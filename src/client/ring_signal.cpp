@@ -22,6 +22,8 @@
 
 namespace jami {
 
+ScheduledExecutor eventScheduler {"eventEmitter"};
+
 SignalHandlerMap&
 getSignalHandlers()
 {

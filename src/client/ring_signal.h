@@ -24,6 +24,8 @@
 #include "config.h"
 #endif
 
+
+
 #include "callmanager_interface.h"
 #include "configurationmanager_interface.h"
 #include "conversation_interface.h"
@@ -52,11 +54,24 @@
 #include <map>
 #include <utility>
 #include <string>
+#include "scheduled_executor.h"
 
 namespace jami {
 
 using SignalHandlerMap = std::map<std::string, std::shared_ptr<libjami::CallbackWrapperBase>>;
 extern SignalHandlerMap& getSignalHandlers();
+extern ScheduledExecutor eventScheduler;
+
+template<typename Callback>
+static void
+runOnEventThread(Callback&& cb,
+                const char* filename = CURRENT_FILENAME(),
+                uint32_t linum = CURRENT_LINE())
+{
+    eventScheduler.run([cb = std::forward<Callback>(cb)]() mutable { cb(); },
+                                        filename,
+                                        linum);
+}
 
 /*
  * Find related user given callback and call it with given
@@ -65,17 +80,17 @@ extern SignalHandlerMap& getSignalHandlers();
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 template<typename Ts, typename... Args>
-void emitSignal(Args... args)
+void
+emitSignal(Args... args)
 {
     jami_tracepoint_if_enabled(emit_signal, demangle<Ts>().c_str());
 
     const auto& handlers = getSignalHandlers();
     if (auto wrap = libjami::CallbackWrapper<typename Ts::cb_type>(handlers.at(Ts::name))) {
         try {
+            jami_tracepoint(emit_signal_begin_callback, wrap.file_, wrap.linum_);
             auto cb = *wrap;
-            jami_tracepoint(emit_signal_begin_callback,
-                            wrap.file_, wrap.linum_);
-            cb(args...);
+            runOnEventThread([callback = cb, ... arguments = std::forward<Args>(args)] { callback(arguments...); });
             jami_tracepoint(emit_signal_end_callback);
         } catch (std::exception& e) {
             JAMI_ERR("Exception during emit signal %s:\n%s", Ts::name, e.what());
