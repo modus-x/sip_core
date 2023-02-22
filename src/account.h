@@ -469,7 +469,7 @@ protected:
     mutable std::mutex upnp_mtx {};
     std::shared_ptr<jami::upnp::Controller> upnpCtrl_;
 
-    bool iceForMediaEnabled_ {true};
+    bool iceForMediaEnabled_ {false};
     bool iceCompIdRfc5245Compliant_ {false};
 
     /**
