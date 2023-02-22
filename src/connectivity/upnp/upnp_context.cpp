@@ -89,7 +89,7 @@ UPnPContext::shutdown()
 
     JAMI_DBG("Waiting for shutdown ...");
 
-    if (cv.wait_for(lk, std::chrono::seconds(30), [this] { return shutdownComplete_; })) {
+    if (cv.wait_for(lk, std::chrono::seconds(0), [this] { return shutdownComplete_; })) {
         JAMI_DBG("Shutdown completed");
     } else {
         JAMI_ERR("Shutdown timed-out");
