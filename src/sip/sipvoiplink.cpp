@@ -646,27 +646,27 @@ SIPVoIPLink::SIPVoIPLink()
                                        NI_NUMERICHOST)) {
                 JAMI_WARN("Error printing SIP nameserver: %s", gai_strerror(ret));
             } else {
-                JAMI_DBG("Using SIP nameserver: %s", hbuf);
+                JAMI_DBG("Found SIP nameserver, but don't use it now: %s", hbuf);
                 pj_strdup2(pool_.get(), &dns_nameservers[i], hbuf);
                 dns_ports[i] = ns[i].getPort();
             }
         }
-        pj_dns_resolver* resv;
-        if (auto ret = pjsip_endpt_create_resolver(endpt_, &resv)) {
-            JAMI_WARN("Error creating SIP DNS resolver: %s", sip_utils::sip_strerror(ret).c_str());
-        } else {
-            if (auto ret = pj_dns_resolver_set_ns(resv,
-                                                  dns_nameservers.size(),
-                                                  dns_nameservers.data(),
-                                                  dns_ports.data())) {
-                JAMI_WARN("Error setting SIP DNS servers: %s", sip_utils::sip_strerror(ret).c_str());
-            } else {
-                if (auto ret = pjsip_endpt_set_resolver(endpt_, resv)) {
-                    JAMI_WARN("Error setting pjsip DNS resolver: %s",
-                              sip_utils::sip_strerror(ret).c_str());
-                }
-            }
-        }
+        // pj_dns_resolver* resv;
+        // if (auto ret = pjsip_endpt_create_resolver(endpt_, &resv)) {
+        //     JAMI_WARN("Error creating SIP DNS resolver: %s", sip_utils::sip_strerror(ret).c_str());
+        // } else {
+        //     if (auto ret = pj_dns_resolver_set_ns(resv,
+        //                                           dns_nameservers.size(),
+        //                                           dns_nameservers.data(),
+        //                                           dns_ports.data())) {
+        //         JAMI_WARN("Error setting SIP DNS servers: %s", sip_utils::sip_strerror(ret).c_str());
+        //     } else {
+        //         if (auto ret = pjsip_endpt_set_resolver(endpt_, resv)) {
+        //             JAMI_WARN("Error setting pjsip DNS resolver: %s",
+        //                       sip_utils::sip_strerror(ret).c_str());
+        //         }
+        //     }
+        // }
     }
 
     sipTransportBroker.reset(new SipTransportBroker(endpt_));
@@ -1391,6 +1391,10 @@ transaction_state_changed_cb(pjsip_inv_session* inv, pjsip_transaction* tsx, pjs
         onRequestInfo(inv, rdata, msg, *call);
     else if (methodName == sip_utils::SIP_METHODS::NOTIFY)
         onRequestNotify(inv, rdata, msg, *call);
+        if (msg->body)
+            runOnMainThread([call, m = im::parseSipMessage(msg)]() mutable {
+                call->onTextMessage(std::move(m));
+            });
     else if (methodName == sip_utils::SIP_METHODS::OPTIONS)
         handleIncomingOptions(rdata);
     else if (methodName == sip_utils::SIP_METHODS::MESSAGE) {
