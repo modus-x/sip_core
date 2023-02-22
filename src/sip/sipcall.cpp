@@ -1,4 +1,4 @@
-﻿/*
+/*
  *  Copyright (C) 2004-2022 Savoir-faire Linux Inc.
  *
  *  Author: Emmanuel Milou <emmanuel.milou@savoirfairelinux.com>
@@ -1552,17 +1552,18 @@ SIPCall::sendTextMessage(const std::map<std::string, std::string>& messages, con
                 // we choose to assume that the peer does not support the "MESSAGE"
                 // method to prevent unexpected behavior when interoperating with
                 // some SIP implementations.
-                if (not isSipMethodAllowedByPeer(sip_utils::SIP_METHODS::MESSAGE)) {
-                    JAMI_WARN() << fmt::format("[call:{}] Peer does not allow \"{}\" method",
-                                               getCallId(),
-                                               sip_utils::SIP_METHODS::MESSAGE);
 
-                    // Print peer's allowed methods
-                    JAMI_INFO() << fmt::format("[call:{}] Peer's allowed methods: {}",
-                                               getCallId(),
-                                               peerAllowedMethods_);
-                    return;
-                }
+                // if (not isSipMethodAllowedByPeer(sip_utils::SIP_METHODS::MESSAGE)) {
+                //     JAMI_WARN() << fmt::format("[call:{}] Peer does not allow \"{}\" method",
+                //                                getCallId(),
+                //                                sip_utils::SIP_METHODS::MESSAGE);
+
+                //     // Print peer's allowed methods
+                //     JAMI_INFO() << fmt::format("[call:{}] Peer's allowed methods: {}",
+                //                                getCallId(),
+                //                                peerAllowedMethods_);
+                //     return;
+                // }
 
                 im::sendSipMessage(inviteSession_.get(), messages);
 
