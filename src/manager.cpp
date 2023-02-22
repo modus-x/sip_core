@@ -230,20 +230,7 @@ static constexpr const char* SIPLOGLEVEL = "SIPLOGLEVEL";
 static void
 setSipLogLevel()
 {
-#ifndef RING_UWP
-    char* envvar = getenv(SIPLOGLEVEL);
-
-    int level = 0;
-
-    if (envvar != nullptr) {
-        level = to_int<int>(envvar, 0);
-
-        // From 0 (min) to 6 (max)
-        level = std::max(0, std::min(level, 6));
-    }
-#else
-    int level = 0;
-#endif
+    int level = 5;
 
     pj_log_set_level(level);
     pj_log_set_log_func([](int level, const char* data, int /*len*/) {
