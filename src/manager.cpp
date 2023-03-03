@@ -574,8 +574,7 @@ Manager::ManagerPimpl::processRemainingParticipants(Conference& conf)
 std::string
 Manager::ManagerPimpl::retrieveConfigPath() const
 {
-    // TODO: Migrate config file name from dring.yml to jami.yml.
-    return fileutils::get_config_dir() + DIR_SEPARATOR_STR + "dring.yml";
+    return fileutils::get_config_dir() + DIR_SEPARATOR_STR + "sip.yaml";
 }
 
 void
