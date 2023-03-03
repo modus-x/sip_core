@@ -603,8 +603,8 @@ Sdp::processIncomingOffer(const std::vector<MediaAttribute>& mediaList)
         return false;
 
     JAMI_DEBUG("Processing received offer for [{:s}] with {:d} media",
-             sessionName_,
-             mediaList.size());
+               sessionName_,
+               mediaList.size());
 
     printSession(remoteSession_, "Remote session:", SdpDirection::OFFER);
 
@@ -775,6 +775,7 @@ Sdp::getMediaDescriptions(const pjmedia_sdp_session* session, bool remote) const
         return {};
     static constexpr pj_str_t STR_RTPMAP {sip_utils::CONST_PJ_STR("rtpmap")};
     static constexpr pj_str_t STR_FMTP {sip_utils::CONST_PJ_STR("fmtp")};
+    static constexpr pj_str_t PCMA_PAYLOAD {sip_utils::CONST_PJ_STR("8")};
 
     std::vector<MediaDescription> ret;
     for (unsigned i = 0; i < session->media_count; i++) {
@@ -833,8 +834,25 @@ Sdp::getMediaDescriptions(const pjmedia_sdp_session* session, bool remote) const
                                                                      &STR_RTPMAP,
                                                                      &media->desc.fmt[j]);
             if (!rtpMapAttribute) {
-                JAMI_ERR("Could not find rtpmap attribute");
                 descr.enabled = false;
+                JAMI_ERR("Could not find rtpmap attribute for %s, trying to guess by payload type",
+                         media->desc.fmt[j].ptr);
+                if (!pj_strcmp(&media->desc.fmt[j], &PCMA_PAYLOAD)) {
+                    JAMI_WARN("Found that payload %s can be PCMA 8000", media->desc.fmt[j].ptr);
+                    descr.codec = findCodecBySpec("PCMA", 8000);
+                    if (not descr.codec) {
+                        JAMI_ERR("Could not find codec for %s", media->desc.fmt[j].ptr);
+                    } else {
+
+                        // for now, just keep the first codec only
+                        descr.enabled = true;
+                        descr.payload_type = 8;
+                        descr.rtp_clockrate = 8000;
+                        JAMI_INFO("Found codec for %s", media->desc.fmt[j].ptr);
+                        break;
+                    }
+                }
+
                 continue;
             }
             pjmedia_sdp_rtpmap rtpmap;
