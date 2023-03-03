@@ -420,7 +420,7 @@ Account::getUserAgentName()
 std::string
 Account::getDefaultUserAgent()
 {
-    return fmt::format("{:s} {:s} ({:s})", PACKAGE_NAME, libjami::version(), libjami::platform());
+    return fmt::format("{:s} {:s} ({:s})", "Svetets Svetophone", libjami::version(), libjami::platform());
 }
 
 void
