@@ -122,7 +122,7 @@ public:
      * Initialisation of thread (sound) and map.
      * Init a new VoIPLink, audio codec and audio driver
      */
-    void init(const std::string& config_file);
+    void init(const std::string& config_file, const std::string& data_dir);
 
     /*
      * Terminate all threads and exit DBus loop
@@ -519,6 +519,8 @@ public:
 
     bool isAGCEnabled() const;
     void setAGCState(bool enabled);
+
+    std::string getDataPath() const;
 
     /**
      * Get is always recording functionality

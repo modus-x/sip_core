@@ -124,10 +124,6 @@ using random_device = dht::crypto::random_device;
 #include <list>
 #include <random>
 
-#ifndef JAMI_DATADIR
-#error "Define the JAMI_DATADIR macro as the data installation prefix of the package"
-#endif
-
 namespace jami {
 
 /** To store uniquely a list of Call ids */
@@ -400,6 +396,11 @@ struct Manager::ManagerPimpl
      * Path of the ConfigFile
      */
     std::string path_;
+
+    /**
+     * Path of the app assets root
+     */
+    std::string data_path_;
 
     /**
      * Instance of the RingBufferPool for the whole application
@@ -733,7 +734,7 @@ Manager::setAutoAnswer(bool enable)
 }
 
 void
-Manager::init(const std::string& config_file)
+Manager::init(const std::string& config_file, const std::string& data_path)
 {
     // FIXME: this is no good
     initialized = true;
@@ -800,6 +801,8 @@ Manager::init(const std::string& config_file)
 
     pimpl_->path_ = config_file.empty() ? pimpl_->retrieveConfigPath() : config_file;
     JAMI_DBG("Configuration file path: %s", pimpl_->path_.c_str());
+
+    pimpl_->data_path_ = data_path;
 
     bool no_errors = true;
 
@@ -942,6 +945,10 @@ Manager::monitor(bool continuous)
             acc->monitor();
     JAMI_DBG("############## END MONITORING ##############");
     Logger::setMonitorLog(continuous);
+}
+
+std::string Manager::getDataPath() const {
+    return pimpl_->data_path_;
 }
 
 bool

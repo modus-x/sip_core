@@ -77,10 +77,10 @@ init(enum InitFlag flags) noexcept
 }
 
 bool
-start(const std::string& config_file) noexcept
+start(const std::string& config_file, const std::string& data_path) noexcept
 {
     try {
-        jami::Manager::instance().init(config_file);
+        jami::Manager::instance().init(config_file, data_path);
     } catch (...) {
         return false;
     }

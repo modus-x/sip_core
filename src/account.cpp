@@ -157,15 +157,16 @@ Account::loadDefaultCodecs()
 }
 
 void
-Account::loadConfig() {
+Account::loadConfig()
+{
     setActiveCodecs(config_->activeCodecs);
-    auto ringtoneDir = fmt::format("{}/{}", JAMI_DATADIR, RINGDIR);
+    auto ringtoneDir = fmt::format("{}/{}", Manager::instance().getDataPath(), "ringtones");
     ringtonePath_ = fileutils::getFullPath(ringtoneDir, config_->ringtonePath);
     // If the user defined a custom ringtone, the file may not exists
     // In this case, fallback on the default ringtone path
     if (!fileutils::isFile(ringtonePath_)) {
         JAMI_WARNING("Ringtone {} is not a valid file", ringtonePath_);
-        ringtonePath_ = fileutils::getFullPath(ringtoneDir, DEFAULT_RINGTONE_PATH);;
+        ringtonePath_ = fileutils::getFullPath(ringtoneDir, DEFAULT_RINGTONE_PATH);
     }
     updateUpnpController();
 }

@@ -64,7 +64,7 @@ LIBJAMI_PUBLIC bool init(enum InitFlag flags) noexcept;
  * Start asynchronously daemon created by init().
  * @returns true if daemon started successfully
  */
-LIBJAMI_PUBLIC bool start(const std::string& config_file = {}) noexcept;
+LIBJAMI_PUBLIC bool start(const std::string& config_file, const std::string& data_path) noexcept;
 
 /**
  * Stop and freeing any resource allocated by daemon
