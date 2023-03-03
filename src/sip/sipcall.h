@@ -490,7 +490,7 @@ private:
     unsigned int localVideoPort_ {0};
 
     bool mediaRestartRequired_ {true};
-    bool enableIce_ {true};
+    bool enableIce_ {false};
     bool srtpEnabled_ {false};
     bool rtcpMuxEnabled_ {false};
 
