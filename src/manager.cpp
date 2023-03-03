@@ -841,7 +841,8 @@ Manager::init(const std::string& config_file, const std::string& data_path)
             pimpl_->dtmfKey_.reset(new DTMF(getRingBufferPool().getInternalSamplingRate()));
         }
     }
-    registerAccounts();
+    // we do not need to register accounts instantly
+    // registerAccounts();
 }
 
 void
@@ -2726,7 +2727,7 @@ Manager::addAccount(const std::map<std::string, std::string>& details, const std
 
     newAccount->setAccountDetails(details);
     saveConfig(newAccount);
-    newAccount->doRegister();
+    // newAccount->doRegister();
 
     preferences.addAccount(newAccountID);
     saveConfig();
