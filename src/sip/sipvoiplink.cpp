@@ -1387,15 +1387,15 @@ transaction_state_changed_cb(pjsip_inv_session* inv, pjsip_transaction* tsx, pjs
 
     if (methodName == sip_utils::SIP_METHODS::REFER)
         onRequestRefer(inv, rdata, msg, *call);
-    else if (methodName == sip_utils::SIP_METHODS::INFO)
-        onRequestInfo(inv, rdata, msg, *call);
-    else if (methodName == sip_utils::SIP_METHODS::NOTIFY)
-        onRequestNotify(inv, rdata, msg, *call);
+    else if (methodName == sip_utils::SIP_METHODS::INFO) {
         if (msg->body)
             runOnMainThread([call, m = im::parseSipMessage(msg)]() mutable {
                 call->onTextMessage(std::move(m));
             });
-    else if (methodName == sip_utils::SIP_METHODS::OPTIONS)
+        onRequestInfo(inv, rdata, msg, *call);
+    } else if (methodName == sip_utils::SIP_METHODS::NOTIFY) {
+        onRequestNotify(inv, rdata, msg, *call);
+    } else if (methodName == sip_utils::SIP_METHODS::OPTIONS)
         handleIncomingOptions(rdata);
     else if (methodName == sip_utils::SIP_METHODS::MESSAGE) {
         if (msg->body)

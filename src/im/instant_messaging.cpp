@@ -150,7 +150,7 @@ im::sendSipMessage(pjsip_inv_session* session, const std::map<std::string, std::
     }
 
     constexpr pjsip_method msg_method = {PJSIP_OTHER_METHOD,
-                                         CONST_PJ_STR(sip_utils::SIP_METHODS::MESSAGE)};
+                                         CONST_PJ_STR(sip_utils::SIP_METHODS::INFO)};
 
     {
         auto dialog = session->dlg;
