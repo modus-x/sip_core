@@ -356,6 +356,9 @@ private:
 
     mutable std::mutex transportMtx_ {};
 
+
+    void setupNegotiatedMedia();
+
 #ifdef ENABLE_PLUGIN
     /**
      * Call Streams and some typedefs
@@ -391,7 +394,6 @@ private:
     void setCallMediaLocal();
     void startIceMedia();
     void onIceNegoSucceed();
-    void setupNegotiatedMedia();
     void startAllMedia();
     void stopAllMedia();
     void updateRemoteMedia();
