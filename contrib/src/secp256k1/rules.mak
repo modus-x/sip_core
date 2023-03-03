@@ -26,7 +26,7 @@ endif
 
 .secp256k1: secp256k1 .sum-secp256k1
 	$(RECONF)
-	cd $< && $(HOSTVARS) ./configure $(HOSTCONF) --disable-tests --disable-exhaustive-tests
+	cd $< && $(HOSTVARS) ./configure $(HOSTCONF) --disable-tests --disable-exhaustive-tests --with-asm=no
 	cd $< && $(MAKE) CFLAGS+='$(SECP256K1_CFLAGS)' install
 
 	touch $@

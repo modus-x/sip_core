@@ -280,6 +280,11 @@ FFMPEGCONF += \
 	--enable-hwaccel=hevc_videotoolbox \
 	--enable-encoder=h264_videotoolbox \
 	--enable-encoder=hevc_videotoolbox \
+	--disable-libxcb \
+	--disable-libxcb-shm \
+	--disable-libxcb-xfixes \
+	--disable-libxcb-shape \
+	--disable-autodetect \
 	--disable-securetransport
 endif
 

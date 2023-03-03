@@ -25,6 +25,6 @@ OPUS_CONF += --enable-fixed-point
 endif
 
 .opus: opus
-	cd $< && $(HOSTVARS) ./configure $(HOSTCONF) $(OPUS_CONF)
+	cd $< && $(HOSTVARS) ./configure $(HOSTCONF) $(OPUS_CONF) --disable-shared
 	cd $< && $(MAKE) install
 	touch $@

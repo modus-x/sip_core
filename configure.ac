@@ -401,28 +401,6 @@ AS_IF([test "x$enable_coverage" = "xyes"],
   [DAEMONCXXFLAGS+=" --coverage"
    DAEMONLDFLAGS+=" --coverage"])
 
-# DBUSCPP
-dnl Check for dbuscpp, the C++ bindings for D-Bus
-AC_ARG_WITH([dbus],
-  [AS_HELP_STRING([--without-dbus], [disable support for dbus])],
-  [],
-  [with_dbus=yes])
-AS_IF([test "x$with_dbus" = "xyes"],
-  [PKG_CHECK_MODULES(DBUSCPP, dbus-c++-1,,
-     AC_MSG_WARN([Missing dbus development files]))
-
-   AC_CONFIG_FILES([bin/dbus/Makefile])
-
-   AC_PATH_PROG([DBUSXX_XML2CPP], dbusxx-xml2cpp,
-     [AC_MSG_ERROR([dbusxx-xml2cpp not found])])
-
-   AS_IF([test "x$CLANG" = "xyes"],
-     [AC_MSG_ERROR([dbus does not compile when clang is used,
-                    rerun with --without-dbus])]);
-   AM_CONDITIONAL(RING_DBUS, true)],
-  [TESTS= $(check_PROGRAMS)
-   AM_CONDITIONAL(RING_DBUS, false)]);
-
 dnl name service is default-enabled
 AC_ARG_ENABLE([ringns], AS_HELP_STRING([--disable-ringns],
   [Enable Name Service]))
@@ -436,15 +414,6 @@ AM_COND_IF([RINGNS],
    PKG_CHECK_MODULES(LIBSSL, libssl,,
      AC_MSG_ERROR([Missing libssl development files]))],
   []);
-
-dnl nodejs module
-AC_ARG_WITH([nodejs], AS_HELP_STRING([--with-nodejs], [Enable NodeJS module]))
-AM_CONDITIONAL(ENABLE_NODEJS, [test "x$with_nodejs" = "xyes"])
-AM_COND_IF([ENABLE_NODEJS],
-  [AC_PATH_PROG(SWIG, swig, "")
-   AS_AC_EXPAND(SBINDIR, $sbindir)
-   AC_SUBST(SBINDIR)
-   AC_CONFIG_FILES([bin/nodejs/Makefile])])
 
 dnl Check for libav
 PKG_CHECK_MODULES(LIBAVUTIL, libavutil >= 54.31.100,,
@@ -651,9 +620,7 @@ AC_DEFUN([BB_ENABLE_DOXYGEN],
 BB_ENABLE_DOXYGEN
 
 AC_CONFIG_FILES([Makefile \
-                 bin/Makefile \
                  src/Makefile \
-                 ringtones/Makefile \
                  test/Makefile\
                  test/sip/Makefile
                  test/unitTest/Makefile \

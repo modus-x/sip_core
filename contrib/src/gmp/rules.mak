@@ -25,7 +25,7 @@ ifdef HAVE_IOS
 else
 ifdef HAVE_MACOSX
 	$(RECONF)
-	cd $< && $(HOSTVARS) ./configure --without-clock-gettime --enable-static --disable-shared $(HOSTCONF)
+	cd $< && $(HOSTVARS) ./configure --without-clock-gettime --enable-static --disable-shared --disable-assembly $(HOSTCONF)
 else
 	cd $< && $(HOSTVARS) ./configure $(HOSTCONF)
 endif
