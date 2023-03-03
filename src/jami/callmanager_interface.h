@@ -46,6 +46,7 @@ LIBJAMI_PUBLIC std::string placeCallWithMedia(
     const std::string& to,
     const std::vector<std::map<std::string, std::string>>& mediaList);
 LIBJAMI_PUBLIC bool refuse(const std::string& accountId, const std::string& callId);
+LIBJAMI_PUBLIC void muteEncoder(const std::string& accountId, const std::string& callId, bool mute);
 LIBJAMI_PUBLIC bool accept(const std::string& accountId, const std::string& callId);
 LIBJAMI_PUBLIC bool hangUp(const std::string& accountId, const std::string& callId);
 LIBJAMI_PUBLIC bool hold(const std::string& accountId, const std::string& callId);

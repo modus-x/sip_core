@@ -439,6 +439,8 @@ public:
     virtual bool hasVideo() const = 0;
     virtual bool isCaptureDeviceMuted(const MediaType& mediaType) const = 0;
 
+    virtual void muteEncoder(bool mute) = 0;
+
     /**
      * A Call can be in a conference. If this is the case, the other side
      * will send conference informations describing the rendered image

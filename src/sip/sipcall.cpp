@@ -1,4 +1,4 @@
-/*
+﻿/*
  *  Copyright (C) 2004-2022 Savoir-faire Linux Inc.
  *
  *  Author: Emmanuel Milou <emmanuel.milou@savoirfairelinux.com>
@@ -203,6 +203,33 @@ SIPCall::createRtpSession(RtpStream& stream)
         throw std::runtime_error("Failed to create RTP Session");
     ;
 }
+#ifdef ENABLE_VIDEO
+
+void
+SIPCall::muteEncoder(bool mute)
+{
+    for (const auto& videoRtp : getRtpSessionList(MediaType::MEDIA_VIDEO)) {
+        if (mute) {
+            std::static_pointer_cast<video::VideoRtpSession>(videoRtp)->videoLocal_->setCapturing(false);
+
+        } else {
+            std::static_pointer_cast<video::VideoRtpSession>(videoRtp)->videoLocal_->setCapturing(true);
+        }
+    }
+
+    std::map<std::string, std::string> messages;
+    Json::StreamWriterBuilder wbuilder;
+    wbuilder["commentStyle"] = "None";
+    wbuilder["indentation"] = "";
+    messages["application/encoderStatus+json"] = std::string("{\"state\":\"") + (mute ? "stopped\"}" : "active\"}");
+
+    auto w = getAccount();
+    auto account = w.lock();
+    if (account)
+        sendTextMessage(messages, account->getFromUri());
+}
+
+#endif
 
 void
 SIPCall::configureRtpSession(const std::shared_ptr<RtpSession>& rtpSession,
@@ -3010,7 +3037,7 @@ SIPCall::getDetails() const
                     const auto* codecInfo = static_cast<const SystemAudioCodecInfo*>(&codec->systemCodecInfo);
                     details.emplace(libjami::Call::Details::AUDIO_SAMPLE_RATE,
                                     codecInfo->getCodecSpecifications()
-                                    [libjami::Account::ConfProperties::CodecInfo::SAMPLE_RATE]);
+                                        [libjami::Account::ConfProperties::CodecInfo::SAMPLE_RATE]);
                 } else {
                     details.emplace(libjami::Call::Details::AUDIO_CODEC, "");
                     details.emplace(libjami::Call::Details::AUDIO_SAMPLE_RATE, "");

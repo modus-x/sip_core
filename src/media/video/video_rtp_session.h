@@ -110,6 +110,9 @@ public:
 
     std::shared_ptr<VideoReceiveThread>& getVideoReceive() { return receiveThread_; }
 
+    std::shared_ptr<VideoMixer> videoMixer_;
+    std::shared_ptr<VideoInput> videoLocal_;
+
 private:
     void setupConferenceVideoPipeline(Conference& conference, Direction dir);
     void setupVideoPipeline();
@@ -125,8 +128,7 @@ private:
     std::unique_ptr<VideoSender> sender_;
     std::shared_ptr<VideoReceiveThread> receiveThread_;
     Conference* conference_ {nullptr};
-    std::shared_ptr<VideoMixer> videoMixer_;
-    std::shared_ptr<VideoInput> videoLocal_;
+
     uint16_t initSeqVal_ = 0;
 
     std::function<void(void)> requestKeyFrameCallback_;

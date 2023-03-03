@@ -520,6 +520,8 @@ private:
     std::mutex setupSuccessMutex_;
 #ifdef ENABLE_VIDEO
     int rotation_ {0};
+    // Control encoding, but not camera!
+    void muteEncoder(bool mute) override;
 #endif
 };
 

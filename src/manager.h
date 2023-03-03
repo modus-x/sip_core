@@ -800,6 +800,10 @@ public:
     std::map<std::string, std::string> getNearbyPeers(const std::string& accountID);
 
 #ifdef ENABLE_VIDEO
+
+
+    void muteEncoder(const std::string& accountId, const std::string& callId, bool mute);
+
     /**
      * Create a new SinkClient instance, store it in an internal cache as a weak_ptr
      * and return it as a shared_ptr. If a SinkClient is already stored for the given id,

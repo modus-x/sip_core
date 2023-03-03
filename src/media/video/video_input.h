@@ -82,6 +82,7 @@ public:
                                int index);
     void flushBuffers();
     void setPaused(bool paused) { paused_ = paused; }
+    void setCapturing(bool cap) { capturing_ = cap; }
     void setSeekTime(int64_t time);
     void setFrameSize(const int width, const int height);
     void setupSink();

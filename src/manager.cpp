@@ -1040,6 +1040,21 @@ Manager::answerCall(const std::string& accountId,
     return false;
 }
 
+#ifdef ENABLE_VIDEO
+
+void
+Manager::muteEncoder(const std::string& accountId, const std::string& callId, bool mute)
+{
+    if (auto account = getAccount(accountId)) {
+        if (auto call = account->getCall(callId)) {
+            call->muteEncoder(mute);
+            return;
+        }
+    }
+}
+
+#endif
+
 bool
 Manager::answerCall(Call& call, const std::vector<libjami::MediaMap>& mediaList)
 {

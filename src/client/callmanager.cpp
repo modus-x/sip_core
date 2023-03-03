@@ -137,6 +137,12 @@ hold(const std::string& accountId, const std::string& callId)
     return jami::Manager::instance().onHoldCall(accountId, callId);
 }
 
+void
+muteEncoder(const std::string& accountId, const std::string& callId, bool mute)
+{
+    return jami::Manager::instance().muteEncoder(accountId, callId, mute);
+}
+
 bool
 unhold(const std::string& accountId, const std::string& callId)
 {

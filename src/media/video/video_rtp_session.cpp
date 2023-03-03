@@ -362,7 +362,7 @@ VideoRtpSession::start(std::unique_ptr<IceSocket> rtp_sock, std::unique_ptr<IceS
         return;
     }
 
-    // startSender();
+    startSender();
     startReceiver();
 
     if (conference_) {
