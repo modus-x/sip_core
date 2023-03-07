@@ -344,7 +344,7 @@ PresSubClient::PresSubClient(const std::string& uri, SIPPresence* pres)
     pj_caching_pool_init(&cp_, &pj_pool_factory_default_policy, 0);
     pool_ = pj_pool_create(&cp_.factory, "Pres_sub_client", 512, 512, NULL);
     uri_ = pj_strdup3(pool_, uri.c_str());
-    contact_ = pj_strdup3(pool_, pres_->getAccount()->getFromUri().c_str());
+    contact_ = pj_strdup3(pool_, pres_->getAccount()->getContactHeader().c_str());
 }
 
 PresSubClient::~PresSubClient()
