@@ -1,4 +1,4 @@
-﻿/*
+/*
  *  Copyright (C) 2004-2022 Savoir-faire Linux Inc.
  *
  *  Author: Emmanuel Milou <emmanuel.milou@savoirfairelinux.com>
@@ -210,10 +210,10 @@ SIPCall::muteEncoder(bool mute)
 {
     for (const auto& videoRtp : getRtpSessionList(MediaType::MEDIA_VIDEO)) {
         if (mute) {
-            std::static_pointer_cast<video::VideoRtpSession>(videoRtp)->videoLocal_->setCapturing(false);
+            std::static_pointer_cast<video::VideoRtpSession>(videoRtp)->stopSender();
 
         } else {
-            std::static_pointer_cast<video::VideoRtpSession>(videoRtp)->videoLocal_->setCapturing(true);
+            std::static_pointer_cast<video::VideoRtpSession>(videoRtp)->restartSender();
         }
     }
 

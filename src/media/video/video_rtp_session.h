@@ -81,6 +81,7 @@ public:
     void restartSender() override;
     void stop() override;
     void setMuted(bool mute, Direction dir = Direction::SEND) override;
+    void generateEmptyVideoFrame();
 
     /**
      * Set video orientation
@@ -112,12 +113,12 @@ public:
 
     std::shared_ptr<VideoMixer> videoMixer_;
     std::shared_ptr<VideoInput> videoLocal_;
+    void startSender(bool empty=false);
+    void stopSender();
 
 private:
     void setupConferenceVideoPipeline(Conference& conference, Direction dir);
     void setupVideoPipeline();
-    void startSender();
-    void stopSender();
     void startReceiver();
     void stopReceiver();
     using clock = std::chrono::steady_clock;

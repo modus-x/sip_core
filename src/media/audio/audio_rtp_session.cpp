@@ -128,12 +128,25 @@ AudioRtpSession::startSender()
 
     // NOTE do after sender/encoder are ready
     auto codec = std::static_pointer_cast<AccountAudioCodecInfo>(send_.codec);
+
+    for (int i = 0; i < 10; ++i)
+        generateEmptyAudioFrame();
+
     audioInput_->setFormat(codec->audioformat);
     if (audioInput_)
         audioInput_->attach(sender_.get());
 
     if (not rtcpCheckerThread_.isRunning())
         rtcpCheckerThread_.start();
+}
+
+void
+AudioRtpSession::generateEmptyAudioFrame()
+{
+    auto codec = std::static_pointer_cast<AccountAudioCodecInfo>(send_.codec);
+    auto silence = std::make_shared<AudioFrame>(codec->audioformat, 1);
+    libav_utils::fillWithSilence(silence->pointer());
+    sender_->update(nullptr, silence);
 }
 
 void

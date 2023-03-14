@@ -100,7 +100,7 @@ VideoRtpSession::setRequestKeyFrameCallback(std::function<void(void)> cb)
 }
 
 void
-VideoRtpSession::startSender()
+VideoRtpSession::startSender(bool empty)
 {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
 
@@ -166,7 +166,8 @@ VideoRtpSession::startSender()
         // Current implementation does not handle resolution change
         // (needed by window sharing feature) with HW codecs, so HW
         // codecs will be disabled for now.
-        bool allowHwAccel = (localVideoParams_.format != "x11grab" && localVideoParams_.format != "dxgigrab");
+        bool allowHwAccel = (localVideoParams_.format != "x11grab"
+                             && localVideoParams_.format != "dxgigrab");
 
         if (socketPair_)
             initSeqVal_ = socketPair_->lastSeqValOut();
@@ -186,6 +187,13 @@ VideoRtpSession::startSender()
                       : videoMixer_->getStream("Video Sender");
             sender_.reset(new VideoSender(
                 getRemoteRtpUri(), ms, send_, *socketPair_, initSeqVal_ + 1, mtu_, allowHwAccel));
+
+            if (empty) {
+                for (int i = 0; i < 10; ++i)
+                    generateEmptyVideoFrame();
+                stopSender();
+                return;
+            }
             if (changeOrientationCallback_)
                 sender_->setChangeOrientationCallback(changeOrientationCallback_);
             if (socketPair_)
@@ -203,6 +211,17 @@ VideoRtpSession::startSender()
         else if (not autoQuality and rtcpCheckerThread_.isRunning())
             rtcpCheckerThread_.join();
     }
+}
+
+void
+VideoRtpSession::generateEmptyVideoFrame()
+{
+    std::shared_ptr<VideoFrame> writableFrame_ = nullptr;
+    writableFrame_.reset(new VideoFrame());
+    VideoFrame& output = *writableFrame_.get();
+    output.reserve(AV_PIX_FMT_YUV420P, localVideoParams_.width, localVideoParams_.height);
+    libav_utils::fillWithBlack(output.pointer());
+    sender_->update(nullptr, writableFrame_);
 }
 
 void
@@ -362,7 +381,7 @@ VideoRtpSession::start(std::unique_ptr<IceSocket> rtp_sock, std::unique_ptr<IceS
         return;
     }
 
-    startSender();
+    startSender(true);
     startReceiver();
 
     if (conference_) {
@@ -683,7 +702,8 @@ VideoRtpSession::setNewBitrate(unsigned int newBR)
 
 #if __ANDROID__
         if (auto input_device = std::dynamic_pointer_cast<VideoInput>(videoLocal_))
-            emitSignal<libjami::VideoSignal::SetBitrate>(input_device->getConfig().name, (int) newBR);
+            emitSignal<libjami::VideoSignal::SetBitrate>(input_device->getConfig().name,
+                                                         (int) newBR);
 #endif
 
         if (sender_) {

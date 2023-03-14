@@ -111,8 +111,8 @@ VideoInput::switchDevice()
             return;
         }
 
-        // emitSignal<libjami::VideoSignal::StartCapture>(decOpts_.input);
-        // capturing_ = true;
+        emitSignal<libjami::VideoSignal::StartCapture>(decOpts_.input);
+        capturing_ = true;
     }
 }
 
@@ -212,10 +212,6 @@ bool
 VideoInput::captureFrame()
 {
     // Return true if capture could continue, false if must be stop
-    if (!capturing_) {
-        return true;
-    }
-
     if (not decoder_)
         return false;
 
