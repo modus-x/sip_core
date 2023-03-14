@@ -1,4 +1,4 @@
-/*
+﻿/*
  *  Copyright (C) 2004-2022 Savoir-faire Linux Inc.
  *
  *  Author: Emmanuel Milou <emmanuel.milou@savoirfairelinux.com>
@@ -1380,7 +1380,7 @@ SIPCall::hold()
         return false;
     }
 
-    stopAllMedia();
+    // stopAllMedia();
 
     for (auto& stream : rtpStreams_) {
         stream.mediaAttribute_->onHold_ = true;

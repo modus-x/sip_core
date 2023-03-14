@@ -172,6 +172,10 @@ Sdp::mediaDirection(const MediaAttribute& mediaAttr)
         return DIRECTION_STR[MediaDirection::INACTIVE];
     }
 
+    if (mediaAttr.onHold_) {
+        return DIRECTION_STR[MediaDirection::SENDONLY];
+    }
+
     // Since mute/un-mute audio is only done locally (RTP packets
     // are still sent to the peer), the media direction must be
     // set to "sendrecv" regardless of the mute state.
@@ -184,10 +188,6 @@ Sdp::mediaDirection(const MediaAttribute& mediaAttr)
             return DIRECTION_STR[MediaDirection::INACTIVE];
         }
         return DIRECTION_STR[MediaDirection::RECVONLY];
-    }
-
-    if (mediaAttr.onHold_) {
-        return DIRECTION_STR[MediaDirection::SENDONLY];
     }
 
     return DIRECTION_STR[MediaDirection::SENDRECV];
