@@ -242,14 +242,14 @@ MediaRecorder::addStream(const MediaStream& ms)
                                                 });
     auto p = streams_.insert(std::make_pair(ms.name, std::move(ptr)));
     if (p.second) {
-        JAMI_DBG() << "Recorder input #" << streams_.size() << ": " << ms;
+        // JAMI_DBG() << "Recorder input #" << streams_.size() << ": " << ms;
         if (ms.isVideo)
             hasVideo_ = true;
         else
             hasAudio_ = true;
         return p.first->second.get();
     } else {
-        JAMI_WARN() << "Recorder already has '" << ms.name << "' as input";
+        // JAMI_WARN() << "Recorder already has '" << ms.name << "' as input";
         return p.first->second.get();
     }
 }
