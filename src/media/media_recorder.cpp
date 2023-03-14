@@ -338,7 +338,7 @@ MediaRecorder::initRecord()
     title_ = replaceAll(title_, "%TIMESTAMP", timestampString.str());
 
     if (description_.empty()) {
-        description_ = "Recorded with Jami https://jami.net";
+        description_ = "Recorded with Virtual PBX";
     }
     description_ = replaceAll(description_, "%TIMESTAMP", timestampString.str());
 
