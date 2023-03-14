@@ -129,6 +129,8 @@ public:
      */
     void finish() noexcept;
 
+    std::string getHomePath();
+
     void monitor(bool continuous);
 
     /**

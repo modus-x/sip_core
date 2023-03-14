@@ -156,6 +156,7 @@ LIBJAMI_PUBLIC std::string getAudioManager();
 LIBJAMI_PUBLIC bool setAudioManager(const std::string& api);
 
 LIBJAMI_PUBLIC std::string getRecordPath();
+LIBJAMI_PUBLIC std::string getHomePath();
 LIBJAMI_PUBLIC void setRecordPath(const std::string& recPath);
 LIBJAMI_PUBLIC bool getIsAlwaysRecording();
 LIBJAMI_PUBLIC void setIsAlwaysRecording(bool rec);

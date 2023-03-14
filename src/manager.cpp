@@ -2202,6 +2202,11 @@ Manager::getCurrentAudioDevicesIndex()
             std::to_string(pimpl_->audiodriver_->getIndexRingtone())};
 }
 
+std::string
+Manager::getHomePath() {
+    return fileutils::get_home_dir();
+}
+
 void
 Manager::startAudio()
 {

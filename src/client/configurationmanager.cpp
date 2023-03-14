@@ -678,6 +678,10 @@ getRecordPath()
 {
     return jami::Manager::instance().audioPreference.getRecordPath();
 }
+std::string
+getHomePath() {
+    return jami::Manager::instance().getHomePath();
+}
 
 void
 setRecordPath(const std::string& recPath)
