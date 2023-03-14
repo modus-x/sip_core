@@ -452,6 +452,7 @@ bool
 AudioPreference::setRecordPath(const std::string& r)
 {
     std::string path = fileutils::expand_path(r);
+    fileutils::check_dir(path.c_str(), 0755, 0755);
     if (fileutils::isDirectoryWritable(path)) {
         recordpath_ = path;
         return true;
