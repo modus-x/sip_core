@@ -24,6 +24,7 @@
 #include "media_buffer.h"
 #include "string_utils.h"
 #include "logger.h"
+#include "connectivity/utf8_utils.h"
 
 #include <cassert>
 
@@ -98,7 +99,7 @@ VideoSettings::VideoSettings(const std::map<std::string, std::string>& settings)
 std::map<std::string, std::string>
 VideoSettings::to_map() const
 {
-    return {{"name", name},
+    return {{"name", utf8_make_valid(name)},
             {"id", unique_id},
             {"input", input},
             {"size", video_size},
