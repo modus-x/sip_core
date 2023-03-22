@@ -432,6 +432,7 @@ PulseLayer::disconnectAudioStream()
 void
 PulseLayer::startStream(AudioDeviceType type)
 {
+    JAMI_WARN("Starting pulseaudio stream");
     waitForDevices();
     PulseMainLoopLock lock(mainloop_.get());
     bool ec = preference_.getEchoCanceller() == "system"

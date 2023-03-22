@@ -301,51 +301,47 @@ checkSoundCard(int& card, AudioDeviceType type)
 AudioLayer*
 AudioPreference::createAudioLayer()
 {
+    JAMI_WARN("Creating audio layer");
 #if HAVE_OPENSL
     return new OpenSLLayer(*this);
 #else
-
 #if HAVE_JACK
-    if (audioApi_ == JACK_API_STR) {
-        try {
-            if (auto ret = system("jack_lsp > /dev/null"))
-                throw std::runtime_error("Error running jack_lsp: " + std::to_string(ret));
-            return new JackLayer(*this);
-        } catch (const std::runtime_error& e) {
-            JAMI_ERR("%s", e.what());
-#if HAVE_PULSE
-            audioApi_ = PULSEAUDIO_API_STR;
-#elif HAVE_ALSA
-            audioApi_ = ALSA_API_STR;
-#elif HAVE_COREAUDIO
-            audioApi_ = COREAUDIO_API_STR;
-#elif HAVE_PORTAUDIO
-            audioApi_ = PORTAUDIO_API_STR;
-#else
-            throw;
-#endif // HAVE_PULSE
-        }
+    try {
+        if (auto ret = system("jack_lsp > /dev/null"))
+            throw std::runtime_error("Error running jack_lsp: " + std::to_string(ret));
+        audioApi_ = JACK_API_STR;
+        return new JackLayer(*this);
+    } catch (const std::runtime_error& e) {
+        JAMI_WARN("coukd not create jack layer: %s, trying another audio layers", e.what());
     }
-#endif // HAVE_JACK
+#endif
 
 #if HAVE_PULSE
-
-    if (audioApi_ == PULSEAUDIO_API_STR) {
-        try {
-            return new PulseLayer(*this);
-        } catch (const std::runtime_error& e) {
-            JAMI_WARN("Could not create pulseaudio layer, falling back to ALSA");
-        }
+    try {
+        audioApi_ = PULSEAUDIO_API_STR;
+        return new PulseLayer(*this);
+    } catch (const std::runtime_error& e) {
+        JAMI_WARN("Could not create pulseaudio layer, trying another audio layers");
     }
+#endif
 
+#if HAVE_PORTAUDIO
+    try {
+        audioApi_ = PORTAUDIO_API_STR;
+        return new PortAudioLayer(*this);
+    } catch (const std::runtime_error& e) {
+        JAMI_WARN("Could not create PortAudio layer, trying another audio layers.");
+    }
+    return nullptr;
 #endif
 
 #if HAVE_ALSA
-
     audioApi_ = ALSA_API_STR;
     checkSoundCard(alsaCardin_, AudioDeviceType::CAPTURE);
     checkSoundCard(alsaCardout_, AudioDeviceType::PLAYBACK);
     checkSoundCard(alsaCardRingtone_, AudioDeviceType::RINGTONE);
+
+    JAMI_WARN("returning alsa layer");
 
     return new AlsaLayer(*this);
 #endif
@@ -360,15 +356,6 @@ AudioPreference::createAudioLayer()
     return NULL;
 #endif
 
-#if HAVE_PORTAUDIO
-    audioApi_ = PORTAUDIO_API_STR;
-    try {
-        return new PortAudioLayer(*this);
-    } catch (const std::runtime_error& e) {
-        JAMI_WARN("Could not create PortAudio layer. There will be no sound.");
-    }
-    return nullptr;
-#endif
 #endif // HAVE_OPENSL
 
     JAMI_WARN("No audio layer provided");
