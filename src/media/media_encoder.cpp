@@ -814,13 +814,13 @@ MediaEncoder::initCodec(AVMediaType mediaType, AVCodecID avcodecId, uint64_t br)
     if (mediaType == AVMEDIA_TYPE_VIDEO && br > 0) {
         if (br < SystemCodecInfo::DEFAULT_MIN_BITRATE) {
             JAMI_WARNING("Requested bitrate {:d} too low, setting to {:d}",
-                      br,
-                      SystemCodecInfo::DEFAULT_MIN_BITRATE);
+                         br,
+                         SystemCodecInfo::DEFAULT_MIN_BITRATE);
             br = SystemCodecInfo::DEFAULT_MIN_BITRATE;
         } else if (br > SystemCodecInfo::DEFAULT_MAX_BITRATE) {
             JAMI_WARNING("Requested bitrate {:d} too high, setting to {:d}",
-                      br,
-                      SystemCodecInfo::DEFAULT_MAX_BITRATE);
+                         br,
+                         SystemCodecInfo::DEFAULT_MAX_BITRATE);
             br = SystemCodecInfo::DEFAULT_MAX_BITRATE;
         }
     }
@@ -927,9 +927,9 @@ MediaEncoder::initH264(AVCodecContext* encoderCtx, uint64_t br)
         av_opt_set_int(encoderCtx, "maxrate", maxBitrate, AV_OPT_SEARCH_CHILDREN);
         av_opt_set_int(encoderCtx, "bufsize", bufSize, AV_OPT_SEARCH_CHILDREN);
         JAMI_DEBUG("H264 encoder setup: crf={:d}, maxrate={:d} kbit/s, bufsize={:d} kbit",
-                 crf,
-                 maxBitrate / 1000,
-                 bufSize / 1000);
+                   crf,
+                   maxBitrate / 1000,
+                   bufSize / 1000);
     } else if (mode_ == RateMode::CBR) {
         av_opt_set_int(encoderCtx, "b", maxBitrate, AV_OPT_SEARCH_CHILDREN);
         av_opt_set_int(encoderCtx, "maxrate", maxBitrate, AV_OPT_SEARCH_CHILDREN);
@@ -958,9 +958,9 @@ MediaEncoder::initH265(AVCodecContext* encoderCtx, uint64_t br)
         av_opt_set_int(encoderCtx, "maxrate", maxBitrate, AV_OPT_SEARCH_CHILDREN);
         av_opt_set_int(encoderCtx, "bufsize", bufSize, AV_OPT_SEARCH_CHILDREN);
         JAMI_DEBUG("H265 encoder setup: crf={:d}, maxrate={:d} kbit/s, bufsize={:d} kbit",
-                 crf,
-                 maxBitrate / 1000,
-                 bufSize / 1000);
+                   crf,
+                   maxBitrate / 1000,
+                   bufSize / 1000);
     } else if (mode_ == RateMode::CBR) {
         av_opt_set_int(encoderCtx, "b", br * 1000, AV_OPT_SEARCH_CHILDREN);
         av_opt_set_int(encoderCtx, "maxrate", br * 1000, AV_OPT_SEARCH_CHILDREN);
@@ -1018,9 +1018,9 @@ MediaEncoder::initVP8(AVCodecContext* encoderCtx, uint64_t br)
         av_opt_set_int(encoderCtx, "maxrate", maxBitrate, AV_OPT_SEARCH_CHILDREN);
         av_opt_set_int(encoderCtx, "bufsize", bufSize, AV_OPT_SEARCH_CHILDREN);
         JAMI_DEBUG("VP8 encoder setup: crf={:d}, maxrate={:d}, bufsize={:d}",
-                 crf,
-                 maxBitrate / 1000,
-                 bufSize / 1000);
+                   crf,
+                   maxBitrate / 1000,
+                   bufSize / 1000);
     }
 }
 
