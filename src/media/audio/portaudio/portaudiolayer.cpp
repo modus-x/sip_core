@@ -480,8 +480,8 @@ PortAudioLayer::PortAudioLayerImpl::getApiIndexByType(AudioDeviceType type)
                                         : (type == AudioDeviceType::PLAYBACK ? devicePlayback_
                                                                              : deviceRingtone_));
         if (toMatch.empty())
-            return type == AudioDeviceType::CAPTURE ? Pa_GetDefaultCommInputDevice()
-                                                    : Pa_GetDefaultCommOutputDevice();
+            return type == AudioDeviceType::CAPTURE ? Pa_GetDefaultInputDevice()
+                                                    : Pa_GetDefaultOutputDevice();
         for (int i = 0; i < numDevices; ++i) {
             if (const auto deviceInfo = Pa_GetDeviceInfo(i)) {
                 if (deviceInfo->name == toMatch)
@@ -499,9 +499,9 @@ PortAudioLayer::PortAudioLayerImpl::getApiDefaultDeviceName(AudioDeviceType type
     std::string deviceName {};
     PaDeviceIndex deviceIndex {paNoDevice};
     if (type == AudioDeviceType::CAPTURE) {
-        deviceIndex = commDevice ? Pa_GetDefaultCommInputDevice() : Pa_GetDefaultInputDevice();
+        deviceIndex = Pa_GetDefaultInputDevice();
     } else {
-        deviceIndex = commDevice ? Pa_GetDefaultCommOutputDevice() : Pa_GetDefaultOutputDevice();
+        deviceIndex = Pa_GetDefaultOutputDevice();
     }
     if (const auto deviceInfo = Pa_GetDeviceInfo(deviceIndex)) {
         deviceName = deviceInfo->name;
