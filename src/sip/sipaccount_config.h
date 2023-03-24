@@ -62,7 +62,7 @@ struct SipAccountConfig : public SipAccountBaseConfig {
     /**
      * Network settings
      */
-    unsigned registrationExpire {30};
+    unsigned registrationExpire {600};
     bool registrationRefreshEnabled {true};
 
     // If true, the contact addreass and header will be rewritten
