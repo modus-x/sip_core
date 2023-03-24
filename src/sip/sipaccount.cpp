@@ -713,11 +713,13 @@ SIPAccount::sendRegister()
         JAMI_WARN("Account must be enabled and active to register, ignoring");
         return;
     }
+    pjsip_cfg()->endpt.disable_rport = PJ_TRUE;
 
     bRegister_ = true;
     setRegistrationState(RegistrationState::TRYING);
 
     pjsip_regc* regc = nullptr;
+    pjsip_endpoint* endpoint = link_.getEndpoint();
     if (pjsip_regc_create(link_.getEndpoint(), (void*) this, &registration_cb, &regc) != PJ_SUCCESS)
         throw VoipLinkException("UserAgent: Unable to create regc structure.");
 
