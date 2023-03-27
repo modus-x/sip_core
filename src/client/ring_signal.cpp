@@ -61,28 +61,10 @@ getSignalHandlers()
         exported_callback<libjami::ConfigurationSignal::StunStatusFailed>(),
         exported_callback<libjami::ConfigurationSignal::RegistrationStateChanged>(),
         exported_callback<libjami::ConfigurationSignal::VolatileDetailsChanged>(),
-        exported_callback<libjami::ConfigurationSignal::CertificatePinned>(),
-        exported_callback<libjami::ConfigurationSignal::CertificatePathPinned>(),
-        exported_callback<libjami::ConfigurationSignal::CertificateExpired>(),
-        exported_callback<libjami::ConfigurationSignal::CertificateStateChanged>(),
         exported_callback<libjami::ConfigurationSignal::IncomingAccountMessage>(),
-        exported_callback<libjami::ConfigurationSignal::ComposingStatusChanged>(),
         exported_callback<libjami::ConfigurationSignal::AccountMessageStatusChanged>(),
-        exported_callback<libjami::ConfigurationSignal::NeedsHost>(),
         exported_callback<libjami::ConfigurationSignal::ActiveCallsChanged>(),
-        exported_callback<libjami::ConfigurationSignal::ProfileReceived>(),
-        exported_callback<libjami::ConfigurationSignal::IncomingTrustRequest>(),
-        exported_callback<libjami::ConfigurationSignal::ContactAdded>(),
-        exported_callback<libjami::ConfigurationSignal::ContactRemoved>(),
-        exported_callback<libjami::ConfigurationSignal::ExportOnRingEnded>(),
-        exported_callback<libjami::ConfigurationSignal::KnownDevicesChanged>(),
-        exported_callback<libjami::ConfigurationSignal::NameRegistrationEnded>(),
-        exported_callback<libjami::ConfigurationSignal::RegisteredNameFound>(),
-        exported_callback<libjami::ConfigurationSignal::UserSearchEnded>(),
         exported_callback<libjami::ConfigurationSignal::MediaParametersChanged>(),
-        exported_callback<libjami::ConfigurationSignal::MigrationEnded>(),
-        exported_callback<libjami::ConfigurationSignal::DeviceRevocationEnded>(),
-        exported_callback<libjami::ConfigurationSignal::AccountProfileReceived>(),
         exported_callback<libjami::ConfigurationSignal::Error>(),
 #if defined(__ANDROID__) || (defined(TARGET_OS_IOS) && TARGET_OS_IOS)
         exported_callback<libjami::ConfigurationSignal::GetHardwareAudioFormat>(),
@@ -97,7 +79,6 @@ getSignalHandlers()
 
         /* Presence */
         exported_callback<libjami::PresenceSignal::NewServerSubscriptionRequest>(),
-        exported_callback<libjami::PresenceSignal::NearbyPeerNotification>(),
         exported_callback<libjami::PresenceSignal::ServerError>(),
         exported_callback<libjami::PresenceSignal::NewBuddyNotification>(),
         exported_callback<libjami::PresenceSignal::SubscriptionStateChanged>(),
@@ -105,9 +86,6 @@ getSignalHandlers()
         /* Audio */
         exported_callback<libjami::AudioSignal::DeviceEvent>(),
         exported_callback<libjami::AudioSignal::AudioMeter>(),
-
-        /* DataTransfer */
-        exported_callback<libjami::DataTransferSignal::DataTransferEvent>(),
 
 #ifdef ENABLE_VIDEO
         /* MediaPlayer */
@@ -129,24 +107,6 @@ getSignalHandlers()
         exported_callback<libjami::VideoSignal::ParametersChanged>(),
 #endif
 
-        /* Conversation */
-        exported_callback<libjami::ConversationSignal::ConversationLoaded>(),
-        exported_callback<libjami::ConversationSignal::MessagesFound>(),
-        exported_callback<libjami::ConversationSignal::MessageReceived>(),
-        exported_callback<libjami::ConversationSignal::ConversationProfileUpdated>(),
-        exported_callback<libjami::ConversationSignal::ConversationRequestReceived>(),
-        exported_callback<libjami::ConversationSignal::ConversationRequestDeclined>(),
-        exported_callback<libjami::ConversationSignal::ConversationReady>(),
-        exported_callback<libjami::ConversationSignal::ConversationRemoved>(),
-        exported_callback<libjami::ConversationSignal::ConversationMemberEvent>(),
-        exported_callback<libjami::ConversationSignal::ConversationSyncFinished>(),
-        exported_callback<libjami::ConversationSignal::CallConnectionRequest>(),
-        exported_callback<libjami::ConversationSignal::OnConversationError>(),
-        exported_callback<libjami::ConversationSignal::ConversationPreferencesUpdated>(),
-
-#ifdef ENABLE_PLUGIN
-        exported_callback<libjami::PluginSignal::WebViewMessageReceived>(),
-#endif
     };
 
     return handlers;

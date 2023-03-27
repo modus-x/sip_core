@@ -15,9 +15,7 @@ include ./client/Makefile.am
 include ./config/Makefile.am
 include ./connectivity/Makefile.am
 include ./im/Makefile.am
-include ./jamidht/Makefile.am
 include ./media/Makefile.am
-include ./plugin/Makefile.am
 include ./sip/Makefile.am
 
 # libjami
@@ -28,9 +26,6 @@ libjami_la_LIBADD += \
 	$(PORTAUDIO_LIBS) \
 	$(SPEEXDSP_LIBS) \
 	$(PJPROJECT_LIBS) \
-	$(OPENDHT_LIBS) \
-	$(LIBUPNP_LIBS) \
-	$(LIBGIT2_LIBS) \
 	$(LIBAVCODEC_LIBS) \
 	$(LIBAVFORMAT_LIBS) \
 	$(LIBAVDEVICE_LIBS) \
@@ -41,21 +36,9 @@ libjami_la_LIBADD += \
 	$(WEBRTC_LIBS) \
 	$(YAMLCPP_LIBS) \
 	$(JSONCPP_LIBS) \
-	$(NETTLE_LIBS) \
-	$(SECP256K1_LIBS) \
 	$(FMT_LIBS) \
 	$(LIBSSL_LIBS) \
-	$(LIBCRYPTO_LIBS) \
-	$(ARCHIVE_LIBS) \
-	$(ZLIB_LIBS)
-
-if ENABLE_PLUGIN
-if HAVE_OSX
-libjami_la_LIBADD += $(MINIZIP_LIBS)
-else
-libjami_la_LIBADD += $(ARCHIVE_LIBS)
-endif
-endif
+	$(LIBCRYPTO_LIBS)
 
 # XXX: It seems this should be the default value when otherwise left
 # unspecified, but for some reason this is required otherwise the
@@ -80,12 +63,10 @@ libjami_la_SOURCES = \
 		preferences.cpp \
 		manager.cpp \
 		call.cpp \
-		gittransport.cpp \
 		account.cpp \
 		account_config.cpp \
 		logger.cpp \
 		fileutils.cpp \
-		archiver.cpp \
 		threadloop.cpp \
 		vcard.cpp \
 		threadloop.h \
@@ -95,12 +76,10 @@ libjami_la_SOURCES = \
 		call_factory.h \
 		preferences.h \
 		manager.h \
-		gittransport.h \
 		account.h \
 		call.h \
 		logger.h \
 		fileutils.h \
-		archiver.h \
 		noncopyable.h \
 		ring_types.h \
 		compiler_intrinsics.h \
@@ -111,8 +90,6 @@ libjami_la_SOURCES = \
 		rational.h \
 		base64.h \
 		base64.cpp \
-		data_transfer.cpp \
-		data_transfer.h \
 		scheduled_executor.h \
 		scheduled_executor.cpp \
 		string_utils.cpp \
@@ -132,20 +109,13 @@ nobase_include_HEADERS += \
 	./jami/call_const.h \
 	./jami/callmanager_interface.h \
 	./jami/configurationmanager_interface.h \
-	./jami/conversation_interface.h \
-	./jami/datatransfer_interface.h \
 	./jami/def.h \
 	./jami/jami.h \
 	./jami/media_const.h \
 	./jami/presence_const.h \
 	./jami/presencemanager_interface.h \
-	./jami/security_const.h \
 	./jami/trace-tools.h
 
-if ENABLE_PLUGIN
-nobase_include_HEADERS += \
-		./jami/plugin_manager_interface.h
-endif
 if ENABLE_VIDEO
 nobase_include_HEADERS += \
 		./jami/videomanager_interface.h

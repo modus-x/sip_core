@@ -127,9 +127,7 @@ Resampler::resample(const AVFrame* input, AVFrame* output)
         // indicative of an underlying problem in the code. This check is so the backtrace
         // doesn't get mangled with a bunch of calls to Resampler::resample
         if (initCount_ > 1) {
-            std::string msg = "Infinite loop detected in audio resampler, please open an issue on "
-                              "https://git.jami.net";
-            JAMI_ERR() << msg;
+            std::string msg = "Infinite loop detected in audio resampler";
             throw std::runtime_error(msg);
         }
         reinit(input, output);

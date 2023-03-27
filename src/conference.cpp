@@ -25,7 +25,6 @@
 #include "conference.h"
 #include "manager.h"
 #include "audio/audiolayer.h"
-#include "jamidht/jamiaccount.h"
 #include "string_utils.h"
 #include "sip/siptransport.h"
 
@@ -37,18 +36,13 @@
 #include "video/video_mixer.h"
 #endif
 
-#ifdef ENABLE_PLUGIN
-#include "plugin/jamipluginmanager.h"
-#endif
-
 #include "call_factory.h"
 
 #include "logger.h"
 #include "jami/media_const.h"
 #include "audio/ringbufferpool.h"
 #include "sip/sipcall.h"
-
-#include <opendht/thread_pool.h>
+#include "sip/sipaccount.h"
 
 using namespace std::literals;
 
@@ -297,18 +291,6 @@ Conference::~Conference()
         }
     }
 #endif // ENABLE_VIDEO
-#ifdef ENABLE_PLUGIN
-    {
-        std::lock_guard<std::mutex> lk(avStreamsMtx_);
-        jami::Manager::instance()
-            .getJamiPluginManager()
-            .getCallServicesManager()
-            .clearCallHandlerMaps(getConfId());
-        Manager::instance().getJamiPluginManager().getCallServicesManager().clearAVSubject(
-            getConfId());
-        confAVStreams.clear();
-    }
-#endif // ENABLE_PLUGIN
     if (shutdownCb_)
         shutdownCb_(getDuration().count());
     jami_tracepoint(conference_end, id_.c_str());
@@ -382,70 +364,6 @@ Conference::currentMediaList() const
 {
     return MediaAttribute::mediaAttributesToMediaMaps(hostSources_);
 }
-
-#ifdef ENABLE_PLUGIN
-void
-Conference::createConfAVStreams()
-{
-    std::string accountId = getAccountId();
-
-    auto audioMap = [](const std::shared_ptr<jami::MediaFrame>& m) -> AVFrame* {
-        return std::static_pointer_cast<AudioFrame>(m)->pointer();
-    };
-
-    // Preview and Received
-    if ((audioMixer_ = jami::getAudioInput(getConfId()))) {
-        auto audioSubject = std::make_shared<MediaStreamSubject>(audioMap);
-        StreamData previewStreamData {getConfId(), false, StreamType::audio, getConfId(), accountId};
-        createConfAVStream(previewStreamData, *audioMixer_, audioSubject);
-        StreamData receivedStreamData {getConfId(), true, StreamType::audio, getConfId(), accountId};
-        createConfAVStream(receivedStreamData, *audioMixer_, audioSubject);
-    }
-
-#ifdef ENABLE_VIDEO
-
-    if (videoMixer_) {
-        // Review
-        auto receiveSubject = std::make_shared<MediaStreamSubject>(pluginVideoMap_);
-        StreamData receiveStreamData {getConfId(), true, StreamType::video, getConfId(), accountId};
-        createConfAVStream(receiveStreamData, *videoMixer_, receiveSubject);
-
-        // Preview
-        if (auto videoPreview = videoMixer_->getVideoLocal()) {
-            auto previewSubject = std::make_shared<MediaStreamSubject>(pluginVideoMap_);
-            StreamData previewStreamData {getConfId(),
-                                          false,
-                                          StreamType::video,
-                                          getConfId(),
-                                          accountId};
-            createConfAVStream(previewStreamData, *videoPreview, previewSubject);
-        }
-    }
-#endif // ENABLE_VIDEO
-}
-
-void
-Conference::createConfAVStream(const StreamData& StreamData,
-                               AVMediaStream& streamSource,
-                               const std::shared_ptr<MediaStreamSubject>& mediaStreamSubject,
-                               bool force)
-{
-    std::lock_guard<std::mutex> lk(avStreamsMtx_);
-    const std::string AVStreamId = StreamData.id + std::to_string(static_cast<int>(StreamData.type))
-                                   + std::to_string(StreamData.direction);
-    auto it = confAVStreams.find(AVStreamId);
-    if (!force && it != confAVStreams.end())
-        return;
-
-    confAVStreams.erase(AVStreamId);
-    confAVStreams[AVStreamId] = mediaStreamSubject;
-    streamSource.attachPriorityObserver(mediaStreamSubject);
-    jami::Manager::instance()
-        .getJamiPluginManager()
-        .getCallServicesManager()
-        .createAVSubject(StreamData, mediaStreamSubject);
-}
-#endif // ENABLE_PLUGIN
 
 void
 Conference::setLocalHostMuteState(MediaType type, bool muted)
@@ -686,7 +604,7 @@ Conference::addParticipant(const std::string& participant_id)
 
             // Check for localModeratorsEnabled preference
             if (account->isLocalModeratorsEnabled() && not localModAdded_) {
-                auto accounts = jami::Manager::instance().getAllAccounts<JamiAccount>();
+                auto accounts = jami::Manager::instance().getAllAccounts<SIPAccount>();
                 for (const auto& account : accounts) {
                     moderators_.emplace(account->getUsername());
                 }
@@ -720,9 +638,6 @@ Conference::addParticipant(const std::string& participant_id)
 #endif // ENABLE_VIDEO
     } else
         JAMI_ERR("no call associate to participant %s", participant_id.c_str());
-#ifdef ENABLE_PLUGIN
-    createConfAVStreams();
-#endif
 }
 
 void
@@ -819,12 +734,9 @@ Conference::sendConferenceInfos()
         if (!account)
             return;
 
-        dht::ThreadPool::io().run(
-            [call,
-             confInfo = getConfInfoHostUri(account->getUsername() + "@ring.dht",
-                                           call->getPeerNumber())] {
-                call->sendConfInfo(confInfo.toString());
-            });
+        call->sendConfInfo(
+            getConfInfoHostUri(account->getUsername() + "@server", call->getPeerNumber())
+                .toString());
     });
 
     auto confInfo = getConfInfoHostUri("", "");
@@ -1072,18 +984,6 @@ Conference::switchInput(const std::string& input)
 
     if (auto mixer = videoMixer_) {
         mixer->switchInputs({input});
-#ifdef ENABLE_PLUGIN
-        // Preview
-        if (auto videoPreview = mixer->getVideoLocal()) {
-            auto previewSubject = std::make_shared<MediaStreamSubject>(pluginVideoMap_);
-            StreamData previewStreamData {getConfId(),
-                                          false,
-                                          StreamType::video,
-                                          getConfId(),
-                                          getAccountId()};
-            createConfAVStream(previewStreamData, *videoPreview, previewSubject, true);
-        }
-#endif
     }
 #endif
 }
@@ -1372,8 +1272,8 @@ Conference::muteStream(const std::string& accountUri,
                        const std::string&,
                        const bool& state)
 {
-    if (auto acc = std::dynamic_pointer_cast<JamiAccount>(account_.lock())) {
-        if (accountUri == acc->getUsername() && deviceId == acc->currentDeviceId()) {
+    if (auto acc = std::dynamic_pointer_cast<SIPAccount>(account_.lock())) {
+        if (accountUri == acc->getUsername()) {
             muteHost(state);
         } else if (auto call = getCallWith(accountUri, deviceId)) {
             muteCall(call->getCallId(), state);
@@ -1537,8 +1437,6 @@ Conference::isHost(std::string_view uri) const
 bool
 Conference::isHostDevice(std::string_view deviceId) const
 {
-    if (auto acc = std::dynamic_pointer_cast<JamiAccount>(account_.lock()))
-        return deviceId == acc->currentDeviceId();
     return false;
 }
 
@@ -1553,7 +1451,7 @@ Conference::updateConferenceInfo(ConfInfo confInfo)
 void
 Conference::hangupParticipant(const std::string& accountUri, const std::string& deviceId)
 {
-    if (auto acc = std::dynamic_pointer_cast<JamiAccount>(account_.lock())) {
+    if (auto acc = std::dynamic_pointer_cast<SIPAccount>(account_.lock())) {
         if (deviceId.empty()) {
             // If deviceId is empty, hangup all calls with device
             while (auto call = getCallFromPeerID(accountUri)) {
@@ -1561,7 +1459,7 @@ Conference::hangupParticipant(const std::string& accountUri, const std::string& 
             }
             return;
         } else {
-            if (accountUri == acc->getUsername() && deviceId == acc->currentDeviceId()) {
+            if (accountUri == acc->getUsername()) {
                 Manager::instance().detachLocalParticipant(shared_from_this());
                 return;
             } else if (auto call = getCallWith(accountUri, deviceId)) {
@@ -1771,10 +1669,6 @@ Conference::getCallWith(const std::string& accountUri, const std::string& device
 std::string
 Conference::getRemoteId(const std::shared_ptr<jami::Call>& call) const
 {
-    if (auto* transport = std::dynamic_pointer_cast<SIPCall>(call)->getTransport())
-        if (auto cert = transport->getTlsInfos().peerCert)
-            if (cert->issuer)
-                return cert->issuer->getId().toString();
     return {};
 }
 

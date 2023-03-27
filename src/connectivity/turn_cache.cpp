@@ -23,7 +23,6 @@
 #include "logger.h"
 #include "fileutils.h"
 #include "manager.h"
-#include "opendht/thread_pool.h" // TODO remove asio
 #include "turn_cache.h"
 
 namespace jami {

@@ -27,7 +27,6 @@
 
 #include "account_schema.h"
 #include "manager.h"
-#include "connectivity/ice_transport.h"
 
 #include "config/yamlparser.h"
 
@@ -40,10 +39,6 @@
 #include "uri.h"
 
 #include "manager.h"
-#ifdef ENABLE_PLUGIN
-#include "plugin/jamipluginmanager.h"
-#include "plugin/streamdata.h"
-#endif
 
 #include <fmt/core.h>
 #include <json/json.h>
@@ -246,36 +241,6 @@ SIPAccountBase::generateVideoPort() const
 }
 #endif
 
-IceTransportOptions
-SIPAccountBase::getIceOptions() const noexcept
-{
-    IceTransportOptions opts;
-    opts.upnpEnable = getUPnPActive();
-
-    // if (config().stunEnabled)
-    //     opts.stunServers.emplace_back(StunServerInfo().setUri(stunServer_));
-    if (config().turnEnabled && turnCache_) {
-        auto turnAddr = turnCache_->getResolvedTurn();
-        if (turnAddr != std::nullopt) {
-            opts.turnServers.emplace_back(TurnServerInfo()
-                                              .setUri(turnAddr->toString(true))
-                                              .setUsername(config().turnServerUserName)
-                                              .setPassword(config().turnServerPwd)
-                                              .setRealm(config().turnServerRealm));
-        }
-        // NOTE: first test with ipv6 turn was not concluant and resulted in multiple
-        // co issues. So this needs some debug. for now just disable
-        // if (cacheTurnV6_ && *cacheTurnV6_) {
-        //    opts.turnServers.emplace_back(TurnServerInfo()
-        //                                      .setUri(cacheTurnV6_->toString(true))
-        //                                      .setUsername(turnServerUserName_)
-        //                                      .setPassword(turnServerPwd_)
-        //                                      .setRealm(turnServerRealm_));
-        //}
-    }
-    return opts;
-}
-
 void
 SIPAccountBase::onTextMessage(const std::string& id,
                               const std::string& from,
@@ -294,13 +259,6 @@ SIPAccountBase::onTextMessage(const std::string& id,
             return;
     }
 
-#ifdef ENABLE_PLUGIN
-    auto& pluginChatManager = Manager::instance().getJamiPluginManager().getChatServicesManager();
-    if (pluginChatManager.hasHandlers()) {
-        pluginChatManager.publishMessage(
-            std::make_shared<JamiMessage>(accountID_, from, true, payloads, false));
-    }
-#endif
     emitSignal<libjami::ConfigurationSignal::IncomingAccountMessage>(accountID_, from, id, payloads);
 
     libjami::Message message;

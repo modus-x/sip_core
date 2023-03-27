@@ -1,7 +1,0 @@
-*.d
-*.so
-*.o
-*.yml
-sip-parser.cpp
-fuzz_*
-out

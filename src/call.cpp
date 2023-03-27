@@ -22,12 +22,7 @@
 
 #include "call.h"
 #include "account.h"
-#include "jamidht/jamiaccount.h"
 #include "manager.h"
-#ifdef ENABLE_PLUGIN
-#include "plugin/jamipluginmanager.h"
-#include "plugin/streamdata.h"
-#endif
 #include "audio/ringbufferpool.h"
 #include "jami/call_const.h"
 #include "client/ring_signal.h"
@@ -39,8 +34,6 @@
 #include "enumclass_utils.h"
 
 #include "errno.h"
-
-#include <opendht/thread_pool.h>
 
 #include <stdexcept>
 #include <system_error>
@@ -120,17 +113,6 @@ Call::Call(const std::shared_ptr<Account>& account,
         if (!isSubcall()) {
             if (cnx_state == ConnectionState::CONNECTED && duration_start_ == time_point::min())
                 duration_start_ = clock::now();
-            else if (cnx_state == ConnectionState::DISCONNECTED && call_state == CallState::OVER) {
-                if (auto jamiAccount = std::dynamic_pointer_cast<JamiAccount>(getAccount().lock())) {
-                    // TODO: This will be removed when 1:1 swarm will have a conference.
-                    // For now, only commit for 1:1 calls
-                    if (toUsername().find('/') == std::string::npos && getCallType() == CallType::OUTGOING) {
-                        jamiAccount->convModule()->addCallHistoryMessage(getPeerNumber(),
-                                                                         getCallDuration().count());
-                    }
-                    monitor();
-                }
-            }
         }
 
         // kill pending subcalls at disconnect
@@ -418,13 +400,6 @@ Call::onTextMessage(std::map<std::string, std::string>&& messages)
             return;
         }
     }
-#ifdef ENABLE_PLUGIN
-    auto& pluginChatManager = Manager::instance().getJamiPluginManager().getChatServicesManager();
-    if (pluginChatManager.hasHandlers()) {
-        pluginChatManager.publishMessage(
-            std::make_shared<JamiMessage>(getAccountId(), getPeerNumber(), true, messages, false));
-    }
-#endif
     Manager::instance().incomingMessage(getAccountId(), getCallId(), getPeerNumber(), messages);
 }
 

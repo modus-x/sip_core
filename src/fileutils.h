@@ -113,11 +113,6 @@ std::vector<uint8_t> loadCacheFile(const std::string& path,
                                    std::chrono::system_clock::duration maxAge);
 std::string loadCacheTextFile(const std::string& path, std::chrono::system_clock::duration maxAge);
 
-std::vector<uint8_t> readArchive(const std::string& path, const std::string& password = {});
-void writeArchive(const std::string& data,
-                  const std::string& path,
-                  const std::string& password = {});
-
 std::mutex& getFileLock(const std::string& path);
 
 /**
@@ -146,9 +141,6 @@ std::ifstream ifstream(const std::string& path, std::ios_base::openmode mode = s
 std::ofstream ofstream(const std::string& path, std::ios_base::openmode mode = std::ios_base::out);
 
 int64_t size(const std::string& path);
-
-std::string sha3File(const std::string& path);
-std::string sha3sum(const std::vector<uint8_t>& buffer);
 
 /**
  * Windows compatibility wrapper for checking read-only attribute

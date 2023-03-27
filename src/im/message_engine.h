@@ -56,7 +56,6 @@ public:
 
     /**
      * @TODO change MessageEngine by a queue,
-     * @NOTE retryOnTimeout is used for failing SIP messages (jamiAccount::sendTextMessage)
      */
     void onPeerOnline(const std::string& peer, bool retryOnTimeout = true);
 

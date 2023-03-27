@@ -55,13 +55,10 @@
 
 #include "system_codec_container.h"
 
-#include "connectivity/upnp/upnp_control.h"
 #include "connectivity/ip_utils.h"
 #include "string_utils.h"
 
 #include "im/instant_messaging.h"
-
-#include <opendht/crypto.h>
 
 #include <unistd.h>
 
@@ -206,27 +203,15 @@ SIPAccount::newOutgoingCall(std::string_view toUrl, const std::vector<libjami::M
 
     auto toUri = getToUri(to);
 
-    // Do not init ICE yet if the media list is empty. This may occur
-    // if we are sending an invite with no SDP offer.
-    if (call->isIceEnabled() and not mediaList.empty()) {
-        if (call->createIceMediaTransport(false)) {
-            call->initIceMediaTransport(true);
-        }
-    }
-
     call->setPeerNumber(toUri);
     call->setPeerUri(toUri);
 
     const auto localAddress = ip_utils::getInterfaceAddr(getLocalInterface(), family);
 
     IpAddr addrSdp;
-    if (getUPnPActive()) {
-        /* use UPnP addr, or published addr if its set */
-        addrSdp = getPublishedSameasLocal() ? getUPnPIpAddress() : getPublishedIpAddress();
-    } else {
-        addrSdp = isStunEnabled() or (not getPublishedSameasLocal()) ? getPublishedIpAddress()
+
+    addrSdp = isStunEnabled() or (not getPublishedSameasLocal()) ? getPublishedIpAddress()
                                                                      : localAddress;
-    }
 
     /* fallback on local address */
     if (not addrSdp)
@@ -335,9 +320,6 @@ SIPAccount::getTransportSelector()
 bool
 SIPAccount::SIPStartCall(std::shared_ptr<SIPCall>& call)
 {
-    // Add Ice headers to local SDP if ice transport exist
-    call->addLocalIceAttributes();
-
     const std::string& toUri(call->getPeerNumber()); // expecting a fully well formed sip uri
     pj_str_t pjTo = sip_utils::CONST_PJ_STR(toUri);
 
@@ -414,15 +396,6 @@ SIPAccount::usePublishedAddressPortInVIA()
     via_addr_.port = publishedPortUsed_;
 }
 
-void
-SIPAccount::useUPnPAddressPortInVIA()
-{
-    upnpIpAddr_ = getUPnPIpAddress().toString();
-    via_addr_.host.ptr = (char*) upnpIpAddr_.c_str();
-    via_addr_.host.slen = upnpIpAddr_.size();
-    via_addr_.port = publishedPortUsed_;
-}
-
 template<typename T>
 static void
 validate(std::string& member, const std::string& param, const T& valid)
@@ -449,69 +422,7 @@ SIPAccount::getVolatileAccountDetails() const
         a.emplace(Conf::CONFIG_PRESENCE_NOTE, presence_->getNote());
     }
 
-    if (transport_ and transport_->isSecure() and transport_->isConnected()) {
-        const auto& tlsInfos = transport_->getTlsInfos();
-        auto cipher = pj_ssl_cipher_name(tlsInfos.cipher);
-        if (tlsInfos.cipher and not cipher)
-            JAMI_WARN("Unknown cipher: %d", tlsInfos.cipher);
-        a.emplace(libjami::TlsTransport::TLS_CIPHER, cipher ? cipher : "");
-        a.emplace(libjami::TlsTransport::TLS_PEER_CERT, tlsInfos.peerCert->toString());
-        auto ca = tlsInfos.peerCert->issuer;
-        unsigned n = 0;
-        while (ca) {
-            std::ostringstream name_str;
-            name_str << libjami::TlsTransport::TLS_PEER_CA_ << n++;
-            a.emplace(name_str.str(), ca->toString());
-            ca = ca->issuer;
-        }
-        a.emplace(libjami::TlsTransport::TLS_PEER_CA_NUM, std::to_string(n));
-    }
-
     return a;
-}
-
-bool
-SIPAccount::mapPortUPnP()
-{
-    upnp::Mapping map(upnp::PortType::UDP, config().publishedPort, config().localPort);
-    map.setNotifyCallback([w = weak()](upnp::Mapping::sharedPtr_t mapRes) {
-        if (auto accPtr = w.lock()) {
-            auto oldPort = static_cast<in_port_t>(accPtr->publishedPortUsed_);
-            bool success = mapRes->getState() == upnp::MappingState::OPEN
-                           or mapRes->getState() == upnp::MappingState::IN_PROGRESS;
-            auto newPort = success ? mapRes->getExternalPort() : accPtr->config().publishedPort;
-            if (not success and not accPtr->isRegistered()) {
-                JAMI_WARN("[Account %s] Failed to open port %u: registering SIP account anyway",
-                          accPtr->getAccountID().c_str(),
-                          oldPort);
-                accPtr->doRegister1_();
-                return;
-            }
-            if ((oldPort != newPort)
-                or (accPtr->getRegistrationState() != RegistrationState::REGISTERED)) {
-                if (not accPtr->isRegistered())
-                    JAMI_WARN("[Account %s] SIP port %u opened: registering SIP account",
-                              accPtr->getAccountID().c_str(),
-                              newPort);
-                else
-                    JAMI_WARN("[Account %s] SIP port changed to %u: re-registering SIP account",
-                              accPtr->getAccountID().c_str(),
-                              newPort);
-                accPtr->publishedPortUsed_ = newPort;
-            } else {
-                accPtr->connectivityChanged();
-            }
-
-            accPtr->doRegister1_();
-        }
-    });
-
-    auto mapRes = upnpCtrl_->reserveMapping(map);
-    if (mapRes and mapRes->getState() == upnp::MappingState::OPEN) {
-        return true;
-    }
-
-    return false;
 }
 
 void
@@ -549,17 +460,8 @@ SIPAccount::doRegister()
 
     JAMI_DEBUG("doRegister {:s}", config_->hostname);
 
-    /* if UPnP is enabled, then wait for IGD to complete registration */
-    if (upnpCtrl_) {
-        JAMI_DBG("UPnP: waiting for IGD to register SIP account");
-        setRegistrationState(RegistrationState::TRYING);
-        if (not mapPortUPnP()) {
-            JAMI_DBG("UPnP: UPNP request failed, try to register SIP account anyway");
-            doRegister1_();
-        }
-    } else {
-        doRegister1_();
-    }
+    setRegistrationState(RegistrationState::TRYING);
+    doRegister1_();
 }
 
 void
@@ -739,7 +641,7 @@ SIPAccount::sendRegister()
     JAMI_DBG("Using contact header %s in registration", contact.c_str());
 
     if (transport_) {
-        if (getUPnPActive() or not getPublishedSameasLocal()
+        if (not getPublishedSameasLocal()
             or (not received.empty() and received != getPublishedAddress())) {
             pjsip_host_port* via = getViaAddr();
             JAMI_DBG("Setting VIA sent-by to %.*s:%d",
@@ -1269,12 +1171,7 @@ SIPAccount::initContactAddress()
                                         address,
                                         port);
 
-    if (getUPnPActive() and getUPnPIpAddress()) {
-        address = getUPnPIpAddress().toString();
-        port = publishedPortUsed_;
-        useUPnPAddressPortInVIA();
-        JAMI_DBG("Using UPnP address %s and port %d", address.c_str(), port);
-    } else if (not config().publishedSameasLocal) {
+    if (not config().publishedSameasLocal) {
         address = getPublishedIpAddress().toString();
         port = config().publishedPort;
         JAMI_DBG("Using published address %s and port %d", address.c_str(), port);

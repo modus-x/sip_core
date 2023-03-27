@@ -29,7 +29,6 @@
 #endif
 
 #include "call.h"
-#include "connectivity/ice_transport.h"
 #include "media_codec.h" // for MediaType enum
 #include "connectivity/sip_utils.h"
 #include "sip/sdp.h"
@@ -38,9 +37,6 @@
 #ifdef ENABLE_VIDEO
 #include "media/video/video_receive_thread.h"
 #include "media/video/video_rtp_session.h"
-#endif
-#ifdef ENABLE_PLUGIN
-#include "plugin/streamdata.h"
 #endif
 #include "noncopyable.h"
 
@@ -62,13 +58,6 @@ class Sdp;
 class SIPAccountBase;
 class SipTransport;
 class AudioRtpSession;
-class IceSocket;
-
-using IceCandidate = pj_ice_sess_cand;
-
-namespace upnp {
-class Controller;
-}
 
 /**
  * @file sipcall.h
@@ -90,8 +79,6 @@ public:
         std::shared_ptr<RtpSession> rtpSession_ {};
         std::shared_ptr<MediaAttribute> mediaAttribute_ {};
         std::shared_ptr<MediaAttribute> remoteMediaAttribute_;
-        std::unique_ptr<IceSocket> rtpSocket_;
-        std::unique_ptr<IceSocket> rtcpSocket_;
     };
 
     /**
@@ -144,7 +131,6 @@ public:
     std::shared_ptr<AccountCodecInfo> getAudioCodec() const override;
     std::shared_ptr<AccountCodecInfo> getVideoCodec() const override;
     void sendKeyframe(int streamIdx = -1) override;
-    bool isIceEnabled() const override;
     std::map<std::string, std::string> getDetails() const override;
     void enterConference(std::shared_ptr<Conference> conference) override;
     void exitConference() override;
@@ -249,27 +235,6 @@ public:
 
     std::shared_ptr<SIPAccountBase> getSIPAccount() const;
 
-    bool remoteHasValidIceAttributes() const;
-    void addLocalIceAttributes();
-
-    std::shared_ptr<IceTransport> getIceMedia() const
-    {
-        std::lock_guard<std::mutex> lk(transportMtx_);
-        return reinvIceMedia_ ? reinvIceMedia_ : iceMedia_;
-    };
-
-    // Set ICE instance. Must be called only for sub-calls
-    void setIceMedia(std::shared_ptr<IceTransport> ice, bool isReinvite = false);
-
-    // Switch to re-invite ICE media if needed
-    void switchToIceReinviteIfNeeded();
-
-    /**
-     * Setup ICE locally to answer to an ICE offer. The ICE session has
-     * the controlled role (slave)
-     */
-    void setupIceResponse(bool isReinvite = false);
-
     void terminateSipSession(int status);
 
     /**
@@ -298,18 +263,6 @@ public:
         peerUri_ = peerUri;
     }
 
-    // Create a new ICE media session. If we already have an instance,
-    // it will be destroyed first.
-    bool createIceMediaTransport(bool isReinvite);
-
-    // Initialize the ICE session.
-    // The initialization is performed asynchronously, i.e, the instance
-    // may not be ready to use when this method returns.
-    bool initIceMediaTransport(bool master,
-                               std::optional<IceTransportOptions> options = std::nullopt);
-
-    std::vector<std::string> getLocalIceCandidates(unsigned compId) const;
-
     void setInviteSession(pjsip_inv_session* inviteSession = nullptr);
 
     std::unique_ptr<pjsip_inv_session, InvSessionDeleter> inviteSession_;
@@ -329,12 +282,6 @@ public:
 
 private:
     void generateMediaPorts();
-
-    void openPortsUPnP();
-
-    bool isIceRunning() const;
-
-    std::unique_ptr<IceSocket> newIceSocket(unsigned compId);
 
     void deinitRecorder();
 
@@ -359,41 +306,7 @@ private:
 
     void setupNegotiatedMedia();
 
-#ifdef ENABLE_PLUGIN
-    /**
-     * Call Streams and some typedefs
-     */
-    using AVMediaStream = Observable<std::shared_ptr<MediaFrame>>;
-    using MediaStreamSubject = PublishMapSubject<std::shared_ptr<MediaFrame>, AVFrame*>;
-
-    /**
-     * @brief createCallAVStream
-     * Creates a call AV stream like video input, video receive, audio input or audio receive
-     * @param StreamData The type of the stream (audio/video, input/output,
-     * @param streamSource
-     * @param mediaStreamSubject
-     */
-    void createCallAVStream(const StreamData& StreamData,
-                            AVMediaStream& streamSource,
-                            const std::shared_ptr<MediaStreamSubject>& mediaStreamSubject);
-    /**
-     * @brief createCallAVStreams
-     * Creates all Call AV Streams (2 if audio, 4 if audio video)
-     */
-    void createCallAVStreams();
-
-    /**
-     * @brief Detach all plugins from call streams;
-     */
-    void clearCallAVStreams();
-
-    std::mutex avStreamsMtx_ {};
-    std::map<std::string, std::shared_ptr<MediaStreamSubject>> callAVStreams;
-#endif // ENABLE_PLUGIN
-
     void setCallMediaLocal();
-    void startIceMedia();
-    void onIceNegoSucceed();
     void startAllMedia();
     void stopAllMedia();
     void updateRemoteMedia();
@@ -414,10 +327,8 @@ private:
     bool updateAllMediaStreams(const std::vector<MediaAttribute>& mediaAttrList, bool isRemote);
     // Check if a SIP re-invite must be sent to negotiate the new media
     bool isReinviteRequired(const std::vector<MediaAttribute>& mediaAttrList);
-    // Check if a new ICE media session is needed when performing a re-invite
-    bool isNewIceMediaRequired(const std::vector<MediaAttribute>& mediaAttrList);
-    void requestReinvite(const std::vector<MediaAttribute>& mediaAttrList, bool needNewIce);
-    int SIPSessionReinvite(const std::vector<MediaAttribute>& mediaAttrList, bool needNewIce);
+    void requestReinvite(const std::vector<MediaAttribute>& mediaAttrList);
+    int SIPSessionReinvite(const std::vector<MediaAttribute>& mediaAttrList);
     int SIPSessionReinvite();
     // Add a media stream to the call.
     void addMediaStream(const MediaAttribute& mediaAttr);
@@ -433,8 +344,6 @@ private:
     // Find the stream index with the matching label
     int findRtpStreamIndex(const std::string& label) const;
 
-    std::vector<IceCandidate> getAllRemoteCandidates(IceTransport& transport) const;
-
     inline std::shared_ptr<const SIPCall> shared() const
     {
         return std::static_pointer_cast<const SIPCall>(shared_from_this());
@@ -448,12 +357,6 @@ private:
     std::string peerUserAgent_ {};
     // Flag to indicate if the peer's Daemon version supports multi-stream.
     bool peerSupportMultiStream_ {false};
-    // Flag to indicate if the peer's Daemon version can negotiate more than 2 ICE medias
-    bool peerSupportMultiIce_ {false};
-
-    // Flag to indicate if the peer's Daemon version supports re-invite
-    // without ICE renegotiation.
-    bool peerSupportReuseIceInReinv_ {false};
 
     // Peer's allowed methods.
     std::vector<std::string> peerAllowedMethods_;
@@ -474,7 +377,6 @@ private:
     std::unique_ptr<Sdp> sdp_ {};
     bool peerHolding_ {false};
 
-    bool isWaitingForIceAndMedia_ {false};
     enum class Request { HoldingOn, HoldingOff, SwitchInput, NoRequest };
     Request remainingRequest_ {Request::NoRequest};
 
@@ -482,22 +384,15 @@ private:
 
     std::string contactHeader_ {};
 
-    std::shared_ptr<jami::upnp::Controller> upnp_;
-
     /** Local audio port, as seen by me. */
     unsigned int localAudioPort_ {0};
     /** Local video port, as seen by me. */
     unsigned int localVideoPort_ {0};
 
     bool mediaRestartRequired_ {true};
-    bool enableIce_ {false};
     bool srtpEnabled_ {false};
     bool rtcpMuxEnabled_ {false};
 
-    // ICE media transport
-    std::shared_ptr<IceTransport> iceMedia_;
-    // Re-invite (temporary) ICE media transport.
-    std::shared_ptr<IceTransport> reinvIceMedia_;
 
     std::string peerUri_ {};
 
@@ -508,8 +403,6 @@ private:
 
     OnReadyCb holdCb_ {};
     OnReadyCb offHoldCb_ {};
-
-    std::atomic_bool waitForIceInit_ {false};
 
     std::map<const std::string, bool> mediaReady_ {{"a:local", false},
                                                    {"a:remote", false},

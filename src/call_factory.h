@@ -38,9 +38,7 @@ class SIPCall;
 class CallFactory
 {
 public:
-    CallFactory(std::mt19937_64& rand)
-        : rand_(rand)
-    {}
+    CallFactory();
 
     std::string getNewCallID() const;
 
@@ -131,8 +129,6 @@ private:
             return &itermap->second;
         return nullptr;
     }
-
-    std::mt19937_64& rand_;
 
     mutable std::recursive_mutex callMapsMutex_ {};
 

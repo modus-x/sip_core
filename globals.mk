@@ -11,7 +11,6 @@ AM_CPPFLAGS += \
 	-I$(src)/src \
 	-I$(src)/src/config \
 	-I$(src)/src/media \
-	-I$(src)/test \
 	-I$(src)/src/jami \
 	$(SIP_CFLAGS) \
 	-DPREFIX=\"$(prefix)\" \

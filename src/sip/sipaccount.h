@@ -455,7 +455,6 @@ private:
     bool SIPStartCall(std::shared_ptr<SIPCall>& call);
 
     void usePublishedAddressPortInVIA();
-    void useUPnPAddressPortInVIA();
     bool fullMatch(std::string_view username, std::string_view hostname) const;
     bool userMatch(std::string_view username) const;
     bool hostnameMatch(std::string_view hostname) const;
@@ -524,11 +523,6 @@ private:
      * @return std::string The login name under which the software is running.
      */
     static std::string getLoginName();
-
-    /**
-     * Maps require port via UPnP
-     */
-    bool mapPortUPnP();
 
     /**
      * Print contact header in certain format
@@ -609,12 +603,6 @@ private:
 
     // This is used at runtime . Mainly by SIPAccount::usePublishedAddressPortInVIA()
     std::string publishedIpStr_ {};
-
-    /**
-     * Temporary storage for getUPnPIpAddress().toString()
-     * Used only by useUPnPAddressPortInVIA().
-     */
-    std::string upnpIpAddr_;
 
     mutable std::mutex contactMutex_;
     // Contact header

@@ -29,21 +29,16 @@
 #include "configurationmanager_interface.h"
 #include "account_schema.h"
 #include "manager.h"
-#include "connectivity/security/tlsvalidator.h"
-#include "connectivity/security/certstore.h"
 #include "logger.h"
 #include "fileutils.h"
 #include "archiver.h"
 #include "connectivity/ip_utils.h"
 #include "sip/sipaccount.h"
-#include "jamidht/jamiaccount.h"
 #include "sip/sipaccount_config.h"
-#include "jamidht/jamiaccount_config.h"
 #include "audio/audiolayer.h"
 #include "system_codec_container.h"
 #include "account_const.h"
 #include "client/ring_signal.h"
-#include "connectivity/upnp/upnp_context.h"
 #include "audio/ringbufferpool.h"
 
 #ifdef __APPLE__
@@ -69,9 +64,6 @@ namespace libjami {
 constexpr unsigned CODECS_NOT_LOADED = 0x1000; /** Codecs not found */
 
 using jami::SIPAccount;
-using jami::JamiAccount;
-using jami::tls::TlsValidator;
-using jami::tls::CertificateStore;
 using jami::AudioDeviceType;
 
 void
@@ -92,127 +84,6 @@ getVolatileAccountDetails(const std::string& accountID)
     return jami::Manager::instance().getVolatileAccountDetails(accountID);
 }
 
-std::map<std::string, std::string>
-validateCertificate(const std::string&, const std::string& certificate)
-{
-    try {
-        return TlsValidator {CertificateStore::instance().getCertificate(certificate)}
-            .getSerializedChecks();
-    } catch (const std::runtime_error& e) {
-        JAMI_WARN("Certificate loading failed: %s", e.what());
-        return {{Certificate::ChecksNames::EXIST, Certificate::CheckValuesNames::FAILED}};
-    }
-}
-
-std::map<std::string, std::string>
-validateCertificatePath(const std::string&,
-                        const std::string& certificate,
-                        const std::string& privateKey,
-                        const std::string& privateKeyPass,
-                        const std::string& caList)
-{
-    try {
-        return TlsValidator {certificate, privateKey, privateKeyPass, caList}.getSerializedChecks();
-    } catch (const std::runtime_error& e) {
-        JAMI_WARN("Certificate loading failed: %s", e.what());
-        return {{Certificate::ChecksNames::EXIST, Certificate::CheckValuesNames::FAILED}};
-    }
-}
-
-std::map<std::string, std::string>
-getCertificateDetails(const std::string& certificate)
-{
-    try {
-        return TlsValidator {CertificateStore::instance().getCertificate(certificate)}
-            .getSerializedDetails();
-    } catch (const std::runtime_error& e) {
-        JAMI_WARN("Certificate loading failed: %s", e.what());
-    }
-    return {};
-}
-
-std::map<std::string, std::string>
-getCertificateDetailsPath(const std::string& certificate,
-                          const std::string& privateKey,
-                          const std::string& privateKeyPassword)
-{
-    try {
-        auto crt = std::make_shared<dht::crypto::Certificate>(
-            jami::fileutils::loadFile(certificate));
-        TlsValidator validator {certificate, privateKey, privateKeyPassword};
-        CertificateStore::instance().pinCertificate(validator.getCertificate(), false);
-        return validator.getSerializedDetails();
-    } catch (const std::runtime_error& e) {
-        JAMI_WARN("Certificate loading failed: %s", e.what());
-    }
-    return {};
-}
-
-std::vector<std::string>
-getPinnedCertificates()
-{
-    return jami::tls::CertificateStore::instance().getPinnedCertificates();
-}
-
-std::vector<std::string>
-pinCertificate(const std::vector<uint8_t>& certificate, bool local)
-{
-    return jami::tls::CertificateStore::instance().pinCertificate(certificate, local);
-}
-
-void
-pinCertificatePath(const std::string& path)
-{
-    jami::tls::CertificateStore::instance().pinCertificatePath(path);
-}
-
-bool
-unpinCertificate(const std::string& certId)
-{
-    return jami::tls::CertificateStore::instance().unpinCertificate(certId);
-}
-
-unsigned
-unpinCertificatePath(const std::string& path)
-{
-    return jami::tls::CertificateStore::instance().unpinCertificatePath(path);
-}
-
-bool
-pinRemoteCertificate(const std::string& accountId, const std::string& certId)
-{
-    if (auto acc = jami::Manager::instance().getAccount<jami::JamiAccount>(accountId))
-        return acc->findCertificate(certId);
-    return false;
-}
-
-bool
-setCertificateStatus(const std::string& accountId,
-                     const std::string& certId,
-                     const std::string& ststr)
-{
-    try {
-        if (accountId.empty()) {
-            jami::tls::CertificateStore::instance()
-                .setTrustedCertificate(certId, jami::tls::trustStatusFromStr(ststr.c_str()));
-        } else if (auto acc = jami::Manager::instance().getAccount<jami::JamiAccount>(accountId)) {
-            auto status = jami::tls::TrustStore::statusFromStr(ststr.c_str());
-            return acc->setCertificateStatus(certId, status);
-        }
-    } catch (const std::out_of_range&) {
-    }
-    return false;
-}
-
-std::vector<std::string>
-getCertificatesByStatus(const std::string& accountId, const std::string& ststr)
-{
-    auto status = jami::tls::TrustStore::statusFromStr(ststr.c_str());
-    if (auto acc = jami::Manager::instance().getAccount<jami::JamiAccount>(accountId))
-        return acc->getCertificatesByStatus(status);
-    return {};
-}
-
 void
 setAccountDetails(const std::string& accountID, const std::map<std::string, std::string>& details)
 {
@@ -229,12 +100,6 @@ void
 sendRegister(const std::string& accountID, bool enable)
 {
     jami::Manager::instance().sendRegister(accountID, enable);
-}
-
-bool
-isPasswordValid(const std::string& accountID, const std::string& password)
-{
-    return jami::Manager::instance().isPasswordValid(accountID, password);
 }
 
 void
@@ -257,12 +122,6 @@ getLastMessages(const std::string& accountID, const uint64_t& base_timestamp)
     if (const auto acc = jami::Manager::instance().getAccount(accountID))
         return acc->getLastMessages(base_timestamp);
     return {};
-}
-
-std::map<std::string, std::string>
-getNearbyPeers(const std::string& accountID)
-{
-    return jami::Manager::instance().getNearbyPeers(accountID);
 }
 
 int
@@ -303,127 +162,11 @@ setMessageDisplayed(const std::string& accountID,
     return false;
 }
 
-bool
-exportOnRing(const std::string& accountID, const std::string& password)
-{
-    if (const auto account = jami::Manager::instance().getAccount<jami::JamiAccount>(accountID)) {
-        account->addDevice(password);
-        return true;
-    }
-    return false;
-}
-
-bool
-exportToFile(const std::string& accountID,
-             const std::string& destinationPath,
-             const std::string& password)
-{
-    if (const auto account = jami::Manager::instance().getAccount<jami::JamiAccount>(accountID)) {
-        return account->exportArchive(destinationPath, password);
-    }
-    return false;
-}
-
-bool
-revokeDevice(const std::string& accountID, const std::string& password, const std::string& deviceID)
-{
-    if (const auto account = jami::Manager::instance().getAccount<jami::JamiAccount>(accountID)) {
-        return account->revokeDevice(password, deviceID);
-    }
-    return false;
-}
-
-std::map<std::string, std::string>
-getKnownRingDevices(const std::string& accountId)
-{
-    if (auto acc = jami::Manager::instance().getAccount<jami::JamiAccount>(accountId))
-        return acc->getKnownDevices();
-    return {};
-}
-
-bool
-changeAccountPassword(const std::string& accountID,
-                      const std::string& password_old,
-                      const std::string& password_new)
-{
-    if (auto acc = jami::Manager::instance().getAccount<jami::JamiAccount>(accountID))
-        return acc->changeArchivePassword(password_old, password_new);
-    return false;
-}
-
-/* contacts */
-
-void
-addContact(const std::string& accountId, const std::string& uri)
-{
-    if (auto acc = jami::Manager::instance().getAccount<jami::JamiAccount>(accountId))
-        return acc->addContact(uri);
-}
-
-void
-removeContact(const std::string& accountId, const std::string& uri, bool ban)
-{
-    if (auto acc = jami::Manager::instance().getAccount<jami::JamiAccount>(accountId))
-        return acc->removeContact(uri, ban);
-}
-
-std::map<std::string, std::string>
-getContactDetails(const std::string& accountId, const std::string& uri)
-{
-    if (auto acc = jami::Manager::instance().getAccount<jami::JamiAccount>(accountId))
-        return acc->getContactDetails(uri);
-    return {};
-}
-
-std::vector<std::map<std::string, std::string>>
-getContacts(const std::string& accountId)
-{
-    if (auto acc = jami::Manager::instance().getAccount<jami::JamiAccount>(accountId))
-        return acc->getContacts();
-    return {};
-}
-
-/* contact requests */
-std::vector<std::map<std::string, std::string>>
-getTrustRequests(const std::string& accountId)
-{
-    if (auto acc = jami::Manager::instance().getAccount<jami::JamiAccount>(accountId))
-        return acc->getTrustRequests();
-    return {};
-}
-
-bool
-acceptTrustRequest(const std::string& accountId, const std::string& from)
-{
-    if (auto acc = jami::Manager::instance().getAccount<jami::JamiAccount>(accountId))
-        return acc->acceptTrustRequest(from);
-    return false;
-}
-
-bool
-discardTrustRequest(const std::string& accountId, const std::string& from)
-{
-    if (auto acc = jami::Manager::instance().getAccount<jami::JamiAccount>(accountId))
-        return acc->discardTrustRequest(from);
-    return false;
-}
-
-void
-sendTrustRequest(const std::string& accountId,
-                 const std::string& to,
-                 const std::vector<uint8_t>& payload)
-{
-    if (auto acc = jami::Manager::instance().getAccount<jami::JamiAccount>(accountId))
-        acc->sendTrustRequest(to, payload);
-}
-
 /// This function is used as a base for new accounts for clients that support it
 std::map<std::string, std::string>
 getAccountTemplate(const std::string& accountType)
 {
-    if (accountType == Account::ProtocolNames::RING)
-        return jami::JamiAccountConfig().toMap();
-    else if (accountType == Account::ProtocolNames::SIP)
+    if (accountType == Account::ProtocolNames::SIP)
         return jami::SipAccountConfig().toMap();
     return {};
 }
@@ -464,21 +207,6 @@ getCodecList()
     if (list.empty())
         jami::emitSignal<ConfigurationSignal::Error>(CODECS_NOT_LOADED);
     return list;
-}
-
-std::vector<std::string>
-getSupportedTlsMethod()
-{
-    return SIPAccount::getSupportedTlsProtocols();
-}
-
-std::vector<std::string>
-getSupportedCiphers(const std::string& accountID)
-{
-    if (auto sipaccount = jami::Manager::instance().getAccount<SIPAccount>(accountID))
-        return SIPAccount::getSupportedTlsCiphers();
-    JAMI_ERR("SIP account %s doesn't exist", accountID.c_str());
-    return {};
 }
 
 bool
@@ -678,8 +406,10 @@ getRecordPath()
 {
     return jami::Manager::instance().audioPreference.getRecordPath();
 }
+
 std::string
-getHomePath() {
+getHomePath()
+{
     return jami::Manager::instance().getHomePath();
 }
 
@@ -924,9 +654,8 @@ setCredentials(const std::string& accountID,
 {
     if (auto sipaccount = jami::Manager::instance().getAccount<SIPAccount>(accountID)) {
         sipaccount->doUnregister([&](bool /* transport_free */) {
-            sipaccount->editConfig([&](jami::SipAccountConfig& config){
-                config.setCredentials(details);
-            });
+            sipaccount->editConfig(
+                [&](jami::SipAccountConfig& config) { config.setCredentials(details); });
             sipaccount->loadConfig();
             if (sipaccount->isEnabled())
                 sipaccount->doRegister();
@@ -940,119 +669,8 @@ connectivityChanged()
 {
     JAMI_WARN("received connectivity changed - trying to re-connect enabled accounts");
 
-    // reset the UPnP context
-#if !(defined(TARGET_OS_IOS) && TARGET_OS_IOS)
-    try {
-        jami::upnp::UPnPContext::getUPnPContext()->connectivityChanged();
-    } catch (std::runtime_error& e) {
-        JAMI_ERR("UPnP context error: %s", e.what());
-    }
-#endif
-
     for (const auto& account : jami::Manager::instance().getAllAccounts()) {
         account->connectivityChanged();
-    }
-}
-
-bool
-lookupName(const std::string& account, const std::string& nameserver, const std::string& name)
-{
-#if HAVE_RINGNS
-    if (account.empty()) {
-        auto cb = [name](const std::string& result, jami::NameDirectory::Response response) {
-            jami::emitSignal<libjami::ConfigurationSignal::RegisteredNameFound>("",
-                                                                              (int) response,
-                                                                              result,
-                                                                              name);
-        };
-        if (nameserver.empty())
-            jami::NameDirectory::lookupUri(name, "", cb);
-        else
-            jami::NameDirectory::instance(nameserver).lookupName(name, cb);
-        return true;
-    } else if (auto acc = jami::Manager::instance().getAccount<JamiAccount>(account)) {
-        acc->lookupName(name);
-        return true;
-    }
-#endif
-    return false;
-}
-
-bool
-lookupAddress(const std::string& account, const std::string& nameserver, const std::string& address)
-{
-#if HAVE_RINGNS
-    if (account.empty()) {
-        jami::NameDirectory::instance(nameserver)
-            .lookupAddress(address,
-                           [address](const std::string& result,
-                                     jami::NameDirectory::Response response) {
-                               jami::emitSignal<libjami::ConfigurationSignal::RegisteredNameFound>(
-                                   "", (int) response, address, result);
-                           });
-        return true;
-    } else if (auto acc = jami::Manager::instance().getAccount<JamiAccount>(account)) {
-        acc->lookupAddress(address);
-        return true;
-    }
-#endif
-    return false;
-}
-
-bool
-searchUser(const std::string& account, const std::string& query)
-{
-    if (auto acc = jami::Manager::instance().getAccount<JamiAccount>(account)) {
-        return acc->searchUser(query);
-    }
-    return false;
-}
-
-bool
-registerName(const std::string& account, const std::string& password, const std::string& name)
-{
-#if HAVE_RINGNS
-    if (auto acc = jami::Manager::instance().getAccount<JamiAccount>(account)) {
-        acc->registerName(password, name);
-        return true;
-    }
-#endif
-    return false;
-}
-
-void
-setPushNotificationToken(const std::string& token)
-{
-    for (const auto& account : jami::Manager::instance().getAllAccounts()) {
-        account->setPushNotificationToken(token);
-    }
-}
-void
-setPushNotificationTopic(const std::string& topic)
-{
-    for (const auto& account : jami::Manager::instance().getAllAccounts()) {
-        account->setPushNotificationTopic(topic);
-    }
-}
-
-void
-pushNotificationReceived(const std::string& from, const std::map<std::string, std::string>& data)
-{
-    try {
-        auto it = data.find("to");
-        if (it != data.end()) {
-            if (auto account = jami::Manager::instance().getAccount<JamiAccount>(it->second))
-                account->pushNotificationReceived(from, data);
-        }
-#if defined(__ANDROID__) || defined(ANDROID) || defined(__Apple__)
-        else {
-            for (const auto& sipAccount : jami::Manager::instance().getAllAccounts<SIPAccount>()) {
-                sipAccount->pushNotificationReceived(from, data);
-            }
-        }
-#endif
-    } catch (const std::exception& e) {
-        JAMI_ERR("Error processing push notification: %s", e.what());
     }
 }
 

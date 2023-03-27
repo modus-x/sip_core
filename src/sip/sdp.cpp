@@ -40,9 +40,6 @@
 #include "system_codec_container.h"
 #include "compiler_intrinsics.h" // for UNUSED
 
-#include <opendht/rng.h>
-using random_device = dht::crypto::random_device;
-
 #include <algorithm>
 #include <cassert>
 
@@ -128,9 +125,9 @@ Sdp::findCodecByPayload(const unsigned payloadType)
 static void
 randomFill(std::vector<uint8_t>& dest)
 {
-    std::uniform_int_distribution<int> rand_byte {0, std::numeric_limits<uint8_t>::max()};
-    random_device rdev;
-    std::generate(dest.begin(), dest.end(), std::bind(rand_byte, std::ref(rdev)));
+    // std::uniform_int_distribution<int> rand_byte {0, std::numeric_limits<uint8_t>::max()};
+    // random_device rdev;
+    // std::generate(dest.begin(), dest.end(), std::bind(rand_byte, std::ref(rdev)));
 }
 
 void
@@ -157,7 +154,7 @@ Sdp::generateSdesAttribute()
     keyAndSalt.resize(jami::CryptoSuites[cryptoSuite].masterKeyLength / 8
                       + jami::CryptoSuites[cryptoSuite].masterSaltLength / 8);
     // generate keys
-    randomFill(keyAndSalt);
+    // randomFill(keyAndSalt);
 
     std::string crypto_attr = "1 "s + jami::CryptoSuites[cryptoSuite].name
                               + " inline:" + base64::encode(keyAndSalt);
@@ -366,8 +363,8 @@ Sdp::addMediaDescription(const MediaAttribute& mediaAttr)
     med->attr[med->attr_count++] = pjmedia_sdp_attr_create(memPool_.get(), direction, NULL);
 
     if (secure) {
-        if (pjmedia_sdp_media_add_attr(med, generateSdesAttribute()) != PJ_SUCCESS)
-            throw SdpException("Could not add sdes attribute to media");
+        // if (pjmedia_sdp_media_add_attr(med, generateSdesAttribute()) != PJ_SUCCESS)
+        //     throw SdpException("Could not add sdes attribute to media");
     }
 
     return med;
@@ -914,127 +911,6 @@ Sdp::getMediaSlots() const
     for (decltype(slot_n) i = 0; i < slot_n; i++)
         s.emplace_back(std::move(loc[i]), std::move(rem[i]));
     return s;
-}
-
-void
-Sdp::addIceCandidates(unsigned media_index, const std::vector<std::string>& cands)
-{
-    if (media_index >= localSession_->media_count) {
-        JAMI_ERR("addIceCandidates failed: cannot access media#%u (may be deactivated)",
-                 media_index);
-        return;
-    }
-
-    auto media = localSession_->media[media_index];
-
-    for (const auto& item : cands) {
-        const pj_str_t val = sip_utils::CONST_PJ_STR(item);
-        pjmedia_sdp_attr* attr = pjmedia_sdp_attr_create(memPool_.get(), "candidate", &val);
-
-        if (pjmedia_sdp_media_add_attr(media, attr) != PJ_SUCCESS)
-            throw SdpException("Could not add ICE candidates attribute to media");
-    }
-}
-
-std::vector<std::string>
-Sdp::getIceCandidates(unsigned media_index) const
-{
-    auto remoteSession = activeRemoteSession_ ? activeRemoteSession_ : remoteSession_;
-    auto localSession = activeLocalSession_ ? activeLocalSession_ : localSession_;
-    if (not remoteSession) {
-        JAMI_ERR("getIceCandidates failed: no remote session");
-        return {};
-    }
-    if (not localSession) {
-        JAMI_ERR("getIceCandidates failed: no local session");
-        return {};
-    }
-    if (media_index >= remoteSession->media_count || media_index >= localSession->media_count) {
-        JAMI_ERR("getIceCandidates failed: cannot access media#%u (may be deactivated)",
-                 media_index);
-        return {};
-    }
-    auto media = remoteSession->media[media_index];
-    auto localMedia = localSession->media[media_index];
-    if (media->desc.port == 0 || localMedia->desc.port == 0) {
-        JAMI_WARN("Media#%u is disabled. Media ports: local %u, remote %u",
-                  media_index,
-                  localMedia->desc.port,
-                  media->desc.port);
-        return {};
-    }
-
-    std::vector<std::string> candidates;
-
-    for (unsigned i = 0; i < media->attr_count; i++) {
-        pjmedia_sdp_attr* attribute = media->attr[i];
-        if (pj_stricmp2(&attribute->name, "candidate") == 0)
-            candidates.push_back(std::string(attribute->value.ptr, attribute->value.slen));
-    }
-
-    return candidates;
-}
-
-void
-Sdp::addIceAttributes(const IceTransport::Attribute&& ice_attrs)
-{
-    pj_str_t value = sip_utils::CONST_PJ_STR(ice_attrs.ufrag);
-    pjmedia_sdp_attr* attr = pjmedia_sdp_attr_create(memPool_.get(), "ice-ufrag", &value);
-
-    if (pjmedia_sdp_attr_add(&localSession_->attr_count, localSession_->attr, attr) != PJ_SUCCESS)
-        throw SdpException("Could not add ICE.ufrag attribute to local SDP");
-
-    value = sip_utils::CONST_PJ_STR(ice_attrs.pwd);
-    attr = pjmedia_sdp_attr_create(memPool_.get(), "ice-pwd", &value);
-
-    if (pjmedia_sdp_attr_add(&localSession_->attr_count, localSession_->attr, attr) != PJ_SUCCESS)
-        throw SdpException("Could not add ICE.pwd attribute to local SDP");
-}
-
-IceTransport::Attribute
-Sdp::getIceAttributes() const
-{
-    if (auto session = activeRemoteSession_ ? activeRemoteSession_ : remoteSession_)
-        return getIceAttributes(session);
-    return {};
-}
-
-IceTransport::Attribute
-Sdp::getIceAttributes(const pjmedia_sdp_session* session)
-{
-    IceTransport::Attribute ice_attrs;
-    for (unsigned i = 0; i < session->attr_count; i++) {
-        pjmedia_sdp_attr* attribute = session->attr[i];
-        if (pj_stricmp2(&attribute->name, "ice-ufrag") == 0)
-            ice_attrs.ufrag.assign(attribute->value.ptr, attribute->value.slen);
-        else if (pj_stricmp2(&attribute->name, "ice-pwd") == 0)
-            ice_attrs.pwd.assign(attribute->value.ptr, attribute->value.slen);
-    }
-    return ice_attrs;
-}
-
-void
-Sdp::clearIce()
-{
-    clearIce(localSession_);
-    clearIce(remoteSession_);
-    setActiveRemoteSdpSession(nullptr);
-    setActiveLocalSdpSession(nullptr);
-}
-
-void
-Sdp::clearIce(pjmedia_sdp_session* session)
-{
-    if (not session)
-        return;
-    pjmedia_sdp_attr_remove_all(&session->attr_count, session->attr, "ice-ufrag");
-    pjmedia_sdp_attr_remove_all(&session->attr_count, session->attr, "ice-pwd");
-    // TODO. Why this? we should not have "candidate" attribute at session level.
-    pjmedia_sdp_attr_remove_all(&session->attr_count, session->attr, "candidate");
-    for (unsigned i = 0; i < session->media_count; i++) {
-        auto media = session->media[i];
-        pjmedia_sdp_attr_remove_all(&media->attr_count, media->attr, "candidate");
-    }
 }
 
 std::vector<MediaAttribute>

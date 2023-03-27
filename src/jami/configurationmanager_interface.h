@@ -35,7 +35,6 @@
 #include <cstdint>
 
 #include "jami.h"
-#include "security_const.h"
 
 #ifdef __APPLE__
 #include <TargetConditionals.h>
@@ -65,29 +64,6 @@ LIBJAMI_PUBLIC std::map<std::string, std::string> getAccountTemplate(const std::
 LIBJAMI_PUBLIC std::string addAccount(const std::map<std::string, std::string>& details,
                                       const std::string& accountID = {});
 LIBJAMI_PUBLIC void monitor(bool continuous);
-LIBJAMI_PUBLIC bool exportOnRing(const std::string& accountID, const std::string& password);
-LIBJAMI_PUBLIC bool exportToFile(const std::string& accountID,
-                                 const std::string& destinationPath,
-                                 const std::string& password = {});
-LIBJAMI_PUBLIC bool revokeDevice(const std::string& accountID,
-                                 const std::string& password,
-                                 const std::string& deviceID);
-LIBJAMI_PUBLIC std::map<std::string, std::string> getKnownRingDevices(const std::string& accountID);
-LIBJAMI_PUBLIC bool changeAccountPassword(const std::string& accountID,
-                                          const std::string& password_old,
-                                          const std::string& password_new);
-LIBJAMI_PUBLIC bool isPasswordValid(const std::string& accountID, const std::string& password);
-
-LIBJAMI_PUBLIC bool lookupName(const std::string& account,
-                               const std::string& nameserver,
-                               const std::string& name);
-LIBJAMI_PUBLIC bool lookupAddress(const std::string& account,
-                                  const std::string& nameserver,
-                                  const std::string& address);
-LIBJAMI_PUBLIC bool registerName(const std::string& account,
-                                 const std::string& password,
-                                 const std::string& name);
-LIBJAMI_PUBLIC bool searchUser(const std::string& account, const std::string& query);
 
 LIBJAMI_PUBLIC void removeAccount(const std::string& accountID);
 LIBJAMI_PUBLIC std::vector<std::string> getAccountList();
@@ -99,7 +75,6 @@ LIBJAMI_PUBLIC uint64_t sendAccountTextMessage(const std::string& accountID,
 LIBJAMI_PUBLIC bool cancelMessage(const std::string& accountID, uint64_t message);
 LIBJAMI_PUBLIC std::vector<Message> getLastMessages(const std::string& accountID,
                                                     const uint64_t& base_timestamp);
-LIBJAMI_PUBLIC std::map<std::string, std::string> getNearbyPeers(const std::string& accountID);
 LIBJAMI_PUBLIC int getMessageStatus(uint64_t id);
 LIBJAMI_PUBLIC int getMessageStatus(const std::string& accountID, uint64_t id);
 LIBJAMI_PUBLIC void setIsComposing(const std::string& accountID,
@@ -111,8 +86,6 @@ LIBJAMI_PUBLIC bool setMessageDisplayed(const std::string& accountID,
                                         int status);
 
 LIBJAMI_PUBLIC std::vector<unsigned> getCodecList();
-LIBJAMI_PUBLIC std::vector<std::string> getSupportedTlsMethod();
-LIBJAMI_PUBLIC std::vector<std::string> getSupportedCiphers(const std::string& accountID);
 LIBJAMI_PUBLIC std::map<std::string, std::string> getCodecDetails(const std::string& accountID,
                                                                   const unsigned& codecId);
 LIBJAMI_PUBLIC bool setCodecDetails(const std::string& accountID,
@@ -185,59 +158,6 @@ LIBJAMI_PUBLIC std::vector<std::string> getAllIpInterfaceByName();
 
 LIBJAMI_PUBLIC void setVolume(const std::string& device, double value);
 LIBJAMI_PUBLIC double getVolume(const std::string& device);
-
-/*
- * Security
- */
-LIBJAMI_PUBLIC std::map<std::string, std::string> validateCertificate(
-    const std::string& accountId, const std::string& certificate);
-LIBJAMI_PUBLIC std::map<std::string, std::string> validateCertificatePath(
-    const std::string& accountId,
-    const std::string& certificatePath,
-    const std::string& privateKey,
-    const std::string& privateKeyPassword,
-    const std::string& caList);
-
-LIBJAMI_PUBLIC std::map<std::string, std::string> getCertificateDetails(
-    const std::string& certificate);
-LIBJAMI_PUBLIC std::map<std::string, std::string> getCertificateDetailsPath(
-    const std::string& certificatePath,
-    const std::string& privateKey,
-    const std::string& privateKeyPassword);
-
-LIBJAMI_PUBLIC std::vector<std::string> getPinnedCertificates();
-
-LIBJAMI_PUBLIC std::vector<std::string> pinCertificate(const std::vector<uint8_t>& certificate,
-                                                       bool local);
-LIBJAMI_PUBLIC bool unpinCertificate(const std::string& certId);
-
-LIBJAMI_PUBLIC void pinCertificatePath(const std::string& path);
-LIBJAMI_PUBLIC unsigned unpinCertificatePath(const std::string& path);
-
-LIBJAMI_PUBLIC bool pinRemoteCertificate(const std::string& accountId, const std::string& certId);
-LIBJAMI_PUBLIC bool setCertificateStatus(const std::string& account,
-                                         const std::string& certId,
-                                         const std::string& status);
-LIBJAMI_PUBLIC std::vector<std::string> getCertificatesByStatus(const std::string& account,
-                                                                const std::string& status);
-
-/* contact requests */
-LIBJAMI_PUBLIC std::vector<std::map<std::string, std::string>> getTrustRequests(
-    const std::string& accountId);
-LIBJAMI_PUBLIC bool acceptTrustRequest(const std::string& accountId, const std::string& from);
-LIBJAMI_PUBLIC bool discardTrustRequest(const std::string& accountId, const std::string& from);
-LIBJAMI_PUBLIC void sendTrustRequest(const std::string& accountId,
-                                     const std::string& to,
-                                     const std::vector<uint8_t>& payload = {});
-
-/* Contacts */
-
-LIBJAMI_PUBLIC void addContact(const std::string& accountId, const std::string& uri);
-LIBJAMI_PUBLIC void removeContact(const std::string& accountId, const std::string& uri, bool ban);
-LIBJAMI_PUBLIC std::map<std::string, std::string> getContactDetails(const std::string& accountId,
-                                                                    const std::string& uri);
-LIBJAMI_PUBLIC std::vector<std::map<std::string, std::string>> getContacts(
-    const std::string& accountId);
 
 /*
  * Network connectivity
@@ -388,12 +308,6 @@ struct LIBJAMI_PUBLIC ConfigurationSignal
                              const std::string& /*message_id*/,
                              int /*state*/);
     };
-    struct LIBJAMI_PUBLIC NeedsHost
-    {
-        constexpr static const char* name = "NeedsHost";
-        using cb_type = void(const std::string& /*account_id*/,
-                             const std::string& /*conversation_id*/);
-    };
     struct LIBJAMI_PUBLIC ActiveCallsChanged
     {
         constexpr static const char* name = "ActiveCallsChanged";
@@ -401,122 +315,10 @@ struct LIBJAMI_PUBLIC ConfigurationSignal
                              const std::string& /*conversation_id*/,
                              const std::vector<std::map<std::string, std::string>>& /*activeCalls*/);
     };
-    struct LIBJAMI_PUBLIC ProfileReceived
-    {
-        constexpr static const char* name = "ProfileReceived";
-        using cb_type = void(const std::string& /*account_id*/,
-                             const std::string& /*from*/,
-                             const std::string& /*vcard*/);
-    };
-    struct LIBJAMI_PUBLIC ComposingStatusChanged
-    {
-        constexpr static const char* name = "ComposingStatusChanged";
-        using cb_type = void(const std::string& /*account_id*/,
-                             const std::string& /*convId*/,
-                             const std::string& /*from*/,
-                             int /*status*/);
-    };
-    struct LIBJAMI_PUBLIC IncomingTrustRequest
-    {
-        constexpr static const char* name = "IncomingTrustRequest";
-        using cb_type = void(const std::string& /*account_id*/,
-                             const std::string& /*from*/,
-                             const std::string& /*conversationId*/,
-                             const std::vector<uint8_t>& payload,
-                             time_t received);
-    };
-    struct LIBJAMI_PUBLIC ContactAdded
-    {
-        constexpr static const char* name = "ContactAdded";
-        using cb_type = void(const std::string& /*account_id*/,
-                             const std::string& /*uri*/,
-                             bool confirmed);
-    };
-    struct LIBJAMI_PUBLIC ContactRemoved
-    {
-        constexpr static const char* name = "ContactRemoved";
-        using cb_type = void(const std::string& /*account_id*/,
-                             const std::string& /*uri*/,
-                             bool banned);
-    };
-    struct LIBJAMI_PUBLIC ExportOnRingEnded
-    {
-        constexpr static const char* name = "ExportOnRingEnded";
-        using cb_type = void(const std::string& /*account_id*/, int state, const std::string& pin);
-    };
-    struct LIBJAMI_PUBLIC NameRegistrationEnded
-    {
-        constexpr static const char* name = "NameRegistrationEnded";
-        using cb_type = void(const std::string& /*account_id*/, int state, const std::string& name);
-    };
-    struct LIBJAMI_PUBLIC KnownDevicesChanged
-    {
-        constexpr static const char* name = "KnownDevicesChanged";
-        using cb_type = void(const std::string& /*account_id*/,
-                             const std::map<std::string, std::string>& devices);
-    };
-    struct LIBJAMI_PUBLIC RegisteredNameFound
-    {
-        constexpr static const char* name = "RegisteredNameFound";
-        using cb_type = void(const std::string& /*account_id*/,
-                             int state,
-                             const std::string& /*address*/,
-                             const std::string& /*name*/);
-    };
-    struct LIBJAMI_PUBLIC UserSearchEnded
-    {
-        constexpr static const char* name = "UserSearchEnded";
-        using cb_type = void(const std::string& /*account_id*/,
-                             int state,
-                             const std::string& /*query*/,
-                             const std::vector<std::map<std::string, std::string>>& /*results*/);
-    };
-    struct LIBJAMI_PUBLIC CertificatePinned
-    {
-        constexpr static const char* name = "CertificatePinned";
-        using cb_type = void(const std::string& /*certId*/);
-    };
-    struct LIBJAMI_PUBLIC CertificatePathPinned
-    {
-        constexpr static const char* name = "CertificatePathPinned";
-        using cb_type = void(const std::string& /*path*/,
-                             const std::vector<std::string>& /*certId*/);
-    };
-    struct LIBJAMI_PUBLIC CertificateExpired
-    {
-        constexpr static const char* name = "CertificateExpired";
-        using cb_type = void(const std::string& /*certId*/);
-    };
-    struct LIBJAMI_PUBLIC CertificateStateChanged
-    {
-        constexpr static const char* name = "CertificateStateChanged";
-        using cb_type = void(const std::string& /*account_id*/,
-                             const std::string& /*certId*/,
-                             const std::string& /*state*/);
-    };
     struct LIBJAMI_PUBLIC MediaParametersChanged
     {
         constexpr static const char* name = "MediaParametersChanged";
         using cb_type = void(const std::string& /*accountId*/);
-    };
-    struct LIBJAMI_PUBLIC MigrationEnded
-    {
-        constexpr static const char* name = "MigrationEnded";
-        using cb_type = void(const std::string& /*accountId*/, const std::string& /*state*/);
-    };
-    struct LIBJAMI_PUBLIC DeviceRevocationEnded
-    {
-        constexpr static const char* name = "DeviceRevocationEnded";
-        using cb_type = void(const std::string& /*accountId*/,
-                             const std::string& /*device*/,
-                             int /*status*/);
-    };
-    struct LIBJAMI_PUBLIC AccountProfileReceived
-    {
-        constexpr static const char* name = "AccountProfileReceived";
-        using cb_type = void(const std::string& /*accountId*/,
-                             const std::string& displayName,
-                             const std::string& /*userPhoto*/);
     };
     /**
      * These are special getters for Android and UWP, so the daemon can retrieve

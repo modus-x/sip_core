@@ -29,10 +29,6 @@
 #include "socket_pair.h"
 #include "sip/sipvoiplink.h" // for enqueueKeyframeRequest
 #include "manager.h"
-#ifdef ENABLE_PLUGIN
-#include "plugin/streamdata.h"
-#include "plugin/jamipluginmanager.h"
-#endif
 #include "logger.h"
 #include "string_utils.h"
 #include "call.h"

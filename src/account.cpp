@@ -36,9 +36,6 @@
 #include "logger.h"
 #include "manager.h"
 
-#include <opendht/rng.h>
-using random_device = dht::crypto::random_device;
-
 #include "client/ring_signal.h"
 #include "account_schema.h"
 #include "jami/account_const.h"
@@ -52,7 +49,6 @@ using random_device = dht::crypto::random_device;
 #include <yaml-cpp/yaml.h>
 #pragma GCC diagnostic pop
 
-#include "connectivity/upnp/upnp_control.h"
 #include "connectivity/ip_utils.h"
 #include "compiler_intrinsics.h"
 #include "jami/account_const.h"
@@ -70,7 +66,7 @@ namespace jami {
 const std::string Account::DEFAULT_USER_AGENT = Account::getDefaultUserAgent();
 
 Account::Account(const std::string& accountID)
-    : rand(dht::crypto::getSeededRandomEngine<std::mt19937_64>())
+    : rand()
     , accountID_(accountID)
     , registrationState_(RegistrationState::UNREGISTERED)
     , systemCodecContainer_(getSystemCodecContainer())
@@ -88,25 +84,6 @@ Account::hangupCalls()
 {
     for (const auto& callId : callSet_.getCallIds())
         Manager::instance().hangupCall(getAccountID(), callId);
-}
-
-void
-Account::updateUpnpController()
-{
-    std::lock_guard<std::mutex> lk {upnp_mtx};
-
-    if (not config().upnpEnabled or not isUsable()) {
-        upnpCtrl_.reset();
-        return;
-    }
-
-    // UPNP enabled. Create new controller if needed.
-    if (not upnpCtrl_) {
-        upnpCtrl_.reset(new upnp::Controller());
-        if (not upnpCtrl_) {
-            throw std::runtime_error("Failed to create a UPNP Controller instance!");
-        }
-    }
 }
 
 void
@@ -168,7 +145,6 @@ Account::loadConfig()
         JAMI_WARNING("Ringtone {} is not a valid file", ringtonePath_);
         ringtonePath_ = fileutils::getFullPath(ringtoneDir, DEFAULT_RINGTONE_PATH);
     }
-    updateUpnpController();
 }
 
 void
@@ -270,31 +246,6 @@ Account::getDefaultCodecDetails(const unsigned& codecId)
     return {};
 }
 
-/**
- * Get the UPnP IP (external router) address.
- * If use UPnP is set to false, the address will be empty.
- */
-IpAddr
-Account::getUPnPIpAddress() const
-{
-    std::lock_guard<std::mutex> lk(upnp_mtx);
-    if (upnpCtrl_)
-        return upnpCtrl_->getExternalIP();
-    return {};
-}
-
-/**
- * returns whether or not UPnP is enabled and active_
- * ie: if it is able to make port mappings
- */
-bool
-Account::getUPnPActive() const
-{
-    std::lock_guard<std::mutex> lk(upnp_mtx);
-    if (upnpCtrl_)
-        return upnpCtrl_->isReady();
-    return false;
-}
 
 /*
  * private account codec searching functions

@@ -68,14 +68,6 @@ struct LIBJAMI_PUBLIC PresenceSignal
                              int /*status*/,
                              const std::string& /*line_status*/);
     };
-    struct LIBJAMI_PUBLIC NearbyPeerNotification
-    {
-        constexpr static const char* name = "NearbyPeerNotification";
-        using cb_type = void(const std::string& /*account_id*/,
-                             const std::string& /*buddy_uri*/,
-                             int /*state*/,
-                             const std::string& /*displayname*/);
-    };
     struct LIBJAMI_PUBLIC SubscriptionStateChanged
     {
         constexpr static const char* name = "SubscriptionStateChanged";

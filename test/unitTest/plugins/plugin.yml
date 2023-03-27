@@ -1,9 +1,0 @@
-jplDirectory:
-  "plugins"
-plugin:
-  "TestSuite"
-mediaHandlers:
-  - "AudioHandlerTester"
-  - "VideoHandlerTester"
-chatHandlers:
-  - "ChatHandlerTester"

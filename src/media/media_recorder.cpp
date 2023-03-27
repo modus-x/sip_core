@@ -33,8 +33,6 @@
 #endif
 #endif
 
-#include <opendht/thread_pool.h>
-
 #include <algorithm>
 #include <iomanip>
 #include <sstream>
@@ -171,43 +169,43 @@ MediaRecorder::startRecording()
     encoder_.reset(new MediaEncoder);
 
     JAMI_DBG() << "Start recording '" << getPath() << "'";
-    if (initRecord() >= 0) {
-        isRecording_ = true;
-        // start thread after isRecording_ is set to true
-        dht::ThreadPool::computation().run([rec = shared_from_this()] {
-            while (rec->isRecording()) {
-                std::shared_ptr<MediaFrame> frame;
-                // get frame from queue
-                {
-                    std::unique_lock<std::mutex> lk(rec->mutexFrameBuff_);
-                    rec->cv_.wait(lk, [rec] {
-                        return rec->interrupted_ or not rec->frameBuff_.empty();
-                    });
-                    if (rec->interrupted_) {
-                        break;
-                    }
-                    frame = std::move(rec->frameBuff_.front());
-                    rec->frameBuff_.pop_front();
-                }
-                try {
-                    // encode frame
-                    if (frame && frame->pointer()) {
-#ifdef ENABLE_VIDEO
-                        bool isVideo = (frame->pointer()->width > 0 && frame->pointer()->height > 0);
-                        rec->encoder_->encode(frame->pointer(),
-                                              isVideo ? rec->videoIdx_ : rec->audioIdx_);
-#else
-                        rec->encoder_->encode(frame->pointer(), rec->audioIdx_);
-#endif // ENABLE_VIDEO
-                    }
-                } catch (const MediaEncoderException& e) {
-                    JAMI_ERR() << "Failed to record frame: " << e.what();
-                }
-            }
-            rec->flush();
-            rec->reset(); // allows recorder to be reused in same call
-        });
-    }
+//     if (initRecord() >= 0) {
+//         isRecording_ = true;
+//         // start thread after isRecording_ is set to true
+//         dht::ThreadPool::computation().run([rec = shared_from_this()] {
+//             while (rec->isRecording()) {
+//                 std::shared_ptr<MediaFrame> frame;
+//                 // get frame from queue
+//                 {
+//                     std::unique_lock<std::mutex> lk(rec->mutexFrameBuff_);
+//                     rec->cv_.wait(lk, [rec] {
+//                         return rec->interrupted_ or not rec->frameBuff_.empty();
+//                     });
+//                     if (rec->interrupted_) {
+//                         break;
+//                     }
+//                     frame = std::move(rec->frameBuff_.front());
+//                     rec->frameBuff_.pop_front();
+//                 }
+//                 try {
+//                     // encode frame
+//                     if (frame && frame->pointer()) {
+// #ifdef ENABLE_VIDEO
+//                         bool isVideo = (frame->pointer()->width > 0 && frame->pointer()->height > 0);
+//                         rec->encoder_->encode(frame->pointer(),
+//                                               isVideo ? rec->videoIdx_ : rec->audioIdx_);
+// #else
+//                         rec->encoder_->encode(frame->pointer(), rec->audioIdx_);
+// #endif // ENABLE_VIDEO
+//                     }
+//                 } catch (const MediaEncoderException& e) {
+//                     JAMI_ERR() << "Failed to record frame: " << e.what();
+//                 }
+//             }
+//             rec->flush();
+//             rec->reset(); // allows recorder to be reused in same call
+//         });
+//     }
     return 0;
 }
 

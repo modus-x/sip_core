@@ -25,7 +25,6 @@
 #include "client/ring_signal.h"
 #include "jami/account_const.h"
 
-#include <opendht/thread_pool.h>
 #include <json/json.h>
 
 #include <fstream>
@@ -304,36 +303,30 @@ MessageEngine::save_() const
                     payloads[p.first] = p.second;
                 peerRoot[to_hex_string(m.first)] = std::move(msg);
             }
-            if (peerRoot.size() == 0) continue;
+            if (peerRoot.size() == 0)
+                continue;
             root[c.first] = std::move(peerRoot);
         }
 
         // Save asynchronously
-        dht::ThreadPool::computation().run([path = savePath_,
-                                            root = std::move(root),
-                                            accountID = account_.getAccountID()] {
-            std::lock_guard<std::mutex> lock(fileutils::getFileLock(path));
-            try {
-                Json::StreamWriterBuilder wbuilder;
-                wbuilder["commentStyle"] = "None";
-                wbuilder["indentation"] = "";
-                std::unique_ptr<Json::StreamWriter> writer(wbuilder.newStreamWriter());
-                std::ofstream file;
-                file.exceptions(std::ifstream::failbit | std::ifstream::badbit);
-                fileutils::openStream(file, path, std::ios::trunc);
-                if (file.is_open())
-                    writer->write(root, &file);
-            } catch (const std::exception& e) {
-                JAMI_ERROR("[Account {:s}] Couldn't save messages to {:s}: {:s}",
-                         accountID,
-                         path,
-                         e.what());
-            }
-            JAMI_DEBUG("[Account {:s}] saved {:d} messages to {:s}",
-                     accountID,
-                     root.size(),
-                     path);
-        });
+        std::lock_guard<std::mutex> lock(fileutils::getFileLock(savePath_));
+        try {
+            Json::StreamWriterBuilder wbuilder;
+            wbuilder["commentStyle"] = "None";
+            wbuilder["indentation"] = "";
+            std::unique_ptr<Json::StreamWriter> writer(wbuilder.newStreamWriter());
+            std::ofstream file;
+            file.exceptions(std::ifstream::failbit | std::ifstream::badbit);
+            fileutils::openStream(file, savePath_, std::ios::trunc);
+            if (file.is_open())
+                writer->write(root, &file);
+        } catch (const std::exception& e) {
+            JAMI_ERROR("[Account {:s}] Couldn't save messages to {:s}: {:s}",
+                       account_.getAccountID(),
+                       savePath_,
+                       e.what());
+        }
+        JAMI_DEBUG("[Account {:s}] saved {:d} messages to {:s}", root.size(), savePath_);
     } catch (const std::exception& e) {
         JAMI_ERR("[Account %s] couldn't save messages to %s: %s",
                  account_.getAccountID().c_str(),

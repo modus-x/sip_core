@@ -1,8 +1,0 @@
-guile-wrapper
-pre-inst-env
-*.yml
-*.txt
-*.log
-.gdbinit
-*.gdb
-*.go

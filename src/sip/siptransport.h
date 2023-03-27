@@ -42,13 +42,6 @@
 #include <list>
 #include <memory>
 
-// OpenDHT
-namespace dht {
-namespace crypto {
-struct Certificate;
-}
-} // namespace dht
-
 namespace jami {
 
 class ChannelSocket;
@@ -78,7 +71,6 @@ struct TlsInfos
     pj_ssl_cipher cipher {PJ_TLS_UNKNOWN_CIPHER};
     pj_ssl_sock_proto proto {PJ_SSL_SOCK_PROTO_DEFAULT};
     pj_ssl_cert_verify_flag_t verifyStatus {};
-    std::shared_ptr<dht::crypto::Certificate> peerCert {};
 };
 
 using SipTransportStateCallback
@@ -94,8 +86,6 @@ public:
     SipTransport(pjsip_transport*, const std::shared_ptr<TlsListener>&);
     // If the SipTransport is a channeled transport, we are already connected to the peer,
     // so, we can directly set tlsInfos_.peerCert and avoid any copy
-    SipTransport(pjsip_transport* t,
-                 const std::shared_ptr<dht::crypto::Certificate>& peerCertficate);
 
     ~SipTransport();
 
@@ -164,11 +154,6 @@ public:
                                                   const std::string& remote_name = {});
 
     std::shared_ptr<SipTransport> addTransport(pjsip_transport*);
-
-    std::shared_ptr<SipTransport> getChanneledTransport(
-        const std::shared_ptr<SIPAccountBase>& account,
-        const std::shared_ptr<ChannelSocket>& socket,
-        onShutdownCb&& cb);
 
     /**
      * Start graceful shutdown procedure for all transports

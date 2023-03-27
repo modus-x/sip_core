@@ -26,7 +26,6 @@
 #include "sdes_negotiator.h"
 #include "connectivity/sip_utils.h"
 #include "connectivity/ip_utils.h"
-#include "connectivity/ice_transport.h"
 #include "media_codec.h"
 #include "media/media_attribute.h"
 #include "connectivity/sip_utils.h"
@@ -185,16 +184,6 @@ public:
     std::vector<MediaSlot> getMediaSlots() const;
 
     unsigned int getTelephoneEventType() const { return telephoneEventPayload_; }
-
-    void addIceAttributes(const IceTransport::Attribute&& ice_attrs);
-    IceTransport::Attribute getIceAttributes() const;
-    static IceTransport::Attribute getIceAttributes(const pjmedia_sdp_session* session);
-
-    void addIceCandidates(unsigned media_index, const std::vector<std::string>& cands);
-
-    std::vector<std::string> getIceCandidates(unsigned media_index) const;
-
-    void clearIce();
 
     SdpDirection getSdpDirection() const { return sdpDirection_; };
     static const char* getSdpDirectionStr(SdpDirection direction);

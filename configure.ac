@@ -46,17 +46,6 @@ AC_ARG_ENABLE([fuzzing],
 AM_CONDITIONAL([ENABLE_FUZZING], [test "x$enable_fuzzing" = "xyes"])
 AM_COND_IF([ENABLE_FUZZING], [AC_CONFIG_FILES([test/fuzzing/Makefile])])
 
-AC_ARG_ENABLE([agent],
-  AS_HELP_STRING([--enable-agent],
-    [Build agent]))
-AM_CONDITIONAL([ENABLE_AGENT], [test "x$enable_agent" = "xyes"])
-AM_COND_IF([ENABLE_AGENT],
-           [AC_CONFIG_FILES([test/agent/Makefile
-                             test/agent/pre-inst-env:test/agent/build-aux/pre-inst-env.in
-                             test/agent/scenarios/bulk-calls/run-scenario],
-                            [chmod +x test/agent/pre-inst-env
-                             chmod +x test/agent/scenarios/bulk-calls/run-scenario])])
-
 AC_ARG_ENABLE([tracepoints], AS_HELP_STRING([--enable-tracepoints], [Enable tracepoints]))
 
 AS_IF([test "x$enable_tracepoints" = "xyes"],
@@ -289,11 +278,6 @@ AS_IF([test -d "${TOOLS_DIR}"],
   [TOOLS_DIR=`cd "${TOOLS_DIR}" && pwd`
    export PATH="${TOOLS_DIR}":$PATH])
 
-dnl Check for zlib
-PKG_CHECK_MODULES(ZLIB, zlib,, AC_MSG_ERROR([zlib not found]))
-
-PKG_CHECK_MODULES(LIBGIT2, [libgit2 >= 1.1.0],, AC_MSG_ERROR([Missing libgit2 files]))
-
 dnl Check for pjproject
 PKG_CHECK_MODULES(PJPROJECT, libpjproject,,
   AC_MSG_ERROR([Missing pjproject files]))
@@ -401,20 +385,6 @@ AS_IF([test "x$enable_coverage" = "xyes"],
   [DAEMONCXXFLAGS+=" --coverage"
    DAEMONLDFLAGS+=" --coverage"])
 
-dnl name service is default-enabled
-AC_ARG_ENABLE([ringns], AS_HELP_STRING([--disable-ringns],
-  [Enable Name Service]))
-AM_CONDITIONAL([RINGNS], test "x$enable_ringns" != "xno")
-AC_DEFINE_UNQUOTED([HAVE_RINGNS],
-  `if test "x$enable_ringns" != "xno"; then echo 1; else echo 0; fi`,
-  [Define if you use the Name Service])
-AM_COND_IF([RINGNS],
-  [PKG_CHECK_MODULES(LIBCRYPTO, libcrypto,,
-     AC_MSG_ERROR([Missing libcrypto development files]))
-   PKG_CHECK_MODULES(LIBSSL, libssl,,
-     AC_MSG_ERROR([Missing libssl development files]))],
-  []);
-
 dnl Check for libav
 PKG_CHECK_MODULES(LIBAVUTIL, libavutil >= 54.31.100,,
   AC_MSG_ERROR([Missing libavutil development files]))
@@ -437,21 +407,6 @@ PKG_CHECK_MODULES(LIBSWSCALE, libswscale >= 3.1.101,,
 
 PKG_CHECK_MODULES(LIBSWRESAMPLE, libswresample >= 1.2.101,,
   AC_MSG_ERROR([Missing libswresample development files]))
-
-dnl Jami Plugin is default-enabled
-AC_ARG_ENABLE([plugin], AS_HELP_STRING([--disable-plugin], [Disable plugin]))
-AS_IF([test "x$enable_plugin" != "xno"],
-  [AC_DEFINE(ENABLE_PLUGIN, [], [Jami Plugin support enabled])
-   AM_CONDITIONAL(ENABLE_PLUGIN, true)
-   AS_IF([test "$SYS" = linux],
-     [PKG_CHECK_MODULES([ARCHIVE], [libarchive >= 3.0],,
-      AC_MSG_ERROR([libarchive not found]))],
-     [AS_IF([test "$SYS" = darwin],
-     [PKG_CHECK_MODULES([MINIZIP], [minizip >= 3.0.0],,
-      AC_MSG_ERROR([libminizip not found]))],
-     [])]
-     )],
-  [AM_CONDITIONAL(ENABLE_PLUGIN, false)]);
 
 dnl Video is default-enabled
 AC_ARG_ENABLE([video], AS_HELP_STRING([--disable-video], [Disable video]))
@@ -482,10 +437,6 @@ AS_IF([test "x$enable_video" != "xno" -a "x$enable_accel" != "xno"],
                  [Defined if videotoolbox is available])])])])],
      [])])
 AM_CONDITIONAL([RING_ACCEL], [test "x${ring_accel}" = "xyes"])
-
-dnl check for GnuTLS
-PKG_CHECK_MODULES([GNUTLS], [gnutls >= 3.6.7], [], AC_MSG_ERROR([gnutls not found]))
-PKG_CHECK_MODULES([NETTLE], [nettle >= 3.0.0], [], AC_MSG_ERROR([nettle not found]))
 
 # PTHREAD
 # required dependency: libxpat
@@ -546,46 +497,9 @@ if test "${SYS}" = "linux"; then
 fi
 AM_CONDITIONAL([HAVE_WEBRTC_AP], test "x$with_webrtc_ap" = "xyes")
 
-dnl check for openDHT
-PKG_CHECK_MODULES([OPENDHT], [opendht >= 2.3.2],,
-  AC_MSG_FAILURE([Missing OpenDHT]))
-
-PKG_CHECK_MODULES([SECP256K1], [libsecp256k1 >= 0.1],,
-  AC_MSG_FAILURE([Missing secp256k1]))
 
 PKG_CHECK_MODULES([FMT], [fmt >= 7.0],,
   AC_MSG_FAILURE([Missing {fmt}]))
-
-# LIBUPNP
-dnl check for libupnp
-AC_ARG_WITH([upnp], [AS_HELP_STRING([--without-upnp],
-  [disable support for upnp])], [], [with_upnp=yes])
-
-AS_IF([test "x$with_upnp" = "xyes"],
-  [PKG_CHECK_MODULES(LIBUPNP, [libupnp],
-    [AC_DEFINE([HAVE_LIBUPNP], 1, [Define if you have libupnp])],
-    [AC_MSG_WARN([Missing libupnp development files])
-     AC_DEFINE([HAVE_LIBUPNP], 0, [Define if you have libupnp])])])
-AM_CONDITIONAL([BUILD_PUPNP], test "x$with_upnp" = "xyes")
-
-# LIBNATPMP
-dnl check for libnatpmp
-AC_ARG_WITH([natpmp], [AS_HELP_STRING([--without-natpmp],
-  [disable support for NAT-PMP])], [], [with_natpmp=yes])
-
-AS_IF([test "x$with_natpmp" != xno],
-  [AC_CHECK_HEADER([natpmp.h],
-     AC_CHECK_LIB([natpmp], [initnatpmp], [], [with_natpmp=no]),
-       [AC_MSG_WARN([Unable to find the libnatpmp headers
-          (you may need to install the dev package). You may use
-          --without-natpmp to compile without NAT-PMP support.]);
-        with_natpmp=no])],
-  [])
-
-AC_DEFINE_UNQUOTED([HAVE_LIBNATPMP],
-  `if test "x$with_natpmp" != xno; then echo 1; else echo 0; fi`,
-  [Define if you have libnatpmp])
-AM_CONDITIONAL([BUILD_NATPMP], test "x$with_natpmp" = "xyes")
 
 # SHM
 dnl check for shm
@@ -621,9 +535,6 @@ BB_ENABLE_DOXYGEN
 
 AC_CONFIG_FILES([Makefile \
                  src/Makefile \
-                 test/Makefile\
-                 test/sip/Makefile
-                 test/unitTest/Makefile \
                  man/Makefile \
                  doc/Makefile \
                  doc/doxygen/Makefile

@@ -22,11 +22,6 @@
 #include "sip/siptransport.h"
 #include "connectivity/sip_utils.h"
 #include "connectivity/ip_utils.h"
-#include "connectivity/security/tls_session.h"
-
-#include "jamidht/abstract_sip_transport.h"
-#include "jamidht/channeled_transport.h"
-#include "connectivity/multiplexed_socket.h"
 
 #include "compiler_intrinsics.h"
 #include "sip/sipvoiplink.h"
@@ -39,8 +34,6 @@
 #include <pjnath/stun_config.h>
 #include <pjlib.h>
 #include <pjlib-util.h>
-
-#include <opendht/crypto.h>
 
 #include <stdexcept>
 #include <sstream>
@@ -88,13 +81,6 @@ SipTransport::SipTransport(pjsip_transport* t, const std::shared_ptr<TlsListener
     tlsListener_ = l;
 }
 
-SipTransport::SipTransport(pjsip_transport* t,
-                           const std::shared_ptr<dht::crypto::Certificate>& peerCertficate)
-    : SipTransport(t)
-{
-    tlsInfos_.peerCert = peerCertficate;
-}
-
 SipTransport::~SipTransport()
 {
     JAMI_DEBUG("~SipTransport@{} tr={} rc={:d}",
@@ -127,19 +113,7 @@ SipTransport::stateCallback(pjsip_transport_state state, const pjsip_transport_s
         tlsInfos_.proto = (pj_ssl_sock_proto) tlsInfo->proto;
         tlsInfos_.cipher = tlsInfo->cipher;
         tlsInfos_.verifyStatus = (pj_ssl_cert_verify_flag_t) tlsInfo->verify_status;
-        if (!tlsInfos_.peerCert) {
-            const auto& peers = tlsInfo->remote_cert_info->raw_chain;
-            std::vector<std::pair<const uint8_t*, const uint8_t*>> bits;
-            bits.resize(peers.cnt);
-            std::transform(peers.cert_raw,
-                           peers.cert_raw + peers.cnt,
-                           std::begin(bits),
-                           [](const pj_str_t& crt) {
-                               return std::make_pair((uint8_t*) crt.ptr,
-                                                     (uint8_t*) (crt.ptr + crt.slen));
-                           });
-            tlsInfos_.peerCert = std::make_shared<dht::crypto::Certificate>(bits);
-        }
+
     } else {
         tlsInfos_ = {};
     }
@@ -396,33 +370,6 @@ SipTransportBroker::getTlsTransport(const std::shared_ptr<TlsListener>& l,
         transports_[ret->get()] = ret;
     }
     return ret;
-}
-
-std::shared_ptr<SipTransport>
-SipTransportBroker::getChanneledTransport(const std::shared_ptr<SIPAccountBase>& account,
-                                          const std::shared_ptr<ChannelSocket>& socket,
-                                          onShutdownCb&& cb)
-{
-    if (!socket)
-        return {};
-    auto sips_tr = std::make_unique<tls::ChanneledSIPTransport>(endpt_,
-                                                                socket,
-                                                                std::move(cb));
-    auto tr = sips_tr->getTransportBase();
-    auto sip_tr = std::make_shared<SipTransport>(tr, socket->peerCertificate());
-    sip_tr->setDeviceId(socket->deviceId().toString());
-    sip_tr->setAccount(account);
-
-    {
-        std::lock_guard<std::mutex> lock(transportMapMutex_);
-        // we do not check for key existence as we've just created it
-        // (member of new SipIceTransport instance)
-        transports_.emplace(tr, sip_tr);
-    }
-
-    sips_tr->start();
-    sips_tr.release(); // managed by PJSIP now
-    return sip_tr;
 }
 
 } // namespace jami

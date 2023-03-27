@@ -24,8 +24,6 @@
 #include "media_io_handle.h"
 #include "system_codec_container.h"
 
-#include <opendht/utils.h>
-
 #include <chrono>
 #include <cstdio>
 #include <fstream>
@@ -66,7 +64,7 @@ public:
     }
 
     void print(std::string_view action) const {
-        JAMI_DBG() << name_ << ": " << action << " after " << dht::print_duration(Clock::now() - start_);
+        // JAMI_DBG() << name_ << ": " << action << " after " << dht::print_duration(Clock::now() - start_);
     }
 
 private:

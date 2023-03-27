@@ -39,7 +39,6 @@
 #include <mutex>
 
 #include "videomanager_interface.h"
-#include <opendht/thread_pool.h>
 
 static constexpr auto MIN_LINE_ZOOM
     = 6; // Used by the ONE_BIG_WITH_SMALL layout for the small previews

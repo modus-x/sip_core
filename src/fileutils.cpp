@@ -24,9 +24,7 @@
 
 #include "logger.h"
 #include "fileutils.h"
-#include "archiver.h"
 #include "compiler_intrinsics.h"
-#include <opendht/crypto.h>
 
 #ifdef RING_UWP
 #include <io.h> // for access and close
@@ -71,8 +69,6 @@
 #if !defined __ANDROID__ && !defined _WIN32
 #include <wordexp.h>
 #endif
-
-#include <nettle/sha3.h>
 
 #include <sstream>
 #include <fstream>
@@ -540,82 +536,6 @@ readDirectory(const std::string& dir)
     return files;
 } // namespace fileutils
 
-std::vector<uint8_t>
-readArchive(const std::string& path, const std::string& pwd)
-{
-    JAMI_DBG("Reading archive from %s", path.c_str());
-
-    auto isUnencryptedGzip = [](const std::vector<uint8_t>& data) {
-        // NOTE: some webserver modify gzip files and this can end with a gunzip in a gunzip
-        // file. So, to make the readArchive more robust, we can support this case by detecting
-        // gzip header via 1f8b 08
-        // We don't need to support more than 2 level, else somebody may be able to send
-        // gunzip in loops and abuse.
-        return data.size() > 3 && data[0] == 0x1f && data[1] == 0x8b && data[2] == 0x08;
-    };
-
-    auto decompress = [](std::vector<uint8_t>& data) {
-        try {
-            data = archiver::decompress(data);
-        } catch (const std::exception& e) {
-            JAMI_ERR("Error decrypting archive: %s", e.what());
-            throw e;
-        }
-    };
-
-    std::vector<uint8_t> data;
-    // Read file
-    try {
-        data = loadFile(path);
-    } catch (const std::exception& e) {
-        JAMI_ERR("Error loading archive: %s", e.what());
-        throw e;
-    }
-
-    if (isUnencryptedGzip(data)) {
-        if (!pwd.empty())
-            JAMI_WARN() << "A gunzip in a gunzip is detected. A webserver may have a bad config";
-
-        decompress(data);
-    }
-
-    if (!pwd.empty()) {
-        // Decrypt
-        try {
-            data = dht::crypto::aesDecrypt(data, pwd);
-        } catch (const std::exception& e) {
-            JAMI_ERR("Error decrypting archive: %s", e.what());
-            throw e;
-        }
-        decompress(data);
-    } else if (isUnencryptedGzip(data)) {
-        JAMI_WARN() << "A gunzip in a gunzip is detected. A webserver may have a bad config";
-        decompress(data);
-    }
-    return data;
-}
-
-void
-writeArchive(const std::string& archive_str, const std::string& path, const std::string& password)
-{
-    JAMI_DBG("Writing archive to %s", path.c_str());
-
-    if (not password.empty()) {
-        // Encrypt using provided password
-        std::vector<uint8_t> data = dht::crypto::aesEncrypt(archiver::compress(archive_str),
-                                                            password);
-        // Write
-        try {
-            saveFile(path, data);
-        } catch (const std::runtime_error& ex) {
-            JAMI_ERR("Export failed: %s", ex.what());
-            return;
-        }
-    } else {
-        JAMI_WARN("Unsecured archiving (no password)");
-        archiver::compressGzip(archive_str, path);
-    }
-}
 
 #if defined(__ANDROID__) || defined(RING_UWP) || (defined(TARGET_OS_IOS) && TARGET_OS_IOS)
 #else
@@ -1048,59 +968,6 @@ size(const std::string& path)
     } catch (...) {
     }
     return size;
-}
-
-std::string
-sha3File(const std::string& path)
-{
-    sha3_512_ctx ctx;
-    sha3_512_init(&ctx);
-
-    std::ifstream file;
-    try {
-        if (!fileutils::isFile(path))
-            return {};
-        openStream(file, path, std::ios::binary | std::ios::in);
-        if (!file)
-            return {};
-        std::vector<char> buffer(8192, 0);
-        while (!file.eof()) {
-            file.read(buffer.data(), buffer.size());
-            std::streamsize readSize = file.gcount();
-            sha3_512_update(&ctx, readSize, (const uint8_t*) buffer.data());
-        }
-        file.close();
-    } catch (...) {
-        return {};
-    }
-
-    unsigned char digest[SHA3_512_DIGEST_SIZE];
-    sha3_512_digest(&ctx, SHA3_512_DIGEST_SIZE, digest);
-
-    char hash[SHA3_512_DIGEST_SIZE * 2];
-
-    for (int i = 0; i < SHA3_512_DIGEST_SIZE; ++i)
-        pj_val_to_hex_digit(digest[i], &hash[2 * i]);
-
-    return {hash, SHA3_512_DIGEST_SIZE * 2};
-}
-
-std::string
-sha3sum(const std::vector<uint8_t>& buffer)
-{
-    sha3_512_ctx ctx;
-    sha3_512_init(&ctx);
-    sha3_512_update(&ctx, buffer.size(), (const uint8_t*) buffer.data());
-
-    unsigned char digest[SHA3_512_DIGEST_SIZE];
-    sha3_512_digest(&ctx, SHA3_512_DIGEST_SIZE, digest);
-
-    char hash[SHA3_512_DIGEST_SIZE * 2];
-
-    for (int i = 0; i < SHA3_512_DIGEST_SIZE; ++i)
-        pj_val_to_hex_digit(digest[i], &hash[2 * i]);
-
-    return {hash, SHA3_512_DIGEST_SIZE * 2};
 }
 
 int

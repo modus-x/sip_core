@@ -38,8 +38,6 @@
 #include "client/ring_signal.h"
 #include "compiler_intrinsics.h"
 
-#include "jamidht/jamiaccount.h"
-
 namespace libjami {
 
 using jami::SIPAccount;
@@ -65,9 +63,6 @@ subscribeBuddy(const std::string& accountID, const std::string& uri, bool flag)
                      uri.c_str());
             pres->subscribeClient(uri, flag);
         }
-    } else if (auto ringaccount = jami::Manager::instance().getAccount<jami::JamiAccount>(
-                   accountID)) {
-        ringaccount->trackBuddyPresence(uri, flag);
     } else
         JAMI_ERR("Could not find account %s", accountID.c_str());
 }
@@ -129,21 +124,13 @@ getSubscriptions(const std::string& accountID)
             for (const auto& s : subs) {
                 ret.push_back(
                     {{libjami::Presence::BUDDY_KEY, std::string(s->getURI())},
-                     {libjami::Presence::STATUS_KEY, s->isPresent() ? libjami::Presence::ONLINE_KEY : libjami::Presence::OFFLINE_KEY},
+                     {libjami::Presence::STATUS_KEY,
+                      s->isPresent() ? libjami::Presence::ONLINE_KEY
+                                     : libjami::Presence::OFFLINE_KEY},
                      {libjami::Presence::LINESTATUS_KEY, std::string(s->getLineStatus())}});
             }
         } else
             JAMI_ERR("Presence not initialized");
-    } else if (auto ringaccount = jami::Manager::instance().getAccount<jami::JamiAccount>(
-                   accountID)) {
-        const auto& trackedBuddies = ringaccount->getTrackedBuddyPresence();
-        ret.reserve(trackedBuddies.size());
-        for (const auto& tracked_id : trackedBuddies) {
-            ret.push_back(
-                {{libjami::Presence::BUDDY_KEY, tracked_id.first},
-                 {libjami::Presence::STATUS_KEY,
-                  tracked_id.second ? libjami::Presence::ONLINE_KEY : libjami::Presence::OFFLINE_KEY}});
-        }
     } else
         JAMI_ERR("Could not find account %s.", accountID.c_str());
 
@@ -162,10 +149,6 @@ setSubscriptions(const std::string& accountID, const std::vector<std::string>& u
                 pres->subscribeClient(u, true);
         } else
             JAMI_ERR("Presence not initialized");
-    } else if (auto ringaccount = jami::Manager::instance().getAccount<jami::JamiAccount>(
-                   accountID)) {
-        for (const auto& u : uris)
-            ringaccount->trackBuddyPresence(u, true);
     } else
         JAMI_ERR("Could not find account %s.", accountID.c_str());
 }

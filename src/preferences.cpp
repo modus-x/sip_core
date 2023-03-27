@@ -132,14 +132,6 @@ static constexpr const char* RECORD_QUALITY_KEY {"recordQuality"};
 static constexpr const char* CONFERENCE_RESOLUTION_KEY {"conferenceResolution"};
 #endif
 
-#ifdef ENABLE_PLUGIN
-// plugin preferences
-constexpr const char* const PluginPreferences::CONFIG_LABEL;
-static constexpr const char* JAMI_PLUGIN_KEY {"pluginsEnabled"};
-static constexpr const char* JAMI_PLUGINS_INSTALLED_KEY {"installedPlugins"};
-static constexpr const char* JAMI_PLUGINS_LOADED_KEY {"loadedPlugins"};
-#endif
-
 static constexpr int PULSE_LENGTH_DEFAULT {250}; /** Default DTMF length */
 #ifndef _MSC_VER
 static constexpr const char* ALSA_DFT_CARD {"0"}; /** Default sound card index */
@@ -545,46 +537,5 @@ VideoPreferences::unserialize(const YAML::Node& in)
     getVideoDeviceMonitor().unserialize(in);
 }
 #endif // ENABLE_VIDEO
-
-#ifdef ENABLE_PLUGIN
-PluginPreferences::PluginPreferences()
-    : pluginsEnabled_(false)
-{}
-
-void
-PluginPreferences::serialize(YAML::Emitter& out) const
-{
-    out << YAML::Key << CONFIG_LABEL << YAML::Value << YAML::BeginMap;
-    out << YAML::Key << JAMI_PLUGIN_KEY << YAML::Value << pluginsEnabled_;
-    out << YAML::Key << JAMI_PLUGINS_INSTALLED_KEY << YAML::Value << installedPlugins_;
-    out << YAML::Key << JAMI_PLUGINS_LOADED_KEY << YAML::Value << loadedPlugins_;
-    out << YAML::EndMap;
-}
-
-void
-PluginPreferences::unserialize(const YAML::Node& in)
-{
-    // values may or may not be present
-    const auto& node = in[CONFIG_LABEL];
-    try {
-        parseValue(node, JAMI_PLUGIN_KEY, pluginsEnabled_);
-    } catch (...) {
-        pluginsEnabled_ = false;
-    }
-
-    const auto& installedPluginsNode = node[JAMI_PLUGINS_INSTALLED_KEY];
-    try {
-        installedPlugins_ = yaml_utils::parseVector(installedPluginsNode);
-    } catch (...) {
-    }
-
-    const auto& loadedPluginsNode = node[JAMI_PLUGINS_LOADED_KEY];
-    try {
-        loadedPlugins_ = yaml_utils::parseVector(loadedPluginsNode);
-    } catch (...) {
-        // loadedPlugins_ = {};
-    }
-}
-#endif // ENABLE_PLUGIN
 
 } // namespace jami

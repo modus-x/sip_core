@@ -25,7 +25,6 @@
 #include "account_factory.h"
 
 #include "sip/sipaccount.h"
-#include "jamidht/jamiaccount.h"
 
 #include <stdexcept>
 
@@ -37,9 +36,6 @@ AccountFactory::AccountFactory()
 {
     generators_.emplace(SIPAccount::ACCOUNT_TYPE, [](const std::string& id) {
         return std::make_shared<SIPAccount>(id, true);
-    });
-    generators_.emplace(JamiAccount::ACCOUNT_TYPE, [](const std::string& id) {
-        return std::make_shared<JamiAccount>(id);
     });
 }
 

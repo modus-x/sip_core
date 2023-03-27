@@ -30,7 +30,6 @@
 #include "client/ring_signal.h"
 #include "connectivity/sip_utils.h"
 
-#include <opendht/crypto.h>
 #include <fmt/core.h>
 
 #include <thread>

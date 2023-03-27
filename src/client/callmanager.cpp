@@ -29,13 +29,13 @@
 #include "sip/siptransport.h"
 #include "sip/sipvoiplink.h"
 #include "sip/sipcall.h"
+#include "sip/sipaccount.h"
 #include "audio/audiolayer.h"
 #include "media/media_attribute.h"
 #include "string_utils.h"
 
 #include "logger.h"
 #include "manager.h"
-#include "jamidht/jamiaccount.h"
 
 namespace libjami {
 
@@ -589,7 +589,7 @@ setActiveStream(const std::string& accountId,
                 const std::string& streamId,
                 const bool& state)
 {
-    if (const auto account = jami::Manager::instance().getAccount<jami::JamiAccount>(accountId)) {
+    if (const auto account = jami::Manager::instance().getAccount<jami::SIPAccount>(accountId)) {
         if (auto conf = account->getConference(confId)) {
             conf->setActiveStream(streamId, state);
         } else if (auto call = account->getCall(confId)) {
@@ -677,19 +677,16 @@ raiseHand(const std::string& accountId,
           const std::string& deviceId,
           const bool& state)
 {
-    if (const auto account = jami::Manager::instance().getAccount<jami::JamiAccount>(accountId)) {
+    if (const auto account = jami::Manager::instance().getAccount<jami::SIPAccount>(accountId)) {
         if (auto conf = account->getConference(confId)) {
             auto device = deviceId;
-            if (device.empty())
-                device = std::string(account->currentDeviceId());
             conf->setHandRaised(device, state);
         } else if (auto call = std::static_pointer_cast<jami::SIPCall>(account->getCall(confId))) {
             if (call->conferenceProtocolVersion() == 1) {
                 Json::Value deviceVal;
                 deviceVal["raiseHand"] = state;
                 Json::Value deviceObj;
-                std::string device = deviceId.empty() ? std::string(account->currentDeviceId())
-                                                      : deviceId;
+                std::string device = deviceId;
                 deviceObj[device] = deviceVal;
                 Json::Value accountVal;
                 deviceVal["devices"] = deviceObj;

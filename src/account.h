@@ -59,10 +59,6 @@ namespace jami {
 static constexpr uint64_t JAMI_ID_MAX_VAL = 9007199254740992;
 constexpr static const char RINGDIR[] = "ringtones";
 
-namespace upnp {
-class Controller;
-} // namespace upnp
-
 class Call;
 class SystemCodecContainer;
 struct IceTransportOptions;
@@ -205,8 +201,6 @@ public:
         return {};
     }
 
-    virtual std::map<std::string, std::string> getNearbyPeers() const { return {}; }
-
     /**
      * Return the status corresponding to the token.
      */
@@ -295,18 +289,6 @@ public:
     bool isRendezVous() const { return config().isRendezVous; }
     bool isAutoAnswerEnabled() const { return config().autoAnswerEnabled; }
     bool isReadReceiptEnabled() const { return config().sendReadReceipt; }
-
-    /**
-     * returns whether or not UPnP is enabled and active
-     * ie: if it is able to make port mappings
-     */
-    bool getUPnPActive() const;
-
-    /**
-     * Get the UPnP IP (external router) address.
-     * If use UPnP is set to false, the address will be empty.
-     */
-    IpAddr getUPnPIpAddress() const;
 
     /**
      * Random generator engine
@@ -414,8 +396,6 @@ private:
     CallSet callSet_;
 
 protected:
-    void updateUpnpController();
-
     std::unique_ptr<AccountConfig> config_ {};
 
     friend class ConfigurationTest;
@@ -462,12 +442,6 @@ protected:
      * Ringtone .au file used for this account
      */
     std::string ringtonePath_;
-
-    /**
-     * UPnP IGD controller and the mutex to access it
-     */
-    mutable std::mutex upnp_mtx {};
-    std::shared_ptr<jami::upnp::Controller> upnpCtrl_;
 
     bool iceForMediaEnabled_ {false};
     bool iceCompIdRfc5245Compliant_ {false};

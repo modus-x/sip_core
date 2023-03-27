@@ -32,8 +32,6 @@
 #include "sip/sipcall.h"
 #include "sip/sipaccount.h"
 
-#include "jamidht/jamiaccount.h"
-
 #include "manager.h"
 
 #include "im/instant_messaging.h"
@@ -51,8 +49,6 @@
 #include "connectivity/sip_utils.h"
 #include "string_utils.h"
 #include "logger.h"
-
-#include <opendht/thread_pool.h>
 
 #include <pjsip/sip_endpoint.h>
 #include <pjsip/sip_uri.h>
@@ -345,15 +341,6 @@ transaction_request_cb(pjsip_rx_data* rdata)
                 if (msgId)
                     id = std::string(msgId->hvalue.ptr, msgId->hvalue.slen);
 
-                if (not id.empty()) {
-                    try {
-                        // Mark message as treated
-                        auto acc = std::dynamic_pointer_cast<JamiAccount>(account);
-                        if (acc and acc->isMessageTreated(id))
-                            return PJ_FALSE;
-                    } catch (...) {
-                    }
-                }
                 account->onTextMessage(id, peerNumber, std::string(transport->deviceId()), payloads);
             }
             return PJ_FALSE;
@@ -425,15 +412,10 @@ transaction_request_cb(pjsip_rx_data* rdata)
         pjsip_transport_get_type_from_flag(transport->get()->flag));
 
     IpAddr addrSdp;
-    if (account->getUPnPActive()) {
-        /* use UPnP addr, or published addr if its set */
-        addrSdp = account->getPublishedSameasLocal() ? account->getUPnPIpAddress()
-                                                     : account->getPublishedIpAddress();
-    } else {
-        addrSdp = account->isStunEnabled() or (not account->getPublishedSameasLocal())
-                      ? account->getPublishedIpAddress()
-                      : ip_utils::getInterfaceAddr(account->getLocalInterface(), family);
-    }
+
+    addrSdp = account->isStunEnabled() or (not account->getPublishedSameasLocal())
+                  ? account->getPublishedIpAddress()
+                  : ip_utils::getInterfaceAddr(account->getLocalInterface(), family);
 
     /* fallback on local address */
     if (not addrSdp)
@@ -1041,14 +1023,7 @@ sdp_create_offer_cb(pjsip_inv_session* inv, pjmedia_sdp_session** p_offer)
     }
     auto ifaceAddr = ip_utils::getInterfaceAddr(account->getLocalInterface(), family);
 
-    IpAddr address;
-    if (account->getUPnPActive()) {
-        /* use UPnP addr, or published addr if its set */
-        address = account->getPublishedSameasLocal() ? account->getUPnPIpAddress()
-                                                     : account->getPublishedIpAddress();
-    } else {
-        address = account->getPublishedSameasLocal() ? ifaceAddr : account->getPublishedIpAddress();
-    }
+    IpAddr address = account->getPublishedSameasLocal() ? ifaceAddr : account->getPublishedIpAddress();
 
     /* fallback on local address */
     if (not address)
@@ -1538,10 +1513,8 @@ SIPVoIPLink::resolveSrvName(const std::string& name,
                 if (s != PJ_SUCCESS || !r) {
                     JAMI_WARN("Can't resolve \"%s\" using pjsip_endpt_resolve, trying getaddrinfo.",
                               name.c_str());
-                    dht::ThreadPool::io().run([=, cb = std::move(cb)]() {
-                        auto ips = ip_utils::getAddrList(name.c_str());
-                        runOnMainThread(std::bind(cb, std::move(ips)));
-                    });
+                    auto ips = ip_utils::getAddrList(name.c_str());
+                    runOnMainThread(std::bind(cb, std::move(ips)));
                 } else {
                     std::vector<IpAddr> ips;
                     ips.reserve(r->count);

@@ -38,20 +38,17 @@
 #include "account_schema.h"
 
 #include "fileutils.h"
-#include "gittransport.h"
 #include "map_utils.h"
 #include "account.h"
 #include "string_utils.h"
-#include "jamidht/jamiaccount.h"
 #include "account.h"
-#include <opendht/rng.h>
-using random_device = dht::crypto::random_device;
 
 #include "call_factory.h"
 
 #include "connectivity/sip_utils.h"
 #include "sip/sipvoiplink.h"
 #include "sip/sipaccount_config.h"
+#include "sip/sipaccount.h"
 
 #include "im/instant_messaging.h"
 
@@ -66,15 +63,9 @@ using random_device = dht::crypto::random_device;
 #include "audio/sound/dtmf.h"
 #include "audio/ringbufferpool.h"
 
-#ifdef ENABLE_PLUGIN
-#include "plugin/jamipluginmanager.h"
-#include "plugin/streamdata.h"
-#endif
-
 #include "client/videomanager.h"
 
 #include "conference.h"
-#include "connectivity/ice_transport.h"
 
 #include "client/ring_signal.h"
 #include "jami/call_const.h"
@@ -89,19 +80,12 @@ using random_device = dht::crypto::random_device;
 #endif
 #include "audio/tonecontrol.h"
 
-#include "data_transfer.h"
 #include "jami/media_const.h"
-
-#include "connectivity/upnp/upnp_context.h"
 
 #include <libavutil/ffversion.h>
 
-#include <opendht/thread_pool.h>
-
 #include <asio/io_context.hpp>
 #include <asio/executor_work_guard.hpp>
-
-#include <git2.h>
 
 #ifndef WIN32
 #include <sys/time.h>
@@ -188,33 +172,6 @@ check_rename(const std::string& old_dir, const std::string& new_dir)
 }
 
 /**
- * Set OpenDHT's log level based on the DHTLOGLEVEL environment variable.
- * DHTLOGLEVEL = 0 minimum logging (=disable)
- * DHTLOGLEVEL = 1 (=ERROR only)
- * DHTLOGLEVEL = 2 (+=WARN)
- * DHTLOGLEVEL = 3 maximum logging (+=DEBUG)
- */
-
-/** Environment variable used to set OpenDHT's logging level */
-static constexpr const char* DHTLOGLEVEL = "DHTLOGLEVEL";
-
-static void
-setDhtLogLevel()
-{
-#ifndef RING_UWP
-    int level = 0;
-    if (auto envvar = getenv(DHTLOGLEVEL)) {
-        level = to_int<int>(envvar, 0);
-        level = std::clamp(level, 0, 3);
-        JAMI_DBG("DHTLOGLEVEL=%u", level);
-    }
-    Manager::instance().dhtLogLevel = level;
-#else
-    Manager::instance().dhtLogLevel = 0;
-#endif
-}
-
-/**
  * Set pjsip's log level based on the SIPLOGLEVEL environment variable.
  * SIPLOGLEVEL = 0 minimum logging
  * SIPLOGLEVEL = 6 maximum logging
@@ -244,35 +201,6 @@ setSipLogLevel()
  * RING_TLS_LOGLEVEL = 0 minimum logging (default)
  * RING_TLS_LOGLEVEL = 9 maximum logging
  */
-
-static constexpr int RING_TLS_LOGLEVEL = 0;
-
-static void
-tls_print_logs(int level, const char* msg)
-{
-    JAMI_XDBG("[%d]GnuTLS: %s", level, msg);
-}
-
-static void
-setGnuTlsLogLevel()
-{
-#ifndef RING_UWP
-    char* envvar = getenv("RING_TLS_LOGLEVEL");
-    int level = RING_TLS_LOGLEVEL;
-
-    if (envvar != nullptr) {
-        level = to_int<int>(envvar);
-
-        // From 0 (min) to 9 (max)
-        level = std::max(0, std::min(level, 9));
-    }
-
-    gnutls_global_set_log_level(level);
-#else
-    gnutls_global_set_log_level(RING_TLS_LOGLEVEL);
-#endif
-    gnutls_global_set_log_function(tls_print_logs);
-}
 
 //==============================================================================
 
@@ -423,13 +351,6 @@ struct Manager::ManagerPimpl
     std::unique_ptr<VideoManager> videoManager_;
 
     std::unique_ptr<SIPVoIPLink> sipLink_;
-#ifdef ENABLE_PLUGIN
-    /* Jami Plugin Manager */
-    JamiPluginManager jami_plugin_manager;
-#endif
-
-    std::mutex gitTransportsMtx_ {};
-    std::map<git_smart_subtransport*, std::unique_ptr<P2PSubTransport>> gitTransports_ {};
 };
 
 Manager::ManagerPimpl::ManagerPimpl(Manager& base)
@@ -545,10 +466,6 @@ Manager::ManagerPimpl::processRemainingParticipants(Conference& conf)
             // Stay in a conference if 1 participants for swarm and rendezvous
             if (account->isRendezVous())
                 return;
-
-            if (auto acc = std::dynamic_pointer_cast<JamiAccount>(account))
-                if (acc->convModule()->isHosting("", conf.getConfId()))
-                    return;
 
             // Else go in 1:1
             if (current_callId != conf.getConfId())
@@ -709,17 +626,13 @@ Manager::instance()
 }
 
 Manager::Manager()
-    : rand_(dht::crypto::getSeededRandomEngine<std::mt19937_64>())
-    , preferences()
+    : preferences()
     , voipPreferences()
     , audioPreference()
-#ifdef ENABLE_PLUGIN
-    , pluginPreferences()
-#endif
 #ifdef ENABLE_VIDEO
     , videoPreferences()
 #endif
-    , callFactory(rand_)
+    , callFactory()
     , accountFactory()
     , pimpl_(new ManagerPimpl(*this))
 {}
@@ -737,13 +650,6 @@ Manager::init(const std::string& config_file, const std::string& data_path)
 {
     // FIXME: this is no good
     initialized = true;
-
-    git_libgit2_init();
-    auto res = git_transport_register("git", p2p_transport_cb, nullptr);
-    if (res < 0) {
-        const git_error* error = giterr_last();
-        JAMI_ERR("Unable to initialize git transport %s", error ? error->message : "(unknown)");
-    }
 
 #if defined _MSC_VER
     gnutls_global_init();
@@ -775,18 +681,8 @@ Manager::init(const std::string& config_file, const std::string& data_path)
     PJSIP_TRY(pjnath_init());
 #undef PJSIP_TRY
 
-    setGnuTlsLogLevel();
-
     JAMI_DBG("Using PJSIP version %s for %s", pj_get_version(), PJ_OS_NAME);
-    JAMI_DBG("Using GnuTLS version %s", gnutls_check_version(nullptr));
-    JAMI_DBG("Using OpenDHT version %s", dht::version());
     JAMI_DBG("Using FFmpeg version %s", av_version_info());
-    int git2_major = 0, git2_minor = 0, git2_rev = 0;
-    if (git_libgit2_version(&git2_major, &git2_minor, &git2_rev) == 0) {
-        JAMI_DBG("Using Libgit2 version %d.%d.%d", git2_major, git2_minor, git2_rev);
-    }
-
-    setDhtLogLevel();
 
     // Manager can restart without being recreated (Unit tests)
     // So only create the SipLink once
@@ -795,8 +691,6 @@ Manager::init(const std::string& config_file, const std::string& data_path)
     check_rename(fileutils::get_cache_dir(PACKAGE_OLD), fileutils::get_cache_dir());
     check_rename(fileutils::get_data_dir(PACKAGE_OLD), fileutils::get_data_dir());
     check_rename(fileutils::get_config_dir(PACKAGE_OLD), fileutils::get_config_dir());
-
-    pimpl_->ice_tf_.reset(new IceTransportFactory());
 
     pimpl_->path_ = config_file.empty() ? pimpl_->retrieveConfigPath() : config_file;
     JAMI_DBG("Configuration file path: %s", pimpl_->path_.c_str());
@@ -853,9 +747,6 @@ Manager::finish() noexcept
         return;
 
     try {
-        // Terminate UPNP context
-        jami::upnp::UPnPContext::getUPnPContext()->shutdown();
-
         // Forbid call creation
         callFactory.forbid();
 
@@ -864,11 +755,6 @@ Manager::finish() noexcept
         for (const auto& call : callFactory.getAllCalls())
             hangupCall(call->getAccountId(), call->getCallId());
         callFactory.clear();
-
-        for (const auto& account : getAllAccounts<JamiAccount>()) {
-            if (account->getRegistrationState() == RegistrationState::INITIALIZING)
-                removeAccount(account->getAccountID(), true);
-        }
 
         saveConfig();
 
@@ -885,8 +771,6 @@ Manager::finish() noexcept
 
         // Flush remaining tasks (free lambda' with capture)
         pimpl_->scheduler_.stop();
-        dht::ThreadPool::io().join();
-        dht::ThreadPool::computation().join();
 
         // IceTransportFactory should be stopped after the io pool
         // as some ICE are destroyed in a ioPool (see ConnectionManager)
@@ -902,8 +786,6 @@ Manager::finish() noexcept
         }
 
         pj_shutdown();
-        pimpl_->gitTransports_.clear();
-        git_libgit2_shutdown();
 
         if (!pimpl_->ioContext_->stopped()) {
             pimpl_->ioContext_->reset(); // allow to finish
@@ -927,8 +809,6 @@ Manager::monitor(bool continuous)
     Logger::setMonitorLog(true);
     JAMI_DBG("############## START MONITORING ##############");
     JAMI_DBG("Using PJSIP version %s for %s", pj_get_version(), PJ_OS_NAME);
-    JAMI_DBG("Using GnuTLS version %s", gnutls_check_version(nullptr));
-    JAMI_DBG("Using OpenDHT version %s", dht::version());
 
 #ifdef __linux__
 #if defined(__ANDROID__)
@@ -940,14 +820,13 @@ Manager::monitor(bool continuous)
 
     for (const auto& call : callFactory.getAllCalls())
         call->monitor();
-    for (const auto& account : getAllAccounts())
-        if (auto acc = std::dynamic_pointer_cast<JamiAccount>(account))
-            acc->monitor();
     JAMI_DBG("############## END MONITORING ##############");
     Logger::setMonitorLog(continuous);
 }
 
-std::string Manager::getDataPath() const {
+std::string
+Manager::getDataPath() const
+{
     return pimpl_->data_path_;
 }
 
@@ -984,11 +863,6 @@ Manager::unregisterAccounts()
 {
     for (const auto& account : getAllAccounts()) {
         if (account->isEnabled()) {
-            if (auto acc = std::dynamic_pointer_cast<JamiAccount>(account)) {
-                // Note: shutdown the connections as doUnregister will not do it (because the
-                // account is enabled)
-                acc->shutdownConnections();
-            }
             account->doUnregister();
         }
     }
@@ -1695,10 +1569,7 @@ Manager::scheduleTaskIn(std::function<void()>&& task,
 void
 Manager::saveConfig(const std::shared_ptr<Account>& acc)
 {
-    if (auto ringAcc = std::dynamic_pointer_cast<JamiAccount>(acc))
-        ringAcc->saveConfig();
-    else
-        saveConfig();
+    saveConfig();
 }
 
 void
@@ -1721,14 +1592,7 @@ Manager::saveConfig()
         out << YAML::Value << YAML::BeginSeq;
 
         for (const auto& account : accountFactory.getAllAccounts()) {
-            if (auto ringAccount = std::dynamic_pointer_cast<JamiAccount>(account)) {
-                auto accountConfig = ringAccount->getPath() + DIR_SEPARATOR_STR + "config.yml";
-                if (not fileutils::isFile(accountConfig)) {
-                    saveConfig(ringAccount);
-                }
-            } else {
-                account->config().serialize(out);
-            }
+            account->config().serialize(out);
         }
         out << YAML::EndSeq;
 
@@ -1740,10 +1604,6 @@ Manager::saveConfig()
 #ifdef ENABLE_VIDEO
         videoPreferences.serialize(out);
 #endif
-#ifdef ENABLE_PLUGIN
-        pluginPreferences.serialize(out);
-#endif
-
         std::lock_guard<std::mutex> lock(fileutils::getFileLock(pimpl_->path_));
         std::ofstream fout = fileutils::ofstream(pimpl_->path_);
         fout.write(out.c_str(), out.size());
@@ -2203,7 +2063,8 @@ Manager::getCurrentAudioDevicesIndex()
 }
 
 std::string
-Manager::getHomePath() {
+Manager::getHomePath()
+{
     return fileutils::get_home_dir();
 }
 
@@ -2478,16 +2339,6 @@ Manager::ManagerPimpl::processIncomingCall(const std::string& accountId, Call& i
         return;
     }
 
-    auto username = incomCall.toUsername();
-    if (username.find('/') != std::string::npos) {
-        // Avoid to do heavy stuff in SIPVoIPLink's transaction_request_cb
-        dht::ThreadPool::io().run([this, account, incomCallId, username]() {
-            if (auto jamiAccount = std::dynamic_pointer_cast<JamiAccount>(account))
-                jamiAccount->handleIncomingConversationCall(incomCallId, username);
-        });
-        return;
-    }
-
     auto const& mediaList = MediaAttribute::mediaAttributesToMediaMaps(
         incomCall.getMediaAttributeList());
 
@@ -2514,46 +2365,7 @@ Manager::ManagerPimpl::processIncomingCall(const std::string& accountId, Call& i
 
     addWaitingCall(incomCallId);
 
-    if (account->isRendezVous()) {
-        dht::ThreadPool::io().run([this, account, incomCall = incomCall.shared_from_this()] {
-            base_.answerCall(*incomCall);
-
-            for (const auto& callId : account->getCallList()) {
-                if (auto call = account->getCall(callId)) {
-                    if (call->getState() != Call::CallState::ACTIVE)
-                        continue;
-                    if (call != incomCall) {
-                        if (auto conf = call->getConference()) {
-                            base_.addParticipant(*incomCall, *conf);
-                        } else {
-                            base_.joinParticipant(account->getAccountID(),
-                                                  incomCall->getCallId(),
-                                                  account->getAccountID(),
-                                                  call->getCallId(),
-                                                  false);
-                        }
-                        return;
-                    }
-                }
-            }
-
-            // First call
-            auto conf = std::make_shared<Conference>(account, "", false);
-            account->attach(conf);
-            emitSignal<libjami::CallSignal::ConferenceCreated>(account->getAccountID(),
-                                                               conf->getConfId());
-
-            // Bind calls according to their state
-            bindCallToConference(*incomCall, *conf);
-            conf->detachLocalParticipant();
-            emitSignal<libjami::CallSignal::ConferenceChanged>(account->getAccountID(),
-                                                               conf->getConfId(),
-                                                               conf->getStateStr());
-        });
-    } else if (autoAnswer_ || account->isAutoAnswerEnabled()) {
-        dht::ThreadPool::io().run(
-            [this, incomCall = incomCall.shared_from_this()] { base_.answerCall(*incomCall); });
-    } else if (currentCall && currentCall->getCallId() != incomCallId) {
+    if (currentCall && currentCall->getCallId() != incomCallId) {
         // Test if already calling this person
         if (currentCall->getAccountId() == account->getAccountID()
             && currentCall->getPeerNumber() == incomCall.getPeerNumber()) {
@@ -2701,7 +2513,7 @@ Manager::getNewAccountId()
 {
     std::string random_id;
     do {
-        random_id = to_hex_string(std::uniform_int_distribution<uint64_t>()(rand_));
+        random_id = "0";
     } while (getAccount(random_id));
     return random_id;
 }
@@ -2749,10 +2561,6 @@ Manager::removeAccount(const std::string& accountID, bool flush)
     if (const auto& remAccount = getAccount(accountID)) {
         // Force stopping connection before doUnregister as it will
         // wait for dht threads to finish
-        if (auto acc = std::dynamic_pointer_cast<JamiAccount>(remAccount)) {
-            acc->hangupCalls();
-            acc->shutdownConnections();
-        }
         remAccount->doUnregister();
         if (flush)
             remAccount->flush();
@@ -2791,9 +2599,6 @@ Manager::loadAccountMap(const YAML::Node& node)
 #ifdef ENABLE_VIDEO
         videoPreferences.unserialize(node);
 #endif
-#ifdef ENABLE_PLUGIN
-        pluginPreferences.unserialize(node);
-#endif
     } catch (const YAML::Exception& e) {
         JAMI_ERR("Preferences node unserialize YAML exception: %s", e.what());
         ++errorCount;
@@ -2813,52 +2618,6 @@ Manager::loadAccountMap(const YAML::Node& node)
     for (auto& a : accountList) {
         pimpl_->loadAccount(a, errorCount);
     }
-
-    auto accountBaseDir = fileutils::get_data_dir();
-    auto dirs = fileutils::readDirectory(accountBaseDir);
-
-    std::condition_variable cv;
-    std::mutex lock;
-    size_t remaining {0};
-    std::unique_lock<std::mutex> l(lock);
-    for (const auto& dir : dirs) {
-        if (accountFactory.hasAccount<JamiAccount>(dir)) {
-            continue;
-        }
-        remaining++;
-        dht::ThreadPool::computation().run([this,
-                                            dir,
-                                            &cv,
-                                            &remaining,
-                                            &lock,
-                                            configFile = accountBaseDir + DIR_SEPARATOR_STR + dir
-                                                         + DIR_SEPARATOR_STR + "config.yml"] {
-            if (fileutils::isFile(configFile)) {
-                try {
-                    if (auto a = accountFactory.createAccount(JamiAccount::ACCOUNT_TYPE, dir)) {
-                        auto config = a->buildConfig();
-                        config->unserialize(YAML::LoadFile(configFile));
-                        a->setConfig(std::move(config));
-                    }
-                } catch (const std::exception& e) {
-                    JAMI_ERR("Can't import account %s: %s", dir.c_str(), e.what());
-                }
-            }
-            std::lock_guard<std::mutex> l(lock);
-            remaining--;
-            cv.notify_one();
-        });
-    }
-    cv.wait(l, [&remaining] { return remaining == 0; });
-
-#ifdef ENABLE_PLUGIN
-    if (pluginPreferences.getPluginsEnabled()) {
-        std::vector<std::string> loadedPlugins = pluginPreferences.getLoadedPlugins();
-        for (const std::string& plugin : loadedPlugins) {
-            jami::Manager::instance().getJamiPluginManager().loadPlugin(plugin);
-        }
-    }
-#endif
 
     return errorCount;
 }
@@ -2908,15 +2667,6 @@ Manager::sendRegister(const std::string& accountID, bool enable)
         acc->doUnregister();
 }
 
-bool
-Manager::isPasswordValid(const std::string& accountID, const std::string& password)
-{
-    const auto acc = getAccount<JamiAccount>(accountID);
-    if (!acc)
-        return false;
-    return acc->isPasswordValid(password);
-}
-
 uint64_t
 Manager::sendTextMessage(const std::string& accountID,
                          const std::string& to,
@@ -2925,15 +2675,7 @@ Manager::sendTextMessage(const std::string& accountID,
 {
     if (const auto acc = getAccount(accountID)) {
         try {
-#ifdef ENABLE_PLUGIN // modifies send message
-            auto& pluginChatManager = getJamiPluginManager().getChatServicesManager();
-            if (pluginChatManager.hasHandlers()) {
-                auto cm = std::make_shared<JamiMessage>(accountID, to, false, payloads, fromPlugin);
-                pluginChatManager.publishMessage(cm);
-                return acc->sendTextMessage(cm->peerId, cm->data);
-            } else
-#endif // ENABLE_PLUGIN
-                return acc->sendTextMessage(to, payloads);
+            return acc->sendTextMessage(to, payloads);
         } catch (const std::exception& e) {
             JAMI_ERR("Exception during text message sending: %s", e.what());
         }
@@ -2991,11 +2733,6 @@ Manager::setAccountActive(const std::string& accountID, bool active, bool shutdo
             acc->doRegister();
         } else {
             acc->doUnregister();
-            if (shutdownConnections) {
-                if (auto jamiAcc = std::dynamic_pointer_cast<JamiAccount>(acc)) {
-                    jamiAcc->shutdownConnections();
-                }
-            }
         }
     }
     emitSignal<libjami::ConfigurationSignal::VolatileDetailsChanged>(
@@ -3144,32 +2881,6 @@ Manager::sipVoIPLink() const
     return *pimpl_->sipLink_;
 }
 
-#ifdef ENABLE_PLUGIN
-JamiPluginManager&
-Manager::getJamiPluginManager() const
-{
-    return pimpl_->jami_plugin_manager;
-}
-#endif
-
-std::optional<std::weak_ptr<ChannelSocket>>
-Manager::gitSocket(const std::string& accountId,
-                   const std::string& deviceId,
-                   const std::string& conversationId)
-{
-    if (const auto acc = getAccount<JamiAccount>(accountId))
-        return acc->gitSocket(DeviceId(deviceId), conversationId);
-    return std::nullopt;
-}
-
-std::map<std::string, std::string>
-Manager::getNearbyPeers(const std::string& accountID)
-{
-    if (const auto acc = getAccount<JamiAccount>(accountID))
-        return acc->getNearbyPeers();
-    return {};
-}
-
 void
 Manager::setDefaultModerator(const std::string& accountID, const std::string& peerURI, bool state)
 {
@@ -3234,20 +2945,6 @@ Manager::isAllModerators(const std::string& accountID)
         return true; // Default value
     }
     return acc->isAllModerators();
-}
-
-void
-Manager::insertGitTransport(git_smart_subtransport* tr, std::unique_ptr<P2PSubTransport>&& sub)
-{
-    std::lock_guard<std::mutex> lk(pimpl_->gitTransportsMtx_);
-    pimpl_->gitTransports_[tr] = std::move(sub);
-}
-
-void
-Manager::eraseGitTransport(git_smart_subtransport* tr)
-{
-    std::lock_guard<std::mutex> lk(pimpl_->gitTransportsMtx_);
-    pimpl_->gitTransports_.erase(tr);
 }
 
 } // namespace jami
