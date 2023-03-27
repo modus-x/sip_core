@@ -89,7 +89,10 @@ using sip_utils::CONST_PJ_STR;
 
 static constexpr unsigned REGISTRATION_FIRST_RETRY_INTERVAL = 60; // seconds
 static constexpr unsigned REGISTRATION_RETRY_INTERVAL = 300;      // seconds
-static constexpr std::string_view VALID_TLS_PROTOS[] = {"Default"sv, "TLSv1.2"sv, "TLSv1.1"sv, "TLSv1"sv};
+static constexpr std::string_view VALID_TLS_PROTOS[] = {"Default"sv,
+                                                        "TLSv1.2"sv,
+                                                        "TLSv1.1"sv,
+                                                        "TLSv1"sv};
 static constexpr std::string_view PN_FCM = "fcm"sv;
 static constexpr std::string_view PN_APNS = "apns"sv;
 
@@ -713,8 +716,6 @@ SIPAccount::sendRegister()
         JAMI_WARN("Account must be enabled and active to register, ignoring");
         return;
     }
-    pjsip_cfg()->endpt.disable_rport = PJ_TRUE;
-
     bRegister_ = true;
     setRegistrationState(RegistrationState::TRYING);
 
@@ -866,9 +867,6 @@ SIPAccount::onRegister(pjsip_regc_cbparam* param)
              */
             // update_rfc5626_status(acc, param->rdata);
 
-            if (config().allowIPAutoRewrite and checkNATAddress(param, link_.getPool()))
-                JAMI_WARN("New contact: %s", getContactHeader().c_str());
-
             /* TODO Check and update Service-Route header */
             if (hasServiceRoute())
                 pjsip_regc_set_route_set(param->regc,
@@ -878,6 +876,8 @@ SIPAccount::onRegister(pjsip_regc_cbparam* param)
             setRegistrationState(RegistrationState::REGISTERED, param->code);
         }
     }
+    if (config().allowIPAutoRewrite and checkNATAddress(param, link_.getPool()))
+        JAMI_WARN("New contact: %s", getContactHeader().c_str());
 
     /* Check if we need to auto retry registration. Basically, registration
      * failure codes triggering auto-retry are those of temporal failures
@@ -1632,7 +1632,7 @@ SIPAccount::checkNATAddress(pjsip_regc_cbparam* param, pj_pool_t* pool)
      */
     if (not contact_addr.isPrivate() and not srv_ip.isPrivate() and recv_addr.isPrivate()) {
         /* Don't switch */
-        return false;
+        // return false;
     }
 
     /* Also don't switch if only the port number part is different, and
@@ -1640,8 +1640,7 @@ SIPAccount::checkNATAddress(pjsip_regc_cbparam* param, pj_pool_t* pool)
      * See http://trac.pjsip.org/repos/ticket/864
      */
     if (contact_addr == recv_addr and recv_addr.isPrivate()) {
-        /* Don't switch */
-        return false;
+        // return false;
     }
 
     JAMI_WARN("[account %s] Contact address changed: "
@@ -1675,7 +1674,7 @@ SIPAccount::checkNATAddress(pjsip_regc_cbparam* param, pj_pool_t* pool)
     if (regc_ != nullptr) {
         auto contactHdr = getContactHeader();
         auto pjContact = sip_utils::CONST_PJ_STR(contactHdr);
-        pjsip_regc_update_contact(regc_, 1, &pjContact);
+        pjsip_regc_update_contact(regc_, 2, &pjContact);
 
         /*  Perform new registration at the next registration cycle */
     }
