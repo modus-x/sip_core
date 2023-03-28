@@ -141,7 +141,6 @@ AR=xcrun ar
 LD=xcrun ld
 STRIP=xcrun strip
 RANLIB=xcrun ranlib
-EXTRA_COMMON := -isysroot $(MACOSX_SDK) -mmacosx-version-min=$(MIN_OSX_VERSION) -DMACOSX_DEPLOYMENT_TARGET=$(MIN_OSX_VERSION)
 EXTRA_CXXFLAGS += -stdlib=libc++
 EXTRA_LDFLAGS += -mmacosx-version-min=$(MIN_OSX_VERSION) -Wl,-syslibroot,$(MACOSX_SDK)
 ifeq ($(ARCH),x86_64)
@@ -180,7 +179,6 @@ RANLIB=xcrun ranlib
 
 EXTRA_CFLAGS=-arch $(ARCH) -isysroot $(IOS_SDK)
 ifeq ($(IOS_TARGET_PLATFORM),iPhoneOS)
-EXTRA_CFLAGS += -miphoneos-version-min=$(MIN_IOS_VERSION) -fembed-bitcode
 else
 EXTRA_CFLAGS += -mios-simulator-version-min=$(MIN_IOS_VERSION)
 endif

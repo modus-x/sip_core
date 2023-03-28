@@ -326,7 +326,7 @@ MessageEngine::save_() const
                        savePath_,
                        e.what());
         }
-        JAMI_DEBUG("[Account {:s}] saved {:d} messages to {:s}", root.size(), savePath_);
+        JAMI_DEBUG("[Account {:s}] saved {:d} messages to {:s}", account_.getAccountID().c_str(), root.size(), savePath_);
     } catch (const std::exception& e) {
         JAMI_ERR("[Account %s] couldn't save messages to %s: %s",
                  account_.getAccountID().c_str(),

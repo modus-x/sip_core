@@ -21,7 +21,7 @@ PJPROJECT_OPTIONS := --disable-sound        \
                      --disable-openh264     \
                      --disable-resample     \
                      --disable-libwebrtc    \
-                     --with-gnutls=$(PREFIX)
+                     --disable-ssl
 
 PKGS += pjproject
 
@@ -29,7 +29,6 @@ ifeq ($(call need_pkg,'libpjproject'),)
 PKGS_FOUND += pjproject
 endif
 
-DEPS_pjproject += gnutls
 ifndef HAVE_MACOSX
 DEPS_pjproject += uuid
 endif

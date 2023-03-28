@@ -3,7 +3,6 @@
     "version": "n5.0",
     "url": "https://git.ffmpeg.org/gitweb/ffmpeg.git/snapshot/__VERSION__.tar.gz",
     "deps": [
-        "vpx",
         "x264",
         "opus",
         "ffnvcodec",

@@ -292,8 +292,6 @@ private:
     void sendMuteState(bool state);
     void sendVoiceActivity(std::string_view streamId, bool state);
 
-    void resetTransport(std::shared_ptr<IceTransport>&& transport);
-
     /**
      * Send device orientation through SIP INFO
      * @param streamIdx  The stream to rotate

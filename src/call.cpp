@@ -56,7 +56,7 @@ hangupCallsIf(Call::SubcallSet&& calls, int errcode, T pred)
     for (auto& call : calls) {
         if (not pred(call.get()))
             continue;
-        dht::ThreadPool::io().run([call = std::move(call), errcode] { call->hangup(errcode); });
+       call->hangup(errcode);
     }
 }
 

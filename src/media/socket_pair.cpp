@@ -24,7 +24,6 @@
 #include "libav_deps.h" // THEN THIS ONE AFTER
 
 #include "socket_pair.h"
-#include "connectivity/ice_socket.h"
 #include "libav_utils.h"
 #include "logger.h"
 #include "connectivity/security/memory.h"
@@ -185,29 +184,6 @@ SocketPair::SocketPair(const char* uri, int localPort)
     openSockets(uri, localPort);
 }
 
-SocketPair::SocketPair(std::unique_ptr<IceSocket> rtp_sock, std::unique_ptr<IceSocket> rtcp_sock)
-    : rtp_sock_(std::move(rtp_sock))
-    , rtcp_sock_(std::move(rtcp_sock))
-{
-    JAMI_DBG("[%p] Creating instance using ICE sockets for comp %d and %d",
-             this,
-             rtp_sock_->getCompId(),
-             rtcp_sock_->getCompId());
-
-    rtp_sock_->setOnRecv([this](uint8_t* buf, size_t len) {
-        std::lock_guard<std::mutex> l(dataBuffMutex_);
-        rtpDataBuff_.emplace_back(buf, buf + len);
-        cv_.notify_one();
-        return len;
-    });
-    rtcp_sock_->setOnRecv([this](uint8_t* buf, size_t len) {
-        std::lock_guard<std::mutex> l(dataBuffMutex_);
-        rtcpDataBuff_.emplace_back(buf, buf + len);
-        cv_.notify_one();
-        return len;
-    });
-}
-
 SocketPair::~SocketPair()
 {
     interrupt();
@@ -298,10 +274,6 @@ SocketPair::interrupt()
 {
     JAMI_WARN("[%p] Interrupting RTP sockets", this);
     interrupted_ = true;
-    if (rtp_sock_)
-        rtp_sock_->setOnRecv(nullptr);
-    if (rtcp_sock_)
-        rtcp_sock_->setOnRecv(nullptr);
     cv_.notify_all();
     cvRtcpPacketReadyToRead_.notify_all();
 }
@@ -369,9 +341,7 @@ MediaIOHandle*
 SocketPair::createIOContext(const uint16_t mtu)
 {
     unsigned ip_header_size;
-    if (rtp_sock_)
-        ip_header_size = rtp_sock_->getTransportOverhead();
-    else if (rtpDestAddr_.getFamily() == AF_INET6)
+    if (rtpDestAddr_.getFamily() == AF_INET6)
         ip_header_size = 40;
     else
         ip_header_size = 20;
@@ -419,7 +389,6 @@ SocketPair::waitForData()
         return ret;
     }
 
-    // work with IceSocket
     {
         std::unique_lock<std::mutex> lk(dataBuffMutex_);
         cv_.wait(lk, [this] {
@@ -608,12 +577,6 @@ SocketPair::writeData(uint8_t* buf, int buf_size)
 
     if (noWrite_)
         return buf_size;
-
-    // IceSocket
-    if (isRTCP)
-        return rtcp_sock_->send(buf, buf_size);
-    else
-        return rtp_sock_->send(buf, buf_size);
 }
 
 int

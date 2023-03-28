@@ -247,9 +247,6 @@ public:
 
     pj_str_t getStunServerName() const { return stunServerName_; }
 
-    static const std::vector<std::string>& getSupportedTlsCiphers();
-    static const std::vector<std::string>& getSupportedTlsProtocols();
-
     /**
      * @return pj_uint8_t structure, filled from the configuration
      * file, that can be used directly by PJSIP to initialize

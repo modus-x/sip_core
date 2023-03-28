@@ -49,7 +49,6 @@ using socklen_t = int;
 
 namespace jami {
 
-class IceSocket;
 class SRTPProtoContext;
 
 typedef struct
@@ -133,7 +132,6 @@ class SocketPair
 {
 public:
     SocketPair(const char* uri, int localPort);
-    SocketPair(std::unique_ptr<IceSocket> rtp_sock, std::unique_ptr<IceSocket> rtcp_sock);
     ~SocketPair();
 
     void interrupt();
@@ -206,9 +204,6 @@ private:
     std::condition_variable cv_;
     std::list<std::vector<uint8_t>> rtpDataBuff_;
     std::list<std::vector<uint8_t>> rtcpDataBuff_;
-
-    std::unique_ptr<IceSocket> rtp_sock_;
-    std::unique_ptr<IceSocket> rtcp_sock_;
 
     int rtpHandle_ {-1};
     int rtcpHandle_ {-1};

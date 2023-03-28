@@ -31,7 +31,6 @@
 #include "manager.h"
 #include "logger.h"
 #include "fileutils.h"
-#include "archiver.h"
 #include "connectivity/ip_utils.h"
 #include "sip/sipaccount.h"
 #include "sip/sipaccount_config.h"

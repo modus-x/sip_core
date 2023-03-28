@@ -196,14 +196,6 @@ setSipLogLevel()
     });
 }
 
-/**
- * Set gnutls's log level based on the RING_TLS_LOGLEVEL environment variable.
- * RING_TLS_LOGLEVEL = 0 minimum logging (default)
- * RING_TLS_LOGLEVEL = 9 maximum logging
- */
-
-//==============================================================================
-
 struct Manager::ManagerPimpl
 {
     explicit ManagerPimpl(Manager& base);
@@ -341,9 +333,6 @@ struct Manager::ManagerPimpl
     std::unique_ptr<RingBufferPool> ringbufferpool_;
 
     std::atomic_bool finished_ {false};
-
-    /* ICE support */
-    std::unique_ptr<IceTransportFactory> ice_tf_;
 
     /* Sink ID mapping */
     std::map<std::string, std::weak_ptr<video::SinkClient>> sinkMap_;
@@ -626,7 +615,8 @@ Manager::instance()
 }
 
 Manager::Manager()
-    : preferences()
+    : rand_{std::random_device{}()}
+    , preferences()
     , voipPreferences()
     , audioPreference()
 #ifdef ENABLE_VIDEO
@@ -650,10 +640,6 @@ Manager::init(const std::string& config_file, const std::string& data_path)
 {
     // FIXME: this is no good
     initialized = true;
-
-#if defined _MSC_VER
-    gnutls_global_init();
-#endif
 
 #ifndef WIN32
     // Set the max number of open files.
@@ -772,11 +758,6 @@ Manager::finish() noexcept
         // Flush remaining tasks (free lambda' with capture)
         pimpl_->scheduler_.stop();
 
-        // IceTransportFactory should be stopped after the io pool
-        // as some ICE are destroyed in a ioPool (see ConnectionManager)
-        // Also, it must be called before pj_shutdown to avoid any problem
-        pimpl_->ice_tf_.reset();
-
         // NOTE: sipLink_->shutdown() is needed because this will perform
         // sipTransportBroker->shutdown(); which will call Manager::instance().sipVoIPLink()
         // so the pointer MUST NOT be resetted at this point
@@ -793,10 +774,6 @@ Manager::finish() noexcept
         }
         if (pimpl_->ioContextRunner_.joinable())
             pimpl_->ioContextRunner_.join();
-
-#if defined _MSC_VER
-        gnutls_global_deinit();
-#endif
 
     } catch (const VoipLinkException& err) {
         JAMI_ERR("%s", err.what());
@@ -2513,7 +2490,7 @@ Manager::getNewAccountId()
 {
     std::string random_id;
     do {
-        random_id = "0";
+        random_id = to_hex_string(std::uniform_int_distribution<uint64_t>()(rand_));
     } while (getAccount(random_id));
     return random_id;
 }
@@ -2853,12 +2830,6 @@ bool
 Manager::hasAccount(const std::string& accountID)
 {
     return accountFactory.hasAccount(accountID);
-}
-
-IceTransportFactory&
-Manager::getIceTransportFactory()
-{
-    return *pimpl_->ice_tf_;
 }
 
 VideoManager&

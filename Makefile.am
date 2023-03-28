@@ -6,7 +6,7 @@ SOURCES=
 
 ACLOCAL_AMFLAGS = -I m4
 
-SUBDIRS = src man doc test
+SUBDIRS = src man doc
 
 EXTRA_DIST = m4/libtool.m4 \
 			 m4/lt~obsolete.m4 \

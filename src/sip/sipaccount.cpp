@@ -1262,38 +1262,6 @@ SIPAccount::getHostPortFromSTUN(pj_pool_t* pool)
     return result;
 }
 
-const std::vector<std::string>&
-SIPAccount::getSupportedTlsCiphers()
-{
-    // Currently, both OpenSSL and GNUTLS implementations are static
-    // reloading this for each account is unnecessary
-    static std::vector<std::string> availCiphers {};
-
-    // LIMITATION Assume the size might change, if there aren't any ciphers,
-    // this will cause the cache to be repopulated at each call for nothing.
-    if (availCiphers.empty()) {
-        unsigned cipherNum = 256;
-        CipherArray avail_ciphers(cipherNum);
-        if (pj_ssl_cipher_get_availables(&avail_ciphers.front(), &cipherNum) != PJ_SUCCESS)
-            JAMI_ERR("Could not determine cipher list on this system");
-        avail_ciphers.resize(cipherNum);
-        availCiphers.reserve(cipherNum);
-        for (const auto& item : avail_ciphers) {
-            if (item > 0) // 0 doesn't have a name
-                availCiphers.push_back(pj_ssl_cipher_name(item));
-        }
-    }
-    return availCiphers;
-}
-
-const std::vector<std::string>&
-SIPAccount::getSupportedTlsProtocols()
-{
-    static std::vector<std::string> availProtos {VALID_TLS_PROTOS,
-                                                 VALID_TLS_PROTOS + std::size(VALID_TLS_PROTOS)};
-    return availProtos;
-}
-
 void
 SIPAccount::setCredentials(const std::vector<SipAccountConfig::Credentials>& creds)
 {

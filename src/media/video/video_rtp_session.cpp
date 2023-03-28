@@ -25,7 +25,6 @@
 #include "video_sender.h"
 #include "video_receive_thread.h"
 #include "video_mixer.h"
-#include "connectivity/ice_socket.h"
 #include "socket_pair.h"
 #include "sip/sipvoiplink.h" // for enqueueKeyframeRequest
 #include "manager.h"
@@ -337,25 +336,13 @@ VideoRtpSession::stopReceiver()
 }
 
 void
-VideoRtpSession::start(std::unique_ptr<IceSocket> rtp_sock, std::unique_ptr<IceSocket> rtcp_sock)
+VideoRtpSession::start()
 {
     JAMI_WARN("[%p] Starting video rtp session", this);
     std::lock_guard<std::recursive_mutex> lock(mutex_);
 
     try {
-        if (rtp_sock and rtcp_sock) {
-            if (send_.addr) {
-                rtp_sock->setDefaultRemoteAddress(send_.addr);
-            }
-
-            auto& rtcpAddr = send_.rtcp_addr ? send_.rtcp_addr : send_.addr;
-            if (rtcpAddr) {
-                rtcp_sock->setDefaultRemoteAddress(rtcpAddr);
-            }
-            socketPair_.reset(new SocketPair(std::move(rtp_sock), std::move(rtcp_sock)));
-        } else {
-            socketPair_.reset(new SocketPair(getRemoteRtpUri().c_str(), receive_.addr.getPort()));
-        }
+        socketPair_.reset(new SocketPair(getRemoteRtpUri().c_str(), receive_.addr.getPort()));
 
         last_REMB_inc_ = clock::now();
         last_REMB_dec_ = clock::now();

@@ -62,7 +62,6 @@ class RingBufferPool;
 struct VideoManager;
 class Conference;
 class AudioLoop;
-class IceTransportFactory;
 class SIPVoIPLink;
 class JamiPluginManager;
 
@@ -769,8 +768,6 @@ public:
 
     CallFactory callFactory;
 
-    IceTransportFactory& getIceTransportFactory();
-
     ScheduledExecutor& scheduler();
 
     std::shared_ptr<asio::io_context> ioContext() const;
@@ -786,7 +783,6 @@ public:
                                          uint32_t linum = CURRENT_LINE());
 
 #ifdef ENABLE_VIDEO
-
 
     void muteEncoder(const std::string& accountId, const std::string& callId, bool mute);
 
@@ -809,10 +805,11 @@ public:
      * @param videoStream the the VideoFrameActiveWriter to which the sinks should be attached
      * @param sinksMap A map between sink ids and the respective shared pointer.
      */
-    void createSinkClients(const std::string& callId,
-                           const ConfInfo& infos,
-                           const std::vector<std::shared_ptr<video::VideoFrameActiveWriter>>& videoStreams,
-                           std::map<std::string, std::shared_ptr<video::SinkClient>>& sinksMap);
+    void createSinkClients(
+        const std::string& callId,
+        const ConfInfo& infos,
+        const std::vector<std::shared_ptr<video::VideoFrameActiveWriter>>& videoStreams,
+        std::map<std::string, std::shared_ptr<video::SinkClient>>& sinksMap);
 
     /**
      * Return an existing SinkClient instance as a shared_ptr associated to the given identifier.
@@ -829,7 +826,7 @@ public:
     AccountFactory accountFactory;
 
     std::vector<libjami::Message> getLastMessages(const std::string& accountID,
-                                                const uint64_t& base_timestamp);
+                                                  const uint64_t& base_timestamp);
 
     SIPVoIPLink& sipVoIPLink() const;
 
@@ -841,6 +838,7 @@ public:
     bool isAllModerators(const std::string& accountID);
 
 private:
+    std::mt19937_64 rand_;
     Manager();
     ~Manager();
     friend class AudioDeviceGuard;

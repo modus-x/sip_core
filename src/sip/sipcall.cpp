@@ -1495,22 +1495,17 @@ void
 SIPCall::sendKeyframe(int streamIdx)
 {
 #ifdef ENABLE_VIDEO
-    dht::ThreadPool::computation().run([w = weak(), streamIdx] {
-        if (auto sthis = w.lock()) {
-            JAMI_DBG("handling picture fast update request");
-            if (streamIdx == -1) {
-                for (const auto& videoRtp : sthis->getRtpSessionList(MediaType::MEDIA_VIDEO))
-                    std::static_pointer_cast<video::VideoRtpSession>(videoRtp)->forceKeyFrame();
-            } else if (streamIdx > -1 && streamIdx < static_cast<int>(sthis->rtpStreams_.size())) {
-                // Apply request for wanted stream
-                auto& stream = sthis->rtpStreams_[streamIdx];
-                if (stream.rtpSession_
-                    && stream.rtpSession_->getMediaType() == MediaType::MEDIA_VIDEO)
-                    std::static_pointer_cast<video::VideoRtpSession>(stream.rtpSession_)
-                        ->forceKeyFrame();
-            }
-        }
-    });
+    JAMI_DBG("handling picture fast update request");
+    if (streamIdx == -1) {
+        for (const auto& videoRtp : getRtpSessionList(MediaType::MEDIA_VIDEO))
+            std::static_pointer_cast<video::VideoRtpSession>(videoRtp)->forceKeyFrame();
+    } else if (streamIdx > -1 && streamIdx < static_cast<int>(rtpStreams_.size())) {
+        // Apply request for wanted stream
+        auto& stream = rtpStreams_[streamIdx];
+        if (stream.rtpSession_ && stream.rtpSession_->getMediaType() == MediaType::MEDIA_VIDEO)
+            std::static_pointer_cast<video::VideoRtpSession>(stream.rtpSession_)->forceKeyFrame();
+    }
+
 #endif
 }
 
@@ -1829,7 +1824,7 @@ SIPCall::startAllMedia()
         // Not restarting media loop on hold as it's a huge waste of CPU ressources
         // because of the audio loop
         if (getState() != CallState::HOLD) {
-            iter->rtpSession_->start(nullptr, nullptr);
+            iter->rtpSession_->start();
         }
     }
 
@@ -2649,13 +2644,6 @@ SIPCall::InvSessionDeleter::operator()(pjsip_inv_session* inv) const noexcept
     inv->mod_data[Manager::instance().sipVoIPLink().getModId()] = nullptr;
     // NOTE: the counter is incremented by sipvoiplink (transaction_request_cb)
     pjsip_inv_dec_ref(inv);
-}
-
-void
-SIPCall::resetTransport(std::shared_ptr<IceTransport>&& transport)
-{
-    // Move the transport to another thread and destroy it there if possible
-    transport.reset();
 }
 
 void

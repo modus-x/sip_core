@@ -33,7 +33,8 @@ CallFactory::getNewCallID() const
 {
     std::string random_id;
     do {
-        random_id = "1111";
+        random_id = std::to_string(
+            std::uniform_int_distribution<uint64_t>(1, JAMI_ID_MAX_VAL)(*rand_.get()));
     } while (hasCall(random_id));
     return random_id;
 }

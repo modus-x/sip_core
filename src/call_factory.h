@@ -28,6 +28,7 @@
 #include <utility>
 
 #include "call.h"
+#include <random>
 #include "account.h"
 
 namespace jami {
@@ -38,7 +39,9 @@ class SIPCall;
 class CallFactory
 {
 public:
-    CallFactory();
+    CallFactory()
+        : rand_{std::make_unique<std::mt19937_64>(std::random_device{}())}
+    {}
 
     std::string getNewCallID() const;
 
@@ -129,6 +132,8 @@ private:
             return &itermap->second;
         return nullptr;
     }
+
+    std::unique_ptr<std::mt19937_64> rand_;
 
     mutable std::recursive_mutex callMapsMutex_ {};
 

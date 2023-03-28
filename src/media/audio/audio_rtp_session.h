@@ -35,7 +35,6 @@ namespace jami {
 class AudioInput;
 class AudioReceiveThread;
 class AudioSender;
-class IceSocket;
 class MediaRecorder;
 class RingBuffer;
 
@@ -53,7 +52,7 @@ public:
     AudioRtpSession(const std::string& callId, const std::string& streamId);
     virtual ~AudioRtpSession();
 
-    void start(std::unique_ptr<IceSocket> rtp_sock, std::unique_ptr<IceSocket> rtcp_sock) override;
+    void start() override;
     void restartSender() override;
     void stop() override;
     void setMuted(bool muted, Direction dir = Direction::SEND) override;

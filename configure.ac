@@ -40,12 +40,6 @@ AS_IF([test "x$enable_debug" = "xyes"],
   [DAEMONCFLAGS+=" -DNDEBUG=1 -O3"
    DAEMONCXXFLAGS+=" -DNDEBUG=1 -O3 -Wno-deprecated"])
 
-AC_ARG_ENABLE([fuzzing],
-  AS_HELP_STRING([--enable-fuzzing],
-    [Build fuzzing tools]))
-AM_CONDITIONAL([ENABLE_FUZZING], [test "x$enable_fuzzing" = "xyes"])
-AM_COND_IF([ENABLE_FUZZING], [AC_CONFIG_FILES([test/fuzzing/Makefile])])
-
 AC_ARG_ENABLE([tracepoints], AS_HELP_STRING([--enable-tracepoints], [Enable tracepoints]))
 
 AS_IF([test "x$enable_tracepoints" = "xyes"],
@@ -281,13 +275,6 @@ AS_IF([test -d "${TOOLS_DIR}"],
 dnl Check for pjproject
 PKG_CHECK_MODULES(PJPROJECT, libpjproject,,
   AC_MSG_ERROR([Missing pjproject files]))
-
-dnl Guile
-AM_COND_IF([ENABLE_AGENT],
-  [PKG_CHECK_MODULES(GUILE, [guile-3.0 >= 3.0.7],, AC_MSG_ERROR([Missing guile files]))],)
-
-PKG_CHECK_MODULES([YAMLCPP], [yaml-cpp >= 0.5.1],,
-  AC_MSG_ERROR([yaml-cpp not found]))
 
 PKG_CHECK_MODULES([YAMLCPP], [yaml-cpp >= 0.5.1],,
   AC_MSG_ERROR([yaml-cpp not found]))

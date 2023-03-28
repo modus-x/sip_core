@@ -9,7 +9,7 @@ PKGS_FOUND += ffmpeg
 endif
 endif
 
-DEPS_ffmpeg = iconv zlib vpx opus speex x264
+DEPS_ffmpeg = iconv zlib opus speex x264
 
 FFMPEGCONF = \
 	--cc="$(CC)" \
@@ -87,8 +87,6 @@ FFMPEGCONF += \
 	--enable-parser=h264 \
 	--enable-parser=hevc \
 	--enable-parser=mpeg4video \
-	--enable-parser=vp8 \
-	--enable-parser=vp9 \
 	--enable-parser=opus
 
 #encoders/decoders
@@ -112,9 +110,6 @@ FFMPEGCONF += \
 	--enable-decoder=pcm_mulaw \
 	--enable-encoder=mpeg4 \
 	--enable-decoder=mpeg4 \
-	--enable-encoder=libvpx_vp8 \
-	--enable-decoder=vp8 \
-	--enable-decoder=vp9 \
 	--enable-encoder=h263 \
 	--enable-encoder=h263p \
 	--enable-decoder=h263 \
@@ -123,7 +118,6 @@ FFMPEGCONF += \
 	--enable-decoder=mjpegb \
 	--enable-libspeex \
 	--enable-libopus \
-	--enable-libvpx \
 	--enable-libx264 \
 	--enable-encoder=libspeex \
 	--enable-decoder=libspeex \
@@ -212,7 +206,6 @@ FFMPEGCONF += \
 	--enable-jni \
 	--enable-mediacodec \
 	--disable-vulkan \
-	--enable-decoder=vp8_mediacodec \
 	--enable-decoder=h264_mediacodec \
 	--enable-decoder=mpeg4_mediacodec \
 	--enable-decoder=hevc_mediacodec \
@@ -244,11 +237,9 @@ FFMPEGCONF += \
 	--enable-hwaccel=h264_vaapi \
 	--enable-hwaccel=mpeg4_vaapi \
 	--enable-hwaccel=h263_vaapi \
-	--enable-hwaccel=vp8_vaapi \
 	--enable-hwaccel=mjpeg_vaapi \
 	--enable-hwaccel=hevc_vaapi \
 	--enable-encoder=h264_vaapi \
-	--enable-encoder=vp8_vaapi \
 	--enable-encoder=mjpeg_vaapi \
 	--enable-encoder=hevc_vaapi
 # ffnvcodec is not supported on ARM then we enable it here for i386 and x86_64
@@ -259,7 +250,6 @@ FFMPEGCONF += --enable-cuvid \
 	      --enable-nvenc \
 	      --enable-hwaccel=h264_nvdec \
 	      --enable-hwaccel=hevc_nvdec \
-	      --enable-hwaccel=vp8_nvdec \
 	      --enable-hwaccel=mjpeg_nvdec \
 	      --enable-encoder=h264_nvenc \
 	      --enable-encoder=hevc_nvenc
@@ -353,7 +343,6 @@ FFMPEGCONF += --target-os=mingw32 \
 	--enable-nvenc \
 	--enable-hwaccel=h264_nvdec \
 	--enable-hwaccel=hevc_nvdec \
-	--enable-hwaccel=vp8_nvdec \
 	--enable-hwaccel=mjpeg_nvdec \
 	--enable-encoder=h264_nvenc \
 	--enable-encoder=hevc_nvenc

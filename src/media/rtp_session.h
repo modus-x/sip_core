@@ -33,7 +33,6 @@
 
 namespace jami {
 
-class IceSocket;
 class MediaRecorder;
 
 class RtpSession
@@ -50,7 +49,7 @@ public:
     {}
     virtual ~RtpSession() {};
 
-    virtual void start(std::unique_ptr<IceSocket> rtp_sock, std::unique_ptr<IceSocket> rtcp_sock) = 0;
+    virtual void start() = 0;
     virtual void restartSender() = 0;
     virtual void stop() = 0;
     void setMediaSource(const std::string& resource) { input_ = resource; }

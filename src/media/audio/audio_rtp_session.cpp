@@ -187,7 +187,7 @@ AudioRtpSession::startReceiver()
 }
 
 void
-AudioRtpSession::start(std::unique_ptr<IceSocket> rtp_sock, std::unique_ptr<IceSocket> rtcp_sock)
+AudioRtpSession::start()
 {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
 
@@ -197,20 +197,8 @@ AudioRtpSession::start(std::unique_ptr<IceSocket> rtp_sock, std::unique_ptr<IceS
     }
 
     try {
-        if (rtp_sock and rtcp_sock) {
-            if (send_.addr) {
-                rtp_sock->setDefaultRemoteAddress(send_.addr);
-            }
 
-            auto& rtcpAddr = send_.rtcp_addr ? send_.rtcp_addr : send_.addr;
-            if (rtcpAddr) {
-                rtcp_sock->setDefaultRemoteAddress(rtcpAddr);
-            }
-
-            socketPair_.reset(new SocketPair(std::move(rtp_sock), std::move(rtcp_sock)));
-        } else {
-            socketPair_.reset(new SocketPair(getRemoteRtpUri().c_str(), receive_.addr.getPort()));
-        }
+        socketPair_.reset(new SocketPair(getRemoteRtpUri().c_str(), receive_.addr.getPort()));
 
         if (send_.crypto and receive_.crypto) {
             socketPair_->createSRTP(receive_.crypto.getCryptoSuite().c_str(),

@@ -75,6 +75,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <limits>
+#include <map>
 #include <array>
 
 #include <cstdlib>
