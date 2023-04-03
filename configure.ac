@@ -201,12 +201,12 @@ AC_COMPILE_IFELSE(
 AC_MSG_RESULT([$CLANG])
 
 dnl define LIBSIP_CORE_BUILD because we are building libsip_core, not using it
-dnl if building shared library, define sip_core_EXPORTS
+dnl if building shared library, define SIP_CORE_EXPORTS
 AC_MSG_CHECKING([if compiling shared library])
 DAEMONCPPFLAGS+=" -fvisibility=hidden -DLIBSIP_CORE_BUILD"
 AS_IF([test "x$enable_shared" == "xyes"],
   [RING_SHARED=yes
-   DAEMONCPPFLAGS+=" -Dsip_core_EXPORTS"],
+   DAEMONCPPFLAGS+=" -DSIP_CORE_EXPORTS"],
   [RING_SHARED=no])
 AC_MSG_RESULT([$RING_SHARED])
 

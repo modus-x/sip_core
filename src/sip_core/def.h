@@ -36,17 +36,17 @@
 // LIBSIP_CORE_PUBLIC is used for the public API symbols. It is either DLL imports or DLL exports (or does
 // nothing for static build) LIBSIP_CORE_LOCAL is used for non-api symbols.
 
-#ifdef sip_core_EXPORTS // defined if sip_core is compiled as a shared library
+#ifdef SIP_CORE_EXPORTS // defined if sip_core is compiled as a shared library
 #ifdef LIBSIP_CORE_BUILD  // defined if we are building the sip_core shared library (instead of using it)
 #define LIBSIP_CORE_PUBLIC LIBSIP_CORE_EXPORT
 #else
 #define LIBSIP_CORE_PUBLIC LIBSIP_CORE_IMPORT
 #endif // LIBSIP_CORE_BUILD
 #define LIBSIP_CORE_LOCAL LIBSIP_CORE_HIDDEN
-#else // sip_core_EXPORTS is not defined: this means sip_core is a static lib.
+#else // SIP_CORE_EXPORTS is not defined: this means sip_core is a static lib.
 #define LIBSIP_CORE_PUBLIC
 #define LIBSIP_CORE_LOCAL
-#endif // sip_core_EXPORTS
+#endif // SIP_CORE_EXPORTS
 
 #ifdef DEBUG
 #define LIBSIP_CORE_TESTABLE LIBSIP_CORE_EXPORT

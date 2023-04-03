@@ -2,10 +2,7 @@
 # Source groups - connectivity
 ################################################################################
 list (APPEND Source_Files__connectivity
-    "${CMAKE_CURRENT_SOURCE_DIR}/ice_socket.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/generic_io.h"
-    "${CMAKE_CURRENT_SOURCE_DIR}/ice_transport.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/ice_transport.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/ip_utils.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/ip_utils.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/sip_utils.cpp"
