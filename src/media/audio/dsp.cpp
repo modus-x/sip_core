@@ -22,7 +22,7 @@
 #include "dsp.h"
 #include "audiobuffer.h"
 
-namespace jami {
+namespace sip_core {
 
 void
 DSP::speexStateDeleter(SpeexPreprocessState* state)
@@ -82,7 +82,7 @@ void
 DSP::process(AudioBuffer& buff, int samples)
 {
     if (samples != smplPerFrame_) {
-        JAMI_WARN("Unexpected amount of samples");
+        SIP_CORE_WARN("Unexpected amount of samples");
         return;
     }
 
@@ -95,4 +95,4 @@ DSP::process(AudioBuffer& buff, int samples)
     }
 }
 
-} // namespace jami
+} // namespace sip_core

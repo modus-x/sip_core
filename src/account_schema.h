@@ -27,7 +27,7 @@
  * @brief Account specific keys/constants that must be shared in daemon and clients.
  */
 
-namespace jami {
+namespace sip_core {
 namespace Conf {
 
 // Common account parameters
@@ -116,6 +116,6 @@ static const char* const CONFIG_TRANSPORT_STATE_CODE = "Transport.statusCode";
 static const char* const CONFIG_TRANSPORT_STATE_DESC = "Transport.statusDescription";
 
 } // namespace Conf
-} // namespace jami
+} // namespace sip_core
 
 #endif // ACCOUNT_SCHEMA_H_

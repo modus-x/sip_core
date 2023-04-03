@@ -29,7 +29,7 @@
 #include <cstring>
 #include <algorithm>
 
-namespace jami {
+namespace sip_core {
 
 const char* const RingBufferPool::DEFAULT_ID = "audiolayer_id";
 
@@ -47,7 +47,7 @@ RingBufferPool::~RingBufferPool()
     for (const auto& item : ringBufferMap_) {
         const auto& weak = item.second;
         if (not weak.expired())
-            JAMI_WARN("Leaking RingBuffer '%s'", item.first.c_str());
+            SIP_CORE_WARN("Leaking RingBuffer '%s'", item.first.c_str());
     }
 }
 
@@ -110,7 +110,7 @@ RingBufferPool::createRingBuffer(const std::string& id)
 
     auto rbuf = getRingBuffer(id);
     if (rbuf) {
-        JAMI_DBG("Ringbuffer already exists for id '%s'", id.c_str());
+        SIP_CORE_DBG("Ringbuffer already exists for id '%s'", id.c_str());
         return rbuf;
     }
 
@@ -137,7 +137,7 @@ void
 RingBufferPool::removeReadBindings(const std::string& call_id)
 {
     if (not readBindingsMap_.erase(call_id))
-        JAMI_ERR("CallID set %s does not exist!", call_id.c_str());
+        SIP_CORE_ERR("CallID set %s does not exist!", call_id.c_str());
 }
 
 /**
@@ -148,11 +148,11 @@ RingBufferPool::addReaderToRingBuffer(const std::shared_ptr<RingBuffer>& rbuf,
                                       const std::string& call_id)
 {
     if (call_id != DEFAULT_ID and rbuf->getId() == call_id)
-        JAMI_WARN("RingBuffer has a readoffset on itself");
+        SIP_CORE_WARN("RingBuffer has a readoffset on itself");
 
     rbuf->createReadOffset(call_id);
     readBindingsMap_[call_id].insert(rbuf); // bindings list created if not existing
-    JAMI_DBG("Bind rbuf '%s' to callid '%s'", rbuf->getId().c_str(), call_id.c_str());
+    SIP_CORE_DBG("Bind rbuf '%s' to callid '%s'", rbuf->getId().c_str(), call_id.c_str());
 }
 
 void
@@ -171,17 +171,17 @@ RingBufferPool::removeReaderFromRingBuffer(const std::shared_ptr<RingBuffer>& rb
 void
 RingBufferPool::bindCallID(const std::string& call_id1, const std::string& call_id2)
 {
-    JAMI_INFO("Bind call %s to call %s", call_id1.c_str(), call_id2.c_str());
+    SIP_CORE_INFO("Bind call %s to call %s", call_id1.c_str(), call_id2.c_str());
 
     const auto& rb_call1 = getRingBuffer(call_id1);
     if (not rb_call1) {
-        JAMI_ERR("No ringbuffer associated with call '%s'", call_id1.c_str());
+        SIP_CORE_ERR("No ringbuffer associated with call '%s'", call_id1.c_str());
         return;
     }
 
     const auto& rb_call2 = getRingBuffer(call_id2);
     if (not rb_call2) {
-        JAMI_ERR("No ringbuffer associated to call '%s'", call_id2.c_str());
+        SIP_CORE_ERR("No ringbuffer associated to call '%s'", call_id2.c_str());
         return;
     }
 
@@ -206,17 +206,17 @@ RingBufferPool::bindHalfDuplexOut(const std::string& process_id, const std::stri
 void
 RingBufferPool::unBindCallID(const std::string& call_id1, const std::string& call_id2)
 {
-    JAMI_INFO("Unbind calls %s and %s", call_id1.c_str(), call_id2.c_str());
+    SIP_CORE_INFO("Unbind calls %s and %s", call_id1.c_str(), call_id2.c_str());
 
     const auto& rb_call1 = getRingBuffer(call_id1);
     if (not rb_call1) {
-        JAMI_ERR("No ringbuffer associated to call '%s'", call_id1.c_str());
+        SIP_CORE_ERR("No ringbuffer associated to call '%s'", call_id1.c_str());
         return;
     }
 
     const auto& rb_call2 = getRingBuffer(call_id2);
     if (not rb_call2) {
-        JAMI_ERR("No ringbuffer associated to call '%s'", call_id2.c_str());
+        SIP_CORE_ERR("No ringbuffer associated to call '%s'", call_id2.c_str());
         return;
     }
 
@@ -240,7 +240,7 @@ RingBufferPool::unBindAllHalfDuplexOut(const std::string& call_id)
 {
     const auto& rb_call = getRingBuffer(call_id);
     if (not rb_call) {
-        JAMI_ERR("No ringbuffer associated to call '%s'", call_id.c_str());
+        SIP_CORE_ERR("No ringbuffer associated to call '%s'", call_id.c_str());
         return;
     }
 
@@ -259,11 +259,11 @@ RingBufferPool::unBindAllHalfDuplexOut(const std::string& call_id)
 void
 RingBufferPool::unBindAll(const std::string& call_id)
 {
-    JAMI_INFO("Unbind call %s from all bound calls", call_id.c_str());
+    SIP_CORE_INFO("Unbind call %s from all bound calls", call_id.c_str());
 
     const auto& rb_call = getRingBuffer(call_id);
     if (not rb_call) {
-        JAMI_ERR("No ringbuffer associated to call '%s'", call_id.c_str());
+        SIP_CORE_ERR("No ringbuffer associated to call '%s'", call_id.c_str());
         return;
     }
 
@@ -472,4 +472,4 @@ RingBufferPool::setAudioMeterState(const std::string& id, bool state)
     }
 }
 
-} // namespace jami
+} // namespace sip_core

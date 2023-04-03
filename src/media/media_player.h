@@ -27,7 +27,7 @@
 #include "media_decoder.h"
 #include <atomic>
 
-namespace jami {
+namespace sip_core {
 class MediaPlayer
 {
 public:
@@ -48,9 +48,9 @@ private:
 
     // media inputs
 #ifdef ENABLE_VIDEO
-    std::shared_ptr<jami::video::VideoInput> videoInput_;
+    std::shared_ptr<sip_core::video::VideoInput> videoInput_;
 #endif
-    std::shared_ptr<jami::AudioInput> audioInput_;
+    std::shared_ptr<sip_core::AudioInput> audioInput_;
     std::shared_ptr<MediaDemuxer> demuxer_;
     ThreadLoop loop_;
 
@@ -80,4 +80,4 @@ private:
 
     bool streamsFinished();
 };
-} // namespace jami
+} // namespace sip_core

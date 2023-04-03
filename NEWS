@@ -2,7 +2,7 @@ DRing (2.2.0) / 2015-05-01
 	* DBus API changes (additions from patches below)
 	* Contrib: use PJSIP 2.4 and gnutls 3.4 if not provided by system
 	* Contrib: minimal gnutls is 3.3.0
-	   => Users of 2.1.1 and below may have to recreate their Jami account
+	   => Users of 2.1.1 and below may have to recreate their sip_core account
 	   and have a new ID.
 	* Implemented CA storage (alpha stage)
 	* Better Window support

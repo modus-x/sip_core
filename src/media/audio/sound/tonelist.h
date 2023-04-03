@@ -29,7 +29,7 @@
 #include <array>
 #include <memory>
 
-namespace jami {
+namespace sip_core {
 
 class TelephoneTone
 {
@@ -64,4 +64,4 @@ private:
     Tone::ToneId currentTone_;
 };
 
-} // namespace jami
+} // namespace sip_core

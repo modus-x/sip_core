@@ -30,19 +30,19 @@
 #include <memory>
 #include <functional>
 
-namespace jami {
+namespace sip_core {
 
-using MediaFrame = libjami::MediaFrame;
-using AudioFrame = libjami::AudioFrame;
+using MediaFrame = libsip_core::MediaFrame;
+using AudioFrame = libsip_core::AudioFrame;
 using MediaObserver = std::function<void(std::shared_ptr<MediaFrame>&&)>;
 
 #ifdef ENABLE_VIDEO
 
-using VideoFrame = libjami::VideoFrame;
+using VideoFrame = libsip_core::VideoFrame;
 
 // Some helpers
 int videoFrameSize(int format, int width, int height);
 
 #endif // ENABLE_VIDEO
 
-} // namespace jami
+} // namespace sip_core

@@ -27,7 +27,7 @@
 
 #include <string>
 
-namespace jami {
+namespace sip_core {
 
 struct MediaStream
 {
@@ -119,7 +119,7 @@ struct MediaStream
                 break;
             }
         } else {
-            JAMI_WARN() << "Trying to get stream info from null codec context";
+            SIP_CORE_WARN() << "Trying to get stream info from null codec context";
         }
     }
 
@@ -173,4 +173,4 @@ operator<<(std::ostream& os, const MediaStream& ms)
     return os;
 }
 
-}; // namespace jami
+}; // namespace sip_core

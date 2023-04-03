@@ -33,7 +33,7 @@
 using ssize_t = SSIZE_T;
 #endif
 
-namespace jami {
+namespace sip_core {
 
 template<typename T>
 class GenericSocket
@@ -124,4 +124,4 @@ protected:
     GenericSocket() = default;
 };
 
-} // namespace jami
+} // namespace sip_core

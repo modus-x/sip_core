@@ -33,7 +33,7 @@
 #include <WTypes.h>
 #endif
 
-namespace jami {
+namespace sip_core {
 
 constexpr static const char TRUE_STR[] = "true";
 constexpr static const char FALSE_STR[] = "false";
@@ -173,7 +173,7 @@ std::string string_join(const std::set<std::string>& set, std::string_view separ
 
 std::set<std::string> string_split_set(std::string& str, std::string_view separator = "/");
 
-} // namespace jami
+} // namespace sip_core
 
 // Add string operators crucially missing from standard
 // see https://groups.google.com/a/isocpp.org/forum/#!topic/std-proposals/1RcShRhrmRc
@@ -181,12 +181,12 @@ namespace std {
 inline string
 operator+(const string& s, const string_view& sv)
 {
-    return jami::concat(s, sv);
+    return sip_core::concat(s, sv);
 }
 inline string
 operator+(const string_view& sv, const string& s)
 {
-    return jami::concat(sv, s);
+    return sip_core::concat(sv, s);
 }
 using svmatch = match_results<string_view::const_iterator>;
 using svsub_match = sub_match<string_view::const_iterator>;

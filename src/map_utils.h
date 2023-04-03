@@ -25,7 +25,7 @@
 #include <algorithm>
 #include <tuple>
 
-namespace jami {
+namespace sip_core {
 namespace map_utils {
 
 ///< Return the N-th type of a tuple type used as the Container compliant value type
@@ -63,4 +63,4 @@ extractValues(const M& map) -> decltype(extractElements<1>(map))
 }
 
 } // namespace map_utils
-} // namespace jami
+} // namespace sip_core

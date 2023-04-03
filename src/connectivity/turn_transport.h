@@ -27,7 +27,7 @@
 #include <memory>
 #include <string>
 
-namespace jami {
+namespace sip_core {
 
 struct TurnTransportParams
 {
@@ -56,4 +56,4 @@ private:
     std::unique_ptr<Impl> pimpl_;
 };
 
-} // namespace jami
+} // namespace sip_core

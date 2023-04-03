@@ -37,7 +37,7 @@
 #include "logger.h"
 #include "video_device_monitor.h"
 
-namespace jami {
+namespace sip_core {
 namespace video {
 
 constexpr const char* const VideoDeviceMonitor::CONFIG_LABEL;
@@ -59,13 +59,13 @@ VideoDeviceMonitor::getDeviceList() const
     return ids;
 }
 
-libjami::VideoCapabilities
+libsip_core::VideoCapabilities
 VideoDeviceMonitor::getCapabilities(const string& id) const
 {
     std::lock_guard<std::mutex> l(lock_);
     const auto iter = findDeviceById(id);
     if (iter == devices_.end())
-        return libjami::VideoCapabilities();
+        return libsip_core::VideoCapabilities();
 
     return iter->getCapabilities();
 }
@@ -114,8 +114,8 @@ VideoDeviceMonitor::getMRLForDefaultDevice() const
     const auto it = findDeviceById(defaultDevice_);
     if (it == std::end(devices_) || it->getDeviceId() == DEVICE_DESKTOP)
         return {};
-    static const std::string sep = libjami::Media::VideoProtocolPrefix::SEPARATOR;
-    return libjami::Media::VideoProtocolPrefix::CAMERA + sep + it->getDeviceId();
+    static const std::string sep = libsip_core::Media::VideoProtocolPrefix::SEPARATOR;
+    return libsip_core::Media::VideoProtocolPrefix::CAMERA + sep + it->getDeviceId();
 }
 
 bool
@@ -150,7 +150,7 @@ VideoDeviceMonitor::setDeviceOrientation(const std::string& id, int angle)
     if (itd != devices_.cend()) {
         itd->setOrientation(angle);
     } else {
-        JAMI_WARN("Can't find device %s to set orientation %d", id.c_str(), angle);
+        SIP_CORE_WARN("Can't find device %s to set orientation %d", id.c_str(), angle);
     }
 }
 
@@ -183,7 +183,7 @@ static void
 notify()
 {
     if (Manager::initialized) {
-        emitSignal<libjami::VideoSignal::DeviceEvent>();
+        emitSignal<libsip_core::VideoSignal::DeviceEvent>();
     }
 }
 
@@ -219,7 +219,7 @@ VideoDeviceMonitor::addDevice(const string& id,
 
         devices_.emplace_back(std::move(dev));
     } catch (const std::exception& e) {
-        JAMI_ERR("Failed to add device %s: %s", id.c_str(), e.what());
+        SIP_CORE_ERR("Failed to add device %s: %s", id.c_str(), e.what());
         return false;
     }
     notify();
@@ -325,4 +325,4 @@ VideoDeviceMonitor::unserialize(const YAML::Node& in)
 }
 
 } // namespace video
-} // namespace jami
+} // namespace sip_core

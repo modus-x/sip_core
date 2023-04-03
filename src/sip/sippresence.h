@@ -39,7 +39,7 @@
 #define PRESENCE_LOCK_FLAG          1
 #define PRESENCE_CLIENT_LOCK_FLAG   2
 
-namespace jami {
+namespace sip_core {
 
 struct pres_msg_data
 {
@@ -227,6 +227,6 @@ private:
     pj_pool_t* pool_;
 };
 
-} // namespace jami
+} // namespace sip_core
 
 #endif

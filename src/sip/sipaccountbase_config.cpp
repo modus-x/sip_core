@@ -19,7 +19,7 @@
 #include "account_schema.h"
 #include "config/account_config_utils.h"
 
-namespace jami {
+namespace sip_core {
 
 namespace Conf {
 // SIP specific configuration keys

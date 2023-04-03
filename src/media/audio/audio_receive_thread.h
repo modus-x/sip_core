@@ -32,7 +32,7 @@
 #include <functional>
 #include <sstream>
 
-namespace jami {
+namespace sip_core {
 
 class MediaDecoder;
 class MediaIOHandle;
@@ -92,4 +92,4 @@ private:
     std::function<void(MediaType, bool)> onSuccessfulSetup_;
 };
 
-} // namespace jami
+} // namespace sip_core

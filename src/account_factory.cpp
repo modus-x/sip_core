@@ -28,7 +28,7 @@
 
 #include <stdexcept>
 
-namespace jami {
+namespace sip_core {
 
 const std::string_view AccountFactory::DEFAULT_ACCOUNT_TYPE = SIPAccount::ACCOUNT_TYPE;
 
@@ -43,7 +43,7 @@ std::shared_ptr<Account>
 AccountFactory::createAccount(std::string_view accountType, const std::string& id)
 {
     if (hasAccount(id)) {
-        JAMI_ERROR("Existing account {}", id);
+        SIP_CORE_ERROR("Existing account {}", id);
         return nullptr;
     }
 
@@ -74,11 +74,11 @@ AccountFactory::removeAccount(Account& account)
     std::string_view account_type = account.getAccountType();
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     const auto& id = account.getAccountID();
-    JAMI_DEBUG("Removing account {:s}", id);
+    SIP_CORE_DEBUG("Removing account {:s}", id);
     auto m = accountMaps_.find(account_type);
     if (m != accountMaps_.end()) {
         m->second.erase(id);
-        JAMI_DEBUG("Remaining {:d} {:s} account(s)", m->second.size(), account_type);
+        SIP_CORE_DEBUG("Remaining {:d} {:s} account(s)", m->second.size(), account_type);
     }
 }
 
@@ -90,7 +90,7 @@ AccountFactory::removeAccount(std::string_view id)
     if (auto account = getAccount(id)) {
         removeAccount(*account);
     } else
-        JAMI_ERROR("No account with ID {:s}", id);
+        SIP_CORE_ERROR("No account with ID {:s}", id);
 }
 
 template<>
@@ -177,4 +177,4 @@ AccountFactory::accountCount() const
     return count;
 }
 
-} // namespace jami
+} // namespace sip_core

@@ -38,14 +38,14 @@
 using Clock = std::chrono::steady_clock;
 using namespace std::literals;
 
-namespace jami {
+namespace sip_core {
 namespace debug {
 
 /**
  * Ex:
  * Timer t;
  * std::this_thread::sleep_for(std::chrono::milliseconds(10));
- * JAMI_DBG() << "Task took " << t.getDuration<std::chrono::nanoseconds>() << " ns";
+ * SIP_CORE_DBG() << "Task took " << t.getDuration<std::chrono::nanoseconds>() << " ns";
  */
 class Timer
 {
@@ -64,7 +64,7 @@ public:
     }
 
     void print(std::string_view action) const {
-        // JAMI_DBG() << name_ << ": " << action << " after " << dht::print_duration(Clock::now() - start_);
+        // SIP_CORE_DBG() << name_ << ": " << action << " after " << dht::print_duration(Clock::now() - start_);
     }
 
 private:
@@ -219,7 +219,7 @@ public:
     ~VideoWriter()
     {
         fclose(f_);
-        JAMI_DBG("Play video file with: ffplay -f rawvideo -pixel_format %s -video_size %dx%d %s",
+        SIP_CORE_DBG("Play video file with: ffplay -f rawvideo -pixel_format %s -video_size %dx%d %s",
                  av_get_pix_fmt_name(format_),
                  width_,
                  height_,
@@ -265,4 +265,4 @@ private:
 };
 
 } // namespace debug
-} // namespace jami
+} // namespace sip_core

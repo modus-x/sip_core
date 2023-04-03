@@ -39,7 +39,7 @@
 #include <algorithm>
 #include <sstream>
 
-namespace jami {
+namespace sip_core {
 namespace video {
 
 using VideoSize = std::pair<unsigned, unsigned>;
@@ -78,9 +78,9 @@ public:
      *                 '800x448': ['15'],
      *                 '960x540': ['10']}}
      */
-    libjami::VideoCapabilities getCapabilities() const
+    libsip_core::VideoCapabilities getCapabilities() const
     {
-        libjami::VideoCapabilities cap;
+        libsip_core::VideoCapabilities cap;
 
         for (const auto& chan : getChannelList())
             for (const auto& size : getSizeList(chan)) {
@@ -88,7 +88,7 @@ public:
                 auto rates = getRateList(chan, size);
                 std::vector<std::string> rates_str {rates.size()};
                 std::transform(rates.begin(), rates.end(), rates_str.begin(), [](const FrameRate& r) {
-                    return jami::to_string(r.real());
+                    return sip_core::to_string(r.real());
                 });
                 cap[chan][sz] = std::move(rates_str);
             }
@@ -129,8 +129,8 @@ public:
         }
         if (max_size.second > 0) {
             settings.video_size = fmt::format("{}x{}", max_size.first, max_size.second);
-            settings.framerate = jami::to_string(max_size_rate.real());
-            JAMI_WARN("Default video settings: %s, %s FPS",
+            settings.framerate = sip_core::to_string(max_size_rate.real());
+            SIP_CORE_WARN("Default video settings: %s, %s FPS",
                       settings.video_size.c_str(),
                       settings.framerate.c_str());
         }
@@ -150,7 +150,7 @@ public:
         settings.input = params.input;
         settings.channel = params.channel_name;
         settings.video_size = sizeToString(params.width, params.height);
-        settings.framerate = jami::to_string(params.framerate.real());
+        settings.framerate = sip_core::to_string(params.framerate.real());
         return settings;
     }
 
@@ -209,9 +209,9 @@ private:
         FrameRate closest {0};
         double rate_val = 0;
         try {
-            rate_val = rate.empty() ? 0 : jami::stod(rate);
+            rate_val = rate.empty() ? 0 : sip_core::stod(rate);
         } catch (...) {
-            JAMI_WARN("Can't read framerate \"%s\"", rate.c_str());
+            SIP_CORE_WARN("Can't read framerate \"%s\"", rate.c_str());
         }
         // fallback to framerate closest to 30 FPS
         if (rate_val == 0)
@@ -248,4 +248,4 @@ private:
 };
 
 } // namespace video
-} // namespace jami
+} // namespace sip_core

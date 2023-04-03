@@ -23,7 +23,7 @@
 
 #include <fmt/compile.h>
 
-namespace jami {
+namespace sip_core {
 
 constexpr const char* RINGTONE_PATH_KEY = "ringtonePath";
 constexpr const char* RINGTONE_ENABLED_KEY = "ringtoneEnabled";
@@ -129,7 +129,7 @@ AccountConfig::toMap() const
             {Conf::CONFIG_ACCOUNT_AUTOANSWER, autoAnswerEnabled ? TRUE_STR : FALSE_STR},
             {Conf::CONFIG_ACCOUNT_SENDREADRECEIPT, sendReadReceipt ? TRUE_STR : FALSE_STR},
             {Conf::CONFIG_ACCOUNT_ISRENDEZVOUS, isRendezVous ? TRUE_STR : FALSE_STR},
-            {libjami::Account::ConfProperties::ACTIVE_CALL_LIMIT, std::to_string(activeCallLimit)},
+            {libsip_core::Account::ConfProperties::ACTIVE_CALL_LIMIT, std::to_string(activeCallLimit)},
             {Conf::CONFIG_RINGTONE_ENABLED, ringtoneEnabled ? TRUE_STR : FALSE_STR},
             {Conf::CONFIG_RINGTONE_PATH, ringtonePath},
             {Conf::CONFIG_VIDEO_ENABLED, videoEnabled ? TRUE_STR : FALSE_STR},
@@ -151,7 +151,7 @@ AccountConfig::fromMap(const std::map<std::string, std::string>& details)
     parseBool(details, Conf::CONFIG_ACCOUNT_AUTOANSWER, autoAnswerEnabled);
     parseBool(details, Conf::CONFIG_ACCOUNT_SENDREADRECEIPT, sendReadReceipt);
     parseBool(details, Conf::CONFIG_ACCOUNT_ISRENDEZVOUS, isRendezVous);
-    parseInt(details, libjami::Account::ConfProperties::ACTIVE_CALL_LIMIT, activeCallLimit);
+    parseInt(details, libsip_core::Account::ConfProperties::ACTIVE_CALL_LIMIT, activeCallLimit);
     parseBool(details, Conf::CONFIG_RINGTONE_ENABLED, ringtoneEnabled);
     parseString(details, Conf::CONFIG_RINGTONE_PATH, ringtonePath);
     parseString(details, Conf::CONFIG_ACCOUNT_USERAGENT, customUserAgent);

@@ -47,7 +47,7 @@ struct AVDictionary;
 struct AVCodec;
 }
 
-namespace jami {
+namespace sip_core {
 
 struct MediaDescription;
 struct AccountCodecInfo;
@@ -183,4 +183,4 @@ protected:
     std::string audioCodec_;
 };
 
-} // namespace jami
+} // namespace sip_core

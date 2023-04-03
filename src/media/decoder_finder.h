@@ -23,7 +23,7 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 }
 
-namespace jami {
+namespace sip_core {
 
 /**
  * Attempt to find standalone AVCodec decoder using AVCodecID,
@@ -59,4 +59,4 @@ findDecoder(const enum AVCodecID codec_id)
     return codec;
 }
 
-} // namespace jami
+} // namespace sip_core

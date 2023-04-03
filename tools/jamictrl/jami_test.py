@@ -26,12 +26,12 @@ import time
 import argparse
 
 from gi.repository import GLib
-from errorsDring import libjamiCtrlError
-from controller import libjamiCtrl
+from errorsDring import libsip_coreCtrlError
+from controller import libsip_coreCtrl
 
-class JamiTest(libjamiCtrl):
+class sip_coreTest(libsip_coreCtrl):
     def __init__(self, name, args):
-        super(JamiTest, self).__init__(name, False)
+        super(sip_coreTest, self).__init__(name, False)
         self.args = args
         self.testCalls = set()
         self.iterator = 0
@@ -48,13 +48,13 @@ class JamiTest(libjamiCtrl):
         volatileCallerDetails = self.getVolatileAccountDetails(self.account)
 
         if volatileCallerDetails['Account.registrationStatus'] != 'REGISTERED':
-            raise libjamiCtrlError("Caller Account not registered")
+            raise libsip_coreCtrlError("Caller Account not registered")
 
         self.peer = args.peer
         volatilePeerDetails = self.getVolatileAccountDetails()
 
         if volatilePeerDetails['Account.registrationStatus'] != 'REGISTERED':
-            raise libjamiCtrlError("Peer Account not registered")
+            raise libsip_coreCtrlError("Peer Account not registered")
 
         print("Using local test account: ", self.account, volatileCallerDetails['Account.registrationStatus'])
         print("Using test peer: ", self.peer, volatilePeerDetails['Account.registrationStatus'])
@@ -114,7 +114,7 @@ class JamiTest(libjamiCtrl):
 
 if __name__ == "__main__":
 
-    parser = argparse.ArgumentParser(description='Monitor Jami reliabilty by mesuring failure rate for making Calls/Messages and receiving them.')
+    parser = argparse.ArgumentParser(description='Monitor sip_core reliabilty by mesuring failure rate for making Calls/Messages and receiving them.')
     optional = parser._action_groups.pop()
     required = parser.add_argument_group('required arguments')
     optional.add_argument('--messages', help = 'Number of messages to send', type = int)
@@ -125,5 +125,5 @@ if __name__ == "__main__":
     parser._action_groups.append(optional)
     args = parser.parse_args()
 
-    test = JamiTest("test", args)
+    test = sip_coreTest("test", args)
     test.run()

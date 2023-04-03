@@ -31,7 +31,7 @@
 #include <memory>
 #include <mutex>
 
-namespace jami {
+namespace sip_core {
 
 class MediaRecorder;
 
@@ -94,4 +94,4 @@ protected:
     std::string getRemoteRtpUri() const { return "rtp://" + send_.addr.toString(true); }
 };
 
-} // namespace jami
+} // namespace sip_core

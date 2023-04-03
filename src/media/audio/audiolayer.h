@@ -57,7 +57,7 @@ typedef struct SpeexEchoState_ SpeexEchoState;
 #define PCM_DSNOOP      "plug:dsnoop" // Alsa plugin for microphone sharing
 #define PCM_DMIX_DSNOOP "dmix/dsnoop" // Audio profile using Alsa dmix/dsnoop
 
-namespace jami {
+namespace sip_core {
 
 class AudioPreference;
 class Resampler;
@@ -318,4 +318,4 @@ private:
         std::chrono::system_clock::time_point::min()};
 };
 
-} // namespace jami
+} // namespace sip_core

@@ -73,7 +73,7 @@ extern "C" {
      | (((val) << 8) & 0x000000FF00000000) | (((val) << 24) & 0x0000FF0000000000) \
      | (((val) << 40) & 0x00FF000000000000) | (((val) << 56) & 0xFF00000000000000))
 
-namespace jami {
+namespace sip_core {
 
 static constexpr int NET_POLL_TIMEOUT = 100; /* poll() timeout in ms */
 static constexpr int RTP_MAX_PACKET_LENGTH = 2048;
@@ -155,22 +155,22 @@ udp_socket_create(int family, int port)
 #endif
 
     if (udp_fd < 0) {
-        JAMI_ERR("socket() failed");
+        SIP_CORE_ERR("socket() failed");
         strErr();
         return -1;
     }
 
     auto bind_addr = ip_utils::getAnyHostAddr(family);
     if (not bind_addr.isIpv4() and not bind_addr.isIpv6()) {
-        JAMI_ERR("No IPv4/IPv6 host found for family %u", family);
+        SIP_CORE_ERR("No IPv4/IPv6 host found for family %u", family);
         close(udp_fd);
         return -1;
     }
 
     bind_addr.setPort(port);
-    JAMI_DBG("use local address: %s", bind_addr.toString(true, true).c_str());
+    SIP_CORE_DBG("use local address: %s", bind_addr.toString(true, true).c_str());
     if (::bind(udp_fd, bind_addr, bind_addr.getLength()) < 0) {
-        JAMI_ERR("bind() failed");
+        SIP_CORE_ERR("bind() failed");
         strErr();
         close(udp_fd);
         udp_fd = -1;
@@ -188,7 +188,7 @@ SocketPair::~SocketPair()
 {
     interrupt();
     closeSockets();
-    JAMI_DBG("[%p] Instance destroyed", this);
+    SIP_CORE_DBG("[%p] Instance destroyed", this);
 }
 
 bool
@@ -272,7 +272,7 @@ SocketPair::createSRTP(const char* out_suite,
 void
 SocketPair::interrupt()
 {
-    JAMI_WARN("[%p] Interrupting RTP sockets", this);
+    SIP_CORE_WARN("[%p] Interrupting RTP sockets", this);
     interrupted_ = true;
     cv_.notify_all();
     cvRtcpPacketReadyToRead_.notify_all();
@@ -281,7 +281,7 @@ SocketPair::interrupt()
 void
 SocketPair::setReadBlockingMode(bool block)
 {
-    JAMI_DBG("[%p] Read operations in blocking mode [%s]", this, block ? "YES" : "NO");
+    SIP_CORE_DBG("[%p] Read operations in blocking mode [%s]", this, block ? "YES" : "NO");
     readBlockingMode_ = block;
     cv_.notify_all();
     cvRtcpPacketReadyToRead_.notify_all();
@@ -305,7 +305,7 @@ SocketPair::closeSockets()
 void
 SocketPair::openSockets(const char* uri, int local_rtp_port)
 {
-    JAMI_DBG("Creating rtp socket for uri %s on port %d", uri, local_rtp_port);
+    SIP_CORE_DBG("Creating rtp socket for uri %s on port %d", uri, local_rtp_port);
 
     char hostname[256];
     char path[1024];
@@ -325,11 +325,11 @@ SocketPair::openSockets(const char* uri, int local_rtp_port)
     if ((rtpHandle_ = udp_socket_create(rtpDestAddr_.getFamily(), local_rtp_port)) == -1
         or (rtcpHandle_ = udp_socket_create(rtcpDestAddr_.getFamily(), local_rtcp_port)) == -1) {
         closeSockets();
-        JAMI_ERR("[%p] Sockets creation failed", this);
+        SIP_CORE_ERR("[%p] Sockets creation failed", this);
         throw std::runtime_error("Sockets creation failed");
     }
 
-    JAMI_WARN("SocketPair: local{%d,%d} / %s{%d,%d}",
+    SIP_CORE_WARN("SocketPair: local{%d,%d} / %s{%d,%d}",
               local_rtp_port,
               local_rtcp_port,
               hostname,
@@ -482,7 +482,7 @@ SocketPair::readCallback(uint8_t* buf, int buf_size)
             // 201 = RR PT
             if (header->pt == 201) {
                 lastDLSR_ = Swap4Bytes(header->dlsr);
-                // JAMI_WARN("Read RR, lastDLSR : %d", lastDLSR_);
+                // SIP_CORE_WARN("Read RR, lastDLSR : %d", lastDLSR_);
                 lastRR_time = std::chrono::steady_clock::now();
                 saveRtcpRRPacket(buf, len);
             }
@@ -493,7 +493,7 @@ SocketPair::readCallback(uint8_t* buf, int buf_size)
             else if (header->pt == 200) {
                 // not used yet
             } else {
-                JAMI_DBG("Can't read RTCP: unknown packet type %u", header->pt);
+                SIP_CORE_DBG("Can't read RTCP: unknown packet type %u", header->pt);
             }
             fromRTCP = true;
         }
@@ -534,7 +534,7 @@ SocketPair::readCallback(uint8_t* buf, int buf_size)
             packetLossCallback_();
         lastSeqNumIn_ = buf[2] << 8 | buf[3];
         if (err < 0)
-            JAMI_WARN("decrypt error %d", err);
+            SIP_CORE_WARN("decrypt error %d", err);
     }
 
     if (len != 0)
@@ -598,7 +598,7 @@ SocketPair::writeCallback(uint8_t* buf, int buf_size)
                                    srtpContext_->encryptbuf,
                                    sizeof(srtpContext_->encryptbuf));
         if (buf_size < 0) {
-            JAMI_WARN("encrypt error %d", buf_size);
+            SIP_CORE_WARN("encrypt error %d", buf_size);
             return buf_size;
         }
 
@@ -632,18 +632,18 @@ SocketPair::writeCallback(uint8_t* buf, int buf_size)
                 histoLatency_.pop_front();
 
             currentLatency = (currentSRTS - lastSRTS_) / 2;
-            // JAMI_WARN("Current Latency : %f from sender %X", currentLatency, header->ssrc);
+            // SIP_CORE_WARN("Current Latency : %f from sender %X", currentLatency, header->ssrc);
             histoLatency_.push_back(currentLatency);
         }
 
         lastSRTS_ = currentSRTS;
 
-        // JAMI_WARN("SENDING NEW RTCP SR !! ");
+        // SIP_CORE_WARN("SENDING NEW RTCP SR !! ");
 
     } else if (buf[1] == 201) // Receiver Report
     {
         // auto header = reinterpret_cast<rtcpRRHeader*>(buf);
-        // JAMI_WARN("SENDING NEW RTCP RR !! ");
+        // SIP_CORE_WARN("SENDING NEW RTCP RR !! ");
     }
 
     return ret < 0 ? -errno : ret;
@@ -718,8 +718,8 @@ SocketPair::lastSeqValOut()
 {
     if (srtpContext_)
         return srtpContext_->srtp_out.seq_largest;
-    JAMI_ERR("SRTP context not found.");
+    SIP_CORE_ERR("SRTP context not found.");
     return 0;
 }
 
-} // namespace jami
+} // namespace sip_core

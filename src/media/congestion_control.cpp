@@ -25,7 +25,7 @@
 #include <utility>
 #include <cmath>
 
-namespace jami {
+namespace sip_core {
 static constexpr uint8_t packetVersion = 2;
 static constexpr uint8_t packetFMT = 15;
 static constexpr uint8_t packetType = 206;
@@ -82,13 +82,13 @@ uint64_t
 CongestionControl::parseREMB(const rtcpREMBHeader& packet)
 {
     if (packet.fmt != 15 || packet.pt != 206) {
-        JAMI_ERR("Unable to parse REMB packet.");
+        SIP_CORE_ERR("Unable to parse REMB packet.");
         return 0;
     }
     uint64_t bitrate_bps = (packet.br_mantis << packet.br_exp);
     bool shift_overflow = (bitrate_bps >> packet.br_exp) != packet.br_mantis;
     if (shift_overflow) {
-        JAMI_ERR("Invalid remb bitrate value : %u*2^%u", packet.br_mantis, packet.br_exp);
+        SIP_CORE_ERR("Invalid remb bitrate value : %u*2^%u", packet.br_mantis, packet.br_exp);
         return false;
     }
     return bitrate_bps;
@@ -139,22 +139,22 @@ CongestionControl::kalmanFilter(uint64_t gradiant_delay)
 float
 CongestionControl::get_estimate_m(float k, int d_m)
 {
-    // JAMI_WARN("[get_estimate_m]k:%f, last_estimate_m_:%f, d_m:%f", k, last_estimate_m_, d_m);
-    // JAMI_WARN("m: %f", ((1-k) * last_estimate_m_) + (k * d_m));
+    // SIP_CORE_WARN("[get_estimate_m]k:%f, last_estimate_m_:%f, d_m:%f", k, last_estimate_m_, d_m);
+    // SIP_CORE_WARN("m: %f", ((1-k) * last_estimate_m_) + (k * d_m));
     return ((1 - k) * last_estimate_m_) + (k * d_m);
 }
 
 float
 CongestionControl::get_gain_k(float q, float dev_n)
 {
-    // JAMI_WARN("k: %f", (last_var_p_ + q) / (last_var_p_ + q + dev_n));
+    // SIP_CORE_WARN("k: %f", (last_var_p_ + q) / (last_var_p_ + q + dev_n));
     return (last_var_p_ + q) / (last_var_p_ + q + dev_n);
 }
 
 float
 CongestionControl::get_sys_var_p(float k, float q)
 {
-    // JAMI_WARN("var_p: %f", ((1-k) * (last_var_p_ + q)));
+    // SIP_CORE_WARN("var_p: %f", ((1-k) * (last_var_p_ + q)));
     return ((1 - k) * (last_var_p_ + q));
 }
 
@@ -162,14 +162,14 @@ float
 CongestionControl::get_var_n(int d_m)
 {
     float z = get_residual_z(d_m);
-    // JAMI_WARN("var_n: %f", (beta * last_var_n_) + ((1.0f - beta) * z * z));
+    // SIP_CORE_WARN("var_n: %f", (beta * last_var_n_) + ((1.0f - beta) * z * z));
     return (beta * last_var_n_) + ((1.0f - beta) * z * z);
 }
 
 float
 CongestionControl::get_residual_z(float d_m)
 {
-    // JAMI_WARN("z: %f", d_m - last_estimate_m_);
+    // SIP_CORE_WARN("z: %f", d_m - last_estimate_m_);
     return (d_m - last_estimate_m_);
 }
 
@@ -196,7 +196,7 @@ BandwidthUsage
 CongestionControl::get_bw_state(float estimation, float thresh)
 {
     if (estimation > thresh) {
-        // JAMI_WARN("Enter overuse state");
+        // SIP_CORE_WARN("Enter overuse state");
         if (not overuse_counter_) {
             t0_overuse = clock::now();
             overuse_counter_++;
@@ -210,7 +210,7 @@ CongestionControl::get_bw_state(float estimation, float thresh)
             last_state_ = bwOverusing;
         }
     } else if (estimation < -thresh) {
-        // JAMI_WARN("Enter underuse state");
+        // SIP_CORE_WARN("Enter underuse state");
         overuse_counter_ = 0;
         last_state_ = bwUnderusing;
     } else {
@@ -220,4 +220,4 @@ CongestionControl::get_bw_state(float estimation, float thresh)
     return last_state_;
 }
 
-} // namespace jami
+} // namespace sip_core

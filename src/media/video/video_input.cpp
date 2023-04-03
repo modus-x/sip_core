@@ -49,7 +49,7 @@ extern "C" {
 #include <libavutil/display.h>
 }
 
-namespace jami {
+namespace sip_core {
 namespace video {
 
 static constexpr unsigned default_grab_width = 640;
@@ -83,7 +83,7 @@ VideoInput::~VideoInput()
 {
     isStopped_ = true;
     if (videoManagedByClient()) {
-        emitSignal<libjami::VideoSignal::StopCapture>(decOpts_.input);
+        emitSignal<libsip_core::VideoSignal::StopCapture>(decOpts_.input);
         capturing_ = false;
         return;
     }
@@ -105,13 +105,13 @@ void
 VideoInput::switchDevice()
 {
     if (switchPending_.exchange(false)) {
-        JAMI_DBG("Switching input to '%s'", decOpts_.input.c_str());
+        SIP_CORE_DBG("Switching input to '%s'", decOpts_.input.c_str());
         if (decOpts_.input.empty()) {
             capturing_ = false;
             return;
         }
 
-        emitSignal<libjami::VideoSignal::StartCapture>(decOpts_.input);
+        emitSignal<libsip_core::VideoSignal::StartCapture>(decOpts_.input);
         capturing_ = true;
     }
 }
@@ -160,14 +160,14 @@ bool
 VideoInput::setup()
 {
     if (not attach(sink_.get())) {
-        JAMI_ERR("attach sink failed");
+        SIP_CORE_ERR("attach sink failed");
         return false;
     }
 
     if (!sink_->start())
-        JAMI_ERR("start sink failed");
+        SIP_CORE_ERR("start sink failed");
 
-    JAMI_DBG("VideoInput ready to capture");
+    SIP_CORE_DBG("VideoInput ready to capture");
 
     return true;
 }
@@ -205,7 +205,7 @@ VideoInput::cleanup()
 {
     deleteDecoder(); // do it first to let a chance to last frame to be displayed
     stopSink();
-    JAMI_DBG("VideoInput closed");
+    SIP_CORE_DBG("VideoInput closed");
 }
 
 bool
@@ -220,7 +220,7 @@ VideoInput::captureFrame()
         createDecoder();
         return static_cast<bool>(decoder_);
     case MediaDemuxer::Status::ReadError:
-        JAMI_ERR() << "Failed to decode frame";
+        SIP_CORE_ERR() << "Failed to decode frame";
         return false;
     default:
         return true;
@@ -335,7 +335,7 @@ VideoInput::createDecoder()
         auto ret = decoder->openInput(decOpts_);
         ready = ret >= 0;
         if (ret < 0 && -ret != EBUSY) {
-            JAMI_ERR("Could not open input \"%s\" with status %i", decOpts_.input.c_str(), ret);
+            SIP_CORE_ERR("Could not open input \"%s\" with status %i", decOpts_.input.c_str(), ret);
             foundDecOpts(decOpts_);
             return;
         } else if (-ret == EBUSY) {
@@ -356,14 +356,14 @@ VideoInput::createDecoder()
 
     /* Data available, finish the decoding */
     if (decoder->setupVideo() < 0) {
-        JAMI_ERR("decoder IO startup failed");
+        SIP_CORE_ERR("decoder IO startup failed");
         foundDecOpts(decOpts_);
         return;
     }
 
     auto ret = decoder->decode(); // Populate AVCodecContext fields
     if (ret == MediaDemuxer::Status::ReadError) {
-        JAMI_INFO() << "Decoder error";
+        SIP_CORE_INFO() << "Decoder error";
         return;
     }
 
@@ -374,11 +374,11 @@ VideoInput::createDecoder()
     if (fmt != AV_PIX_FMT_NONE) {
         decOpts_.pixel_format = av_get_pix_fmt_name(fmt);
     } else {
-        JAMI_WARN("Could not determine pixel format, using default");
+        SIP_CORE_WARN("Could not determine pixel format, using default");
         decOpts_.pixel_format = av_get_pix_fmt_name(AV_PIX_FMT_YUV420P);
     }
 
-    JAMI_DBG("created decoder with video params : size=%dX%d, fps=%lf pix=%s",
+    SIP_CORE_DBG("created decoder with video params : size=%dX%d, fps=%lf pix=%s",
              decOpts_.width,
              decOpts_.height,
              decOpts_.framerate.real(),
@@ -428,7 +428,7 @@ VideoInput::isCapturing() const noexcept
 bool
 VideoInput::initCamera(const std::string& device)
 {
-    decOpts_ = jami::getVideoDeviceMonitor().getDeviceParams(device);
+    decOpts_ = sip_core::getVideoDeviceMonitor().getDeviceParams(device);
     return true;
 }
 
@@ -449,7 +449,7 @@ VideoInput::initX11(const std::string& display)
     std::string windowIdStr = "window-id:";
     size_t winIdPos = display.find(windowIdStr);
 
-    DeviceParams p = jami::getVideoDeviceMonitor().getDeviceParams(DEVICE_DESKTOP);
+    DeviceParams p = sip_core::getVideoDeviceMonitor().getDeviceParams(DEVICE_DESKTOP);
     if (winIdPos != std::string::npos) {
         p.window_id = display.substr(winIdPos + windowIdStr.size()); // "0x0340021e";
         p.is_area = 0;
@@ -458,7 +458,7 @@ VideoInput::initX11(const std::string& display)
         p.input = display.substr(1, space);
         if (p.window_id.empty()) {
             p.input = display.substr(0, space);
-            auto splits = jami::split_string_to_unsigned(display.substr(space + 1), 'x');
+            auto splits = sip_core::split_string_to_unsigned(display.substr(space + 1), 'x');
             // round to 8 pixel block
             p.width = round2pow(splits[0], 3);
             p.height = round2pow(splits[1], 3);
@@ -473,7 +473,7 @@ VideoInput::initX11(const std::string& display)
 
     auto dec = std::make_unique<MediaDecoder>();
     if (dec->openInput(p) < 0 || dec->setupVideo() < 0)
-        return initCamera(jami::getVideoDeviceMonitor().getDefaultDevice());
+        return initCamera(sip_core::getVideoDeviceMonitor().getDefaultDevice());
 
     clearOptions();
     decOpts_ = p;
@@ -493,7 +493,7 @@ VideoInput::initAVFoundation(const std::string& display)
     decOpts_.pixel_format = "nv12";
     decOpts_.name = "Capture screen 0";
     decOpts_.input = "Capture screen 0";
-    decOpts_.framerate = jami::getVideoDeviceMonitor().getDeviceParams(DEVICE_DESKTOP).framerate;
+    decOpts_.framerate = sip_core::getVideoDeviceMonitor().getDeviceParams(DEVICE_DESKTOP).framerate;
 
     if (space != std::string::npos) {
         std::istringstream iss(display.substr(space + 1));
@@ -521,7 +521,7 @@ VideoInput::initWindowsGrab(const std::string& display)
     std::string windowIdStr = "window-id:";
     size_t winIdPos = display.find(windowIdStr);
 
-    DeviceParams p = jami::getVideoDeviceMonitor().getDeviceParams(DEVICE_DESKTOP);
+    DeviceParams p = sip_core::getVideoDeviceMonitor().getDeviceParams(DEVICE_DESKTOP);
     if (winIdPos != std::string::npos) {
         p.input = display.substr(winIdPos + windowIdStr.size()); // "TITLE";
         p.name  = display.substr(winIdPos + windowIdStr.size()); // "TITLE";
@@ -537,7 +537,7 @@ VideoInput::initWindowsGrab(const std::string& display)
         p.name = display.substr(1);
         p.is_area = 1;
         if (space != std::string::npos) {
-            auto splits = jami::split_string_to_unsigned(display.substr(space + 1), 'x');
+            auto splits = sip_core::split_string_to_unsigned(display.substr(space + 1), 'x');
             if (splits.size() != 2)
                 return false;
 
@@ -547,7 +547,7 @@ VideoInput::initWindowsGrab(const std::string& display)
 
             size_t plus = display.find('+');
             auto position = display.substr(plus + 1, space - plus - 1);
-            splits = jami::split_string_to_unsigned(position, ',');
+            splits = sip_core::split_string_to_unsigned(position, ',');
             if (splits.size() != 2)
                 return false;
             p.offset_x = splits[0];
@@ -560,7 +560,7 @@ VideoInput::initWindowsGrab(const std::string& display)
 
     auto dec = std::make_unique<MediaDecoder>();
     if (dec->openInput(p) < 0 || dec->setupVideo() < 0)
-        return initCamera(jami::getVideoDeviceMonitor().getDefaultDevice());
+        return initCamera(sip_core::getVideoDeviceMonitor().getDefaultDevice());
 
     clearOptions();
     decOpts_ = p;
@@ -579,7 +579,7 @@ VideoInput::initFile(std::string path)
 
     /* File exists? */
     if (access(path.c_str(), R_OK) != 0) {
-        JAMI_ERR("file '%s' unavailable\n", path.c_str());
+        SIP_CORE_ERR("file '%s' unavailable\n", path.c_str());
         return false;
     }
 
@@ -591,7 +591,7 @@ VideoInput::initFile(std::string path)
     p.name = path;
     auto dec = std::make_unique<MediaDecoder>();
     if (dec->openInput(p) < 0 || dec->setupVideo() < 0) {
-        return initCamera(jami::getVideoDeviceMonitor().getDefaultDevice());
+        return initCamera(sip_core::getVideoDeviceMonitor().getDefaultDevice());
     }
 
     clearOptions();
@@ -605,7 +605,7 @@ VideoInput::initFile(std::string path)
         decOpts_.format = "image2";
         decOpts_.framerate = 1;
     } else {
-        JAMI_WARN("Guessing file type for %s", path.c_str());
+        SIP_CORE_WARN("Guessing file type for %s", path.c_str());
     }
 
     return false;
@@ -621,10 +621,10 @@ VideoInput::restart()
 std::shared_future<DeviceParams>
 VideoInput::switchInput(const std::string& resource)
 {
-    JAMI_DBG("MRL: '%s'", resource.c_str());
+    SIP_CORE_DBG("MRL: '%s'", resource.c_str());
 
     if (switchPending_.exchange(true)) {
-        JAMI_ERR("Video switch already requested");
+        SIP_CORE_ERR("Video switch already requested");
         return {};
     }
 
@@ -643,7 +643,7 @@ VideoInput::switchInput(const std::string& resource)
     }
 
     // Supported MRL schemes
-    static const std::string sep = libjami::Media::VideoProtocolPrefix::SEPARATOR;
+    static const std::string sep = libsip_core::Media::VideoProtocolPrefix::SEPARATOR;
 
     const auto pos = resource.find(sep);
     if (pos == std::string::npos)
@@ -657,10 +657,10 @@ VideoInput::switchInput(const std::string& resource)
 
     bool ready = false;
 
-    if (prefix == libjami::Media::VideoProtocolPrefix::CAMERA) {
+    if (prefix == libsip_core::Media::VideoProtocolPrefix::CAMERA) {
         /* Video4Linux2 */
         ready = initCamera(suffix);
-    } else if (prefix == libjami::Media::VideoProtocolPrefix::DISPLAY) {
+    } else if (prefix == libsip_core::Media::VideoProtocolPrefix::DISPLAY) {
         /* X11 display name */
 #ifdef __APPLE__
         ready = initAVFoundation(suffix);
@@ -669,7 +669,7 @@ VideoInput::switchInput(const std::string& resource)
 #else
         ready = initX11(suffix);
 #endif
-    } else if (prefix == libjami::Media::VideoProtocolPrefix::FILE) {
+    } else if (prefix == libsip_core::Media::VideoProtocolPrefix::FILE) {
         /* Pathname */
         ready = initFile(suffix);
     }
@@ -744,4 +744,4 @@ VideoInput::updateStartTime(int64_t startTime)
 }
 
 } // namespace video
-} // namespace jami
+} // namespace sip_core

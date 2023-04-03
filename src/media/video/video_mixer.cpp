@@ -43,7 +43,7 @@
 static constexpr auto MIN_LINE_ZOOM
     = 6; // Used by the ONE_BIG_WITH_SMALL layout for the small previews
 
-namespace jami {
+namespace sip_core {
 namespace video {
 
 struct VideoMixer::VideoMixerSource
@@ -97,7 +97,7 @@ VideoMixer::VideoMixer(const std::string& id, const std::string& localInput, boo
     loop_.start();
     nextProcess_ = std::chrono::steady_clock::now();
 
-    JAMI_DBG("[mixer:%s] New instance created", id_.c_str());
+    SIP_CORE_DBG("[mixer:%s] New instance created", id_.c_str());
 }
 
 VideoMixer::~VideoMixer()
@@ -107,7 +107,7 @@ VideoMixer::~VideoMixer()
 
     loop_.join();
 
-    JAMI_DBG("[mixer:%s] Instance destroyed", id_.c_str());
+    SIP_CORE_DBG("[mixer:%s] Instance destroyed", id_.c_str());
 }
 
 void
@@ -182,7 +182,7 @@ VideoMixer::attachVideo(Observable<std::shared_ptr<MediaFrame>>* frame,
 {
     if (!frame)
         return;
-    JAMI_DBG("Attaching video with streamId %s", streamId.c_str());
+    SIP_CORE_DBG("Attaching video with streamId %s", streamId.c_str());
     {
         std::lock_guard<std::mutex> lk(videoToStreamInfoMtx_);
         videoToStreamInfo_[frame] = StreamInfo {callId, streamId};
@@ -199,7 +199,7 @@ VideoMixer::detachVideo(Observable<std::shared_ptr<MediaFrame>>* frame)
     std::unique_lock<std::mutex> lk(videoToStreamInfoMtx_);
     auto it = videoToStreamInfo_.find(frame);
     if (it != videoToStreamInfo_.end()) {
-        JAMI_DBG("Detaching video of call %s", it->second.callId.c_str());
+        SIP_CORE_DBG("Detaching video of call %s", it->second.callId.c_str());
         detach = true;
         // Handle the case where the current shown source leave the conference
         // Note, do not call resetActiveStream() to avoid multiple updates
@@ -220,9 +220,9 @@ VideoMixer::attached(Observable<std::shared_ptr<MediaFrame>>* ob)
     auto src = std::unique_ptr<VideoMixerSource>(new VideoMixerSource);
     src->render_frame = std::make_shared<VideoFrame>();
     src->source = ob;
-    JAMI_DBG("Add new source [%p]", src.get());
+    SIP_CORE_DBG("Add new source [%p]", src.get());
     sources_.emplace_back(std::move(src));
-    JAMI_DEBUG("Total sources: {:d}", sources_.size());
+    SIP_CORE_DEBUG("Total sources: {:d}", sources_.size());
     updateLayout();
 }
 
@@ -233,9 +233,9 @@ VideoMixer::detached(Observable<std::shared_ptr<MediaFrame>>* ob)
 
     for (const auto& x : sources_) {
         if (x->source == ob) {
-            JAMI_DBG("Remove source [%p]", x.get());
+            SIP_CORE_DBG("Remove source [%p]", x.get());
             sources_.remove(x);
-            JAMI_DEBUG("Total sources: {:d}", sources_.size());
+            SIP_CORE_DEBUG("Total sources: {:d}", sources_.size());
             updateLayout();
             break;
         }
@@ -258,7 +258,7 @@ VideoMixer::update(Observable<std::shared_ptr<MediaFrame>>* ob,
                                                             AV_PIX_FMT_NV12);
                 x->atomic_copy(*std::static_pointer_cast<VideoFrame>(frame));
             } catch (const std::runtime_error& e) {
-                JAMI_ERR("[mixer:%s] Accel failure: %s", id_.c_str(), e.what());
+                SIP_CORE_ERR("[mixer:%s] Accel failure: %s", id_.c_str(), e.what());
                 return;
             }
 #else
@@ -286,7 +286,7 @@ VideoMixer::process()
     try {
         output.reserve(format_, width_, height_);
     } catch (const std::bad_alloc& e) {
-        JAMI_ERR("[mixer:%s] VideoFrame::allocBuffer() failed", id_.c_str());
+        SIP_CORE_ERR("[mixer:%s] VideoFrame::allocBuffer() failed", id_.c_str());
         return;
     }
 
@@ -363,7 +363,7 @@ VideoMixer::process()
                     if (fooInput)
                         successfullyRendered |= render_frame(output, fooInput, x);
                     else
-                        JAMI_WARN("[mixer:%s] Nothing to render for %p", id_.c_str(), x->source);
+                        SIP_CORE_WARN("[mixer:%s] Nothing to render for %p", id_.c_str(), x->source);
                 }
 
                 x->hasVideo = !blackFrame && successfullyRendered;
@@ -541,12 +541,12 @@ VideoMixer::startSink()
     stopSink();
 
     if (width_ == 0 or height_ == 0) {
-        JAMI_WARN("[mixer:%s] MX: unable to start with zero-sized output", id_.c_str());
+        SIP_CORE_WARN("[mixer:%s] MX: unable to start with zero-sized output", id_.c_str());
         return;
     }
 
     if (not sink_->start()) {
-        JAMI_ERR("[mixer:%s] MX: sink startup failed", id_.c_str());
+        SIP_CORE_ERR("[mixer:%s] MX: sink startup failed", id_.c_str());
         return;
     }
 
@@ -596,4 +596,4 @@ VideoMixer::getStream(const std::string& name) const
 }
 
 } // namespace video
-} // namespace jami
+} // namespace sip_core

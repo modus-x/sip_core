@@ -38,13 +38,13 @@ void ring_secure_memzero(void* ptr, size_t length);
 };
 }
 
-namespace jami {
+namespace sip_core {
 namespace secure {
 
 /// Erase with \a size '0' the given memory starting at \a ptr pointer.
 void memzero(void* ptr, std::size_t length);
 
 } // namespace secure
-} // namespace jami
+} // namespace sip_core
 
 #endif // __cplusplus

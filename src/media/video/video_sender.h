@@ -31,13 +31,13 @@
 #include <atomic>
 
 // Forward declarations
-namespace jami {
+namespace sip_core {
 class SocketPair;
 struct DeviceParams;
 struct AccountVideoCodecInfo;
-} // namespace jami
+} // namespace sip_core
 
-namespace jami {
+namespace sip_core {
 namespace video {
 
 class VideoSender : public VideoFramePassiveReader
@@ -84,4 +84,4 @@ private:
     std::function<void(int)> changeOrientationCallback_;
 };
 } // namespace video
-} // namespace jami
+} // namespace sip_core

@@ -31,7 +31,7 @@ extern "C" {
 #include <libavutil/rational.h> // specify conversions for AVRational
 }
 
-namespace jami {
+namespace sip_core {
 
 /**
  * Naive implementation of the boost::rational interface, described here:
@@ -262,7 +262,7 @@ operator<<(std::ostream& os, const rational<I>& r)
 template<typename T, typename I>
 T rational_cast(const rational<I>& r);
 
-} // namespace jami
+} // namespace sip_core
 
 namespace std {
 template<>

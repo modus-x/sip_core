@@ -24,7 +24,7 @@
 #include "logger.h"
 #include <yaml-cpp/yaml.h>
 
-namespace jami {
+namespace sip_core {
 namespace yaml_utils {
 
 // set T to the value stored at key, or leaves T unchanged
@@ -44,7 +44,7 @@ parseValueOptional(const YAML::Node& node, const char* key, T& value)
         parseValue(node, key, value);
         return true;
     } catch (const std::exception& e) {
-        // JAMI_DBG("Can't read yaml field: %s", key);
+        // SIP_CORE_DBG("Can't read yaml field: %s", key);
     }
     return false;
 }
@@ -57,4 +57,4 @@ std::vector<std::map<std::string, std::string>> parseVectorMap(
 std::set<std::string> parseVector(const YAML::Node& node);
 
 } // namespace yaml_utils
-} // namespace jami
+} // namespace sip_core

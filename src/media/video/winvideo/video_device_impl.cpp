@@ -36,7 +36,7 @@
 
 #include <dshow.h>
 
-namespace jami {
+namespace sip_core {
 namespace video {
 
 class VideoDeviceImpl
@@ -128,7 +128,7 @@ VideoDeviceImpl::setup()
     }
     pDevEnum->Release();
     if (FAILED(hr) || pEnum == nullptr) {
-        JAMI_ERR() << "No webcam found";
+        SIP_CORE_ERR() << "No webcam found";
         return;
     }
 
@@ -230,17 +230,17 @@ VideoDeviceImpl::setup()
     cInterface->streamConf_->GetNumberOfCapabilities(&piCount, &piSize);
     AM_MEDIA_TYPE* pmt;
     VIDEO_STREAM_CONFIG_CAPS pSCC;
-    std::map<std::pair<jami::video::VideoSize, jami::video::FrameRate>, LONG> bitrateList;
+    std::map<std::pair<sip_core::video::VideoSize, sip_core::video::FrameRate>, LONG> bitrateList;
     for (int i = 0; i < piCount; i++) {
         cInterface->streamConf_->GetStreamCaps(i, &pmt, (BYTE*) &pSCC);
         if (pmt->formattype != FORMAT_VideoInfo) {
             continue;
         }
         auto videoInfo = (VIDEOINFOHEADER*) pmt->pbFormat;
-        auto size = jami::video::VideoSize(videoInfo->bmiHeader.biWidth,
+        auto size = sip_core::video::VideoSize(videoInfo->bmiHeader.biWidth,
                                            videoInfo->bmiHeader.biHeight);
         // use 1e7 / MinFrameInterval to get maximum fps
-        auto rate = jami::video::FrameRate(1e7, pSCC.MinFrameInterval);
+        auto rate = sip_core::video::FrameRate(1e7, pSCC.MinFrameInterval);
         auto bitrate = videoInfo->dwBitRate;
         // Only add configurations with positive bitrates.
         if (bitrate == 0)
@@ -314,7 +314,7 @@ VideoDeviceImpl::setDeviceParams(const DeviceParams& params)
             ((VIDEOINFOHEADER*) pmt->pbFormat)->AvgTimePerFrame
                 = (FrameRate(1e7) / params.framerate).real();
             if (FAILED(cInterface->streamConf_->SetFormat(pmt))) {
-                JAMI_ERR("Could not set settings.");
+                SIP_CORE_ERR("Could not set settings.");
             }
         }
     }
@@ -387,4 +387,4 @@ VideoDevice::getRateList(const std::string& channel, VideoSize size) const
 VideoDevice::~VideoDevice() {}
 
 } // namespace video
-} // namespace jami
+} // namespace sip_core

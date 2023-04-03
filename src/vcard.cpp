@@ -30,7 +30,7 @@ toMap(std::string_view content)
     std::map<std::string, std::string> vCard;
 
     std::string_view line;
-    while (jami::getline(content, line)) {
+    while (sip_core::getline(content, line)) {
         if (line.size()) {
             const auto dblptPos = line.find(':');
             if (dblptPos == std::string::npos)

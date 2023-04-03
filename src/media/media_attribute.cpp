@@ -19,11 +19,11 @@
  */
 
 #include "media/media_attribute.h"
-#include "jami/media_const.h"
+#include "sip_core/media_const.h"
 
-namespace jami {
+namespace sip_core {
 
-MediaAttribute::MediaAttribute(const libjami::MediaMap& mediaMap, bool secure)
+MediaAttribute::MediaAttribute(const libsip_core::MediaMap& mediaMap, bool secure)
 {
     std::pair<bool, MediaType> pairType = getMediaType(mediaMap);
     if (pairType.first)
@@ -31,24 +31,24 @@ MediaAttribute::MediaAttribute(const libjami::MediaMap& mediaMap, bool secure)
 
     std::pair<bool, bool> pairBool;
 
-    pairBool = getBoolValue(mediaMap, libjami::Media::MediaAttributeKey::MUTED);
+    pairBool = getBoolValue(mediaMap, libsip_core::Media::MediaAttributeKey::MUTED);
     if (pairBool.first)
         muted_ = pairBool.second;
 
-    pairBool = getBoolValue(mediaMap, libjami::Media::MediaAttributeKey::ENABLED);
+    pairBool = getBoolValue(mediaMap, libsip_core::Media::MediaAttributeKey::ENABLED);
     if (pairBool.first)
         enabled_ = pairBool.second;
 
     std::pair<bool, std::string> pairString;
-    pairString = getStringValue(mediaMap, libjami::Media::MediaAttributeKey::SOURCE);
+    pairString = getStringValue(mediaMap, libsip_core::Media::MediaAttributeKey::SOURCE);
     if (pairBool.first)
         sourceUri_ = pairString.second;
 
-    pairString = getStringValue(mediaMap, libjami::Media::MediaAttributeKey::LABEL);
+    pairString = getStringValue(mediaMap, libsip_core::Media::MediaAttributeKey::LABEL);
     if (pairBool.first)
         label_ = pairString.second;
 
-    pairBool = getBoolValue(mediaMap, libjami::Media::MediaAttributeKey::ON_HOLD);
+    pairBool = getBoolValue(mediaMap, libsip_core::Media::MediaAttributeKey::ON_HOLD);
     if (pairBool.first)
         onHold_ = pairBool.second;
 
@@ -56,7 +56,7 @@ MediaAttribute::MediaAttribute(const libjami::MediaMap& mediaMap, bool secure)
 }
 
 std::vector<MediaAttribute>
-MediaAttribute::buildMediaAttributesList(const std::vector<libjami::MediaMap>& mediaList, bool secure)
+MediaAttribute::buildMediaAttributesList(const std::vector<libsip_core::MediaMap>& mediaList, bool secure)
 {
     std::vector<MediaAttribute> mediaAttrList;
     mediaAttrList.reserve(mediaList.size());
@@ -71,24 +71,24 @@ MediaAttribute::buildMediaAttributesList(const std::vector<libjami::MediaMap>& m
 MediaType
 MediaAttribute::stringToMediaType(const std::string& mediaType)
 {
-    if (mediaType.compare(libjami::Media::MediaAttributeValue::AUDIO) == 0)
+    if (mediaType.compare(libsip_core::Media::MediaAttributeValue::AUDIO) == 0)
         return MediaType::MEDIA_AUDIO;
-    if (mediaType.compare(libjami::Media::MediaAttributeValue::VIDEO) == 0)
+    if (mediaType.compare(libsip_core::Media::MediaAttributeValue::VIDEO) == 0)
         return MediaType::MEDIA_VIDEO;
     return MediaType::MEDIA_NONE;
 }
 
 std::pair<bool, MediaType>
-MediaAttribute::getMediaType(const libjami::MediaMap& map)
+MediaAttribute::getMediaType(const libsip_core::MediaMap& map)
 {
-    const auto& iter = map.find(libjami::Media::MediaAttributeKey::MEDIA_TYPE);
+    const auto& iter = map.find(libsip_core::Media::MediaAttributeKey::MEDIA_TYPE);
     if (iter == map.end()) {
         return {false, MediaType::MEDIA_NONE};
     }
 
     auto type = stringToMediaType(iter->second);
     if (type == MediaType::MEDIA_NONE) {
-        JAMI_ERR("Invalid value [%s] for a media type key in media map", iter->second.c_str());
+        SIP_CORE_ERR("Invalid value [%s] for a media type key in media map", iter->second.c_str());
         return {false, type};
     }
 
@@ -96,7 +96,7 @@ MediaAttribute::getMediaType(const libjami::MediaMap& map)
 }
 
 std::pair<bool, bool>
-MediaAttribute::getBoolValue(const libjami::MediaMap& map, const std::string& key)
+MediaAttribute::getBoolValue(const libsip_core::MediaMap& map, const std::string& key)
 {
     const auto& iter = map.find(key);
     if (iter == map.end()) {
@@ -109,12 +109,12 @@ MediaAttribute::getBoolValue(const libjami::MediaMap& map, const std::string& ke
     if (value.compare(FALSE_STR) == 0)
         return {true, false};
 
-    JAMI_ERR("Invalid value %s for a boolean key", value.c_str());
+    SIP_CORE_ERR("Invalid value %s for a boolean key", value.c_str());
     return {false, false};
 }
 
 std::pair<bool, std::string>
-MediaAttribute::getStringValue(const libjami::MediaMap& map, const std::string& key)
+MediaAttribute::getStringValue(const libsip_core::MediaMap& map, const std::string& key)
 {
     const auto& iter = map.find(key);
     if (iter == map.end()) {
@@ -134,9 +134,9 @@ char const*
 MediaAttribute::mediaTypeToString(MediaType type)
 {
     if (type == MediaType::MEDIA_AUDIO)
-        return libjami::Media::MediaAttributeValue::AUDIO;
+        return libsip_core::Media::MediaAttributeValue::AUDIO;
     if (type == MediaType::MEDIA_VIDEO)
-        return libjami::Media::MediaAttributeValue::VIDEO;
+        return libsip_core::Media::MediaAttributeValue::VIDEO;
     return nullptr;
 }
 
@@ -149,26 +149,26 @@ MediaAttribute::hasMediaType(const std::vector<MediaAttribute>& mediaList, Media
               });
 }
 
-libjami::MediaMap
+libsip_core::MediaMap
 MediaAttribute::toMediaMap(const MediaAttribute& mediaAttr)
 {
-    libjami::MediaMap mediaMap;
+    libsip_core::MediaMap mediaMap;
 
-    mediaMap.emplace(libjami::Media::MediaAttributeKey::MEDIA_TYPE,
+    mediaMap.emplace(libsip_core::Media::MediaAttributeKey::MEDIA_TYPE,
                      mediaTypeToString(mediaAttr.type_));
-    mediaMap.emplace(libjami::Media::MediaAttributeKey::LABEL, mediaAttr.label_);
-    mediaMap.emplace(libjami::Media::MediaAttributeKey::ENABLED, boolToString(mediaAttr.enabled_));
-    mediaMap.emplace(libjami::Media::MediaAttributeKey::MUTED, boolToString(mediaAttr.muted_));
-    mediaMap.emplace(libjami::Media::MediaAttributeKey::SOURCE, mediaAttr.sourceUri_);
-    mediaMap.emplace(libjami::Media::MediaAttributeKey::ON_HOLD, boolToString(mediaAttr.onHold_));
+    mediaMap.emplace(libsip_core::Media::MediaAttributeKey::LABEL, mediaAttr.label_);
+    mediaMap.emplace(libsip_core::Media::MediaAttributeKey::ENABLED, boolToString(mediaAttr.enabled_));
+    mediaMap.emplace(libsip_core::Media::MediaAttributeKey::MUTED, boolToString(mediaAttr.muted_));
+    mediaMap.emplace(libsip_core::Media::MediaAttributeKey::SOURCE, mediaAttr.sourceUri_);
+    mediaMap.emplace(libsip_core::Media::MediaAttributeKey::ON_HOLD, boolToString(mediaAttr.onHold_));
 
     return mediaMap;
 }
 
-std::vector<libjami::MediaMap>
+std::vector<libsip_core::MediaMap>
 MediaAttribute::mediaAttributesToMediaMaps(std::vector<MediaAttribute> mediaAttrList)
 {
-    std::vector<libjami::MediaMap> mediaList;
+    std::vector<libsip_core::MediaMap> mediaList;
     mediaAttrList.reserve(mediaAttrList.size());
     for (auto const& media : mediaAttrList) {
         mediaList.emplace_back(toMediaMap(media));
@@ -198,4 +198,4 @@ MediaAttribute::toString(bool full) const
 
     return descr.str();
 }
-} // namespace jami
+} // namespace sip_core

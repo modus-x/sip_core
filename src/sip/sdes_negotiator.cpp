@@ -31,7 +31,7 @@
 
 #include <cstdio>
 
-namespace jami {
+namespace sip_core {
 
 std::vector<CryptoAttribute>
 SdesNegotiator::parse(const std::vector<std::string>& attributes)
@@ -155,4 +155,4 @@ SdesNegotiator::negotiate(const std::vector<std::string>& attributes)
     return {};
 }
 
-} // namespace jami
+} // namespace sip_core

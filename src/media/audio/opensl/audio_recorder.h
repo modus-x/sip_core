@@ -25,7 +25,7 @@
 #include "buf_manager.h"
 #include "noncopyable.h"
 
-namespace jami {
+namespace sip_core {
 namespace opensl {
 
 class AudioRecorder
@@ -34,7 +34,7 @@ class AudioRecorder
     SLRecordItf recItf_;
     SLAndroidSimpleBufferQueueItf recBufQueueItf_;
 
-    jami::AudioFormat sampleInfo_;
+    sip_core::AudioFormat sampleInfo_;
     AudioQueue* freeQueue_ {nullptr};                            // user
     AudioQueue* recQueue_ {nullptr};                             // user
     AudioQueue devShadowQueue_ {DEVICE_SHADOW_BUFFER_QUEUE_LEN}; // owner
@@ -46,7 +46,7 @@ class AudioRecorder
     bool hasNativeNS_ {false};
 
 public:
-    explicit AudioRecorder(jami::AudioFormat, size_t bufSize, SLEngineItf engineEngine);
+    explicit AudioRecorder(sip_core::AudioFormat, size_t bufSize, SLEngineItf engineEngine);
     ~AudioRecorder();
     NON_COPYABLE(AudioRecorder);
 
@@ -62,4 +62,4 @@ public:
 };
 
 } // namespace opensl
-} // namespace jami
+} // namespace sip_core

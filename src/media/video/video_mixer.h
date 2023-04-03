@@ -32,7 +32,7 @@
 #include <memory>
 #include <shared_mutex>
 
-namespace jami {
+namespace sip_core {
 namespace video {
 
 class SinkClient;
@@ -205,4 +205,4 @@ private:
 };
 
 } // namespace video
-} // namespace jami
+} // namespace sip_core

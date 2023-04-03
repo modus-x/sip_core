@@ -35,7 +35,7 @@
 
 #include "logger.h"
 
-namespace jami {
+namespace sip_core {
 
 void
 AudioFile::onBufferFinish()
@@ -44,12 +44,12 @@ AudioFile::onBufferFinish()
     const int divisor = buffer_->getSampleRate() / 1000;
 
     if (divisor == 0) {
-        JAMI_ERR("Error cannot update playback slider, sampling rate is 0");
+        SIP_CORE_ERR("Error cannot update playback slider, sampling rate is 0");
         return;
     }
 
     if ((updatePlaybackScale_ % 5) == 0)
-        emitSignal<libjami::CallSignal::UpdatePlaybackScale>(filepath_,
+        emitSignal<libsip_core::CallSignal::UpdatePlaybackScale>(filepath_,
                                                            (unsigned) (pos_ / divisor),
                                                            (unsigned) (buffer_->frames() / divisor));
 
@@ -85,4 +85,4 @@ AudioFile::AudioFile(const std::string& fileName, unsigned int sampleRate)
     buffer_ = buf.release();
 }
 
-} // namespace jami
+} // namespace sip_core

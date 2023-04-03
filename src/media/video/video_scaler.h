@@ -30,7 +30,7 @@ extern "C" {
 struct AVFrame;
 }
 
-namespace jami {
+namespace sip_core {
 namespace video {
 
 class VideoScaler
@@ -59,6 +59,6 @@ private:
 };
 
 } // namespace video
-} // namespace jami
+} // namespace sip_core
 
 #endif // __VIDEO_SCALER_H__

@@ -52,7 +52,7 @@ struct pj_ice_sess_cand;
 struct pjsip_rx_data;
 }
 
-namespace jami {
+namespace sip_core {
 
 class Sdp;
 class SIPAccountBase;
@@ -95,7 +95,7 @@ public:
     SIPCall(const std::shared_ptr<SIPAccountBase>& account,
             const std::string& id,
             Call::CallType type,
-            const std::vector<libjami::MediaMap>& mediaList);
+            const std::vector<libsip_core::MediaMap>& mediaList);
 
     // Inherited from Call class
     LinkType getLinkType() const override { return LINK_TYPE; }
@@ -106,10 +106,10 @@ private:
 
 public:
     void answer() override;
-    void answer(const std::vector<libjami::MediaMap>& mediaList) override;
-    bool checkMediaChangeRequest(const std::vector<libjami::MediaMap>& remoteMediaList) override;
-    void handleMediaChangeRequest(const std::vector<libjami::MediaMap>& remoteMediaList) override;
-    void answerMediaChangeRequest(const std::vector<libjami::MediaMap>& mediaList,
+    void answer(const std::vector<libsip_core::MediaMap>& mediaList) override;
+    bool checkMediaChangeRequest(const std::vector<libsip_core::MediaMap>& remoteMediaList) override;
+    void handleMediaChangeRequest(const std::vector<libsip_core::MediaMap>& remoteMediaList) override;
+    void answerMediaChangeRequest(const std::vector<libsip_core::MediaMap>& mediaList,
                                   bool isRemote = false) override;
     void hangup(int reason) override;
     void refuse() override;
@@ -120,8 +120,8 @@ public:
     void switchInput(const std::string& resource = {}) override;
     void peerHungup() override;
     void carryingDTMFdigits(char code) override;
-    bool requestMediaChange(const std::vector<libjami::MediaMap>& mediaList) override;
-    std::vector<libjami::MediaMap> currentMediaList() const override;
+    bool requestMediaChange(const std::vector<libsip_core::MediaMap>& mediaList) override;
+    std::vector<libsip_core::MediaMap> currentMediaList() const override;
     void sendTextMessage(const std::map<std::string, std::string>& messages,
                          const std::string& from) override;
     void removeCall() override;
@@ -429,4 +429,4 @@ getPtr(SIPCall& call)
     return std::static_pointer_cast<SIPCall>(call.shared_from_this());
 }
 
-} // namespace jami
+} // namespace sip_core

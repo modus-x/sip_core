@@ -42,7 +42,7 @@
 #include <list>
 #include <memory>
 
-namespace jami {
+namespace sip_core {
 
 class ChannelSocket;
 class SIPAccountBase;
@@ -56,7 +56,7 @@ struct TlsListener
     {}
     virtual ~TlsListener()
     {
-        JAMI_DBG("Destroying listener");
+        SIP_CORE_DBG("Destroying listener");
         listener->destroy(listener);
     }
     pjsip_tpfactory* get() { return listener; }
@@ -191,4 +191,4 @@ private:
     std::atomic_bool isDestroying_ {false};
 };
 
-} // namespace jami
+} // namespace sip_core

@@ -20,7 +20,7 @@
 #include "scheduled_executor.h"
 #include "logger.h"
 
-namespace jami {
+namespace sip_core {
 
 std::atomic<uint64_t> task_cookie = {0};
 
@@ -144,9 +144,9 @@ ScheduledExecutor::loop()
         try {
             job.fn();
         } catch (const std::exception& e) {
-            JAMI_ERR("Exception running job: %s", e.what());
+            SIP_CORE_ERR("Exception running job: %s", e.what());
         }
     }
 }
 
-} // namespace jami
+} // namespace sip_core

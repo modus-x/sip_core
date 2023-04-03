@@ -63,7 +63,7 @@ extern "C" {
 
 #define INVALID_SOCKET (-1)
 
-namespace jami {
+namespace sip_core {
 
 /**
  * Binary representation of an IP address.
@@ -351,4 +351,4 @@ bool haveCommonAddr(const std::vector<IpAddr>& a, const std::vector<IpAddr>& b);
 std::vector<IpAddr> getLocalNameservers();
 
 } // namespace ip_utils
-} // namespace jami
+} // namespace sip_core

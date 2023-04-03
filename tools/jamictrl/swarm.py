@@ -18,7 +18,7 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
-from controller import libjamiCtrl
+from controller import libsip_coreCtrl
 
 import argparse
 import sys
@@ -31,7 +31,7 @@ parser.add_argument('--account', help='Account to use', metavar='<account>', typ
 
 args = parser.parse_args()
 
-ctrl = libjamiCtrl(sys.argv[0], False)
+ctrl = libsip_coreCtrl(sys.argv[0], False)
 if not args.account:
     for account in ctrl.getAllEnabledAccounts():
         details = ctrl.getAccountDetails(account)

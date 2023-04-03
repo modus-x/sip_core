@@ -38,7 +38,7 @@
 
 #include "client/ring_signal.h"
 #include "account_schema.h"
-#include "jami/account_const.h"
+#include "sip_core/account_const.h"
 #include "string_utils.h"
 #include "fileutils.h"
 #include "config/yamlparser.h"
@@ -51,17 +51,17 @@
 
 #include "connectivity/ip_utils.h"
 #include "compiler_intrinsics.h"
-#include "jami/account_const.h"
+#include "sip_core/account_const.h"
 
 #include <fmt/ranges.h>
 
 using namespace std::literals;
 
-namespace jami {
+namespace sip_core {
 
 // For portability, do not specify the absolute file name of the ringtone. 
 // Instead, specify its base name to be looked in
-// JAMI_DATADIR/ringtones/, where JAMI_DATADIR is a preprocessor macro denoting
+// SIP_CORE_DATADIR/ringtones/, where SIP_CORE_DATADIR is a preprocessor macro denoting
 // the data directory prefix that must be set at build time.
 const std::string Account::DEFAULT_USER_AGENT = Account::getDefaultUserAgent();
 
@@ -99,12 +99,12 @@ Account::setRegistrationState(RegistrationState state,
                          detail_code,
                          detail_str,
                          details = getVolatileAccountDetails()] {
-            emitSignal<libjami::ConfigurationSignal::RegistrationStateChanged>(accountId,
+            emitSignal<libsip_core::ConfigurationSignal::RegistrationStateChanged>(accountId,
                                                                              state,
                                                                              detail_code,
                                                                              detail_str);
 
-            emitSignal<libjami::ConfigurationSignal::VolatileDetailsChanged>(accountId, details);
+            emitSignal<libsip_core::ConfigurationSignal::VolatileDetailsChanged>(accountId, details);
         });
     }
 }
@@ -142,7 +142,7 @@ Account::loadConfig()
     // If the user defined a custom ringtone, the file may not exists
     // In this case, fallback on the default ringtone path
     if (!fileutils::isFile(ringtonePath_)) {
-        JAMI_WARNING("Ringtone {} is not a valid file", ringtonePath_);
+        SIP_CORE_WARNING("Ringtone {} is not a valid file", ringtonePath_);
         ringtonePath_ = fileutils::getFullPath(ringtoneDir, DEFAULT_RINGTONE_PATH);
     }
 }
@@ -157,7 +157,7 @@ std::map<std::string, std::string>
 Account::getVolatileAccountDetails() const
 {
     return {{Conf::CONFIG_ACCOUNT_REGISTRATION_STATUS, mapStateNumberToString(registrationState_)},
-            {libjami::Account::VolatileProperties::ACTIVE, active_ ? TRUE_STR : FALSE_STR}};
+            {libsip_core::Account::VolatileProperties::ACTIVE, active_ ? TRUE_STR : FALSE_STR}};
 }
 
 bool
@@ -217,7 +217,7 @@ Account::mapStateNumberToString(RegistrationState state)
         CASE_STATE(ERROR_NEED_MIGRATION);
         CASE_STATE(INITIALIZING);
     default:
-        return libjami::Account::States::ERROR_GENERIC;
+        return libsip_core::Account::States::ERROR_GENERIC;
     }
 
 #undef CASE_STATE
@@ -232,14 +232,14 @@ Account::getDefaultCodecsId()
 std::map<std::string, std::string>
 Account::getDefaultCodecDetails(const unsigned& codecId)
 {
-    auto codec = jami::getSystemCodecContainer()->searchCodecById(codecId, jami::MEDIA_ALL);
+    auto codec = sip_core::getSystemCodecContainer()->searchCodecById(codecId, sip_core::MEDIA_ALL);
     if (codec) {
-        if (codec->mediaType & jami::MEDIA_AUDIO) {
-            auto audioCodec = std::static_pointer_cast<jami::SystemAudioCodecInfo>(codec);
+        if (codec->mediaType & sip_core::MEDIA_AUDIO) {
+            auto audioCodec = std::static_pointer_cast<sip_core::SystemAudioCodecInfo>(codec);
             return audioCodec->getCodecSpecifications();
         }
-        if (codec->mediaType & jami::MEDIA_VIDEO) {
-            auto videoCodec = std::static_pointer_cast<jami::SystemVideoCodecInfo>(codec);
+        if (codec->mediaType & sip_core::MEDIA_VIDEO) {
+            auto videoCodec = std::static_pointer_cast<sip_core::SystemVideoCodecInfo>(codec);
             return videoCodec->getCodecSpecifications();
         }
     }
@@ -372,7 +372,7 @@ Account::getUserAgentName()
 std::string
 Account::getDefaultUserAgent()
 {
-    return fmt::format("{:s} {:s} ({:s})", "Svetets Svetophone", libjami::version(), libjami::platform());
+    return fmt::format("{:s} {:s} ({:s})", "Svetets Svetophone", libsip_core::version(), libsip_core::platform());
 }
 
 void
@@ -399,4 +399,4 @@ Account::meetMinimumRequiredVersion(const std::vector<unsigned>& version,
     }
     return true;
 }
-} // namespace jami
+} // namespace sip_core

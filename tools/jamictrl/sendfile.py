@@ -17,14 +17,14 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301 USA.
 
-from controller import libjamiCtrl
+from controller import libsip_coreCtrl
 
 import argparse
 import sys
 import signal
 import os.path
 
-class Controller(libjamiCtrl):
+class Controller(libsip_coreCtrl):
     def onDataTransferEvent(self, transferId, code):
         if code == 6:
             print("transfer %u has been cancelled by host" % transferId)

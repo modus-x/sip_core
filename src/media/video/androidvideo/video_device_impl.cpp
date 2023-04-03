@@ -32,7 +32,7 @@
 #include <vector>
 #include <array>
 
-namespace jami {
+namespace sip_core {
 namespace video {
 
 /*
@@ -100,15 +100,15 @@ VideoDeviceImpl::selectFormat()
             }
         }
         if (f == and_formats.end())
-            JAMI_WARN("AndroidVideo: No format matching %d", fmt);
+            SIP_CORE_WARN("AndroidVideo: No format matching %d", fmt);
     }
 
     if (best != UINT_MAX) {
         fmt_ = &and_formats[best];
-        JAMI_DBG("AndroidVideo: picked format %s", fmt_->name.c_str());
+        SIP_CORE_DBG("AndroidVideo: picked format %s", fmt_->name.c_str());
     } else {
         fmt_ = &and_formats[0];
-        JAMI_ERR("AndroidVideo: Could not find a known format to use");
+        SIP_CORE_ERR("AndroidVideo: Could not find a known format to use");
     }
 }
 
@@ -120,7 +120,7 @@ VideoDeviceImpl::VideoDeviceImpl(const std::string& path)
     formats_.reserve(16);
     sizes.reserve(16);
     rates.reserve(16);
-    emitSignal<libjami::VideoSignal::GetCameraInfo>(name, &formats_, &sizes, &rates);
+    emitSignal<libsip_core::VideoSignal::GetCameraInfo>(name, &formats_, &sizes, &rates);
     for (size_t i = 0, n = sizes.size(); i < n; i += 2)
         sizes_.emplace_back(sizes[i], sizes[i + 1]);
     for (const auto& r : rates)
@@ -183,7 +183,7 @@ VideoDeviceImpl::setDeviceParams(const DeviceParams& params)
 {
     size_ = getSize({params.width, params.height});
     rate_ = getRate(params.framerate);
-    emitSignal<libjami::VideoSignal::SetParameters>(name,
+    emitSignal<libsip_core::VideoSignal::SetParameters>(name,
                                                   fmt_->code,
                                                   size_.first,
                                                   size_.second,
@@ -231,4 +231,4 @@ VideoDevice::getRateList(const std::string& /* channel */, VideoSize /* size */)
 VideoDevice::~VideoDevice() {}
 
 } // namespace video
-} // namespace jami
+} // namespace sip_core

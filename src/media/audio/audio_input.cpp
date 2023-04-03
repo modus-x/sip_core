@@ -21,7 +21,7 @@
 
 #include "audio_frame_resizer.h"
 #include "audio_input.h"
-#include "jami/media_const.h"
+#include "sip_core/media_const.h"
 #include "fileutils.h" // access
 #include "manager.h"
 #include "media_decoder.h"
@@ -33,7 +33,7 @@
 #include <future>
 #include <memory>
 
-namespace jami {
+namespace sip_core {
 
 static constexpr auto MS_PER_PACKET = std::chrono::milliseconds(20);
 
@@ -51,7 +51,7 @@ AudioInput::AudioInput(const std::string& id)
     , deviceGuard_()
     , loop_([] { return true; }, [this] { process(); }, [] {})
 {
-    JAMI_DBG() << "Creating audio input with id: " << id;
+    SIP_CORE_DBG() << "Creating audio input with id: " << id;
 }
 
 AudioInput::AudioInput(const std::string& id, const std::string& resource)
@@ -137,7 +137,7 @@ AudioInput::readFromDevice()
         audioFrame = resampler_->resample(std::move(audioFrame), format_);
     resizer_->enqueue(std::move(audioFrame));
 
-    jami_tracepoint(audio_input_read_from_device_end, id_.c_str());
+    sip_core_tracepoint(audio_input_read_from_device_end, id_.c_str());
 }
 
 void
@@ -165,10 +165,10 @@ AudioInput::readFromFile()
         createDecoder();
         break;
     case MediaDemuxer::Status::ReadError:
-        JAMI_ERR() << "Failed to decode frame";
+        SIP_CORE_ERR() << "Failed to decode frame";
         break;
     case MediaDemuxer::Status::ReadBufferOverflow:
-        JAMI_ERR() << "Read buffer overflow detected";
+        SIP_CORE_ERR() << "Read buffer overflow detected";
         break;
     case MediaDemuxer::Status::FallBack:
         break;
@@ -238,7 +238,7 @@ bool
 AudioInput::initFile(const std::string& path)
 {
     if (access(path.c_str(), R_OK) != 0) {
-        JAMI_ERR() << "File '" << path << "' not available";
+        SIP_CORE_ERR() << "File '" << path << "' not available";
         return false;
     }
 
@@ -248,7 +248,7 @@ AudioInput::initFile(const std::string& path)
     devOpts_.loop = "1";
     // sets devOpts_'s sample rate and number of channels
     if (!createDecoder()) {
-        JAMI_WARN() << "Cannot decode audio from file, switching back to default device";
+        SIP_CORE_WARN() << "Cannot decode audio from file, switching back to default device";
         return initDevice("");
     }
     fileBuf_ = Manager::instance().getRingBufferPool().createRingBuffer(fileId_);
@@ -267,7 +267,7 @@ AudioInput::switchInput(const std::string& resource)
     // Always switch inputs, even if it's the same resource, so audio will be in sync with video
     std::unique_lock<std::mutex> lk(resourceMutex_);
 
-    JAMI_DBG() << "Switching audio source to match '" << resource << "'";
+    SIP_CORE_DBG() << "Switching audio source to match '" << resource << "'";
 
     auto oldGuard = std::move(deviceGuard_);
 
@@ -291,7 +291,7 @@ AudioInput::switchInput(const std::string& resource)
         if (initDevice(""))
             foundDevOpts(devOpts_);
     } else {
-        static const std::string& sep = libjami::Media::VideoProtocolPrefix::SEPARATOR;
+        static const std::string& sep = libsip_core::Media::VideoProtocolPrefix::SEPARATOR;
         const auto pos = resource.find(sep);
         if (pos == std::string::npos)
             return {};
@@ -302,7 +302,7 @@ AudioInput::switchInput(const std::string& resource)
 
         const auto suffix = resource.substr(pos + sep.size());
         bool ready = false;
-        if (prefix == libjami::Media::VideoProtocolPrefix::FILE)
+        if (prefix == libsip_core::Media::VideoProtocolPrefix::FILE)
             ready = initFile(suffix);
         else
             ready = initDevice(suffix);
@@ -348,13 +348,13 @@ AudioInput::createDecoder()
         [](void* data) -> int { return not static_cast<AudioInput*>(data)->isCapturing(); }, this);
 
     if (decoder->openInput(devOpts_) < 0) {
-        JAMI_ERR() << "Could not open input '" << devOpts_.input << "'";
+        SIP_CORE_ERR() << "Could not open input '" << devOpts_.input << "'";
         foundDevOpts(devOpts_);
         return false;
     }
 
     if (decoder->setupAudio() < 0) {
-        JAMI_ERR() << "Could not setup decoder for '" << devOpts_.input << "'";
+        SIP_CORE_ERR() << "Could not setup decoder for '" << devOpts_.input << "'";
         foundDevOpts(devOpts_);
         return false;
     }
@@ -362,7 +362,7 @@ AudioInput::createDecoder()
     auto ms = decoder->getStream(devOpts_.input);
     devOpts_.channel = ms.nbChannels;
     devOpts_.framerate = ms.sampleRate;
-    JAMI_DBG() << "Created audio decoder: " << ms;
+    SIP_CORE_DBG() << "Created audio decoder: " << ms;
 
     decoder_ = std::move(decoder);
     foundDevOpts(devOpts_);
@@ -380,7 +380,7 @@ AudioInput::setFormat(const AudioFormat& fmt)
 void
 AudioInput::setMuted(bool isMuted)
 {
-    JAMI_WARN("Audio Input muted [%s]", isMuted ? "YES" : "NO");
+    SIP_CORE_WARN("Audio Input muted [%s]", isMuted ? "YES" : "NO");
     muteState_ = isMuted;
 }
 
@@ -399,4 +399,4 @@ AudioInput::getInfo(const std::string& name) const
     return ms;
 }
 
-} // namespace jami
+} // namespace sip_core

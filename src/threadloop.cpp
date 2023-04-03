@@ -23,7 +23,7 @@
 
 #include <ciso646> // fix windows compiler bug
 
-namespace jami {
+namespace sip_core {
 
 void
 ThreadLoop::mainloop(std::thread::id& tid,
@@ -38,12 +38,12 @@ ThreadLoop::mainloop(std::thread::id& tid,
                 process();
             cleanup();
         } else {
-            JAMI_ERR("setup failed");
+            SIP_CORE_ERR("setup failed");
         }
     } catch (const ThreadLoopException& e) {
-        JAMI_ERR("[threadloop:%p] ThreadLoopException: %s", this, e.what());
+        SIP_CORE_ERR("[threadloop:%p] ThreadLoopException: %s", this, e.what());
     } catch (const std::exception& e) {
-        JAMI_ERR("[threadloop:%p] Unwaited exception: %s", this, e.what());
+        SIP_CORE_ERR("[threadloop:%p] Unwaited exception: %s", this, e.what());
     }
     stop();
 }
@@ -60,7 +60,7 @@ ThreadLoop::ThreadLoop(const std::function<bool()>& setup,
 ThreadLoop::~ThreadLoop()
 {
     if (isRunning()) {
-        JAMI_ERR("join() should be explicitly called in owner's destructor");
+        SIP_CORE_ERR("join() should be explicitly called in owner's destructor");
         join();
     }
 }
@@ -71,13 +71,13 @@ ThreadLoop::start()
     const auto s = state_.load();
 
     if (s == ThreadState::RUNNING) {
-        JAMI_ERR("already started");
+        SIP_CORE_ERR("already started");
         return;
     }
 
     // stop pending but not processed by thread yet?
     if (s == ThreadState::STOPPING and thread_.joinable()) {
-        JAMI_DBG("stop pending");
+        SIP_CORE_DBG("stop pending");
         thread_.join();
     }
 
@@ -131,4 +131,4 @@ InterruptedThreadLoop::stop()
     ThreadLoop::stop();
     cv_.notify_one();
 }
-} // namespace jami
+} // namespace sip_core

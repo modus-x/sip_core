@@ -17,7 +17,7 @@
 #pragma once
 #include "sipaccountbase_config.h"
 
-namespace jami {
+namespace sip_core {
 constexpr static std::string_view ACCOUNT_TYPE_SIP = "SIP";
 
 struct SipAccountConfig : public SipAccountBaseConfig {

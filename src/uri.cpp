@@ -19,13 +19,13 @@
  */
 #include "uri.h"
 
-namespace jami {
+namespace sip_core {
 
 Uri::Uri(const std::string_view& uri)
 {
     // TODO better handling of Uri, for now it's only used for
     // setMessageDisplayed to differentiate swarm:xxx
-    scheme_ = Uri::Scheme::JAMI;
+    scheme_ = Uri::Scheme::SIP_CORE;
     auto posSep = uri.find(':');
     if (posSep != std::string::npos) {
         auto scheme_str = uri.substr(0, posSep);
@@ -33,8 +33,8 @@ Uri::Uri(const std::string_view& uri)
             scheme_ = Uri::Scheme::SIP;
         else if (scheme_str == "swarm")
             scheme_ = Uri::Scheme::SWARM;
-        else if (scheme_str == "jami")
-            scheme_ = Uri::Scheme::JAMI;
+        else if (scheme_str == "sip_core")
+            scheme_ = Uri::Scheme::SIP_CORE;
         else if (scheme_str == "data-transfer")
             scheme_ = Uri::Scheme::DATA_TRANSFER;
         else if (scheme_str == "git")
@@ -83,11 +83,11 @@ Uri::schemeToString() const
         return "git";
     case Uri::Scheme::SYNC:
         return "sync";
-    case Uri::Scheme::JAMI:
+    case Uri::Scheme::SIP_CORE:
     case Uri::Scheme::UNRECOGNIZED:
     default:
-        return "jami";
+        return "sip_core";
     }
 }
 
-} // namespace jami
+} // namespace sip_core

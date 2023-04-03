@@ -17,7 +17,7 @@
 #pragma once
 #include "account_config.h"
 
-namespace jami {
+namespace sip_core {
 constexpr static const char* const OVERRTP_STR = "overrtp";
 constexpr static const char* const SIPINFO_STR = "sipinfo";
 constexpr static unsigned MAX_PORT {65536};

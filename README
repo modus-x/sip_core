@@ -19,7 +19,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 Introduction
 ------------
 
-Jami is a Voice-over-IP software phone. We want it to be:
+sip_core is a Voice-over-IP software phone. We want it to be:
 - user friendly (fast, sleek, easy to learn interface)
 - professional grade (transfers, holds, optimal audio quality)
 - compatible with Asterisk (using SIP account)
@@ -27,24 +27,24 @@ Jami is a Voice-over-IP software phone. We want it to be:
 - customizable
 
 As the SIP/audio daemon and the user interface are separate processes,
-it is easy to provide different user interfaces. Jami comes with
+it is easy to provide different user interfaces. sip_core comes with
 various graphical user interfaces and even scripts to control the daemon from
 the shell.
 
-Jami is currently used by the support team of Savoir-faire Linux Inc.
+sip_core is currently used by the support team of Savoir-faire Linux Inc.
 
 More information is available on the project homepage:
-  https://www.jami.net/
+  https://www.sip_core.net/
 
 This source tree contains the daemon application only that handles
-the business logic of Jami. UIs are located in differents repositories. See
+the business logic of sip_core. UIs are located in differents repositories. See
 the Contributing section for more information.
 
 
 Short description of content of source tree
 -------------------------------------------
 
-- src/ is the core of libjami.
+- src/ is the core of libsip_core.
 - bin/ contains applications main code.
 - bin/dbus, the D-Bus XML interfaces, and C++ bindings
 
@@ -67,7 +67,7 @@ cd native
 ../bootstrap
 make
 
-2) Then the jamid application
+2) Then the sip_cored application
 
 A) With Autotools (recommended)
 
@@ -117,7 +117,7 @@ cd native
 make
 
 3) Update directories in the file /cross-files/android_arm64_api29.txt
-4) Compile the library libjami.so
+4) Compile the library libsip_core.so
 
 cd ../../
 mkdir build
@@ -154,7 +154,7 @@ cd ../../
 ./configure  --without-dbus --prefix=<install_path>
 make
 
-If you want to link against libjamiclient and native client easiest way is to
+If you want to link against libsip_coreclient and native client easiest way is to
 add to ./configure: --prefix=<prefix_path>
 
 Do a little dance!
@@ -162,12 +162,12 @@ Do a little dance!
 How to compile in a Docker container
 -----------------------
 
-docker build --tag jami-daemon .
+docker build --tag sip_core-daemon .
 
 # To build with custom build args
 
 ```bash
-docker build --tag jami-daemon --build-arg config_args="--with-nodejs" .
+docker build --tag sip_core-daemon --build-arg config_args="--with-nodejs" .
 ```
 
 
@@ -182,7 +182,7 @@ Run: 'brew link --force gettext' to fix it.
 Clang compatibility (developers only)
 -------------------------------------
 
-It is possible to compile jamid with Clang by setting CC and CXX variables
+It is possible to compile sip_cored with Clang by setting CC and CXX variables
 to 'clang' and 'clang++' respectively when calling ./configure.
 
 Currently it is not possible to use the DBus interface mechanism, and the
@@ -199,18 +199,18 @@ clients (KDE and GNOME).
 By doing this, you will be able to call other accounts known to this server.
 
 
-Contributing to Jami
+Contributing to sip_core
 ------------------------
 
 Of course we love patches. And contributions. And spring rolls.
 
 Development website / Bug Tracker:
- - https://git.jami.net/savoirfairelinux/ring-project
+ - https://git.sip_core.net/savoirfairelinux/ring-project
 
 Repositories are hosted on Gerrit, which we use for code review. It also
 contains the client subprojects:
- - https://review.jami.net/#/admin/projects/
+ - https://review.sip_core.net/#/admin/projects/
 
 Do not hesitate to join us and post comments, suggestions, questions
-and general feedback on the Jami mailing-list:
-https://lists.gnu.org/mailman/listinfo/jami
+and general feedback on the sip_core mailing-list:
+https://lists.gnu.org/mailman/listinfo/sip_core

@@ -22,7 +22,7 @@
 
 #include "string_utils.h"
 
-namespace jami {
+namespace sip_core {
 
 namespace ProtocolKeys {
 
@@ -58,7 +58,7 @@ ConfProtocolParser::parse()
         if (version == 1) {
             parseV1();
         } else {
-            JAMI_WARN() << "Unsupported protocol version " << version;
+            SIP_CORE_WARN() << "Unsupported protocol version " << version;
         }
     } else {
         parseV0();
@@ -70,7 +70,7 @@ ConfProtocolParser::parseV0()
 {
     if (!checkAuthorization_ || !raiseHandUri_ || !setLayout_ || !setActiveParticipant_
         || !muteParticipant_ || !kickParticipant_) {
-        JAMI_ERR() << "Missing methods for ConfProtocolParser";
+        SIP_CORE_ERR() << "Missing methods for ConfProtocolParser";
         return;
     }
     // Check if all lambdas set
@@ -87,7 +87,7 @@ ConfProtocolParser::parseV0()
         }
     }
     if (!isPeerModerator) {
-        JAMI_WARN("Received conference order from a non master (%.*s)",
+        SIP_CORE_WARN("Received conference order from a non master (%.*s)",
                   (int) peerId_.size(),
                   peerId_.data());
         return;
@@ -112,7 +112,7 @@ ConfProtocolParser::parseV1()
 {
     if (!checkAuthorization_ || !setLayout_ || !raiseHand_ || !hangupParticipant_
         || !muteStreamAudio_ || !setActiveStream_) {
-        JAMI_ERR() << "Missing methods for ConfProtocolParser";
+        SIP_CORE_ERR() << "Missing methods for ConfProtocolParser";
         return;
     }
 
@@ -178,4 +178,4 @@ ConfProtocolParser::parseV1()
     }
 }
 
-} // namespace jami
+} // namespace sip_core

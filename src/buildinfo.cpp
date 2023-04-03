@@ -22,31 +22,31 @@
 #include "config.h"
 #endif
 
-#include "jami.h"
+#include "sip_core.h"
 #include <string>
 
 #include <ciso646> // fix windows compiler bug
 
-#ifndef JAMI_REVISION
-#define JAMI_REVISION ""
+#ifndef SIP_CORE_REVISION
+#define SIP_CORE_REVISION ""
 #endif
 
-#ifndef JAMI_DIRTY_REPO
-#define JAMI_DIRTY_REPO ""
+#ifndef SIP_CORE_DIRTY_REPO
+#define SIP_CORE_DIRTY_REPO ""
 #endif
 
 #ifndef PACKAGE_VERSION
 #define PACKAGE_VERSION "unknown"
 #endif
 
-namespace libjami {
+namespace libsip_core {
 
 const char*
 version() noexcept
 {
-    return JAMI_REVISION[0] and JAMI_DIRTY_REPO[0]
-               ? PACKAGE_VERSION "-" JAMI_REVISION "-" JAMI_DIRTY_REPO
-               : (JAMI_REVISION[0] ? PACKAGE_VERSION "-" JAMI_REVISION : PACKAGE_VERSION);
+    return SIP_CORE_REVISION[0] and SIP_CORE_DIRTY_REPO[0]
+               ? PACKAGE_VERSION "-" SIP_CORE_REVISION "-" SIP_CORE_DIRTY_REPO
+               : (SIP_CORE_REVISION[0] ? PACKAGE_VERSION "-" SIP_CORE_REVISION : PACKAGE_VERSION);
 }
 
 const char*
@@ -70,4 +70,4 @@ platform() noexcept
     #error "Unknown OS"
 #endif
 }
-} // namespace libjami
+} // namespace libsip_core

@@ -20,7 +20,7 @@
 
 #include "audio_processor.h"
 
-namespace jami {
+namespace sip_core {
 
 class NullAudioProcessor final : public AudioProcessor
 {
@@ -39,4 +39,4 @@ public:
     void enableVoiceActivityDetection(bool) override {};
 };
 
-} // namespace jami
+} // namespace sip_core

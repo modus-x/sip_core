@@ -38,13 +38,13 @@
 #    define lttng_ust_tracepoint_enabled(...) tracepoint_enabled(__VA_ARGS__)
 #  endif
 
-#  define jami_tracepoint(tp_name, ...)                                 \
-        lttng_ust_tracepoint(jami, tp_name __VA_OPT__(,) __VA_ARGS__)
+#  define sip_core_tracepoint(tp_name, ...)                                 \
+        lttng_ust_tracepoint(sip_core, tp_name __VA_OPT__(,) __VA_ARGS__)
 
-#  define jami_tracepoint_if_enabled(tp_name, ...)                      \
+#  define sip_core_tracepoint_if_enabled(tp_name, ...)                      \
         do {                                                            \
-                if (lttng_ust_tracepoint_enabled(jami, tp_name)) {      \
-                        lttng_ust_do_tracepoint(jami,                   \
+                if (lttng_ust_tracepoint_enabled(sip_core, tp_name)) {      \
+                        lttng_ust_do_tracepoint(sip_core,                   \
                                                 tp_name                 \
                                                 __VA_OPT__(,)           \
                                                 __VA_ARGS__);           \
@@ -54,7 +54,7 @@
 
 #else
 
-#  define jami_tracepoint(...)            static_assert(true)
-#  define jami_tracepoint_if_enabled(...) static_assert(true)
+#  define sip_core_tracepoint(...)            static_assert(true)
+#  define sip_core_tracepoint_if_enabled(...) static_assert(true)
 
 #endif

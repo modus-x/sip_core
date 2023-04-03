@@ -32,7 +32,7 @@
 #include <TargetConditionals.h>
 #endif
 
-namespace jami {
+namespace sip_core {
 
 decltype(getGlobalInstance<SystemCodecContainer>)& getSystemCodecContainer
     = getGlobalInstance<SystemCodecContainer>;
@@ -214,10 +214,10 @@ SystemCodecContainer::setActiveH265()
 
     auto apiName = MediaEncoder::testH265Accel();
     if (apiName != "") {
-        JAMI_WARN("Found a usable accelerated H265/HEVC codec: %s, enabling.", apiName.c_str());
+        SIP_CORE_WARN("Found a usable accelerated H265/HEVC codec: %s, enabling.", apiName.c_str());
         return true;
     } else {
-        JAMI_ERR("Can't find a usable accelerated H265/HEVC codec, disabling.");
+        SIP_CORE_ERR("Can't find a usable accelerated H265/HEVC codec, disabling.");
         removeCodecByName("H265");
     }
     return false;
@@ -247,8 +247,8 @@ SystemCodecContainer::checkInstalledCodecs()
                 codecIt->codecType = (CodecType)((unsigned) codecType & ~CODEC_DECODER);
         }
     }
-    JAMI_INFO("Encoders found: %s", enc_ss.str().c_str());
-    JAMI_INFO("Decoders found: %s", dec_ss.str().c_str());
+    SIP_CORE_INFO("Encoders found: %s", enc_ss.str().c_str());
+    SIP_CORE_INFO("Decoders found: %s", dec_ss.str().c_str());
 }
 
 std::vector<std::shared_ptr<SystemCodecInfo>>
@@ -317,4 +317,4 @@ SystemCodecContainer::removeCodecByName(const std::string& name, MediaType media
     }
 }
 
-} // namespace jami
+} // namespace sip_core

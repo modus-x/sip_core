@@ -33,7 +33,7 @@
 #include "threadloop.h"
 #include "media_codec.h"
 
-namespace jami {
+namespace sip_core {
 class AudioDeviceGuard;
 class AudioFrameResizer;
 class MediaDemuxer;
@@ -116,4 +116,4 @@ private:
     std::function<void(MediaType, bool)> onSuccessfulSetup_;
 };
 
-} // namespace jami
+} // namespace sip_core

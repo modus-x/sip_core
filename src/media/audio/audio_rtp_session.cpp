@@ -45,14 +45,14 @@
 #include "observer.h"
 #include <sstream>
 
-namespace jami {
+namespace sip_core {
 
 AudioRtpSession::AudioRtpSession(const std::string& callId, const std::string& streamId)
     : RtpSession(callId, streamId, MediaType::MEDIA_AUDIO)
     , rtcpCheckerThread_([] { return true; }, [this] { processRtcpChecker(); }, [] {})
 
 {
-    JAMI_DBG("Created Audio RTP session: %p - call Id %s", this, callId_.c_str());
+    SIP_CORE_DBG("Created Audio RTP session: %p - call Id %s", this, callId_.c_str());
 
     // don't move this into the initializer list or Cthulus will emerge
     ringbuffer_ = Manager::instance().getRingBufferPool().createRingBuffer(callId_);
@@ -61,19 +61,19 @@ AudioRtpSession::AudioRtpSession(const std::string& callId, const std::string& s
 AudioRtpSession::~AudioRtpSession()
 {
     stop();
-    JAMI_DBG("Destroyed Audio RTP session: %p - call Id %s", this, callId_.c_str());
+    SIP_CORE_DBG("Destroyed Audio RTP session: %p - call Id %s", this, callId_.c_str());
 }
 
 void
 AudioRtpSession::startSender()
 {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-    JAMI_DBG("Start audio RTP sender: input [%s] - muted [%s]",
+    SIP_CORE_DBG("Start audio RTP sender: input [%s] - muted [%s]",
              input_.c_str(),
              muteState_ ? "YES" : "NO");
 
     if (not send_.enabled or send_.onHold) {
-        JAMI_WARN("Audio sending disabled");
+        SIP_CORE_WARN("Audio sending disabled");
         if (sender_) {
             if (socketPair_)
                 socketPair_->interrupt();
@@ -85,12 +85,12 @@ AudioRtpSession::startSender()
     }
 
     if (sender_)
-        JAMI_WARN("Restarting audio sender");
+        SIP_CORE_WARN("Restarting audio sender");
     if (audioInput_)
         audioInput_->detach(sender_.get());
 
     // sender sets up input correctly, we just keep a reference in case startSender is called
-    audioInput_ = jami::getAudioInput(callId_);
+    audioInput_ = sip_core::getAudioInput(callId_);
     audioInput_->setMuted(muteState_);
     audioInput_->setSuccessfulSetupCb(onSuccessfulSetup_);
     auto newParams = audioInput_->switchInput(input_);
@@ -99,11 +99,11 @@ AudioRtpSession::startSender()
             && newParams.wait_for(NEWPARAMS_TIMEOUT) == std::future_status::ready) {
             localAudioParams_ = newParams.get();
         } else {
-            JAMI_ERR() << "No valid new audio parameters";
+            SIP_CORE_ERR() << "No valid new audio parameters";
             return;
         }
     } catch (const std::exception& e) {
-        JAMI_ERR() << "Exception while retrieving audio parameters: " << e.what();
+        SIP_CORE_ERR() << "Exception while retrieving audio parameters: " << e.what();
         return;
     }
 
@@ -118,7 +118,7 @@ AudioRtpSession::startSender()
         socketPair_->stopSendOp(false);
         sender_.reset(new AudioSender(getRemoteRtpUri(), send_, *socketPair_, initSeqVal_, mtu_));
     } catch (const MediaEncoderException& e) {
-        JAMI_ERR("%s", e.what());
+        SIP_CORE_ERR("%s", e.what());
         send_.enabled = false;
     }
 
@@ -168,13 +168,13 @@ AudioRtpSession::startReceiver()
         socketPair_->setReadBlockingMode(true);
 
     if (not receive_.enabled or receive_.onHold) {
-        JAMI_WARN("Audio receiving disabled");
+        SIP_CORE_WARN("Audio receiving disabled");
         receiveThread_.reset();
         return;
     }
 
     if (receiveThread_)
-        JAMI_WARN("Restarting audio receiver");
+        SIP_CORE_WARN("Restarting audio receiver");
 
     auto accountAudioCodec = std::static_pointer_cast<AccountAudioCodecInfo>(receive_.codec);
     receiveThread_.reset(new AudioReceiveThread(callId_,
@@ -207,7 +207,7 @@ AudioRtpSession::start()
                                     send_.crypto.getSrtpKeyInfo().c_str());
         }
     } catch (const std::runtime_error& e) {
-        JAMI_ERR("Socket creation failed: %s", e.what());
+        SIP_CORE_ERR("Socket creation failed: %s", e.what());
         return;
     }
 
@@ -220,7 +220,7 @@ AudioRtpSession::stop()
 {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
 
-    JAMI_DBG("[%p] Stopping receiver", this);
+    SIP_CORE_DBG("[%p] Stopping receiver", this);
 
     if (not receiveThread_)
         return;
@@ -315,9 +315,9 @@ AudioRtpSession::setNewPacketLoss(unsigned int newPL)
             auto ret = sender_->setPacketLoss(newPL);
             packetLoss_ = newPL;
             if (ret == -1)
-                JAMI_ERR("Fail to access the encoder");
+                SIP_CORE_ERR("Fail to access the encoder");
         } else {
-            JAMI_ERR("Fail to access the sender");
+            SIP_CORE_ERR("Fail to access the sender");
         }
     }
 }
@@ -347,7 +347,7 @@ AudioRtpSession::initRecorder(std::shared_ptr<MediaRecorder>& rec)
 {
     if (receiveThread_)
         receiveThread_->attach(rec->addStream(receiveThread_->getInfo()));
-    if (auto input = jami::getAudioInput(callId_))
+    if (auto input = sip_core::getAudioInput(callId_))
         input->attach(rec->addStream(input->getInfo()));
 }
 
@@ -359,11 +359,11 @@ AudioRtpSession::deinitRecorder(std::shared_ptr<MediaRecorder>& rec)
             receiveThread_->detach(ob);
         }
     }
-    if (auto input = jami::getAudioInput(callId_)) {
+    if (auto input = sip_core::getAudioInput(callId_)) {
         if (auto ob = rec->getStream(input->getInfo().name)) {
             input->detach(ob);
         }
     }
 }
 
-} // namespace jami
+} // namespace sip_core

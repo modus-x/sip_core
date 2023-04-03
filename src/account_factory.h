@@ -29,7 +29,7 @@
 #include <functional>
 #include <ciso646>
 
-namespace jami {
+namespace sip_core {
 
 class Account;
 class AccountGeneratorBase;
@@ -157,4 +157,4 @@ bool AccountFactory::empty() const;
 template<>
 std::size_t AccountFactory::accountCount() const;
 
-} // namespace jami
+} // namespace sip_core

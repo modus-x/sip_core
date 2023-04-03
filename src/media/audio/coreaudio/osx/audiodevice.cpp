@@ -22,7 +22,7 @@
 
 #if !TARGET_OS_IPHONE
 
-namespace jami {
+namespace sip_core {
 
 AudioDevice::AudioDevice(AudioDeviceID devid, bool isInput)
 {
@@ -131,6 +131,6 @@ AudioDevice::getName() const
     return buf;
 }
 
-} // namespace jami
+} // namespace sip_core
 
 #endif // TARGET_OS_IPHONE

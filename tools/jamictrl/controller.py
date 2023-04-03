@@ -19,7 +19,7 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301 USA.
 #
 
-"""libjami controlling class through DBUS"""
+"""libsip_core controlling class through DBUS"""
 
 import sys
 import os
@@ -29,24 +29,24 @@ import hashlib
 
 from threading import Thread
 from functools import partial
-from errorsDring import libjamiCtrlAccountError, libjamiCtrlError, libjamiCtrlDBusError, libjamiCtrlDeamonError
+from errorsDring import libsip_coreCtrlAccountError, libsip_coreCtrlError, libsip_coreCtrlDBusError, libsip_coreCtrlDeamonError
 from gi.repository import GLib
 
 try:
     import dbus
     from dbus.mainloop.glib import DBusGMainLoop
 except ImportError as e:
-    raise libjamiCtrlError(str(e))
+    raise libsip_coreCtrlError(str(e))
 
 
 DBUS_DEAMON_OBJECT = 'cx.ring.Ring'
 DBUS_DEAMON_PATH = '/cx/ring/Ring'
 
 
-class libjamiCtrl(Thread):
+class libsip_coreCtrl(Thread):
     def __init__(self, name, autoAnswer):
         if sys.version_info[0] < 3:
-            super(libjamiCtrl, self).__init__()
+            super(libsip_coreCtrl, self).__init__()
         else:
             super().__init__()
 
@@ -85,11 +85,11 @@ class libjamiCtrl(Thread):
             bus = dbus.SessionBus()
 
         except dbus.DBusException as e:
-            raise libjamiCtrlDBusError(str(e))
+            raise libsip_coreCtrlDBusError(str(e))
 
         if not bus.name_has_owner(DBUS_DEAMON_OBJECT) :
-            raise libjamiCtrlDBusError(("Unable to find %s in DBUS." % DBUS_DEAMON_OBJECT)
-                                     + " Check if jami is running")
+            raise libsip_coreCtrlDBusError(("Unable to find %s in DBUS." % DBUS_DEAMON_OBJECT)
+                                     + " Check if sip_core is running")
 
         try:
             proxy_instance = bus.get_object(DBUS_DEAMON_OBJECT,
@@ -112,14 +112,14 @@ class libjamiCtrl(Thread):
                     DBUS_DEAMON_OBJECT+'.VideoManager')
 
         except dbus.DBusException as e:
-            raise libjamiCtrlDBusError("Unable to bind to jami DBus API")
+            raise libsip_coreCtrlDBusError("Unable to bind to sip_core DBus API")
 
         try:
             self.instance.Register(os.getpid(), self.name)
             self.registered = True
 
         except dbus.DBusException as e:
-            raise libjamiCtrlDeamonError("Client registration failed")
+            raise libsip_coreCtrlDeamonError("Client registration failed")
 
         try:
             proxy_callmgr.connect_to_signal('incomingCall', self.onIncomingCall)
@@ -133,7 +133,7 @@ class libjamiCtrl(Thread):
             proxy_confmgr.connect_to_signal('messageReceived', self.onMessageReceived)
 
         except dbus.DBusException as e:
-            raise libjamiCtrlDBusError("Unable to connect to jami DBus signals")
+            raise libsip_coreCtrlDBusError("Unable to connect to sip_core DBus signals")
 
 
     def unregister(self):
@@ -145,7 +145,7 @@ class libjamiCtrl(Thread):
             self.registered = False
 
         except:
-            raise libjamiCtrlDeamonError("Client unregistration failed")
+            raise libsip_coreCtrlDeamonError("Client unregistration failed")
 
     def isRegistered(self):
         return self.registered
@@ -330,7 +330,7 @@ class libjamiCtrl(Thread):
     def _valid_account(self, account):
         account = account or self.account
         if account is None:
-            raise libjamiCtrlError("No provided or current account!")
+            raise libsip_coreCtrlError("No provided or current account!")
         return account
 
     def isAccountExists(self, account):
@@ -407,7 +407,7 @@ class libjamiCtrl(Thread):
         """
 
         if details is None:
-            raise libjamiCtrlAccountError("Must specifies type, alias, hostname, \
+            raise libsip_coreCtrlAccountError("Must specifies type, alias, hostname, \
                                   username and password in \
                                   order to create a new account")
 
@@ -417,7 +417,7 @@ class libjamiCtrl(Thread):
         """Remove an account from internal list"""
 
         if accountID is None:
-            raise libjamiCtrlAccountError("Account ID must be specified")
+            raise libsip_coreCtrlAccountError("Account ID must be specified")
 
         self.configurationmanager.removeAccount(accountID)
 
@@ -430,7 +430,7 @@ class libjamiCtrl(Thread):
                 details['Account.alias'] == alias):
                 self.account = testedaccount
                 return
-        raise libjamiCtrlAccountError("No enabled account matched with alias")
+        raise libsip_coreCtrlAccountError("No enabled account matched with alias")
 
     def getAccountByAlias(self, alias):
         """Get account name having its alias"""
@@ -440,7 +440,7 @@ class libjamiCtrl(Thread):
             if details['Account.alias'] == alias:
                 return account
 
-        raise libjamiCtrlAccountError("No account matched with alias")
+        raise libsip_coreCtrlAccountError("No account matched with alias")
 
     def setAccount(self, account):
         """Define the active account
@@ -452,14 +452,14 @@ class libjamiCtrl(Thread):
             self.account = account
         else:
             print(account)
-            raise libjamiCtrlAccountError("Not a valid account")
+            raise libsip_coreCtrlAccountError("Not a valid account")
 
     def setFirstRegisteredAccount(self):
         """Find the first enabled account and define it as active"""
 
         rAccounts = self.getAllRegisteredAccounts()
         if 0 == len(rAccounts):
-            raise libjamiCtrlAccountError("No registered account !")
+            raise libsip_coreCtrlAccountError("No registered account !")
         self.account = rAccounts[0]
 
     def setFirstActiveAccount(self):
@@ -467,7 +467,7 @@ class libjamiCtrl(Thread):
 
         aAccounts = self.getAllEnabledAccounts()
         if 0 == len(aAccounts):
-            raise libjamiCtrlAccountError("No active account !")
+            raise libsip_coreCtrlAccountError("No active account !")
         self.account = aAccounts[0]
 
     def getAccount(self):
@@ -565,14 +565,14 @@ class libjamiCtrl(Thread):
         """
 
         if dest is None or dest == "":
-            raise libjamiCtrlError("Invalid call destination")
+            raise libsip_coreCtrlError("Invalid call destination")
 
         # Set the account to be used for this call
         if not self.account:
             self.setFirstRegisteredAccount()
 
         if self.account != "IP2IP" and not self.isAccountRegistered():
-            raise libjamiCtrlAccountError("Can't place a call without a registered account")
+            raise libsip_coreCtrlAccountError("Can't place a call without a registered account")
 
         # Send the request to the CallManager
         callid = self.callmanager.placeCall(self.account, dest)
@@ -599,7 +599,7 @@ class libjamiCtrl(Thread):
         """Transfert a call identified by a CallID"""
 
         if callid is None or callid == "":
-            raise libjamiCtrlError("Invalid callID")
+            raise libsip_coreCtrlError("Invalid callID")
 
         self.callmanager.transfert(callid, to)
 
@@ -609,7 +609,7 @@ class libjamiCtrl(Thread):
         print("Refuse call " + callid)
 
         if callid is None or callid == "":
-            raise libjamiCtrlError("Invalid callID")
+            raise libsip_coreCtrlError("Invalid callID")
 
         self.callmanager.refuse(callid)
 
@@ -622,10 +622,10 @@ class libjamiCtrl(Thread):
             self.setFirstRegisteredAccount()
 
         if not self.isAccountRegistered():
-            raise libjamiCtrlAccountError("Can't accept a call without a registered account")
+            raise libsip_coreCtrlAccountError("Can't accept a call without a registered account")
 
         if callid is None or callid == "":
-            raise libjamiCtrlError("Invalid callID")
+            raise libsip_coreCtrlError("Invalid callID")
 
         self.callmanager.accept(callid)
 
@@ -634,7 +634,7 @@ class libjamiCtrl(Thread):
         """Hold a call identified by a CallID"""
 
         if callid is None or callid == "":
-            raise libjamiCtrlError("Invalid callID")
+            raise libsip_coreCtrlError("Invalid callID")
 
         self.callmanager.hold(callid)
 
@@ -643,7 +643,7 @@ class libjamiCtrl(Thread):
         """Unhold an incoming call identified by a CallID"""
 
         if callid is None or callid == "":
-            raise libjamiCtrlError("Invalid callID")
+            raise libsip_coreCtrlError("Invalid callID")
 
         self.callmanager.unhold(callid)
 

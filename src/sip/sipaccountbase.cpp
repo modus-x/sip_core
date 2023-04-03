@@ -31,7 +31,7 @@
 #include "config/yamlparser.h"
 
 #include "client/ring_signal.h"
-#include "jami/account_const.h"
+#include "sip_core/account_const.h"
 #include "string_utils.h"
 #include "fileutils.h"
 #include "connectivity/sip_utils.h"
@@ -53,7 +53,7 @@
 
 using namespace std::literals;
 
-namespace jami {
+namespace sip_core {
 
 SIPAccountBase::SIPAccountBase(const std::string& accountID)
     : Account(accountID)
@@ -74,7 +74,7 @@ SIPAccountBase::CreateClientDialogAndInvite(const pj_str_t* from,
                                             pjsip_dialog** dlg,
                                             pjsip_inv_session** inv)
 {
-    JAMI_DBG("Creating SIP dialog: \n"
+    SIP_CORE_DBG("Creating SIP dialog: \n"
              "From: %s\n"
              "Contact: %s\n"
              "To: %s\n",
@@ -83,14 +83,14 @@ SIPAccountBase::CreateClientDialogAndInvite(const pj_str_t* from,
              to->ptr);
 
     if (target) {
-        JAMI_DBG("Target: %s", target->ptr);
+        SIP_CORE_DBG("Target: %s", target->ptr);
     } else {
-        JAMI_DBG("No target provided, using 'to' as target");
+        SIP_CORE_DBG("No target provided, using 'to' as target");
     }
 
     auto status = pjsip_dlg_create_uac(pjsip_ua_instance(), from, contact, to, target, dlg);
     if (status != PJ_SUCCESS) {
-        JAMI_ERR("Unable to create SIP dialogs for user agent client when calling %s %d",
+        SIP_CORE_ERR("Unable to create SIP dialogs for user agent client when calling %s %d",
                  to->ptr,
                  status);
         return false;
@@ -113,7 +113,7 @@ SIPAccountBase::CreateClientDialogAndInvite(const pj_str_t* from,
         pj_list_push_back(&dialog->inv_hdr, subj_hdr);
 
         if (pjsip_inv_create_uac(dialog, local_sdp, 0, inv) != PJ_SUCCESS) {
-            JAMI_ERR("Unable to create invite session for user agent client");
+            SIP_CORE_ERR("Unable to create invite session for user agent client");
             return false;
         }
     }
@@ -247,21 +247,21 @@ SIPAccountBase::onTextMessage(const std::string& id,
                               const std::string& /* deviceId */,
                               const std::map<std::string, std::string>& payloads)
 {
-    JAMI_DBG("Text message received from %s, %zu part(s)", from.c_str(), payloads.size());
+    SIP_CORE_DBG("Text message received from %s, %zu part(s)", from.c_str(), payloads.size());
     for (const auto& m : payloads) {
         if (!utf8_validate(m.first))
             return;
         if (!utf8_validate(m.second)) {
-            JAMI_WARN("Dropping invalid message with MIME type %s", m.first.c_str());
+            SIP_CORE_WARN("Dropping invalid message with MIME type %s", m.first.c_str());
             return;
         }
         if (handleMessage(from, m))
             return;
     }
 
-    emitSignal<libjami::ConfigurationSignal::IncomingAccountMessage>(accountID_, from, id, payloads);
+    emitSignal<libsip_core::ConfigurationSignal::IncomingAccountMessage>(accountID_, from, id, payloads);
 
-    libjami::Message message;
+    libsip_core::Message message;
     message.from = from;
     message.payloads = payloads;
     message.received = std::time(nullptr);
@@ -301,7 +301,7 @@ SIPAccountBase::setPublishedAddress(const IpAddr& ip_addr)
     }
 }
 
-std::vector<libjami::Message>
+std::vector<libsip_core::Message>
 SIPAccountBase::getLastMessages(const uint64_t& base_timestamp)
 {
     std::lock_guard<std::mutex> lck(mutexLastMessages_);
@@ -344,4 +344,4 @@ SIPAccountBase::createDefaultMediaList(bool addVideo, bool onHold)
 #endif
     return mediaList;
 }
-} // namespace jami
+} // namespace sip_core

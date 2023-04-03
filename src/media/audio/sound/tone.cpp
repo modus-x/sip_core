@@ -30,7 +30,7 @@
 #include <cmath>
 #include <cstdlib>
 
-namespace jami {
+namespace sip_core {
 
 Tone::Tone(const std::string& definition, unsigned int sampleRate)
     : AudioLoop(sampleRate)
@@ -128,4 +128,4 @@ Tone::genSin(AudioSample* buffer, int lowFrequency, int highFrequency, size_t nb
     }
 }
 
-} // namespace jami
+} // namespace sip_core

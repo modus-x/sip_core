@@ -19,7 +19,7 @@
 #include <cstdlib>
 #include "audio_recorder.h"
 
-namespace jami {
+namespace sip_core {
 namespace opensl {
 
 /*
@@ -52,21 +52,21 @@ AudioRecorder::processSLCallback(SLAndroidSimpleBufferQueueItf bq)
 
         // should leave the device to sleep to save power if no buffers
         if (devShadowQueue_.size() == 0) {
-            // JAMI_WARN("OpenSL: processSLCallback empty queue");
+            // SIP_CORE_WARN("OpenSL: processSLCallback empty queue");
             (*bq)->Enqueue(bq, silentBuf_.buf_, silentBuf_.cap_);
             devShadowQueue_.push(&silentBuf_);
         }
         if (callback_)
             callback_();
     } catch (const std::exception& e) {
-        JAMI_ERR("OpenSL: processSLCallback exception: %s", e.what());
+        SIP_CORE_ERR("OpenSL: processSLCallback exception: %s", e.what());
     }
 }
 
-AudioRecorder::AudioRecorder(jami::AudioFormat sampleFormat, size_t bufSize, SLEngineItf slEngine)
+AudioRecorder::AudioRecorder(sip_core::AudioFormat sampleFormat, size_t bufSize, SLEngineItf slEngine)
     : sampleInfo_(sampleFormat)
 {
-    JAMI_DBG("Creating OpenSL record stream");
+    SIP_CORE_DBG("Creating OpenSL record stream");
 
     // configure audio source/
     SLDataLocator_IODevice loc_dev = {SL_DATALOCATOR_IODEVICE,
@@ -132,7 +132,7 @@ AudioRecorder::AudioRecorder(jami::AudioFormat sampleFormat, size_t bufSize, SLE
                                     &modeSize,
                                     (void*) &modeRetrieved);
     if (result == SL_RESULT_SUCCESS) {
-        JAMI_WARN("Actual performance mode is %u\n", modeRetrieved);
+        SIP_CORE_WARN("Actual performance mode is %u\n", modeRetrieved);
     }
 
     /* Enable AEC if requested */
@@ -142,14 +142,14 @@ AudioRecorder::AudioRecorder(jami::AudioFormat sampleFormat, size_t bufSize, SLE
                      ->GetInterface(recObjectItf_,
                                     SL_IID_ANDROIDACOUSTICECHOCANCELLATION,
                                     (void*) &aecItf);
-        JAMI_WARN("AEC is %savailable\n", SL_RESULT_SUCCESS == result ? "" : "not ");
+        SIP_CORE_WARN("AEC is %savailable\n", SL_RESULT_SUCCESS == result ? "" : "not ");
         if (SL_RESULT_SUCCESS == result) {
             SLboolean enabled;
             if ((*aecItf)->IsEnabled(aecItf, &enabled) == SL_RESULT_SUCCESS) {
-                JAMI_WARN("AEC was %s\n", enabled ? "enabled" : "not enabled");
+                SIP_CORE_WARN("AEC was %s\n", enabled ? "enabled" : "not enabled");
                 (*aecItf)->SetEnabled(aecItf, true);
                 if ((*aecItf)->IsEnabled(aecItf, &enabled) == SL_RESULT_SUCCESS) {
-                    JAMI_WARN("AEC is now %s\n", enabled ? "enabled" : "not enabled");
+                    SIP_CORE_WARN("AEC is now %s\n", enabled ? "enabled" : "not enabled");
                     hasNativeAEC_ = enabled;
                 }
             }
@@ -162,14 +162,14 @@ AudioRecorder::AudioRecorder(jami::AudioFormat sampleFormat, size_t bufSize, SLE
                      ->GetInterface(recObjectItf_,
                                     SL_IID_ANDROIDAUTOMATICGAINCONTROL,
                                     (void*) &agcItf);
-        JAMI_WARN("AGC is %savailable\n", SL_RESULT_SUCCESS == result ? "" : "not ");
+        SIP_CORE_WARN("AGC is %savailable\n", SL_RESULT_SUCCESS == result ? "" : "not ");
         if (SL_RESULT_SUCCESS == result) {
             SLboolean enabled;
             if ((*agcItf)->IsEnabled(agcItf, &enabled) == SL_RESULT_SUCCESS) {
-                JAMI_WARN("AGC was %s\n", enabled ? "enabled" : "not enabled");
+                SIP_CORE_WARN("AGC was %s\n", enabled ? "enabled" : "not enabled");
                 (*agcItf)->SetEnabled(agcItf, true);
                 if ((*agcItf)->IsEnabled(agcItf, &enabled) == SL_RESULT_SUCCESS) {
-                    JAMI_WARN("AGC is now %s\n", enabled ? "enabled" : "not enabled");
+                    SIP_CORE_WARN("AGC is now %s\n", enabled ? "enabled" : "not enabled");
                 }
             }
         }
@@ -179,14 +179,14 @@ AudioRecorder::AudioRecorder(jami::AudioFormat sampleFormat, size_t bufSize, SLE
         SLAndroidNoiseSuppressionItf nsItf;
         result = (*recObjectItf_)
                      ->GetInterface(recObjectItf_, SL_IID_ANDROIDNOISESUPPRESSION, (void*) &nsItf);
-        JAMI_WARN("NS is %savailable\n", SL_RESULT_SUCCESS == result ? "" : "not ");
+        SIP_CORE_WARN("NS is %savailable\n", SL_RESULT_SUCCESS == result ? "" : "not ");
         if (SL_RESULT_SUCCESS == result) {
             SLboolean enabled;
             if ((*nsItf)->IsEnabled(nsItf, &enabled) == SL_RESULT_SUCCESS) {
-                JAMI_WARN("NS was %s\n", enabled ? "enabled" : "not enabled");
+                SIP_CORE_WARN("NS was %s\n", enabled ? "enabled" : "not enabled");
                 (*nsItf)->SetEnabled(nsItf, true);
                 if ((*nsItf)->IsEnabled(nsItf, &enabled)  == SL_RESULT_SUCCESS) {
-                    JAMI_WARN("NS is now %s\n", enabled ? "enabled" : "not enabled");
+                    SIP_CORE_WARN("NS is now %s\n", enabled ? "enabled" : "not enabled");
                     hasNativeNS_ = enabled;
                 }
             }
@@ -208,9 +208,9 @@ AudioRecorder::AudioRecorder(jami::AudioFormat sampleFormat, size_t bufSize, SLE
 bool
 AudioRecorder::start()
 {
-    JAMI_DBG("OpenSL record start");
+    SIP_CORE_DBG("OpenSL record start");
     if (!freeQueue_ || !recQueue_) {
-        JAMI_ERR("====NULL pointer to Start(%p, %p)", freeQueue_, recQueue_);
+        SIP_CORE_ERR("====NULL pointer to Start(%p, %p)", freeQueue_, recQueue_);
         return false;
     }
     audioBufCount = 0;
@@ -225,7 +225,7 @@ AudioRecorder::start()
     for (int i = 0; i < RECORD_DEVICE_KICKSTART_BUF_COUNT; i++) {
         sample_buf* buf = NULL;
         if (!freeQueue_->front(&buf)) {
-            JAMI_ERR("=====OutOfFreeBuffers @ startingRecording @ (%d)", i);
+            SIP_CORE_ERR("=====OutOfFreeBuffers @ startingRecording @ (%d)", i);
             break;
         }
         freeQueue_->pop();
@@ -245,7 +245,7 @@ AudioRecorder::start()
 bool
 AudioRecorder::stop()
 {
-    JAMI_DBG("OpenSL record stop");
+    SIP_CORE_DBG("OpenSL record stop");
     // in case already recording, stop recording and clear buffer queue
     SLuint32 curState;
     SLresult result = (*recItf_)->GetRecordState(recItf_, &curState);
@@ -271,7 +271,7 @@ AudioRecorder::stop()
 
 AudioRecorder::~AudioRecorder()
 {
-    JAMI_DBG("Destroying OpenSL record stream");
+    SIP_CORE_DBG("Destroying OpenSL record stream");
 
     // destroy audio recorder object, and invalidate all associated interfaces
     if (recObjectItf_) {
@@ -294,4 +294,4 @@ AudioRecorder::dbgGetDevBufCount()
 }
 
 } // namespace opensl
-} // namespace jami
+} // namespace sip_core

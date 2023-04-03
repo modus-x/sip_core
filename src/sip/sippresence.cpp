@@ -38,7 +38,7 @@
 #define MAX_N_SUB_SERVER 50
 #define MAX_N_SUB_CLIENT 50
 
-namespace jami {
+namespace sip_core {
 
 using sip_utils::CONST_PJ_STR;
 
@@ -147,7 +147,7 @@ SIPPresence::updateStatus(bool status, const std::string& note)
         rpid.activity = PJRPID_ACTIVITY_BUSY;
     /*
     else // TODO: is there any other possibilities
-        JAMI_DBG("Presence : no activity");
+        SIP_CORE_DBG("Presence : no activity");
     */
 
     pj_bzero(&status_data_, sizeof(status_data_));
@@ -183,7 +183,7 @@ SIPPresence::reportPresSubClientNotification(std::string_view uri, pjsip_pres_st
     /* Update our info. See pjsua_buddy_get_info() for additionnal ideas*/
     const std::string& acc_ID = acc_->getAccountID();
     const std::string note(status->info[0].rpid.note.ptr, status->info[0].rpid.note.slen);
-    JAMI_DBG(" Received status of PresSubClient %.*s(acc:%s): status=%s note=%s",
+    SIP_CORE_DBG(" Received status of PresSubClient %.*s(acc:%s): status=%s note=%s",
              (int)uri.size(), uri.data(),
              acc_ID.c_str(),
              status->info[0].basic_open ? "open" : "closed",
@@ -195,7 +195,7 @@ SIPPresence::reportPresSubClientNotification(std::string_view uri, pjsip_pres_st
         note_ = note;
     }
     // report status to client signal
-    emitSignal<libjami::PresenceSignal::NewBuddyNotification>(acc_ID,
+    emitSignal<libsip_core::PresenceSignal::NewBuddyNotification>(acc_ID,
                                                             std::string(uri),
                                                             status->info[0].basic_open,
                                                             note);
@@ -217,7 +217,7 @@ SIPPresence::subscribeClient(const std::string& uri, bool flag)
     /* Check if the buddy was already subscribed */
     for (const auto& c : sub_client_list_) {
         if (c->getURI() == uri) {
-            // JAMI_DBG("-PresSubClient:%s exists in the list. Replace it.", uri.c_str());
+            // SIP_CORE_DBG("-PresSubClient:%s exists in the list. Replace it.", uri.c_str());
             if (flag)
                 c->subscribe();
             else
@@ -227,14 +227,14 @@ SIPPresence::subscribeClient(const std::string& uri, bool flag)
     }
 
     if (sub_client_list_.size() >= MAX_N_SUB_CLIENT) {
-        JAMI_WARN("Can't add PresSubClient, max number reached.");
+        SIP_CORE_WARN("Can't add PresSubClient, max number reached.");
         return;
     }
 
     if (flag) {
         PresSubClient* c = new PresSubClient(uri, this);
         if (!(c->subscribe())) {
-            JAMI_WARN("Failed send subscribe.");
+            SIP_CORE_WARN("Failed send subscribe.");
             delete c;
         }
         // the buddy has to be accepted before being added in the list
@@ -246,9 +246,9 @@ SIPPresence::addPresSubClient(PresSubClient* c)
 {
     if (sub_client_list_.size() < MAX_N_SUB_CLIENT) {
         sub_client_list_.push_back(c);
-        JAMI_DBG("New Presence_subscription_client added (list[%zu]).", sub_client_list_.size());
+        SIP_CORE_DBG("New Presence_subscription_client added (list[%zu]).", sub_client_list_.size());
     } else {
-        JAMI_WARN("Max Presence_subscription_client is reach.");
+        SIP_CORE_WARN("Max Presence_subscription_client is reach.");
         // let the client alive //delete c;
     }
 }
@@ -256,7 +256,7 @@ SIPPresence::addPresSubClient(PresSubClient* c)
 void
 SIPPresence::removePresSubClient(PresSubClient* c)
 {
-    JAMI_DBG("Remove Presence_subscription_client from the buddy list.");
+    SIP_CORE_DBG("Remove Presence_subscription_client from the buddy list.");
     sub_client_list_.remove(c);
 }
 
@@ -277,7 +277,7 @@ SIPPresence::addPresSubServer(PresSubServer* s)
     if (sub_server_list_.size() < MAX_N_SUB_SERVER) {
         sub_server_list_.push_back(s);
     } else {
-        JAMI_WARN("Max Presence_subscription_server is reach.");
+        SIP_CORE_WARN("Max Presence_subscription_server is reach.");
         // let de server alive // delete s;
     }
 }
@@ -286,13 +286,13 @@ void
 SIPPresence::removePresSubServer(PresSubServer* s)
 {
     sub_server_list_.remove(s);
-    JAMI_DBG("Presence_subscription_server removed");
+    SIP_CORE_DBG("Presence_subscription_server removed");
 }
 
 void
 SIPPresence::notifyPresSubServer()
 {
-    JAMI_DBG("Iterating through IP2IP Presence_subscription_server:");
+    SIP_CORE_DBG("Iterating through IP2IP Presence_subscription_server:");
 
     for (const auto& s : sub_server_list_)
         s->notify();
@@ -338,7 +338,7 @@ SIPPresence::fillDoc(pjsip_tx_data* tdata, const pres_msg_data* msg_data)
     while (hdr && hdr != &msg_data->hdr_list) {
         pjsip_hdr* new_hdr;
         new_hdr = (pjsip_hdr*) pjsip_hdr_clone(tdata->pool, hdr);
-        JAMI_DBG("adding header %p", new_hdr->name.ptr);
+        SIP_CORE_DBG("adding header %p", new_hdr->name.ptr);
         pjsip_msg_add_hdr(tdata->msg, new_hdr);
         hdr = hdr->next;
     }
@@ -369,8 +369,8 @@ SIPPresence::publish_cb(struct pjsip_publishc_cbparam* param)
         if (param->status != PJ_SUCCESS) {
             char errmsg[PJ_ERR_MSG_SIZE];
             pj_strerror(param->status, errmsg, sizeof(errmsg));
-            JAMI_ERR("Client (PUBLISH) failed, status=%d, msg=%s", param->status, errmsg);
-            emitSignal<libjami::PresenceSignal::ServerError>(pres->getAccount()->getAccountID(),
+            SIP_CORE_ERR("Client (PUBLISH) failed, status=%d, msg=%s", param->status, errmsg);
+            emitSignal<libsip_core::PresenceSignal::ServerError>(pres->getAccount()->getAccountID(),
                                                            error,
                                                            errmsg);
 
@@ -378,13 +378,13 @@ SIPPresence::publish_cb(struct pjsip_publishc_cbparam* param)
             /* 412 (Conditional Request Failed)
              * The PUBLISH refresh has failed, retry with new one.
              */
-            JAMI_WARN("Publish retry.");
+            SIP_CORE_WARN("Publish retry.");
             publish(pres);
         } else if ((param->code == PJSIP_SC_BAD_EVENT)
                    || (param->code == PJSIP_SC_NOT_IMPLEMENTED)) { // 489 or 501
-            JAMI_WARN("Client (PUBLISH) failed (%s)", error.c_str());
+            SIP_CORE_WARN("Client (PUBLISH) failed (%s)", error.c_str());
 
-            emitSignal<libjami::PresenceSignal::ServerError>(pres->getAccount()->getAccountID(),
+            emitSignal<libsip_core::PresenceSignal::ServerError>(pres->getAccount()->getAccountID(),
                                                            error,
                                                            "Publish not supported.");
 
@@ -413,7 +413,7 @@ SIPPresence::send_publish(SIPPresence* pres)
     pjsip_tx_data* tdata;
     pj_status_t status;
 
-    JAMI_DBG("Send PUBLISH (%s).", pres->getAccount()->getAccountID().c_str());
+    SIP_CORE_DBG("Send PUBLISH (%s).", pres->getAccount()->getAccountID().c_str());
 
     SIPAccount* acc = pres->getAccount();
     std::string contactWithAngles = acc->getFromUri();
@@ -431,7 +431,7 @@ SIPPresence::send_publish(SIPPresence* pres)
     pj_str_t from = pj_strdup3(pres->pool_, acc->getFromUri().c_str());
 
     if (status != PJ_SUCCESS) {
-        JAMI_ERR("Error creating PUBLISH request %d", status);
+        SIP_CORE_ERR("Error creating PUBLISH request %d", status);
         goto on_error;
     }
 
@@ -439,7 +439,7 @@ SIPPresence::send_publish(SIPPresence* pres)
         char* epos = pj_strchr(&from, '>');
 
         if (epos - bpos < 2) {
-            JAMI_ERR("Unexpected invalid URI");
+            SIP_CORE_ERR("Unexpected invalid URI");
             status = PJSIP_EINVALIDURI;
             goto on_error;
         }
@@ -456,7 +456,7 @@ SIPPresence::send_publish(SIPPresence* pres)
     pres_msg_data msg_data;
 
     if (status != PJ_SUCCESS) {
-        JAMI_ERR("Error creating PIDF for PUBLISH request");
+        SIP_CORE_ERR("Error creating PIDF for PUBLISH request");
         pjsip_tx_data_dec_ref(tdata);
         goto on_error;
     }
@@ -472,9 +472,9 @@ SIPPresence::send_publish(SIPPresence* pres)
     status = pjsip_publishc_send(pres->publish_sess_, tdata);
 
     if (status == PJ_EPENDING) {
-        JAMI_WARN("Previous request is in progress, ");
+        SIP_CORE_WARN("Previous request is in progress, ");
     } else if (status != PJ_SUCCESS) {
-        JAMI_ERR("Error sending PUBLISH request");
+        SIP_CORE_ERR("Error sending PUBLISH request");
         goto on_error;
     }
 
@@ -506,7 +506,7 @@ SIPPresence::publish(SIPPresence* pres)
 
     if (status != PJ_SUCCESS) {
         pres->publish_sess_ = NULL;
-        JAMI_ERR("Failed to create a publish session.");
+        SIP_CORE_ERR("Failed to create a publish session.");
         return status;
     }
 
@@ -515,7 +515,7 @@ SIPPresence::publish(SIPPresence* pres)
     status = pjsip_publishc_init(pres->publish_sess_, &STR_PRESENCE, &from, &from, &from, 0xFFFF);
 
     if (status != PJ_SUCCESS) {
-        JAMI_ERR("Failed to init a publish session");
+        SIP_CORE_ERR("Failed to init a publish session");
         pres->publish_sess_ = NULL;
         return status;
     }
@@ -526,7 +526,7 @@ SIPPresence::publish(SIPPresence* pres)
                                            acc->getCredentialCount(),
                                            acc->getCredInfo())
                 != PJ_SUCCESS) {
-        JAMI_ERR("Could not initialize credentials for invite session authentication");
+        SIP_CORE_ERR("Could not initialize credentials for invite session authentication");
         return status;
     }
 
@@ -546,4 +546,4 @@ SIPPresence::publish(SIPPresence* pres)
     return PJ_SUCCESS;
 }
 
-} // namespace jami
+} // namespace sip_core

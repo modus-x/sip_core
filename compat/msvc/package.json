@@ -16,5 +16,5 @@
         "libgit2"
     ],
     "configuration": "ReleaseLib_win32",
-    "project_paths": ["jami-daemon.vcxproj"]
+    "project_paths": ["sip_core-daemon.vcxproj"]
 }

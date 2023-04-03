@@ -31,7 +31,7 @@
  * @brief Tone sample (dial, busy, ring, congestion)
  */
 
-namespace jami {
+namespace sip_core {
 
 class Tone : public AudioLoop
 {
@@ -67,4 +67,4 @@ private:
     void genBuffer(const std::string& definition);
 };
 
-} // namespace jami
+} // namespace sip_core

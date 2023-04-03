@@ -23,13 +23,13 @@
 #include "fileutils.h"
 
 #include "client/ring_signal.h"
-#include "jami/account_const.h"
+#include "sip_core/account_const.h"
 
 #include <json/json.h>
 
 #include <fstream>
 
-namespace jami {
+namespace sip_core {
 namespace im {
 
 MessageEngine::MessageEngine(SIPAccountBase& acc, const std::string& path)
@@ -54,13 +54,13 @@ MessageEngine::sendMessage(const std::string& to,
         auto& peerMessages = messages_[to];
         auto previousIt = peerMessages.find(refreshToken);
         if (previousIt != peerMessages.end() && previousIt->second.status != MessageStatus::SENT) {
-            JAMI_DEBUG("[message {:d}] Replace content", refreshToken);
+            SIP_CORE_DEBUG("[message {:d}] Replace content", refreshToken);
             token = refreshToken;
             previousIt->second.to = to;
             previousIt->second.payloads = payloads;
         } else {
             do {
-                token = std::uniform_int_distribution<MessageToken> {1, JAMI_ID_MAX_VAL}(
+                token = std::uniform_int_distribution<MessageToken> {1, SIP_CORE_ID_MAX_VAL}(
                     account_.rand);
             } while (peerMessages.find(token) != peerMessages.end());
             auto m = peerMessages.emplace(token, Message {});
@@ -109,14 +109,14 @@ MessageEngine::retrySend(const std::string& peer, bool retryOnTimeout)
     }
     // avoid locking while calling callback
     for (const auto& p : pending) {
-        JAMI_DEBUG("[message {:d}] Retry sending", p.token);
+        SIP_CORE_DEBUG("[message {:d}] Retry sending", p.token);
         if (p.payloads.find("application/im-gitmessage-id") == p.payloads.end())
-            emitSignal<libjami::ConfigurationSignal::AccountMessageStatusChanged>(
+            emitSignal<libsip_core::ConfigurationSignal::AccountMessageStatusChanged>(
                 account_.getAccountID(),
                 "",
                 p.to,
                 std::to_string(p.token),
-                (int) libjami::Account::MessageStates::SENDING);
+                (int) libsip_core::Account::MessageStates::SENDING);
         account_.sendMessage(p.to, p.payloads, p.token, retryOnTimeout);
     }
 }
@@ -144,12 +144,12 @@ MessageEngine::cancel(MessageToken t)
                         == m->second.payloads.end();
             m->second.status = MessageStatus::CANCELLED;
             if (emit)
-                emitSignal<libjami::ConfigurationSignal::AccountMessageStatusChanged>(
+                emitSignal<libsip_core::ConfigurationSignal::AccountMessageStatusChanged>(
                     account_.getAccountID(),
                     "",
                     m->second.to,
                     std::to_string(t),
-                    static_cast<int>(libjami::Account::MessageStates::CANCELLED));
+                    static_cast<int>(libsip_core::Account::MessageStates::CANCELLED));
             save_();
             return true;
         }
@@ -160,11 +160,11 @@ MessageEngine::cancel(MessageToken t)
 void
 MessageEngine::onMessageSent(const std::string& peer, MessageToken token, bool ok)
 {
-    JAMI_DEBUG("[message {:d}] Message sent: {:s}", token, ok ? "success"sv : "failure"sv);
+    SIP_CORE_DEBUG("[message {:d}] Message sent: {:s}", token, ok ? "success"sv : "failure"sv);
     std::lock_guard<std::mutex> lock(messagesMutex_);
     auto p = messages_.find(peer);
     if (p == messages_.end()) {
-        JAMI_DEBUG("[message {:d}] Can't find peer", token);
+        SIP_CORE_DEBUG("[message {:d}] Can't find peer", token);
         return;
     }
     auto f = p->second.find(token);
@@ -174,35 +174,35 @@ MessageEngine::onMessageSent(const std::string& peer, MessageToken token, bool o
         if (f->second.status == MessageStatus::SENDING) {
             if (ok) {
                 f->second.status = MessageStatus::SENT;
-                JAMI_DBG() << "[message " << token << "] Status changed to SENT";
+                SIP_CORE_DBG() << "[message " << token << "] Status changed to SENT";
                 if (emit)
-                    emitSignal<libjami::ConfigurationSignal::AccountMessageStatusChanged>(
+                    emitSignal<libsip_core::ConfigurationSignal::AccountMessageStatusChanged>(
                         account_.getAccountID(),
                         "",
                         f->second.to,
                         std::to_string(token),
-                        static_cast<int>(libjami::Account::MessageStates::SENT));
+                        static_cast<int>(libsip_core::Account::MessageStates::SENT));
                 save_();
             } else if (f->second.retried >= MAX_RETRIES) {
                 f->second.status = MessageStatus::FAILURE;
-                JAMI_DBG() << "[message " << token << "] Status changed to FAILURE";
+                SIP_CORE_DBG() << "[message " << token << "] Status changed to FAILURE";
                 if (emit)
-                    emitSignal<libjami::ConfigurationSignal::AccountMessageStatusChanged>(
+                    emitSignal<libsip_core::ConfigurationSignal::AccountMessageStatusChanged>(
                         account_.getAccountID(),
                         "",
                         f->second.to,
                         std::to_string(token),
-                        static_cast<int>(libjami::Account::MessageStates::FAILURE));
+                        static_cast<int>(libsip_core::Account::MessageStates::FAILURE));
                 save_();
             } else {
                 f->second.status = MessageStatus::IDLE;
-                JAMI_DEBUG("[message {:d}] Status changed to IDLE", token);
+                SIP_CORE_DEBUG("[message {:d}] Status changed to IDLE", token);
             }
         } else {
-            JAMI_DEBUG("[message {:d}] State is not SENDING", token);
+            SIP_CORE_DEBUG("[message {:d}] State is not SENDING", token);
         }
     } else {
-        JAMI_DEBUG("[message {:d}] Can't find message", token);
+        SIP_CORE_DEBUG("[message {:d}] Can't find message", token);
     }
 }
 
@@ -211,13 +211,13 @@ MessageEngine::onMessageDisplayed(const std::string& peer, MessageToken token, b
 {
     if (not displayed)
         return;
-    JAMI_DBG() << "[message " << token << "] Displayed by peer";
-    emitSignal<libjami::ConfigurationSignal::AccountMessageStatusChanged>(
+    SIP_CORE_DBG() << "[message " << token << "] Displayed by peer";
+    emitSignal<libsip_core::ConfigurationSignal::AccountMessageStatusChanged>(
         account_.getAccountID(),
         "", /* No related conversation */
         peer,
         std::to_string(token),
-        static_cast<int>(libjami::Account::MessageStates::DISPLAYED));
+        static_cast<int>(libsip_core::Account::MessageStates::DISPLAYED));
 }
 
 void
@@ -256,13 +256,13 @@ MessageEngine::load()
             }
         }
         if (loaded > 0) {
-            JAMI_DBG("[Account %s] loaded %lu messages from %s",
+            SIP_CORE_DBG("[Account %s] loaded %lu messages from %s",
                      account_.getAccountID().c_str(),
                      loaded,
                      savePath_.c_str());
         }
     } catch (const std::exception& e) {
-        JAMI_DBG("[Account %s] couldn't load messages from %s: %s",
+        SIP_CORE_DBG("[Account %s] couldn't load messages from %s: %s",
                  account_.getAccountID().c_str(),
                  savePath_.c_str(),
                  e.what());
@@ -321,14 +321,14 @@ MessageEngine::save_() const
             if (file.is_open())
                 writer->write(root, &file);
         } catch (const std::exception& e) {
-            JAMI_ERROR("[Account {:s}] Couldn't save messages to {:s}: {:s}",
+            SIP_CORE_ERROR("[Account {:s}] Couldn't save messages to {:s}: {:s}",
                        account_.getAccountID(),
                        savePath_,
                        e.what());
         }
-        JAMI_DEBUG("[Account {:s}] saved {:d} messages to {:s}", account_.getAccountID().c_str(), root.size(), savePath_);
+        SIP_CORE_DEBUG("[Account {:s}] saved {:d} messages to {:s}", account_.getAccountID().c_str(), root.size(), savePath_);
     } catch (const std::exception& e) {
-        JAMI_ERR("[Account %s] couldn't save messages to %s: %s",
+        SIP_CORE_ERR("[Account %s] couldn't save messages to %s: %s",
                  account_.getAccountID().c_str(),
                  savePath_.c_str(),
                  e.what());
@@ -336,4 +336,4 @@ MessageEngine::save_() const
 }
 
 } // namespace im
-} // namespace jami
+} // namespace sip_core

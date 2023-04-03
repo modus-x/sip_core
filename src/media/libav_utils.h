@@ -34,7 +34,7 @@ struct AVBufferRef;
 void av_buffer_unref(AVBufferRef **buf);
 }
 
-namespace jami {
+namespace sip_core {
 namespace libav_utils {
 
 void av_init();
@@ -61,4 +61,4 @@ struct AVBufferRef_deleter {
 typedef std::unique_ptr<AVBufferRef, AVBufferRef_deleter> AVBufferPtr;
 
 } // namespace libav_utils
-} // namespace jami
+} // namespace sip_core

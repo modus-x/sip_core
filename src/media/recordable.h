@@ -28,7 +28,7 @@
 #include <memory>
 #include <mutex>
 
-namespace jami {
+namespace sip_core {
 
 class Recordable
 {
@@ -76,4 +76,4 @@ protected:
     bool isAudioOnly_ {false};
 };
 
-} // namespace jami
+} // namespace sip_core

@@ -27,7 +27,7 @@
 #include "video/video_input.h"
 #endif
 
-namespace jami {
+namespace sip_core {
 
 /*
  * @file localrecorder.h
@@ -67,9 +67,9 @@ private:
 
     // media inputs
 #ifdef ENABLE_VIDEO
-    std::shared_ptr<jami::video::VideoInput> videoInput_;
+    std::shared_ptr<sip_core::video::VideoInput> videoInput_;
 #endif
-    std::shared_ptr<jami::AudioInput> audioInput_;
+    std::shared_ptr<sip_core::AudioInput> audioInput_;
 };
 
-} // namespace jami
+} // namespace sip_core

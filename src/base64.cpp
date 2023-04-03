@@ -22,7 +22,7 @@
 #include <pjlib.h>
 #include <pjlib-util/base64.h>
 
-namespace jami {
+namespace sip_core {
 namespace base64 {
 
 std::string
@@ -65,4 +65,4 @@ decode(std::string_view str)
 }
 
 } // namespace base64
-} // namespace jami
+} // namespace sip_core

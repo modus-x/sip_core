@@ -41,12 +41,12 @@
 #import "TargetConditionals.h"
 #endif
 
-namespace jami {
+namespace sip_core {
 class MediaDecoder;
 class MediaDemuxer;
-} // namespace jami
+} // namespace sip_core
 
-namespace jami {
+namespace sip_core {
 namespace video {
 
 class SinkClient;
@@ -174,4 +174,4 @@ private:
 };
 
 } // namespace video
-} // namespace jami
+} // namespace sip_core

@@ -15,4 +15,4 @@ libconnectivity_la_SOURCES = \
 		./connectivity/utf8_utils.cpp \
 		./connectivity/utf8_utils.h
 
-libjami_la_LIBADD += libconnectivity.la
+libsip_core_la_LIBADD += libconnectivity.la

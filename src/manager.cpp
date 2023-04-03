@@ -68,8 +68,8 @@
 #include "conference.h"
 
 #include "client/ring_signal.h"
-#include "jami/call_const.h"
-#include "jami/account_const.h"
+#include "sip_core/call_const.h"
+#include "sip_core/account_const.h"
 
 #include "libav_utils.h"
 #ifdef ENABLE_VIDEO
@@ -80,7 +80,7 @@
 #endif
 #include "audio/tonecontrol.h"
 
-#include "jami/media_const.h"
+#include "sip_core/media_const.h"
 
 #include <libavutil/ffversion.h>
 
@@ -108,7 +108,7 @@
 #include <list>
 #include <random>
 
-namespace jami {
+namespace sip_core {
 
 /** To store uniquely a list of Call ids */
 using CallIDSet = std::set<std::string>;
@@ -154,7 +154,7 @@ check_rename(const std::string& old_dir, const std::string& new_dir)
         return;
 
     if (not fileutils::isDirectory(new_dir)) {
-        JAMI_WARN() << "Migrating " << old_dir << " to " << new_dir;
+        SIP_CORE_WARN() << "Migrating " << old_dir << " to " << new_dir;
         std::rename(old_dir.c_str(), new_dir.c_str());
     } else {
         for (const auto& file : fileutils::readDirectory(old_dir)) {
@@ -163,7 +163,7 @@ check_rename(const std::string& old_dir, const std::string& new_dir)
             if (fileutils::isDirectory(old_dest) and fileutils::isDirectory(new_dest)) {
                 check_rename(old_dest, new_dest);
             } else {
-                JAMI_WARN() << "Migrating " << old_dest << " to " << new_dest;
+                SIP_CORE_WARN() << "Migrating " << old_dest << " to " << new_dest;
                 std::rename(old_dest.c_str(), new_dest.c_str());
             }
         }
@@ -188,11 +188,11 @@ setSipLogLevel()
     pj_log_set_level(level);
     pj_log_set_log_func([](int level, const char* data, int /*len*/) {
         if (level < 2)
-            JAMI_ERR() << data;
+            SIP_CORE_ERR() << data;
         else if (level < 4)
-            JAMI_WARN() << data;
+            SIP_CORE_WARN() << data;
         else
-            JAMI_DBG() << data;
+            SIP_CORE_DBG() << data;
     });
 }
 
@@ -352,14 +352,14 @@ Manager::ManagerPimpl::ManagerPimpl(Manager& base)
     , videoManager_(new VideoManager)
 #endif
 {
-    jami::libav_utils::av_init();
+    sip_core::libav_utils::av_init();
 
     ioContextRunner_ = std::thread([context = ioContext_]() {
         try {
             auto work = asio::make_work_guard(*context);
             context->run();
         } catch (const std::exception& ex) {
-            JAMI_ERR("Unexpected io_context thread exception: %s", ex.what());
+            SIP_CORE_ERR("Unexpected io_context thread exception: %s", ex.what());
         }
     });
 }
@@ -376,11 +376,11 @@ Manager::ManagerPimpl::parseConfiguration()
         const int error_count = base_.loadAccountMap(parsedFile);
 
         if (error_count > 0) {
-            JAMI_WARN("Errors while parsing %s", path_.c_str());
+            SIP_CORE_WARN("Errors while parsing %s", path_.c_str());
             result = false;
         }
     } catch (const YAML::BadFile& e) {
-        JAMI_WARN("Could not open configuration file");
+        SIP_CORE_WARN("Could not open configuration file");
         result = false;
     }
 
@@ -398,7 +398,7 @@ Manager::ManagerPimpl::playATone(Tone::ToneId toneId)
 
     std::lock_guard<std::mutex> lock(audioLayerMutex_);
     if (not audiodriver_) {
-        JAMI_ERR("Audio layer not initialized");
+        SIP_CORE_ERR("Audio layer not initialized");
         return;
     }
 
@@ -431,7 +431,7 @@ Manager::ManagerPimpl::processRemainingParticipants(Conference& conf)
     const std::string current_callId(base_.getCurrentCallId());
     ParticipantSet participants(conf.getParticipantList());
     const size_t n = participants.size();
-    JAMI_DBG("Process remaining %zu participant(s) from conference %s", n, conf.getConfId().c_str());
+    SIP_CORE_DBG("Process remaining %zu participant(s) from conference %s", n, conf.getConfId().c_str());
 
     if (n > 1) {
         // Reset ringbuffer's readpointers
@@ -448,7 +448,7 @@ Manager::ManagerPimpl::processRemainingParticipants(Conference& conf)
             auto w = call->getAccount();
             auto account = w.lock();
             if (!account) {
-                JAMI_ERR("No account detected");
+                SIP_CORE_ERR("No account detected");
                 return;
             }
 
@@ -463,11 +463,11 @@ Manager::ManagerPimpl::processRemainingParticipants(Conference& conf)
                 switchCall(call->getCallId());
         }
 
-        JAMI_DBG("No remaining participants, remove conference");
+        SIP_CORE_DBG("No remaining participants, remove conference");
         if (auto account = conf.getAccount())
             account->removeConference(conf.getConfId());
     } else {
-        JAMI_DBG("No remaining participants, remove conference");
+        SIP_CORE_DBG("No remaining participants, remove conference");
         if (auto account = conf.getAccount())
             account->removeConference(conf.getConfId());
         unsetCurrentCall();
@@ -493,7 +493,7 @@ void
 Manager::ManagerPimpl::switchCall(const std::string& id)
 {
     std::lock_guard<std::mutex> m(currentCallMutex_);
-    JAMI_DBG("----- Switch current call id to '%s' -----", not id.empty() ? id.c_str() : "none");
+    SIP_CORE_DBG("----- Switch current call id to '%s' -----", not id.empty() ? id.c_str() : "none");
     currentCall_ = id;
 }
 
@@ -534,7 +534,7 @@ Manager::ManagerPimpl::loadAccount(const YAML::Node& node, int& errorCount)
             config->unserialize(node);
             a->setConfig(std::move(config));
         } else {
-            JAMI_ERROR("Failed to create account of type \"{:s}\"", accountType);
+            SIP_CORE_ERROR("Failed to create account of type \"{:s}\"", accountType);
             ++errorCount;
         }
     }
@@ -554,7 +554,7 @@ Manager::ManagerPimpl::sendTextMessageToConference(const Conference& conf,
                 throw std::runtime_error("no associated call");
             call->sendTextMessage(messages, from);
         } catch (const std::exception& e) {
-            JAMI_ERR("Failed to send message to conference participant %s: %s",
+            SIP_CORE_ERR("Failed to send message to conference participant %s: %s",
                      callId.c_str(),
                      e.what());
         }
@@ -572,7 +572,7 @@ Manager::ManagerPimpl::bindCallToConference(Call& call, Conference& conf)
     if (call.isConferenceParticipant())
         base_.detachParticipant(callId);
 
-    JAMI_DBG("[call:%s] bind to conference %s (callState=%s)",
+    SIP_CORE_DBG("[call:%s] bind to conference %s (callState=%s)",
              callId.c_str(),
              confId.c_str(),
              state.c_str());
@@ -593,7 +593,7 @@ Manager::ManagerPimpl::bindCallToConference(Call& call, Conference& conf)
         conf.bindParticipant(callId);
         base_.answerCall(call);
     } else
-        JAMI_WARN("[call:%s] call state %s not recognized for conference",
+        SIP_CORE_WARN("[call:%s] call state %s not recognized for conference",
                   callId.c_str(),
                   state.c_str());
 }
@@ -609,7 +609,7 @@ Manager::instance()
     // This will give a warning that can be ignored the first time instance()
     // is called...subsequent warnings are more serious
     if (not Manager::initialized)
-        JAMI_DBG("Not initialized");
+        SIP_CORE_DBG("Not initialized");
 
     return instance;
 }
@@ -667,8 +667,8 @@ Manager::init(const std::string& config_file, const std::string& data_path)
     PJSIP_TRY(pjnath_init());
 #undef PJSIP_TRY
 
-    JAMI_DBG("Using PJSIP version %s for %s", pj_get_version(), PJ_OS_NAME);
-    JAMI_DBG("Using FFmpeg version %s", av_version_info());
+    SIP_CORE_DBG("Using PJSIP version %s for %s", pj_get_version(), PJ_OS_NAME);
+    SIP_CORE_DBG("Using FFmpeg version %s", av_version_info());
 
     // Manager can restart without being recreated (Unit tests)
     // So only create the SipLink once
@@ -679,7 +679,7 @@ Manager::init(const std::string& config_file, const std::string& data_path)
     check_rename(fileutils::get_config_dir(PACKAGE_OLD), fileutils::get_config_dir());
 
     pimpl_->path_ = config_file.empty() ? pimpl_->retrieveConfigPath() : config_file;
-    JAMI_DBG("Configuration file path: %s", pimpl_->path_.c_str());
+    SIP_CORE_DBG("Configuration file path: %s", pimpl_->path_.c_str());
 
     pimpl_->data_path_ = data_path;
 
@@ -691,7 +691,7 @@ Manager::init(const std::string& config_file, const std::string& data_path)
     try {
         no_errors = pimpl_->parseConfiguration();
     } catch (const YAML::Exception& e) {
-        JAMI_ERR("%s", e.what());
+        SIP_CORE_ERR("%s", e.what());
         no_errors = false;
     }
 
@@ -700,7 +700,7 @@ Manager::init(const std::string& config_file, const std::string& data_path)
         make_backup(pimpl_->path_);
     } else {
         // restore previous configuration
-        JAMI_WARN("Restoring last working configuration");
+        SIP_CORE_WARN("Restoring last working configuration");
 
         try {
             // remove accounts from broken configuration
@@ -708,8 +708,8 @@ Manager::init(const std::string& config_file, const std::string& data_path)
             restore_backup(pimpl_->path_);
             pimpl_->parseConfiguration();
         } catch (const YAML::Exception& e) {
-            JAMI_ERR("%s", e.what());
-            JAMI_WARN("Restoring backup failed");
+            SIP_CORE_ERR("%s", e.what());
+            SIP_CORE_WARN("Restoring backup failed");
         }
     }
 
@@ -737,7 +737,7 @@ Manager::finish() noexcept
         callFactory.forbid();
 
         // Hangup all remaining active calls
-        JAMI_DBG("Hangup %zu remaining call(s)", callFactory.callCount());
+        SIP_CORE_DBG("Hangup %zu remaining call(s)", callFactory.callCount());
         for (const auto& call : callFactory.getAllCalls())
             hangupCall(call->getAccountId(), call->getCallId());
         callFactory.clear();
@@ -753,7 +753,7 @@ Manager::finish() noexcept
             pimpl_->audiodriver_.reset();
         }
 
-        JAMI_DBG("Stopping schedulers and worker threads");
+        SIP_CORE_DBG("Stopping schedulers and worker threads");
 
         // Flush remaining tasks (free lambda' with capture)
         pimpl_->scheduler_.stop();
@@ -776,7 +776,7 @@ Manager::finish() noexcept
             pimpl_->ioContextRunner_.join();
 
     } catch (const VoipLinkException& err) {
-        JAMI_ERR("%s", err.what());
+        SIP_CORE_ERR("%s", err.what());
     }
 }
 
@@ -784,20 +784,20 @@ void
 Manager::monitor(bool continuous)
 {
     Logger::setMonitorLog(true);
-    JAMI_DBG("############## START MONITORING ##############");
-    JAMI_DBG("Using PJSIP version %s for %s", pj_get_version(), PJ_OS_NAME);
+    SIP_CORE_DBG("############## START MONITORING ##############");
+    SIP_CORE_DBG("Using PJSIP version %s for %s", pj_get_version(), PJ_OS_NAME);
 
 #ifdef __linux__
 #if defined(__ANDROID__)
 #else
     auto opened_files = fileutils::readDirectory("/proc/" + std::to_string(getpid()) + "/fd").size();
-    JAMI_DBG("Opened files: %lu", opened_files);
+    SIP_CORE_DBG("Opened files: %lu", opened_files);
 #endif
 #endif
 
     for (const auto& call : callFactory.getAllCalls())
         call->monitor();
-    JAMI_DBG("############## END MONITORING ##############");
+    SIP_CORE_DBG("############## END MONITORING ##############");
     Logger::setMonitorLog(continuous);
 }
 
@@ -817,7 +817,7 @@ bool
 Manager::hasCurrentCall() const
 {
     for (const auto& call : callFactory.getAllCalls()) {
-        if (!call->isSubcall() && call->getStateStr() == libjami::Call::StateEvent::CURRENT)
+        if (!call->isSubcall() && call->getStateStr() == libsip_core::Call::StateEvent::CURRENT)
             return true;
     }
     return false;
@@ -853,9 +853,9 @@ Manager::unregisterAccounts()
 std::string
 Manager::outgoingCall(const std::string& account_id,
                       const std::string& to,
-                      const std::vector<libjami::MediaMap>& mediaList)
+                      const std::vector<libsip_core::MediaMap>& mediaList)
 {
-    JAMI_DBG() << "try outgoing call to '" << to << "'"
+    SIP_CORE_DBG() << "try outgoing call to '" << to << "'"
                << " with account '" << account_id << "'";
 
     std::shared_ptr<Call> call;
@@ -863,7 +863,7 @@ Manager::outgoingCall(const std::string& account_id,
     try {
         call = newOutgoingCall(trim(to), account_id, mediaList);
     } catch (const std::exception& e) {
-        JAMI_ERR("%s", e.what());
+        SIP_CORE_ERR("%s", e.what());
         return {};
     }
 
@@ -881,7 +881,7 @@ Manager::outgoingCall(const std::string& account_id,
 bool
 Manager::answerCall(const std::string& accountId,
                     const std::string& callId,
-                    const std::vector<libjami::MediaMap>& mediaList)
+                    const std::vector<libsip_core::MediaMap>& mediaList)
 {
     if (auto account = getAccount(accountId)) {
         if (auto call = account->getCall(callId)) {
@@ -907,9 +907,9 @@ Manager::muteEncoder(const std::string& accountId, const std::string& callId, bo
 #endif
 
 bool
-Manager::answerCall(Call& call, const std::vector<libjami::MediaMap>& mediaList)
+Manager::answerCall(Call& call, const std::vector<libsip_core::MediaMap>& mediaList)
 {
-    JAMI_INFO("Answer call %s", call.getCallId().c_str());
+    SIP_CORE_INFO("Answer call %s", call.getCallId().c_str());
 
     if (call.getConnectionState() != Call::ConnectionState::RINGING) {
         // The call is already answered
@@ -923,7 +923,7 @@ Manager::answerCall(Call& call, const std::vector<libjami::MediaMap>& mediaList)
     try {
         call.answer(mediaList);
     } catch (const std::runtime_error& e) {
-        JAMI_ERR("%s", e.what());
+        SIP_CORE_ERR("%s", e.what());
         return false;
     }
 
@@ -938,8 +938,8 @@ Manager::answerCall(Call& call, const std::vector<libjami::MediaMap>& mediaList)
     // Start recording if set in preference
     if (audioPreference.getIsAlwaysRecording()) {
         auto recResult = call.toggleRecording();
-        emitSignal<libjami::CallSignal::RecordPlaybackFilepath>(call.getCallId(), call.getPath());
-        emitSignal<libjami::CallSignal::RecordingStateChanged>(call.getCallId(), recResult);
+        emitSignal<libsip_core::CallSignal::RecordPlaybackFilepath>(call.getCallId(), call.getPath());
+        emitSignal<libsip_core::CallSignal::RecordingStateChanged>(call.getCallId(), recResult);
     }
     return true;
 }
@@ -958,7 +958,7 @@ Manager::hangupCall(const std::string& accountId, const std::string& callId)
     /* We often get here when the call was hungup before being created */
     auto call = account->getCall(callId);
     if (not call) {
-        JAMI_WARN("Could not hang up non-existant call %s", callId.c_str());
+        SIP_CORE_WARN("Could not hang up non-existant call %s", callId.c_str());
         return false;
     }
 
@@ -976,7 +976,7 @@ Manager::hangupCall(const std::string& accountId, const std::string& callId)
     try {
         call->hangup(0);
     } catch (const VoipLinkException& e) {
-        JAMI_ERR("%s", e.what());
+        SIP_CORE_ERR("%s", e.what());
         return false;
     }
 
@@ -990,7 +990,7 @@ Manager::hangupConference(const std::string& accountId, const std::string& confI
         if (auto conference = account->getConference(confId)) {
             return pimpl_->hangupConference(*conference);
         } else {
-            JAMI_ERR("No such conference %s", confId.c_str());
+            SIP_CORE_ERR("No such conference %s", confId.c_str());
         }
     }
     return false;
@@ -1010,7 +1010,7 @@ Manager::onHoldCall(const std::string&, const std::string& callId)
         try {
             result = call->onhold([=](bool ok) {
                 if (!ok) {
-                    JAMI_ERR("hold failed for call %s", callId.c_str());
+                    SIP_CORE_ERR("hold failed for call %s", callId.c_str());
                     return;
                 }
                 removeAudio(*call); // Unbind calls in main buffer
@@ -1023,11 +1023,11 @@ Manager::onHoldCall(const std::string&, const std::string& callId)
                     pimpl_->unsetCurrentCall();
             });
         } catch (const VoipLinkException& e) {
-            JAMI_ERR("%s", e.what());
+            SIP_CORE_ERR("%s", e.what());
             result = false;
         }
     } else {
-        JAMI_DBG("CallID %s doesn't exist in call onHold", callId.c_str());
+        SIP_CORE_DBG("CallID %s doesn't exist in call onHold", callId.c_str());
         return false;
     }
 
@@ -1049,7 +1049,7 @@ Manager::offHoldCall(const std::string&, const std::string& callId)
     try {
         result = call->offhold([=](bool ok) {
             if (!ok) {
-                JAMI_ERR("off hold failed for call %s", callId.c_str());
+                SIP_CORE_ERR("off hold failed for call %s", callId.c_str());
                 return;
             }
 
@@ -1061,7 +1061,7 @@ Manager::offHoldCall(const std::string&, const std::string& callId)
             addAudio(*call);
         });
     } catch (const VoipLinkException& e) {
-        JAMI_ERR("%s", e.what());
+        SIP_CORE_ERR("%s", e.what());
         return false;
     }
 
@@ -1094,13 +1094,13 @@ Manager::transferCall(const std::string& accountId, const std::string& callId, c
 void
 Manager::transferFailed()
 {
-    emitSignal<libjami::CallSignal::TransferFailed>();
+    emitSignal<libsip_core::CallSignal::TransferFailed>();
 }
 
 void
 Manager::transferSucceeded()
 {
-    emitSignal<libjami::CallSignal::TransferSucceeded>();
+    emitSignal<libsip_core::CallSignal::TransferSucceeded>();
 }
 
 // THREAD=Main : Call:Incoming
@@ -1122,12 +1122,12 @@ Manager::refuseCall(const std::string& accountId, const std::string& id)
 bool
 Manager::holdConference(const std::string& accountId, const std::string& confId)
 {
-    JAMI_INFO("Hold conference %s", confId.c_str());
+    SIP_CORE_INFO("Hold conference %s", confId.c_str());
 
     if (const auto account = getAccount(accountId)) {
         if (auto conf = account->getConference(confId)) {
             conf->detachLocalParticipant();
-            emitSignal<libjami::CallSignal::ConferenceChanged>(accountId,
+            emitSignal<libsip_core::CallSignal::ConferenceChanged>(accountId,
                                                                conf->getConfId(),
                                                                conf->getStateStr());
             return true;
@@ -1139,7 +1139,7 @@ Manager::holdConference(const std::string& accountId, const std::string& confId)
 bool
 Manager::unHoldConference(const std::string& accountId, const std::string& confId)
 {
-    JAMI_DBG("[conf:%s] un-holding conference", confId.c_str());
+    SIP_CORE_DBG("[conf:%s] un-holding conference", confId.c_str());
 
     if (const auto account = getAccount(accountId)) {
         if (auto conf = account->getConference(confId)) {
@@ -1151,7 +1151,7 @@ Manager::unHoldConference(const std::string& accountId, const std::string& confI
 
                 pimpl_->switchCall(confId);
                 conf->setState(Conference::State::ACTIVE_ATTACHED);
-                emitSignal<libjami::CallSignal::ConferenceChanged>(accountId,
+                emitSignal<libsip_core::CallSignal::ConferenceChanged>(accountId,
                                                                    conf->getConfId(),
                                                                    conf->getStateStr());
                 return true;
@@ -1188,11 +1188,11 @@ Manager::addParticipant(Call& call, Conference& conference)
 {
     // No-op if the call is already a conference participant
     /*if (call.getConfId() == conference.getConfId()) {
-        JAMI_WARN("Call %s already participant of conf %s", call.getCallId().c_str(),
+        SIP_CORE_WARN("Call %s already participant of conf %s", call.getCallId().c_str(),
     conference.getConfId().c_str()); return true;
     }*/
 
-    JAMI_DBG("Add participant %s to conference %s",
+    SIP_CORE_DBG("Add participant %s to conference %s",
              call.getCallId().c_str(),
              conference.getConfId().c_str());
 
@@ -1218,7 +1218,7 @@ void
 Manager::ManagerPimpl::addMainParticipant(Conference& conf)
 {
     conf.attachLocalParticipant();
-    emitSignal<libjami::CallSignal::ConferenceChanged>(conf.getAccountId(),
+    emitSignal<libsip_core::CallSignal::ConferenceChanged>(conf.getAccountId(),
                                                        conf.getConfId(),
                                                        conf.getStateStr());
     switchCall(conf.getConfId());
@@ -1227,7 +1227,7 @@ Manager::ManagerPimpl::addMainParticipant(Conference& conf)
 bool
 Manager::ManagerPimpl::hangupConference(Conference& conference)
 {
-    JAMI_DBG("Hangup conference %s", conference.getConfId().c_str());
+    SIP_CORE_DBG("Hangup conference %s", conference.getConfId().c_str());
     ParticipantSet participants(conference.getParticipantList());
     for (const auto& callId : participants) {
         if (auto call = base_.getCallFromCallID(callId))
@@ -1240,15 +1240,15 @@ Manager::ManagerPimpl::hangupConference(Conference& conference)
 bool
 Manager::addMainParticipant(const std::string& accountId, const std::string& conferenceId)
 {
-    JAMI_INFO("Add main participant to conference %s", conferenceId.c_str());
+    SIP_CORE_INFO("Add main participant to conference %s", conferenceId.c_str());
 
     if (auto account = getAccount(accountId)) {
         if (auto conf = account->getConference(conferenceId)) {
             pimpl_->addMainParticipant(*conf);
-            JAMI_DBG("Successfully added main participant to conference %s", conferenceId.c_str());
+            SIP_CORE_DBG("Successfully added main participant to conference %s", conferenceId.c_str());
             return true;
         } else
-            JAMI_WARN("Failed to add main participant to conference %s", conferenceId.c_str());
+            SIP_CORE_WARN("Failed to add main participant to conference %s", conferenceId.c_str());
     }
     return false;
 }
@@ -1266,40 +1266,40 @@ Manager::joinParticipant(const std::string& accountId,
                          const std::string& callId2,
                          bool attached)
 {
-    JAMI_INFO("JoinParticipant(%s, %s, %i)", callId1.c_str(), callId2.c_str(), attached);
+    SIP_CORE_INFO("JoinParticipant(%s, %s, %i)", callId1.c_str(), callId2.c_str(), attached);
     auto account = getAccount(accountId);
     auto account2 = getAccount(account2Id);
     if (not account or not account2) {
         return false;
     }
 
-    JAMI_INFO("Creating conference for participants %s and %s. Attach host [%s]",
+    SIP_CORE_INFO("Creating conference for participants %s and %s. Attach host [%s]",
               callId1.c_str(),
               callId2.c_str(),
               attached ? "YES" : "NO");
 
     if (callId1 == callId2) {
-        JAMI_ERR("Cannot join participant %s to itself", callId1.c_str());
+        SIP_CORE_ERR("Cannot join participant %s to itself", callId1.c_str());
         return false;
     }
 
     // Set corresponding conference ids for call 1
     auto call1 = account->getCall(callId1);
     if (!call1) {
-        JAMI_ERR("Could not find call %s", callId1.c_str());
+        SIP_CORE_ERR("Could not find call %s", callId1.c_str());
         return false;
     }
 
     // Set corresponding conference details
     auto call2 = account2->getCall(callId2);
     if (!call2) {
-        JAMI_ERR("Could not find call %s", callId2.c_str());
+        SIP_CORE_ERR("Could not find call %s", callId2.c_str());
         return false;
     }
 
     auto conf = std::make_shared<Conference>(account);
     account->attach(conf);
-    emitSignal<libjami::CallSignal::ConferenceCreated>(account->getAccountID(), conf->getConfId());
+    emitSignal<libsip_core::CallSignal::ConferenceCreated>(account->getAccountID(), conf->getConfId());
 
     // Bind calls according to their state
     pimpl_->bindCallToConference(*call1, *conf);
@@ -1312,7 +1312,7 @@ Manager::joinParticipant(const std::string& accountId,
     } else {
         conf->detachLocalParticipant();
     }
-    emitSignal<libjami::CallSignal::ConferenceChanged>(account->getAccountID(),
+    emitSignal<libsip_core::CallSignal::ConferenceChanged>(account->getAccountID(),
                                                        conf->getConfId(),
                                                        conf->getStateStr());
 
@@ -1325,13 +1325,13 @@ Manager::createConfFromParticipantList(const std::string& accountId,
 {
     auto account = getAccount(accountId);
     if (not account) {
-        JAMI_WARN("Can't find account");
+        SIP_CORE_WARN("Can't find account");
         return;
     }
 
     // we must at least have 2 participant for a conference
     if (participantList.size() <= 1) {
-        JAMI_ERR("Participant number must be higher or equal to 2");
+        SIP_CORE_ERR("Participant number must be higher or equal to 2");
         return;
     }
 
@@ -1357,7 +1357,7 @@ Manager::createConfFromParticipantList(const std::string& accountId,
     // Create the conference if and only if at least 2 calls have been successfully created
     if (successCounter >= 2) {
         account->attach(conf);
-        emitSignal<libjami::CallSignal::ConferenceCreated>(accountId, conf->getConfId());
+        emitSignal<libsip_core::CallSignal::ConferenceCreated>(accountId, conf->getConfId());
     }
 }
 
@@ -1367,9 +1367,9 @@ Manager::detachLocalParticipant(const std::shared_ptr<Conference>& conf)
     if (not conf)
         return false;
 
-    JAMI_INFO("Detach local participant from conference %s", conf->getConfId().c_str());
+    SIP_CORE_INFO("Detach local participant from conference %s", conf->getConfId().c_str());
     conf->detachLocalParticipant();
-    emitSignal<libjami::CallSignal::ConferenceChanged>(conf->getAccountId(),
+    emitSignal<libsip_core::CallSignal::ConferenceChanged>(conf->getAccountId(),
                                                        conf->getConfId(),
                                                        conf->getStateStr());
     pimpl_->unsetCurrentCall();
@@ -1379,11 +1379,11 @@ Manager::detachLocalParticipant(const std::shared_ptr<Conference>& conf)
 bool
 Manager::detachParticipant(const std::string& callId)
 {
-    JAMI_DBG("Detach participant %s", callId.c_str());
+    SIP_CORE_DBG("Detach participant %s", callId.c_str());
 
     auto call = getCallFromCallID(callId);
     if (!call) {
-        JAMI_ERR("Could not find call %s", callId.c_str());
+        SIP_CORE_ERR("Could not find call %s", callId.c_str());
         return false;
     }
 
@@ -1398,11 +1398,11 @@ Manager::detachParticipant(const std::string& callId)
 void
 Manager::removeParticipant(Call& call)
 {
-    JAMI_DBG("Remove participant %s", call.getCallId().c_str());
+    SIP_CORE_DBG("Remove participant %s", call.getCallId().c_str());
 
     auto conf = call.getConference();
     if (not conf) {
-        JAMI_ERR("No conference, cannot remove participant");
+        SIP_CORE_ERR("No conference, cannot remove participant");
         return;
     }
 
@@ -1410,7 +1410,7 @@ Manager::removeParticipant(Call& call)
 
     removeAudio(call);
 
-    emitSignal<libjami::CallSignal::ConferenceChanged>(conf->getAccountId(),
+    emitSignal<libsip_core::CallSignal::ConferenceChanged>(conf->getAccountId(),
                                                        conf->getConfId(),
                                                        conf->getStateStr());
 
@@ -1426,23 +1426,23 @@ Manager::joinConference(const std::string& accountId,
     auto account = getAccount(accountId);
     auto account2 = getAccount(account2Id);
     if (not account) {
-        JAMI_ERR("Can't find account: %s", accountId.c_str());
+        SIP_CORE_ERR("Can't find account: %s", accountId.c_str());
         return false;
     }
     if (not account2) {
-        JAMI_ERR("Can't find account: %s", account2Id.c_str());
+        SIP_CORE_ERR("Can't find account: %s", account2Id.c_str());
         return false;
     }
 
     auto conf = account->getConference(confId1);
     if (not conf) {
-        JAMI_ERR("Not a valid conference ID: %s", confId1.c_str());
+        SIP_CORE_ERR("Not a valid conference ID: %s", confId1.c_str());
         return false;
     }
 
     auto conf2 = account2->getConference(confId2);
     if (not conf2) {
-        JAMI_ERR("Not a valid conference ID: %s", confId2.c_str());
+        SIP_CORE_ERR("Not a valid conference ID: %s", confId2.c_str());
         return false;
     }
 
@@ -1454,13 +1454,13 @@ Manager::joinConference(const std::string& accountId,
     // Detach and remove all participant from conf1 before add
     // ... to conf2
     for (const auto& p : participants) {
-        JAMI_DBG("Detach participant %s", p.c_str());
+        SIP_CORE_DBG("Detach participant %s", p.c_str());
         if (auto call = account->getCall(p)) {
             conf->removeParticipant(p);
             removeAudio(*call);
             calls.emplace_back(std::move(call));
         } else {
-            JAMI_ERR("Could not find call %s", p.c_str());
+            SIP_CORE_ERR("Could not find call %s", p.c_str());
         }
     }
     // Remove conf1
@@ -1476,10 +1476,10 @@ void
 Manager::addAudio(Call& call)
 {
     const auto& callId = call.getCallId();
-    JAMI_INFO("Add audio to call %s", callId.c_str());
+    SIP_CORE_INFO("Add audio to call %s", callId.c_str());
 
     if (call.isConferenceParticipant()) {
-        JAMI_DBG("[conf:%s] Attach local audio", callId.c_str());
+        SIP_CORE_DBG("[conf:%s] Attach local audio", callId.c_str());
 
         // bind to conference participant
         /*auto iter = pimpl_->conferenceMap_.find(callId);
@@ -1487,7 +1487,7 @@ Manager::addAudio(Call& call)
             iter->second->bindParticipant(callId);
         }*/
     } else {
-        JAMI_DBG("[call:%s] Attach audio", callId.c_str());
+        SIP_CORE_DBG("[call:%s] Attach audio", callId.c_str());
 
         // bind to main
         getRingBufferPool().bindCallID(callId, RingBufferPool::DEFAULT_ID);
@@ -1496,7 +1496,7 @@ Manager::addAudio(Call& call)
 
         std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
         if (!pimpl_->audiodriver_) {
-            JAMI_ERR("Audio driver not initialized");
+            SIP_CORE_ERR("Audio driver not initialized");
             return;
         }
         pimpl_->audiodriver_->flushUrgent();
@@ -1508,7 +1508,7 @@ void
 Manager::removeAudio(Call& call)
 {
     const auto& callId = call.getCallId();
-    JAMI_DBG("[call:%s] Remove local audio", callId.c_str());
+    SIP_CORE_DBG("[call:%s] Remove local audio", callId.c_str());
     getRingBufferPool().unBindAll(callId);
     call.audioGuard.reset();
 }
@@ -1552,7 +1552,7 @@ Manager::saveConfig(const std::shared_ptr<Account>& acc)
 void
 Manager::saveConfig()
 {
-    JAMI_DBG("Saving Configuration to XDG directory %s", pimpl_->path_.c_str());
+    SIP_CORE_DBG("Saving Configuration to XDG directory %s", pimpl_->path_.c_str());
 
     if (pimpl_->audiodriver_) {
         audioPreference.setVolumemic(pimpl_->audiodriver_->getCaptureGain());
@@ -1585,9 +1585,9 @@ Manager::saveConfig()
         std::ofstream fout = fileutils::ofstream(pimpl_->path_);
         fout.write(out.c_str(), out.size());
     } catch (const YAML::Exception& e) {
-        JAMI_ERR("%s", e.what());
+        SIP_CORE_ERR("%s", e.what());
     } catch (const std::runtime_error& e) {
-        JAMI_ERR("%s", e.what());
+        SIP_CORE_ERR("%s", e.what());
     }
 }
 
@@ -1598,7 +1598,7 @@ Manager::playDtmf(char code)
     stopTone();
 
     if (not voipPreferences.getPlayDtmf()) {
-        JAMI_DBG("Do not have to play a tone...");
+        SIP_CORE_DBG("Do not have to play a tone...");
         return;
     }
 
@@ -1606,7 +1606,7 @@ Manager::playDtmf(char code)
     int pulselen = voipPreferences.getPulseLength();
 
     if (pulselen == 0) {
-        JAMI_DBG("Pulse length is not set...");
+        SIP_CORE_DBG("Pulse length is not set...");
         return;
     }
 
@@ -1614,13 +1614,13 @@ Manager::playDtmf(char code)
 
     // fast return, no sound, so no dtmf
     if (not pimpl_->audiodriver_ or not pimpl_->dtmfKey_) {
-        JAMI_DBG("No audio layer...");
+        SIP_CORE_DBG("No audio layer...");
         return;
     }
 
     std::shared_ptr<AudioDeviceGuard> audioGuard = startAudioStream(AudioDeviceType::PLAYBACK);
     if (not pimpl_->audiodriver_->waitForStart(std::chrono::seconds(1))) {
-        JAMI_ERR("Failed to start audio layer...");
+        SIP_CORE_ERR("Failed to start audio layer...");
         return;
     }
 
@@ -1644,7 +1644,7 @@ Manager::playDtmf(char code)
         pimpl_->audiodriver_->putUrgent(pimpl_->dtmfBuf_);
     }
 
-    scheduler().scheduleIn([audioGuard] { JAMI_WARN("End of dtmf"); },
+    scheduler().scheduleIn([audioGuard] { SIP_CORE_WARN("End of dtmf"); },
                            std::chrono::milliseconds(pulselen));
 
     // TODO Cache the DTMF
@@ -1669,7 +1669,7 @@ Manager::incomingCall(const std::string& accountId, Call& call)
 
     auto const& account = getAccount(accountId);
     if (not account) {
-        JAMI_ERR("Incoming call %s on unknown account %s",
+        SIP_CORE_ERR("Incoming call %s on unknown account %s",
                  call.getCallId().c_str(),
                  accountId.c_str());
         return;
@@ -1692,7 +1692,7 @@ Manager::incomingMessage(const std::string& accountId,
     if (auto call = account->getCall(callId)) {
         if (call->isConferenceParticipant()) {
             if (auto conf = call->getConference()) {
-                JAMI_DBG("Is a conference, send incoming message to everyone");
+                SIP_CORE_DBG("Is a conference, send incoming message to everyone");
                 // filter out vcards messages  as they could be resent by master as its own vcard
                 // TODO. Implement a protocol to handle vcard messages
                 bool sendToOtherParicipants = true;
@@ -1706,15 +1706,15 @@ Manager::incomingMessage(const std::string& accountId,
                 }
 
                 // in case of a conference we must notify client using conference id
-                emitSignal<libjami::CallSignal::IncomingMessage>(accountId,
+                emitSignal<libsip_core::CallSignal::IncomingMessage>(accountId,
                                                                  conf->getConfId(),
                                                                  from,
                                                                  messages);
             } else {
-                JAMI_ERR("no conference associated to ID %s", callId.c_str());
+                SIP_CORE_ERR("no conference associated to ID %s", callId.c_str());
             }
         } else {
-            emitSignal<libjami::CallSignal::IncomingMessage>(accountId, callId, from, messages);
+            emitSignal<libsip_core::CallSignal::IncomingMessage>(accountId, callId, from, messages);
         }
     }
 }
@@ -1732,27 +1732,27 @@ Manager::sendCallTextMessage(const std::string& accountId,
     }
 
     if (auto conf = account->getConference(callID)) {
-        JAMI_DBG("Is a conference, send instant message to everyone");
+        SIP_CORE_DBG("Is a conference, send instant message to everyone");
         pimpl_->sendTextMessageToConference(*conf, messages, from);
     } else if (auto call = account->getCall(callID)) {
         if (call->isConferenceParticipant()) {
             if (auto conf = call->getConference()) {
-                JAMI_DBG("Call is participant in a conference, send instant message to everyone");
+                SIP_CORE_DBG("Call is participant in a conference, send instant message to everyone");
                 pimpl_->sendTextMessageToConference(*conf, messages, from);
             } else {
-                JAMI_ERR("no conference associated to call ID %s", callID.c_str());
+                SIP_CORE_ERR("no conference associated to call ID %s", callID.c_str());
             }
         } else {
             try {
                 call->sendTextMessage(messages, from);
             } catch (const im::InstantMessageException& e) {
-                JAMI_ERR("Failed to send message to call %s: %s",
+                SIP_CORE_ERR("Failed to send message to call %s: %s",
                          call->getCallId().c_str(),
                          e.what());
             }
         }
     } else {
-        JAMI_ERR("Failed to send message to %s: inexistent call ID", callID.c_str());
+        SIP_CORE_ERR("Failed to send message to %s: inexistent call ID", callID.c_str());
     }
 }
 
@@ -1761,7 +1761,7 @@ void
 Manager::peerAnsweredCall(Call& call)
 {
     const auto& callId = call.getCallId();
-    JAMI_DBG("[call:%s] Peer answered", callId.c_str());
+    SIP_CORE_DBG("[call:%s] Peer answered", callId.c_str());
 
     // The if statement is useful only if we sent two calls at the same time.
     if (isCurrentCall(call))
@@ -1777,8 +1777,8 @@ Manager::peerAnsweredCall(Call& call)
 
     if (audioPreference.getIsAlwaysRecording()) {
         auto result = call.toggleRecording();
-        emitSignal<libjami::CallSignal::RecordPlaybackFilepath>(callId, call.getPath());
-        emitSignal<libjami::CallSignal::RecordingStateChanged>(callId, result);
+        emitSignal<libsip_core::CallSignal::RecordPlaybackFilepath>(callId, call.getPath());
+        emitSignal<libsip_core::CallSignal::RecordingStateChanged>(callId, result);
     }
 }
 
@@ -1786,7 +1786,7 @@ Manager::peerAnsweredCall(Call& call)
 void
 Manager::peerRingingCall(Call& call)
 {
-    JAMI_DBG("[call:%s] Peer ringing", call.getCallId().c_str());
+    SIP_CORE_DBG("[call:%s] Peer ringing", call.getCallId().c_str());
 
     if (!hasCurrentCall())
         ringback();
@@ -1797,7 +1797,7 @@ void
 Manager::peerHungupCall(Call& call)
 {
     const auto& callId = call.getCallId();
-    JAMI_DBG("[call:%s] Peer hung up", callId.c_str());
+    SIP_CORE_DBG("[call:%s] Peer hung up", callId.c_str());
 
     if (call.isConferenceParticipant()) {
         removeParticipant(call);
@@ -1819,7 +1819,7 @@ Manager::peerHungupCall(Call& call)
 void
 Manager::callBusy(Call& call)
 {
-    JAMI_DBG("[call:%s] Busy", call.getCallId().c_str());
+    SIP_CORE_DBG("[call:%s] Busy", call.getCallId().c_str());
 
     if (isCurrentCall(call)) {
         pimpl_->unsetCurrentCall();
@@ -1834,7 +1834,7 @@ Manager::callBusy(Call& call)
 void
 Manager::callFailure(Call& call)
 {
-    JAMI_DBG("[call:%s] %s failed",
+    SIP_CORE_DBG("[call:%s] %s failed",
              call.getCallId().c_str(),
              call.isSubcall() ? "Sub-call" : "Parent call");
 
@@ -1843,7 +1843,7 @@ Manager::callFailure(Call& call)
     }
 
     if (call.isConferenceParticipant()) {
-        JAMI_DBG("[call %s] Participating in a conference. Remove", call.getCallId().c_str());
+        SIP_CORE_DBG("[call %s] Participating in a conference. Remove", call.getCallId().c_str());
         // remove this participant
         removeParticipant(call);
     }
@@ -1911,7 +1911,7 @@ Manager::playRingtone(const std::string& accountID)
 {
     const auto account = getAccount(accountID);
     if (!account) {
-        JAMI_WARN("Invalid account in ringtone");
+        SIP_CORE_WARN("Invalid account in ringtone");
         return;
     }
 
@@ -1924,7 +1924,7 @@ Manager::playRingtone(const std::string& accountID)
         std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
 
         if (not pimpl_->audiodriver_) {
-            JAMI_ERR("no audio layer in ringtone");
+            SIP_CORE_ERR("no audio layer in ringtone");
             return;
         }
         // start audio if not started AND flush all buffers (main and urgent)
@@ -1974,11 +1974,11 @@ Manager::setAudioDevice(int index, AudioDeviceType type)
     std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
 
     if (not pimpl_->audiodriver_) {
-        JAMI_ERR("Audio driver not initialized");
+        SIP_CORE_ERR("Audio driver not initialized");
         return;
     }
     if (pimpl_->getCurrentDeviceIndex(type) == index) {
-        JAMI_WARN("Audio device already selected ; doing nothing.");
+        SIP_CORE_WARN("Audio device already selected ; doing nothing.");
         return;
     }
 
@@ -1999,7 +1999,7 @@ Manager::getAudioOutputDeviceList()
     std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
 
     if (not pimpl_->audiodriver_) {
-        JAMI_ERR("Audio layer not initialized");
+        SIP_CORE_ERR("Audio layer not initialized");
         return {};
     }
 
@@ -2015,7 +2015,7 @@ Manager::getAudioInputDeviceList()
     std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
 
     if (not pimpl_->audiodriver_) {
-        JAMI_ERR("Audio layer not initialized");
+        SIP_CORE_ERR("Audio layer not initialized");
         return {};
     }
 
@@ -2030,7 +2030,7 @@ Manager::getCurrentAudioDevicesIndex()
 {
     std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
     if (not pimpl_->audiodriver_) {
-        JAMI_ERR("Audio layer not initialized");
+        SIP_CORE_ERR("Audio layer not initialized");
         return {};
     }
 
@@ -2100,18 +2100,18 @@ Manager::toggleRecordingCall(const std::string& accountId, const std::string& id
     if (auto account = getAccount(accountId)) {
         std::shared_ptr<Recordable> rec;
         if (auto conf = account->getConference(id)) {
-            JAMI_DBG("toggle recording for conference %s", id.c_str());
+            SIP_CORE_DBG("toggle recording for conference %s", id.c_str());
             rec = conf;
         } else if (auto call = account->getCall(id)) {
-            JAMI_DBG("toggle recording for call %s", id.c_str());
+            SIP_CORE_DBG("toggle recording for call %s", id.c_str());
             rec = call;
         } else {
-            JAMI_ERR("Could not find recordable instance %s", id.c_str());
+            SIP_CORE_ERR("Could not find recordable instance %s", id.c_str());
             return false;
         }
         result = rec->toggleRecording();
-        emitSignal<libjami::CallSignal::RecordPlaybackFilepath>(id, rec->getPath());
-        emitSignal<libjami::CallSignal::RecordingStateChanged>(id, result);
+        emitSignal<libsip_core::CallSignal::RecordPlaybackFilepath>(id, rec->getPath());
+        emitSignal<libsip_core::CallSignal::RecordingStateChanged>(id, result);
     }
     return result;
 }
@@ -2119,13 +2119,13 @@ Manager::toggleRecordingCall(const std::string& accountId, const std::string& id
 bool
 Manager::startRecordedFilePlayback(const std::string& filepath)
 {
-    JAMI_DBG("Start recorded file playback %s", filepath.c_str());
+    SIP_CORE_DBG("Start recorded file playback %s", filepath.c_str());
 
     {
         std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
 
         if (not pimpl_->audiodriver_) {
-            JAMI_ERR("No audio layer in start recorded file playback");
+            SIP_CORE_ERR("No audio layer in start recorded file playback");
             return false;
         }
 
@@ -2146,7 +2146,7 @@ Manager::recordingPlaybackSeek(const double value)
 void
 Manager::stopRecordedFilePlayback()
 {
-    JAMI_DBG("Stop recorded file playback");
+    SIP_CORE_DBG("Stop recorded file playback");
 
     pimpl_->toneCtrl_.stopAudioFile();
     pimpl_->toneDeviceGuard_.reset();
@@ -2155,7 +2155,7 @@ Manager::stopRecordedFilePlayback()
 void
 Manager::setHistoryLimit(int days)
 {
-    JAMI_DBG("Set history limit");
+    SIP_CORE_DBG("Set history limit");
     preferences.setHistoryLimit(days);
     saveConfig();
 }
@@ -2169,7 +2169,7 @@ Manager::getHistoryLimit() const
 void
 Manager::setRingingTimeout(int timeout)
 {
-    JAMI_DBG("Set ringing timeout");
+    SIP_CORE_DBG("Set ringing timeout");
     preferences.setRingingTimeout(timeout);
     saveConfig();
 }
@@ -2190,7 +2190,7 @@ Manager::setAudioManager(const std::string& api)
             return false;
 
         if (api == audioPreference.getAudioApi()) {
-            JAMI_DBG("Audio manager chosen already in use. No changes made. ");
+            SIP_CORE_DBG("Audio manager chosen already in use. No changes made. ");
             return true;
         }
     }
@@ -2220,7 +2220,7 @@ Manager::getAudioInputDeviceIndex(const std::string& name)
     std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
 
     if (not pimpl_->audiodriver_) {
-        JAMI_ERR("Audio layer not initialized");
+        SIP_CORE_ERR("Audio layer not initialized");
         return 0;
     }
 
@@ -2233,7 +2233,7 @@ Manager::getAudioOutputDeviceIndex(const std::string& name)
     std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
 
     if (not pimpl_->audiodriver_) {
-        JAMI_ERR("Audio layer not initialized");
+        SIP_CORE_ERR("Audio layer not initialized");
         return 0;
     }
 
@@ -2312,7 +2312,7 @@ Manager::ManagerPimpl::processIncomingCall(const std::string& accountId, Call& i
     auto w = incomCall.getAccount();
     auto account = w.lock();
     if (!account) {
-        JAMI_ERR("No account detected");
+        SIP_CORE_ERR("No account detected");
         return;
     }
 
@@ -2320,14 +2320,14 @@ Manager::ManagerPimpl::processIncomingCall(const std::string& accountId, Call& i
         incomCall.getMediaAttributeList());
 
     if (mediaList.empty())
-        JAMI_WARN("Incoming call %s has an empty media list", incomCallId.c_str());
+        SIP_CORE_WARN("Incoming call %s has an empty media list", incomCallId.c_str());
 
-    JAMI_INFO("Incoming call %s on account %s with %lu media",
+    SIP_CORE_INFO("Incoming call %s on account %s with %lu media",
               incomCallId.c_str(),
               accountId.c_str(),
               mediaList.size());
 
-    emitSignal<libjami::CallSignal::IncomingCallWithMedia>(accountId,
+    emitSignal<libsip_core::CallSignal::IncomingCallWithMedia>(accountId,
                                                            incomCallId,
                                                            incomCall.getPeerNumber(),
                                                            mediaList);
@@ -2390,7 +2390,7 @@ Manager::audioFormatUsed(AudioFormat format)
     if (currentFormat == format)
         return format;
 
-    JAMI_DBG("Audio format changed: %s -> %s",
+    SIP_CORE_DBG("Audio format changed: %s -> %s",
              currentFormat.toString().c_str(),
              format.toString().c_str());
 
@@ -2404,14 +2404,14 @@ Manager::audioFormatUsed(AudioFormat format)
 void
 Manager::setAccountsOrder(const std::string& order)
 {
-    JAMI_DBG("Set accounts order : %s", order.c_str());
+    SIP_CORE_DBG("Set accounts order : %s", order.c_str());
     // Set the new config
 
     preferences.setAccountOrder(order);
 
     saveConfig();
 
-    emitSignal<libjami::ConfigurationSignal::AccountsChanged>();
+    emitSignal<libsip_core::ConfigurationSignal::AccountsChanged>();
 }
 
 std::vector<std::string>
@@ -2435,7 +2435,7 @@ Manager::getAccountDetails(const std::string& accountID) const
     if (account) {
         return account->getAccountDetails();
     } else {
-        JAMI_ERR("Could not get account details on a non-existing accountID %s", accountID.c_str());
+        SIP_CORE_ERR("Could not get account details on a non-existing accountID %s", accountID.c_str());
         // return an empty map since we can't throw an exception to D-Bus
         return std::map<std::string, std::string>();
     }
@@ -2449,7 +2449,7 @@ Manager::getVolatileAccountDetails(const std::string& accountID) const
     if (account) {
         return account->getVolatileAccountDetails();
     } else {
-        JAMI_ERR("Could not get volatile account details on a non-existing accountID %s",
+        SIP_CORE_ERR("Could not get volatile account details on a non-existing accountID %s",
                  accountID.c_str());
         return {};
     }
@@ -2459,11 +2459,11 @@ void
 Manager::setAccountDetails(const std::string& accountID,
                            const std::map<std::string, std::string>& details)
 {
-    JAMI_DBG("Set account details for %s", accountID.c_str());
+    SIP_CORE_DBG("Set account details for %s", accountID.c_str());
 
     auto account = getAccount(accountID);
     if (not account) {
-        JAMI_ERR("Could not find account %s", accountID.c_str());
+        SIP_CORE_ERR("Could not find account %s", accountID.c_str());
         return;
     }
 
@@ -2481,7 +2481,7 @@ Manager::setAccountDetails(const std::string& accountID,
             account->doUnregister();
 
         // Update account details to the client side
-        emitSignal<libjami::ConfigurationSignal::AccountDetailsChanged>(accountID, details);
+        emitSignal<libsip_core::ConfigurationSignal::AccountDetailsChanged>(accountID, details);
     });
 }
 
@@ -2509,11 +2509,11 @@ Manager::addAccount(const std::map<std::string, std::string>& details, const std
     else
         accountType = AccountFactory::DEFAULT_ACCOUNT_TYPE;
 
-    JAMI_DEBUG("Adding account {:s} with type {}", newAccountID, accountType);
+    SIP_CORE_DEBUG("Adding account {:s} with type {}", newAccountID, accountType);
 
     auto newAccount = accountFactory.createAccount(accountType, newAccountID);
     if (!newAccount) {
-        JAMI_ERROR("Unknown {:s} param when calling addAccount(): {:s}",
+        SIP_CORE_ERROR("Unknown {:s} param when calling addAccount(): {:s}",
                    Conf::CONFIG_ACCOUNT_TYPE,
                    accountType);
         return "";
@@ -2526,7 +2526,7 @@ Manager::addAccount(const std::map<std::string, std::string>& details, const std
     preferences.addAccount(newAccountID);
     saveConfig();
 
-    emitSignal<libjami::ConfigurationSignal::AccountsChanged>();
+    emitSignal<libsip_core::ConfigurationSignal::AccountsChanged>();
 
     return newAccountID;
 }
@@ -2548,7 +2548,7 @@ Manager::removeAccount(const std::string& accountID, bool flush)
 
     saveConfig();
 
-    emitSignal<libjami::ConfigurationSignal::AccountsChanged>();
+    emitSignal<libsip_core::ConfigurationSignal::AccountsChanged>();
 }
 
 void
@@ -2577,13 +2577,13 @@ Manager::loadAccountMap(const YAML::Node& node)
         videoPreferences.unserialize(node);
 #endif
     } catch (const YAML::Exception& e) {
-        JAMI_ERR("Preferences node unserialize YAML exception: %s", e.what());
+        SIP_CORE_ERR("Preferences node unserialize YAML exception: %s", e.what());
         ++errorCount;
     } catch (const std::exception& e) {
-        JAMI_ERR("Preferences node unserialize standard exception: %s", e.what());
+        SIP_CORE_ERR("Preferences node unserialize standard exception: %s", e.what());
         ++errorCount;
     } catch (...) {
-        JAMI_ERR("Preferences node unserialize unknown exception");
+        SIP_CORE_ERR("Preferences node unserialize unknown exception");
         ++errorCount;
     }
 
@@ -2654,7 +2654,7 @@ Manager::sendTextMessage(const std::string& accountID,
         try {
             return acc->sendTextMessage(to, payloads);
         } catch (const std::exception& e) {
-            JAMI_ERR("Exception during text message sending: %s", e.what());
+            SIP_CORE_ERR("Exception during text message sending: %s", e.what());
         }
     }
     return 0;
@@ -2666,15 +2666,15 @@ statusFromImStatus(im::MessageStatus status)
     switch (status) {
     case im::MessageStatus::IDLE:
     case im::MessageStatus::SENDING:
-        return static_cast<int>(libjami::Account::MessageStates::SENDING);
+        return static_cast<int>(libsip_core::Account::MessageStates::SENDING);
     case im::MessageStatus::SENT:
-        return static_cast<int>(libjami::Account::MessageStates::SENT);
+        return static_cast<int>(libsip_core::Account::MessageStates::SENT);
     case im::MessageStatus::DISPLAYED:
-        return static_cast<int>(libjami::Account::MessageStates::DISPLAYED);
+        return static_cast<int>(libsip_core::Account::MessageStates::DISPLAYED);
     case im::MessageStatus::FAILURE:
-        return static_cast<int>(libjami::Account::MessageStates::FAILURE);
+        return static_cast<int>(libsip_core::Account::MessageStates::FAILURE);
     default:
-        return static_cast<int>(libjami::Account::MessageStates::UNKNOWN);
+        return static_cast<int>(libsip_core::Account::MessageStates::UNKNOWN);
     }
 }
 
@@ -2687,7 +2687,7 @@ Manager::getMessageStatus(uint64_t id) const
         if (status != im::MessageStatus::UNKNOWN)
             return statusFromImStatus(status);
     }
-    return static_cast<int>(libjami::Account::MessageStates::UNKNOWN);
+    return static_cast<int>(libsip_core::Account::MessageStates::UNKNOWN);
 }
 
 int
@@ -2695,7 +2695,7 @@ Manager::getMessageStatus(const std::string& accountID, uint64_t id) const
 {
     if (const auto acc = getAccount(accountID))
         return statusFromImStatus(acc->getMessageStatus(id));
-    return static_cast<int>(libjami::Account::MessageStates::UNKNOWN);
+    return static_cast<int>(libsip_core::Account::MessageStates::UNKNOWN);
 }
 
 void
@@ -2712,7 +2712,7 @@ Manager::setAccountActive(const std::string& accountID, bool active, bool shutdo
             acc->doUnregister();
         }
     }
-    emitSignal<libjami::ConfigurationSignal::VolatileDetailsChanged>(
+    emitSignal<libsip_core::ConfigurationSignal::VolatileDetailsChanged>(
         accountID, acc->getVolatileAccountDetails());
 }
 
@@ -2725,16 +2725,16 @@ Manager::getAudioDriver()
 std::shared_ptr<Call>
 Manager::newOutgoingCall(std::string_view toUrl,
                          const std::string& accountId,
-                         const std::vector<libjami::MediaMap>& mediaList)
+                         const std::vector<libsip_core::MediaMap>& mediaList)
 {
     auto account = getAccount(accountId);
     if (not account) {
-        JAMI_WARN("No account matches ID %s", accountId.c_str());
+        SIP_CORE_WARN("No account matches ID %s", accountId.c_str());
         return {};
     }
 
     if (not account->isUsable()) {
-        JAMI_WARN("Account %s is not usable", accountId.c_str());
+        SIP_CORE_WARN("Account %s is not usable", accountId.c_str());
         return {};
     }
 
@@ -2838,7 +2838,7 @@ Manager::getVideoManager() const
     return *pimpl_->videoManager_;
 }
 
-std::vector<libjami::Message>
+std::vector<libsip_core::Message>
 Manager::getLastMessages(const std::string& accountID, const uint64_t& base_timestamp)
 {
     if (const auto acc = getAccount(accountID))
@@ -2857,7 +2857,7 @@ Manager::setDefaultModerator(const std::string& accountID, const std::string& pe
 {
     auto acc = getAccount(accountID);
     if (!acc) {
-        JAMI_ERR("Fail to change default moderator, account %s not found", accountID.c_str());
+        SIP_CORE_ERR("Fail to change default moderator, account %s not found", accountID.c_str());
         return;
     }
 
@@ -2873,7 +2873,7 @@ Manager::getDefaultModerators(const std::string& accountID)
 {
     auto acc = getAccount(accountID);
     if (!acc) {
-        JAMI_ERR("Fail to get default moderators, account %s not found", accountID.c_str());
+        SIP_CORE_ERR("Fail to get default moderators, account %s not found", accountID.c_str());
         return {};
     }
 
@@ -2894,7 +2894,7 @@ Manager::isLocalModeratorsEnabled(const std::string& accountID)
 {
     auto acc = getAccount(accountID);
     if (!acc) {
-        JAMI_ERR("Fail to get local moderators, account %s not found", accountID.c_str());
+        SIP_CORE_ERR("Fail to get local moderators, account %s not found", accountID.c_str());
         return true; // Default value
     }
     return acc->isLocalModeratorsEnabled();
@@ -2912,10 +2912,10 @@ Manager::isAllModerators(const std::string& accountID)
 {
     auto acc = getAccount(accountID);
     if (!acc) {
-        JAMI_ERR("Fail to get all moderators, account %s not found", accountID.c_str());
+        SIP_CORE_ERR("Fail to get all moderators, account %s not found", accountID.c_str());
         return true; // Default value
     }
     return acc->isAllModerators();
 }
 
-} // namespace jami
+} // namespace sip_core

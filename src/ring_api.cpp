@@ -29,7 +29,7 @@
 
 #include "manager.h"
 #include "logger.h"
-#include "jami.h"
+#include "sip_core.h"
 #include "callmanager_interface.h"
 #include "configurationmanager_interface.h"
 #include "presencemanager_interface.h"
@@ -39,34 +39,34 @@
 #include "client/videomanager.h"
 #endif // ENABLE_VIDEO
 
-namespace libjami {
+namespace libsip_core {
 
 bool
 init(enum InitFlag flags) noexcept
 {
-    jami::Logger::setDebugMode(LIBJAMI_FLAG_DEBUG == (flags & LIBJAMI_FLAG_DEBUG));
+    sip_core::Logger::setDebugMode(LIBSIP_CORE_FLAG_DEBUG == (flags & LIBSIP_CORE_FLAG_DEBUG));
 
-    jami::Logger::setSysLog(true);
-    jami::Logger::setConsoleLog(LIBJAMI_FLAG_CONSOLE_LOG == (flags & LIBJAMI_FLAG_CONSOLE_LOG));
+    sip_core::Logger::setSysLog(true);
+    sip_core::Logger::setConsoleLog(LIBSIP_CORE_FLAG_CONSOLE_LOG == (flags & LIBSIP_CORE_FLAG_CONSOLE_LOG));
 
-    const char* log_file = getenv("JAMI_LOG_FILE");
+    const char* log_file = getenv("SIP_CORE_LOG_FILE");
 
     if (log_file) {
-        jami::Logger::setFileLog(log_file);
+        sip_core::Logger::setFileLog(log_file);
     }
 
     // Following function create a local static variable inside
     // This var must have the same live as Manager.
     // So we call it now to create this var.
-    jami::getSignalHandlers();
+    sip_core::getSignalHandlers();
 
     try {
         // current implementation use static variable
-        auto& manager = jami::Manager::instance();
-        manager.setAutoAnswer(flags & LIBJAMI_FLAG_AUTOANSWER);
+        auto& manager = sip_core::Manager::instance();
+        manager.setAutoAnswer(flags & LIBSIP_CORE_FLAG_AUTOANSWER);
 
 #if TARGET_OS_IOS
-        if (flags & LIBJAMI_FLAG_IOS_EXTENSION)
+        if (flags & LIBSIP_CORE_FLAG_IOS_EXTENSION)
             manager.isIOSExtension = true;
 #endif
 
@@ -80,7 +80,7 @@ bool
 start(const std::string& config_file, const std::string& data_path) noexcept
 {
     try {
-        jami::Manager::instance().init(config_file, data_path);
+        sip_core::Manager::instance().init(config_file, data_path);
     } catch (...) {
         return false;
     }
@@ -90,30 +90,30 @@ start(const std::string& config_file, const std::string& data_path) noexcept
 bool
 initialized() noexcept
 {
-    return jami::Manager::initialized;
+    return sip_core::Manager::initialized;
 }
 
 void
 fini() noexcept
 {
-    jami::Manager::instance().finish();
-    jami::Logger::fini();
+    sip_core::Manager::instance().finish();
+    sip_core::Logger::fini();
 }
 
 void
 logging(const std::string& whom, const std::string& action) noexcept
 {
     if ("syslog" == whom) {
-        jami::Logger::setSysLog(not action.empty());
+        sip_core::Logger::setSysLog(not action.empty());
     } else if ("console" == whom) {
-        jami::Logger::setConsoleLog(not action.empty());
+        sip_core::Logger::setConsoleLog(not action.empty());
     } else if ("monitor" == whom) {
-        jami::Logger::setMonitorLog(not action.empty());
+        sip_core::Logger::setMonitorLog(not action.empty());
     } else if ("file" == whom) {
-        jami::Logger::setFileLog(action);
+        sip_core::Logger::setFileLog(action);
     } else {
-        JAMI_ERR("Bad log handler %s", whom.c_str());
+        SIP_CORE_ERR("Bad log handler %s", whom.c_str());
     }
 }
 
-} // namespace libjami
+} // namespace libsip_core

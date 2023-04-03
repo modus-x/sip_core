@@ -30,7 +30,7 @@ extern "C" {
 struct AVAudioFifo;
 }
 
-namespace jami {
+namespace sip_core {
 
 /**
  * Buffers extra samples. This is in case an input's frame size (number of samples in
@@ -107,4 +107,4 @@ private:
     bool hasVoice_ {false};
 };
 
-} // namespace jami
+} // namespace sip_core

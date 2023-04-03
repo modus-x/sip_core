@@ -36,7 +36,7 @@
             throw std::runtime_error(#ret " failed"); \
     } while (0)
 
-namespace jami {
+namespace sip_core {
 
 class TurnLock
 {
@@ -124,12 +124,12 @@ TurnTransport::Impl::onTurnState(pj_turn_state_t old_state, pj_turn_state_t new_
         pj_turn_sock_get_info(relay, &info);
         peerRelayAddr = IpAddr {info.relay_addr};
         mappedAddr = IpAddr {info.mapped_addr};
-        JAMI_DEBUG("TURN server ready, peer relay address: {:s}",
+        SIP_CORE_DEBUG("TURN server ready, peer relay address: {:s}",
                    peerRelayAddr.toString(true, true).c_str());
         cbCalled_ = true;
         cb_(true);
     } else if (old_state <= PJ_TURN_STATE_READY and new_state > PJ_TURN_STATE_READY and not cbCalled_) {
-        JAMI_WARNING("TURN server disconnected ({:s})", pj_turn_state_name(new_state));
+        SIP_CORE_WARNING("TURN server disconnected ({:s})", pj_turn_state_name(new_state));
         cb_(false);
     }
 }
@@ -196,7 +196,7 @@ TurnTransport::TurnTransport(const TurnTransportParams& params, std::function<vo
     pj_cstr(&cred.data.static_cred.data, pimpl_->settings.password.c_str());
     pimpl_->relayAddr = pj_strdup3(pimpl_->pool, server.toString().c_str());
     // TURN connection/allocation
-    JAMI_DEBUG("Connecting to TURN {:s}", server.toString(true, true));
+    SIP_CORE_DEBUG("Connecting to TURN {:s}", server.toString(true, true));
     TRY(pj_turn_sock_alloc(pimpl_->relay,
                            &pimpl_->relayAddr,
                            server.getPort(),
@@ -215,4 +215,4 @@ TurnTransport::shutdown()
     pimpl_->shutdown();
 }
 
-} // namespace jami
+} // namespace sip_core

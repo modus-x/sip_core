@@ -20,7 +20,7 @@
 
 #include "recordable.h"
 
-namespace jami {
+namespace sip_core {
 
 /*
  * @file remoterecorder.h
@@ -51,4 +51,4 @@ protected:
     bool peerVoice_ {false};
 };
 
-} // namespace jami
+} // namespace sip_core

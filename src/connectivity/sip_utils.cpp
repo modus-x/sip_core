@@ -44,7 +44,7 @@
 
 using namespace std::literals;
 
-namespace jami {
+namespace sip_core {
 namespace sip_utils {
 
 std::string
@@ -97,7 +97,7 @@ createRouteSet(const std::string& route, pj_pool_t* hdr_pool)
     pj_strdup2(hdr_pool, &url->host, host.c_str());
     url->port = port;
 
-    JAMI_DBG("Adding route %s", host.c_str());
+    SIP_CORE_DBG("Adding route %s", host.c_str());
     pj_list_push_back(route_set, pjsip_hdr_clone(hdr_pool, routing));
 
     return route_set;
@@ -176,14 +176,14 @@ void
 addContactHeader(const std::string& contactHdr, pjsip_tx_data* tdata)
 {
     if (contactHdr.empty()) {
-        JAMI_WARN("Contact header won't be added (empty string)");
+        SIP_CORE_WARN("Contact header won't be added (empty string)");
         return;
     }
 
     /*
      * Duplicate contact header because tdata->msg keep a reference to it and
      * can be used in a callback after destruction of the contact header in
-     * Jami.  Bind lifetime of the duplicated string to the pool allocator of
+     * sip_core.  Bind lifetime of the duplicated string to the pool allocator of
      * tdata.
      */
     auto pjContact = pj_strdup3(tdata->pool, contactHdr.c_str());
@@ -217,7 +217,7 @@ addUserAgentHeader(const std::string& userAgent, pjsip_tx_data* tdata)
         pjsip_user_agent_hdr_create(tdata->pool, &STR_USER_AGENT, &pjUserAgent));
 
     if (hdr != nullptr) {
-        JAMI_DBG("Add header to SIP message: \"%.*s: %.*s\"",
+        SIP_CORE_DBG("Add header to SIP message: \"%.*s: %.*s\"",
                  (int) hdr->name.slen,
                  hdr->name.ptr,
                  (int) pjUserAgent.slen,
@@ -230,7 +230,7 @@ std::string_view
 getPeerUserAgent(const pjsip_rx_data* rdata)
 {
     if (rdata == nullptr or rdata->msg_info.msg == nullptr) {
-        JAMI_ERR("Unexpected null pointer!");
+        SIP_CORE_ERR("Unexpected null pointer!");
         return {};
     }
 
@@ -247,7 +247,7 @@ std::vector<std::string>
 getPeerAllowMethods(const pjsip_rx_data* rdata)
 {
     if (rdata == nullptr or rdata->msg_info.msg == nullptr) {
-        JAMI_ERR("Unexpected null pointer!");
+        SIP_CORE_ERR("Unexpected null pointer!");
         return {};
     }
 
@@ -281,7 +281,7 @@ logMessageHeaders(const pjsip_hdr* hdr_list)
         }
     }
 
-    JAMI_INFO("%.*s", (int) msgHdrStr.size(), msgHdrStr.c_str());
+    SIP_CORE_INFO("%.*s", (int) msgHdrStr.size(), msgHdrStr.c_str());
 }
 
 std::string
@@ -310,4 +310,4 @@ sockaddr_to_host_port(pj_pool_t* pool, pjsip_host_port* host_port, const pj_sock
 }
 
 } // namespace sip_utils
-} // namespace jami
+} // namespace sip_core

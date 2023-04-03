@@ -26,7 +26,7 @@
 
 #include "media/media_codec.h"
 
-namespace jami {
+namespace sip_core {
 
 class MediaAttribute
 {
@@ -47,19 +47,19 @@ public:
         , onHold_(onHold)
     {}
 
-    MediaAttribute(const libjami::MediaMap& mediaMap, bool secure);
+    MediaAttribute(const libsip_core::MediaMap& mediaMap, bool secure);
 
     static std::vector<MediaAttribute> buildMediaAttributesList(
-        const std::vector<libjami::MediaMap>& mediaList, bool secure);
+        const std::vector<libsip_core::MediaMap>& mediaList, bool secure);
 
     static MediaType stringToMediaType(const std::string& mediaType);
 
-    static std::pair<bool, MediaType> getMediaType(const libjami::MediaMap& map);
+    static std::pair<bool, MediaType> getMediaType(const libsip_core::MediaMap& map);
 
-    static std::pair<bool, bool> getBoolValue(const libjami::MediaMap& mediaMap,
+    static std::pair<bool, bool> getBoolValue(const libsip_core::MediaMap& mediaMap,
                                               const std::string& key);
 
-    static std::pair<bool, std::string> getStringValue(const libjami::MediaMap& mediaMap,
+    static std::pair<bool, std::string> getStringValue(const libsip_core::MediaMap& mediaMap,
                                                        const std::string& key);
 
     // Return true if at least one media has a matching type.
@@ -72,10 +72,10 @@ public:
     static char const* mediaTypeToString(MediaType type);
 
     // Convert MediaAttribute to MediaMap
-    static libjami::MediaMap toMediaMap(const MediaAttribute& mediaAttr);
+    static libsip_core::MediaMap toMediaMap(const MediaAttribute& mediaAttr);
 
     // Serialize a vector of MediaAttribute to a vector of MediaMap
-    static std::vector<libjami::MediaMap> mediaAttributesToMediaMaps(
+    static std::vector<libsip_core::MediaMap> mediaAttributesToMediaMaps(
         std::vector<MediaAttribute> mediaAttrList);
 
     std::string toString(bool full = false) const;
@@ -103,4 +103,4 @@ public:
     // audio input (capture) of the encoding session, resulting in
     // sending RTP packets without actual audio (silence).
 };
-} // namespace jami
+} // namespace sip_core

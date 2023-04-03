@@ -31,7 +31,7 @@
 
 #include <algorithm> // std::min
 
-namespace jami {
+namespace sip_core {
 
 AudioLoop::AudioLoop(unsigned int sampleRate)
     : buffer_(new AudioBuffer(0, AudioFormat(sampleRate, 1)))
@@ -53,7 +53,7 @@ void
 AudioLoop::getNext(AudioBuffer& output, double gain)
 {
     if (!buffer_) {
-        JAMI_ERR("buffer is NULL");
+        SIP_CORE_ERR("buffer is NULL");
         return;
     }
 
@@ -63,10 +63,10 @@ AudioLoop::getNext(AudioBuffer& output, double gain)
     size_t output_pos = 0;
 
     if (buf_samples == 0) {
-        JAMI_ERR("Audio loop size is 0");
+        SIP_CORE_ERR("Audio loop size is 0");
         return;
     } else if (pos >= buf_samples) {
-        JAMI_ERR("Invalid loop position %zu", pos);
+        SIP_CORE_ERR("Invalid loop position %zu", pos);
         return;
     }
 
@@ -98,4 +98,4 @@ AudioLoop::getNext(size_t samples)
     return buff.toAVFrame();
 }
 
-} // namespace jami
+} // namespace sip_core

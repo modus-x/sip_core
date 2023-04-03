@@ -22,7 +22,7 @@
 
 #include <cstdlib>
 
-namespace jami {
+namespace sip_core {
 namespace opensl {
 
 /*
@@ -53,7 +53,7 @@ AudioPlayer::processSLCallback(SLAndroidSimpleBufferQueueItf bq)
     // so recorder could re-use it
     sample_buf* buf;
     if (!devShadowQueue_.front(&buf)) {
-        JAMI_ERR("AudioPlayer buffer lost");
+        SIP_CORE_ERR("AudioPlayer buffer lost");
         /*
          * This should not happen: we got a callback,
          * but we have no buffer in deviceShadowedQueue
@@ -66,7 +66,7 @@ AudioPlayer::processSLCallback(SLAndroidSimpleBufferQueueItf bq)
     if (buf != &silentBuf_) {
         buf->size_ = 0;
         if (!freeQueue_->push(buf)) {
-            JAMI_ERR("buffer lost");
+            SIP_CORE_ERR("buffer lost");
         }
     }
 
@@ -76,7 +76,7 @@ AudioPlayer::processSLCallback(SLAndroidSimpleBufferQueueItf bq)
     while (playQueue_->front(&buf) && devShadowQueue_.push(buf)) {
         if ((*bq)->Enqueue(bq, buf->buf_, buf->size_) != SL_RESULT_SUCCESS) {
             devShadowQueue_.pop();
-            JAMI_ERR("enqueue failed %zu %d %d %d",
+            SIP_CORE_ERR("enqueue failed %zu %d %d %d",
                      buf->size_,
                      freeQueue_->size(),
                      playQueue_->size(),
@@ -90,19 +90,19 @@ AudioPlayer::processSLCallback(SLAndroidSimpleBufferQueueItf bq)
             if ((*bq)->Enqueue(bq, silentBuf_.buf_, silentBuf_.size_) == SL_RESULT_SUCCESS) {
                 devShadowQueue_.push(&silentBuf_);
             } else {
-                JAMI_ERR("Enqueue silentBuf_ failed");
+                SIP_CORE_ERR("Enqueue silentBuf_ failed");
             }
         }
     }
 }
 
-AudioPlayer::AudioPlayer(jami::AudioFormat sampleFormat,
+AudioPlayer::AudioPlayer(sip_core::AudioFormat sampleFormat,
                          size_t bufSize,
                          SLEngineItf slEngine,
                          SLint32 streamType)
     : sampleInfo_(sampleFormat)
 {
-    JAMI_DBG("Creating OpenSL playback stream %s", sampleFormat.toString().c_str());
+    SIP_CORE_DBG("Creating OpenSL playback stream %s", sampleFormat.toString().c_str());
 
     SLresult result;
     result = (*slEngine)->CreateOutputMix(slEngine, &outputMixObjectItf_, 0, nullptr, nullptr);
@@ -173,7 +173,7 @@ AudioPlayer::AudioPlayer(jami::AudioFormat sampleFormat,
 
 AudioPlayer::~AudioPlayer()
 {
-    JAMI_DBG("Destroying OpenSL playback stream");
+    SIP_CORE_DBG("Destroying OpenSL playback stream");
     std::lock_guard<std::mutex> lk(m_);
 
     // destroy buffer queue audio player object, and invalidate all associated interfaces
@@ -197,7 +197,7 @@ AudioPlayer::setBufQueue(AudioQueue* playQ, AudioQueue* freeQ)
 bool
 AudioPlayer::start()
 {
-    JAMI_DBG("OpenSL playback start");
+    SIP_CORE_DBG("OpenSL playback start");
     std::unique_lock<std::mutex> lk(m_);
     SLuint32 state;
     SLresult result = (*playItf_)->GetPlayState(playItf_, &state);
@@ -212,7 +212,7 @@ AudioPlayer::start()
     devShadowQueue_.push(&silentBuf_);
     result = (*playBufferQueueItf_)->Enqueue(playBufferQueueItf_, silentBuf_.buf_, silentBuf_.size_);
     if (result != SL_RESULT_SUCCESS) {
-        JAMI_ERR("Enqueue silentBuf_ failed, result = %d", result);
+        SIP_CORE_ERR("Enqueue silentBuf_ failed, result = %d", result);
         devShadowQueue_.pop();
     }
 
@@ -236,7 +236,7 @@ AudioPlayer::started() const
 void
 AudioPlayer::stop()
 {
-    JAMI_DBG("OpenSL playback stop");
+    SIP_CORE_DBG("OpenSL playback stop");
     SLuint32 state;
 
     std::lock_guard<std::mutex> lk(m_);
@@ -270,7 +270,7 @@ AudioPlayer::playAudioBuffers(unsigned count)
     while (count--) {
         sample_buf* buf = nullptr;
         if (!playQueue_->front(&buf)) {
-            JAMI_ERR("====Run out of buffers in %s @(count = %d)", __FUNCTION__, count);
+            SIP_CORE_ERR("====Run out of buffers in %s @(count = %d)", __FUNCTION__, count);
             break;
         }
         if (!devShadowQueue_.push(buf)) {
@@ -279,7 +279,7 @@ AudioPlayer::playAudioBuffers(unsigned count)
 
         SLresult result = (*playBufferQueueItf_)->Enqueue(playBufferQueueItf_, buf->buf_, buf->size_);
         if (result != SL_RESULT_SUCCESS) {
-            JAMI_ERR("%s Error @( %p, %zu ), result = %d",
+            SIP_CORE_ERR("%s Error @( %p, %zu ), result = %d",
                      __FUNCTION__,
                      (void*) buf->buf_,
                      buf->size_,
@@ -305,4 +305,4 @@ AudioPlayer::dbgGetDevBufCount(void)
 }
 
 } // namespace opensl
-} // namespace jami
+} // namespace sip_core

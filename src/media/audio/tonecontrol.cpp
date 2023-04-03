@@ -25,9 +25,9 @@
 #include "audio/tonecontrol.h"
 #include "sound/tonelist.h"
 #include "client/ring_signal.h"
-#include "jami/callmanager_interface.h" // for CallSignal
+#include "sip_core/callmanager_interface.h" // for CallSignal
 
-namespace jami {
+namespace sip_core {
 
 static constexpr unsigned DEFAULT_SAMPLE_RATE = 8000;
 
@@ -54,7 +54,7 @@ ToneControl::setSampleRate(unsigned rate)
     try {
         audioFile_.reset(new AudioFile(path, sampleRate_));
     } catch (const AudioFileException& e) {
-        JAMI_WARN("Audio file error: %s", e.what());
+        SIP_CORE_WARN("Audio file error: %s", e.what());
     }
 }
 
@@ -80,14 +80,14 @@ ToneControl::setAudioFile(const std::string& file)
     std::lock_guard<std::mutex> lk(mutex_);
 
     if (audioFile_) {
-        emitSignal<libjami::CallSignal::RecordPlaybackStopped>(audioFile_->getFilePath());
+        emitSignal<libsip_core::CallSignal::RecordPlaybackStopped>(audioFile_->getFilePath());
         audioFile_.reset();
     }
 
     try {
         audioFile_.reset(new AudioFile(file, sampleRate_));
     } catch (const AudioFileException& e) {
-        JAMI_WARN("Audio file error: %s", e.what());
+        SIP_CORE_WARN("Audio file error: %s", e.what());
     }
 
     return static_cast<bool>(audioFile_);
@@ -99,7 +99,7 @@ ToneControl::stopAudioFile()
     std::lock_guard<std::mutex> lk(mutex_);
 
     if (audioFile_) {
-        emitSignal<libjami::CallSignal::RecordPlaybackStopped>(audioFile_->getFilePath());
+        emitSignal<libsip_core::CallSignal::RecordPlaybackStopped>(audioFile_->getFilePath());
         audioFile_.reset();
     }
 }
@@ -113,7 +113,7 @@ ToneControl::stop()
         telephoneTone_->setCurrentTone(Tone::ToneId::TONE_NULL);
 
     if (audioFile_) {
-        emitSignal<libjami::CallSignal::RecordPlaybackStopped>(audioFile_->getFilePath());
+        emitSignal<libsip_core::CallSignal::RecordPlaybackStopped>(audioFile_->getFilePath());
         audioFile_.reset();
     }
 }
@@ -136,4 +136,4 @@ ToneControl::seek(double value)
         audioFile_->seek(value);
 }
 
-} // namespace jami
+} // namespace sip_core

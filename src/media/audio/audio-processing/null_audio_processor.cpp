@@ -20,12 +20,12 @@
 
 #include <cassert>
 
-namespace jami {
+namespace sip_core {
 
 NullAudioProcessor::NullAudioProcessor(AudioFormat format, unsigned frameSize)
     : AudioProcessor(format, frameSize)
 {
-    JAMI_DBG("[null_audio] NullAudioProcessor, frame size = %d (=%d ms), channels = %d",
+    SIP_CORE_DBG("[null_audio] NullAudioProcessor, frame size = %d (=%d ms), channels = %d",
              frameSize,
              frameDurationMs_,
              format.nb_channels);
@@ -42,4 +42,4 @@ NullAudioProcessor::getProcessed()
     return recordQueue_.dequeue();
 };
 
-} // namespace jami
+} // namespace sip_core

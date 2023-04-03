@@ -21,7 +21,7 @@
 #ifndef DENABLE_VIDEOMANAGERI_H
 #define DENABLE_VIDEOMANAGERI_H
 
-#include "jami.h"
+#include "sip_core.h"
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif // HAVE_CONFIG_H
@@ -47,22 +47,22 @@ void av_frame_free(AVFrame** frame);
 #import "TargetConditionals.h"
 #endif
 
-namespace jami {
+namespace sip_core {
 struct AudioFormat;
 }
 
-namespace libjami {
+namespace libsip_core {
 
-[[deprecated("Replaced by registerSignalHandlers")]] LIBJAMI_PUBLIC void registerVideoHandlers(
+[[deprecated("Replaced by registerSignalHandlers")]] LIBSIP_CORE_PUBLIC void registerVideoHandlers(
     const std::map<std::string, std::shared_ptr<CallbackWrapperBase>>&);
 
-struct LIBJAMI_PUBLIC AVFrame_deleter {
+struct LIBSIP_CORE_PUBLIC AVFrame_deleter {
     void operator()(AVFrame* frame) const { av_frame_free(&frame); }
 };
 
 typedef std::unique_ptr<AVFrame, AVFrame_deleter> FrameBuffer;
 
-class LIBJAMI_PUBLIC MediaFrame
+class LIBSIP_CORE_PUBLIC MediaFrame
 {
 public:
     // Construct an empty MediaFrame
@@ -93,26 +93,26 @@ protected:
     std::unique_ptr<AVPacket, void (*)(AVPacket*)> packet_;
 };
 
-class LIBJAMI_PUBLIC AudioFrame : public MediaFrame
+class LIBSIP_CORE_PUBLIC AudioFrame : public MediaFrame
 {
 public:
     AudioFrame()
         : MediaFrame()
     {}
-    AudioFrame(const jami::AudioFormat& format, size_t nb_samples = 0);
+    AudioFrame(const sip_core::AudioFormat& format, size_t nb_samples = 0);
     ~AudioFrame() {};
     void mix(const AudioFrame& o);
     float calcRMS() const;
-    jami::AudioFormat getFormat() const;
+    sip_core::AudioFormat getFormat() const;
     size_t getFrameSize() const;
     bool has_voice {false};
 
 private:
-    void setFormat(const jami::AudioFormat& format);
+    void setFormat(const sip_core::AudioFormat& format);
     void reserve(size_t nb_samples = 0);
 };
 
-class LIBJAMI_PUBLIC VideoFrame : public MediaFrame
+class LIBSIP_CORE_PUBLIC VideoFrame : public MediaFrame
 {
 public:
     // Construct an empty VideoFrame
@@ -164,7 +164,7 @@ private:
     void setGeometry(int format, int width, int height) noexcept;
 };
 
-struct LIBJAMI_PUBLIC SinkTarget
+struct LIBSIP_CORE_PUBLIC SinkTarget
 {
     std::function<FrameBuffer()> pull;
     std::function<void(FrameBuffer)> push;
@@ -173,55 +173,55 @@ struct LIBJAMI_PUBLIC SinkTarget
 
 using VideoCapabilities = std::map<std::string, std::map<std::string, std::vector<std::string>>>;
 
-LIBJAMI_PUBLIC std::vector<std::string> getDeviceList();
-LIBJAMI_PUBLIC VideoCapabilities getCapabilities(const std::string& deviceId);
-LIBJAMI_PUBLIC std::map<std::string, std::string> getSettings(const std::string& deviceId);
-LIBJAMI_PUBLIC void applySettings(const std::string& deviceId,
+LIBSIP_CORE_PUBLIC std::vector<std::string> getDeviceList();
+LIBSIP_CORE_PUBLIC VideoCapabilities getCapabilities(const std::string& deviceId);
+LIBSIP_CORE_PUBLIC std::map<std::string, std::string> getSettings(const std::string& deviceId);
+LIBSIP_CORE_PUBLIC void applySettings(const std::string& deviceId,
                                 const std::map<std::string, std::string>& settings);
-LIBJAMI_PUBLIC void setDefaultDevice(const std::string& deviceId);
-LIBJAMI_PUBLIC void setDeviceOrientation(const std::string& deviceId, int angle);
-LIBJAMI_PUBLIC std::map<std::string, std::string> getDeviceParams(const std::string& deviceId);
-LIBJAMI_PUBLIC std::string getDefaultDevice();
-LIBJAMI_PUBLIC void startAudioDevice();
-LIBJAMI_PUBLIC void stopAudioDevice();
+LIBSIP_CORE_PUBLIC void setDefaultDevice(const std::string& deviceId);
+LIBSIP_CORE_PUBLIC void setDeviceOrientation(const std::string& deviceId, int angle);
+LIBSIP_CORE_PUBLIC std::map<std::string, std::string> getDeviceParams(const std::string& deviceId);
+LIBSIP_CORE_PUBLIC std::string getDefaultDevice();
+LIBSIP_CORE_PUBLIC void startAudioDevice();
+LIBSIP_CORE_PUBLIC void stopAudioDevice();
 
-LIBJAMI_PUBLIC std::string openVideoInput(const std::string& path);
-LIBJAMI_PUBLIC bool closeVideoInput(const std::string& id);
+LIBSIP_CORE_PUBLIC std::string openVideoInput(const std::string& path);
+LIBSIP_CORE_PUBLIC bool closeVideoInput(const std::string& id);
 
-LIBJAMI_PUBLIC std::string createMediaPlayer(const std::string& path);
-LIBJAMI_PUBLIC bool closeMediaPlayer(const std::string& id);
-LIBJAMI_PUBLIC bool pausePlayer(const std::string& id, bool pause);
-LIBJAMI_PUBLIC bool mutePlayerAudio(const std::string& id, bool mute);
-LIBJAMI_PUBLIC bool playerSeekToTime(const std::string& id, int time);
+LIBSIP_CORE_PUBLIC std::string createMediaPlayer(const std::string& path);
+LIBSIP_CORE_PUBLIC bool closeMediaPlayer(const std::string& id);
+LIBSIP_CORE_PUBLIC bool pausePlayer(const std::string& id, bool pause);
+LIBSIP_CORE_PUBLIC bool mutePlayerAudio(const std::string& id, bool mute);
+LIBSIP_CORE_PUBLIC bool playerSeekToTime(const std::string& id, int time);
 int64_t getPlayerPosition(const std::string& id);
 
-LIBJAMI_PUBLIC bool registerSinkTarget(const std::string& sinkId, SinkTarget target);
+LIBSIP_CORE_PUBLIC bool registerSinkTarget(const std::string& sinkId, SinkTarget target);
 #ifdef ENABLE_SHM
-LIBJAMI_PUBLIC void startShmSink(const std::string& sinkId, bool value);
+LIBSIP_CORE_PUBLIC void startShmSink(const std::string& sinkId, bool value);
 #endif
-LIBJAMI_PUBLIC std::map<std::string, std::string> getRenderer(const std::string& callId);
+LIBSIP_CORE_PUBLIC std::map<std::string, std::string> getRenderer(const std::string& callId);
 
-LIBJAMI_PUBLIC std::string startLocalMediaRecorder(const std::string& videoInputId,
+LIBSIP_CORE_PUBLIC std::string startLocalMediaRecorder(const std::string& videoInputId,
                                                  const std::string& filepath);
-LIBJAMI_PUBLIC void stopLocalRecorder(const std::string& filepath);
+LIBSIP_CORE_PUBLIC void stopLocalRecorder(const std::string& filepath);
 
 #if defined(__ANDROID__) || defined(RING_UWP) || (defined(TARGET_OS_IOS) && TARGET_OS_IOS)
-LIBJAMI_PUBLIC void addVideoDevice(
+LIBSIP_CORE_PUBLIC void addVideoDevice(
     const std::string& node, const std::vector<std::map<std::string, std::string>>& devInfo = {});
-LIBJAMI_PUBLIC void removeVideoDevice(const std::string& node);
-LIBJAMI_PUBLIC VideoFrame* getNewFrame(std::string_view id);
-LIBJAMI_PUBLIC void publishFrame(std::string_view id);
+LIBSIP_CORE_PUBLIC void removeVideoDevice(const std::string& node);
+LIBSIP_CORE_PUBLIC VideoFrame* getNewFrame(std::string_view id);
+LIBSIP_CORE_PUBLIC void publishFrame(std::string_view id);
 #endif
 
-LIBJAMI_PUBLIC bool getDecodingAccelerated();
-LIBJAMI_PUBLIC void setDecodingAccelerated(bool state);
-LIBJAMI_PUBLIC bool getEncodingAccelerated();
-LIBJAMI_PUBLIC void setEncodingAccelerated(bool state);
+LIBSIP_CORE_PUBLIC bool getDecodingAccelerated();
+LIBSIP_CORE_PUBLIC void setDecodingAccelerated(bool state);
+LIBSIP_CORE_PUBLIC bool getEncodingAccelerated();
+LIBSIP_CORE_PUBLIC void setEncodingAccelerated(bool state);
 
 // player signal type definitions
-struct LIBJAMI_PUBLIC MediaPlayerSignal
+struct LIBSIP_CORE_PUBLIC MediaPlayerSignal
 {
-    struct LIBJAMI_PUBLIC FileOpened
+    struct LIBSIP_CORE_PUBLIC FileOpened
     {
         constexpr static const char* name = "FileOpened";
         using cb_type = void(const std::string& /*playerId*/,
@@ -230,14 +230,14 @@ struct LIBJAMI_PUBLIC MediaPlayerSignal
 };
 
 // Video signal type definitions
-struct LIBJAMI_PUBLIC VideoSignal
+struct LIBSIP_CORE_PUBLIC VideoSignal
 {
-    struct LIBJAMI_PUBLIC DeviceEvent
+    struct LIBSIP_CORE_PUBLIC DeviceEvent
     {
         constexpr static const char* name = "DeviceEvent";
         using cb_type = void(void);
     };
-    struct LIBJAMI_PUBLIC DecodingStarted
+    struct LIBSIP_CORE_PUBLIC DecodingStarted
     {
         constexpr static const char* name = "DecodingStarted";
         using cb_type = void(const std::string& /*id*/,
@@ -246,7 +246,7 @@ struct LIBJAMI_PUBLIC VideoSignal
                              int /*h*/,
                              bool /*is_mixer*/ id);
     };
-    struct LIBJAMI_PUBLIC DecodingStopped
+    struct LIBSIP_CORE_PUBLIC DecodingStopped
     {
         constexpr static const char* name = "DecodingStopped";
         using cb_type = void(const std::string& /*id*/,
@@ -254,7 +254,7 @@ struct LIBJAMI_PUBLIC VideoSignal
                              bool /*is_mixer*/);
     };
 #ifdef __ANDROID__
-    struct LIBJAMI_PUBLIC SetParameters
+    struct LIBSIP_CORE_PUBLIC SetParameters
     {
         constexpr static const char* name = "SetParameters";
         using cb_type = void(const std::string& device,
@@ -263,7 +263,7 @@ struct LIBJAMI_PUBLIC VideoSignal
                              const int height,
                              const int rate);
     };
-    struct LIBJAMI_PUBLIC GetCameraInfo
+    struct LIBSIP_CORE_PUBLIC GetCameraInfo
     {
         constexpr static const char* name = "GetCameraInfo";
         using cb_type = void(const std::string& device,
@@ -271,39 +271,39 @@ struct LIBJAMI_PUBLIC VideoSignal
                              std::vector<unsigned>* sizes,
                              std::vector<unsigned>* rates);
     };
-    struct LIBJAMI_PUBLIC RequestKeyFrame
+    struct LIBSIP_CORE_PUBLIC RequestKeyFrame
     {
         constexpr static const char* name = "RequestKeyFrame";
         using cb_type = void(const std::string& /*device*/);
     };
-    struct LIBJAMI_PUBLIC SetBitrate
+    struct LIBSIP_CORE_PUBLIC SetBitrate
     {
         constexpr static const char* name = "SetBitrate";
         using cb_type = void(const std::string& /*device*/, const int bitrate);
     };
 #endif
-    struct LIBJAMI_PUBLIC StartCapture
+    struct LIBSIP_CORE_PUBLIC StartCapture
     {
         constexpr static const char* name = "StartCapture";
         using cb_type = void(const std::string& /*device*/);
     };
-    struct LIBJAMI_PUBLIC StopCapture
+    struct LIBSIP_CORE_PUBLIC StopCapture
     {
         constexpr static const char* name = "StopCapture";
         using cb_type = void(const std::string& /*device*/);
     };
-    struct LIBJAMI_PUBLIC DeviceAdded
+    struct LIBSIP_CORE_PUBLIC DeviceAdded
     {
         constexpr static const char* name = "DeviceAdded";
         using cb_type = void(const std::string& /*device*/);
     };
-    struct LIBJAMI_PUBLIC ParametersChanged
+    struct LIBSIP_CORE_PUBLIC ParametersChanged
     {
         constexpr static const char* name = "ParametersChanged";
         using cb_type = void(const std::string& /*device*/);
     };
 };
 
-} // namespace libjami
+} // namespace libsip_core
 
 #endif // DENABLE_VIDEOMANAGERI_H

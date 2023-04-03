@@ -31,7 +31,7 @@
 #include <random>
 #include "account.h"
 
-namespace jami {
+namespace sip_core {
 
 class SIPAccountBase;
 class SIPCall;
@@ -54,7 +54,7 @@ public:
      */
     std::shared_ptr<SIPCall> newSipCall(const std::shared_ptr<SIPAccountBase>& account,
                                         Call::CallType type,
-                                        const std::vector<libjami::MediaMap>& mediaList);
+                                        const std::vector<libsip_core::MediaMap>& mediaList);
 
     /**
      * Forbid creation of new calls.
@@ -142,4 +142,4 @@ private:
     std::map<Call::LinkType, CallMap> callMaps_ {};
 };
 
-} // namespace jami
+} // namespace sip_core

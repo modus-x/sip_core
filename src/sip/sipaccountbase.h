@@ -55,7 +55,7 @@ struct pjmedia_sdp_session;
 
 static constexpr const char MIME_TYPE_TEXT_PLAIN[] {"text/plain"};
 
-namespace jami {
+namespace sip_core {
 
 class SipTransport;
 class Task;
@@ -101,7 +101,7 @@ public:
      * @return A shared pointer on the created call.
      */
     virtual std::shared_ptr<SIPCall> newIncomingCall(const std::string& from,
-                                                     const std::vector<libjami::MediaMap>& mediaList,
+                                                     const std::vector<libsip_core::MediaMap>& mediaList,
                                                      const std::shared_ptr<SipTransport>& sipTr = {})
         = 0;
 
@@ -210,7 +210,7 @@ public:
 
     virtual std::string getUserUri() const = 0;
 
-    std::vector<libjami::Message> getLastMessages(const uint64_t& base_timestamp) override;
+    std::vector<libsip_core::Message> getLastMessages(const uint64_t& base_timestamp) override;
 
     // Build the list of medias to be included in the SDP (offer/answer)
     std::vector<MediaAttribute> createDefaultMediaList(bool addVideo, bool onHold = false);
@@ -259,7 +259,7 @@ protected:
      */
     std::mutex mutexLastMessages_;
     static constexpr size_t MAX_WAITING_MESSAGES_SIZE = 1000;
-    std::deque<libjami::Message> lastMessages_;
+    std::deque<libsip_core::Message> lastMessages_;
 
     std::string composingUri_;
     std::chrono::steady_clock::time_point composingTime_ {
@@ -272,4 +272,4 @@ private:
     NON_COPYABLE(SIPAccountBase);
 };
 
-} // namespace jami
+} // namespace sip_core

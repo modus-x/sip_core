@@ -31,7 +31,7 @@ struct AVFrame;
 struct SwrContext;
 }
 
-namespace jami {
+namespace sip_core {
 
 /**
  * @brief Wrapper class for libswresample
@@ -94,4 +94,4 @@ private:
     unsigned initCount_;
 };
 
-} // namespace jami
+} // namespace sip_core

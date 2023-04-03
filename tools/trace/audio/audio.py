@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Quick-and-dirty script to plot lttng trace data of the jami audio system
+Quick-and-dirty script to plot lttng trace data of the sip_core audio system
 
 Depends on `python3-bt2` package:
 https://babeltrace.org/docs/v2.0/python/bt2/
@@ -56,7 +56,7 @@ def analyze(filename: str):
     """Process trace file"""
     # running_averages: Dict[str, RunningAverage] = {}
     intervals: Dict[str, Intervals] = {}
-    desired_event_regex = re.compile("jami:(call|audio|conference)")
+    desired_event_regex = re.compile("sip_core:(call|audio|conference)")
 
     for message in bt2.TraceCollectionMessageIterator(filename):
         # pylint: disable=protected-access
@@ -68,7 +68,7 @@ def analyze(filename: str):
         if not desired_event_regex.match(name):
             continue
 
-        if "id" in message.event.payload_field and name != "jami:conference_add_participant":
+        if "id" in message.event.payload_field and name != "sip_core:conference_add_participant":
             name = f"{name}({str(message.event.payload_field['id'])})"
 
         if not name in intervals:
@@ -85,8 +85,8 @@ def analyze(filename: str):
             f"event: {key}, average: {(sum(val.intervals) / len(val.intervals)) / 1e9:.9f}"
         )
 
-    earliest_recorded = intervals["jami:audio_layer_put_recorded_end"].times[0]
-    latest_recorded = intervals["jami:audio_layer_put_recorded_end"].times[-1]
+    earliest_recorded = intervals["sip_core:audio_layer_put_recorded_end"].times[0]
+    latest_recorded = intervals["sip_core:audio_layer_put_recorded_end"].times[-1]
 
     earliest_recorded += int(1e9)  # start graph 1 second later
 
@@ -107,16 +107,16 @@ def analyze(filename: str):
 
 def plot(intervals: Dict[str, Intervals], filename: str):
     """Plot audio event data"""
-    add_part = intervals["jami:conference_add_participant"]
+    add_part = intervals["sip_core:conference_add_participant"]
 
     fig, axis = plt.subplots(figsize=(20, 9))
 
     axis.set_xlabel("seconds since start")
     axis.set_ylabel("interval between events (seconds)")
-    axis.set_title("jami:audio*")
+    axis.set_title("sip_core:audio*")
 
     # only plot audio events
-    events_to_plot_regex = re.compile("jami:audio")
+    events_to_plot_regex = re.compile("sip_core:audio")
 
     # plot each desired interval
     for interval_key, interval_val in intervals.items():

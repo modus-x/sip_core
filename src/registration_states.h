@@ -25,7 +25,7 @@
 #undef REGISTERED
 #endif
 
-namespace jami {
+namespace sip_core {
 
 /** Contains all the Registration states for an account can be in */
 enum class RegistrationState {
@@ -41,4 +41,4 @@ enum class RegistrationState {
     INITIALIZING
 };
 
-} // namespace jami
+} // namespace sip_core

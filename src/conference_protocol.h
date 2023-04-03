@@ -29,7 +29,7 @@
 
 #include "logger.h"
 
-namespace jami {
+namespace sip_core {
 
 /**
  * Used to parse confOrder objects
@@ -135,4 +135,4 @@ private:
     std::function<void(const std::string&, bool)> voiceActivity_;
 };
 
-} // namespace jami
+} // namespace sip_core

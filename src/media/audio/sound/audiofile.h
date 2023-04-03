@@ -27,7 +27,7 @@
 #include <stdexcept>
 #include "audio/audioloop.h"
 
-namespace jami {
+namespace sip_core {
 
 class AudioFileException : public std::runtime_error
 {
@@ -57,6 +57,6 @@ private:
     unsigned updatePlaybackScale_;
 };
 
-} // namespace jami
+} // namespace sip_core
 
 #endif // __AUDIOFILE_H__

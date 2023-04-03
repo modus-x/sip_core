@@ -24,7 +24,7 @@ namespace webrtc {
 class AudioProcessing;
 }
 
-namespace jami {
+namespace sip_core {
 
 class WebRTCAudioProcessor final : public AudioProcessor
 {
@@ -50,4 +50,4 @@ private:
     AudioBuffer iPlaybackBuffer_;
     int analogLevel_ {0};
 };
-} // namespace jami
+} // namespace sip_core

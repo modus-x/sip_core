@@ -27,7 +27,7 @@
 
 #define checkErr(err) \
     if (err) { \
-        JAMI_ERR("CoreAudio Error: %ld", static_cast<long>(err)); \
+        SIP_CORE_ERR("CoreAudio Error: %ld", static_cast<long>(err)); \
     }
 
 /**
@@ -35,7 +35,7 @@
  * @brief Main iOS sound class. Manages the data transfers between the application and the hardware.
  */
 
-namespace jami {
+namespace sip_core {
 
 class RingBuffer;
 
@@ -164,6 +164,6 @@ private:
     dispatch_queue_t audioConfigurationQueue;
 };
 
-} // namespace jami
+} // namespace sip_core
 
 #endif // CORE_LAYER_H_

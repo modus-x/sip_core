@@ -40,7 +40,7 @@ struct AVFrame;
 #include <string>
 #include <cstddef> // for size_t
 
-namespace jami {
+namespace sip_core {
 
 /**
  * Structure to hold sample rate and channel number associated with audio data.
@@ -368,4 +368,4 @@ private:
     std::vector<std::vector<AudioSample>> samples_;
 };
 
-} // namespace jami
+} // namespace sip_core

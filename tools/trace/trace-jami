@@ -8,8 +8,8 @@ epilogue() {
 
 trap epilogue SIGINT
 
-lttng create jami
-lttng enable-event --userspace 'jami:*'
+lttng create sip_core
+lttng enable-event --userspace 'sip_core:*'
 lttng add-context --userspace --type=vtid
 
 for arg in "$@"; do

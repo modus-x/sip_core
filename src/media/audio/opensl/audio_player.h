@@ -26,7 +26,7 @@
 
 #include <mutex>
 
-namespace jami {
+namespace sip_core {
 namespace opensl {
 
 class AudioPlayer
@@ -37,7 +37,7 @@ class AudioPlayer
     SLPlayItf playItf_;
     SLAndroidSimpleBufferQueueItf playBufferQueueItf_;
 
-    jami::AudioFormat sampleInfo_;
+    sip_core::AudioFormat sampleInfo_;
     AudioQueue* freeQueue_ {nullptr};                            // user
     AudioQueue* playQueue_ {nullptr};                            // user
     AudioQueue devShadowQueue_ {DEVICE_SHADOW_BUFFER_QUEUE_LEN}; // owner
@@ -46,7 +46,7 @@ class AudioPlayer
     EngineCallback callback_ {};
 
 public:
-    explicit AudioPlayer(jami::AudioFormat sampleFormat,
+    explicit AudioPlayer(sip_core::AudioFormat sampleFormat,
                          size_t bufSize,
                          SLEngineItf engine,
                          SLint32 streamType);
@@ -67,4 +67,4 @@ public:
 };
 
 } // namespace opensl
-} // namespace jami
+} // namespace sip_core

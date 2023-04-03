@@ -25,7 +25,7 @@
 
 #include <cstdint>
 
-namespace jami {
+namespace sip_core {
 namespace base64 {
 
 class base64_exception : public std::exception
@@ -40,4 +40,4 @@ inline std::string encode(const std::vector<uint8_t>& data) {
 std::vector<uint8_t> decode(std::string_view);
 
 } // namespace base64
-} // namespace jami
+} // namespace sip_core

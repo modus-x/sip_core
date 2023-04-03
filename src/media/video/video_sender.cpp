@@ -36,7 +36,7 @@
 #include <map>
 #include <unistd.h>
 
-namespace jami {
+namespace sip_core {
 namespace video {
 
 using std::string;
@@ -84,7 +84,7 @@ VideoSender::encodeAndSendVideo(const std::shared_ptr<VideoFrame>& input_frame)
             --forceKeyFrame_;
 
         if (videoEncoder_->encode(input_frame, is_keyframe, frameNumber_++) < 0)
-            JAMI_ERR("encoding failed");
+            SIP_CORE_ERR("encoding failed");
     }
 #ifdef DEBUG_SDP
     if (frameNumber_ == 1) // video stream is lazy initialized, wait for first frame
@@ -102,7 +102,7 @@ VideoSender::update(Observable<std::shared_ptr<MediaFrame>>* /*obs*/,
 void
 VideoSender::forceKeyFrame()
 {
-    JAMI_DBG("Key frame requested");
+    SIP_CORE_DBG("Key frame requested");
     ++forceKeyFrame_;
 }
 
@@ -130,4 +130,4 @@ VideoSender::setBitrate(uint64_t br)
 }
 
 } // namespace video
-} // namespace jami
+} // namespace sip_core

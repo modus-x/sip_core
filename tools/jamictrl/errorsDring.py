@@ -21,7 +21,7 @@
 """Internal exceptions"""
 
 
-class libjamiCtrlError(Exception):
+class libsip_coreCtrlError(Exception):
     """Base class for all our exceptions."""
 
     def __init__(self, help=None):
@@ -30,11 +30,11 @@ class libjamiCtrlError(Exception):
     def __str__(self):
         return self.help
 
-class libjamiCtrlDBusError(libjamiCtrlError):
+class libsip_coreCtrlDBusError(libsip_coreCtrlError):
     """General error for dbus communication"""
 
-class libjamiCtrlDeamonError(libjamiCtrlError):
+class libsip_coreCtrlDeamonError(libsip_coreCtrlError):
     """General error for daemon communication"""
 
-class libjamiCtrlAccountError(libjamiCtrlError):
+class libsip_coreCtrlAccountError(libsip_coreCtrlError):
     """General error for account handling"""

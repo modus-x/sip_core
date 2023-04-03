@@ -26,7 +26,7 @@
 
 #include <mutex>
 
-namespace jami {
+namespace sip_core {
 
 /**
  * ToneControl is a class to handle application wide business logic
@@ -62,4 +62,4 @@ private:
     std::shared_ptr<AudioFile> audioFile_;
 };
 
-} // namespace jami
+} // namespace sip_core

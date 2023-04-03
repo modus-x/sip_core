@@ -25,7 +25,7 @@
 #include "sip/sipaccountbase.h"
 #include "string_utils.h"
 
-namespace jami {
+namespace sip_core {
 
 // generate something like 7ea037947eb9fb2f
 std::string
@@ -34,7 +34,7 @@ CallFactory::getNewCallID() const
     std::string random_id;
     do {
         random_id = std::to_string(
-            std::uniform_int_distribution<uint64_t>(1, JAMI_ID_MAX_VAL)(*rand_.get()));
+            std::uniform_int_distribution<uint64_t>(1, SIP_CORE_ID_MAX_VAL)(*rand_.get()));
     } while (hasCall(random_id));
     return random_id;
 }
@@ -42,10 +42,10 @@ CallFactory::getNewCallID() const
 std::shared_ptr<SIPCall>
 CallFactory::newSipCall(const std::shared_ptr<SIPAccountBase>& account,
                         Call::CallType type,
-                        const std::vector<libjami::MediaMap>& mediaList)
+                        const std::vector<libsip_core::MediaMap>& mediaList)
 {
     if (not allowNewCall_) {
-        JAMI_WARN("Creation of new calls is not allowed");
+        SIP_CORE_WARN("Creation of new calls is not allowed");
         return {};
     }
 
@@ -69,10 +69,10 @@ CallFactory::removeCall(Call& call)
     std::lock_guard<std::recursive_mutex> lk(callMapsMutex_);
 
     const auto& id = call.getCallId();
-    JAMI_DBG("Removing call %s", id.c_str());
+    SIP_CORE_DBG("Removing call %s", id.c_str());
     auto& map = callMaps_.at(call.getLinkType());
     map.erase(id);
-    JAMI_DBG("Remaining %zu call", map.size());
+    SIP_CORE_DBG("Remaining %zu call", map.size());
 }
 
 void
@@ -83,7 +83,7 @@ CallFactory::removeCall(const std::string& id)
     if (auto call = getCall(id)) {
         removeCall(*call);
     } else
-        JAMI_ERR("No call with ID %s", id.c_str());
+        SIP_CORE_ERR("No call with ID %s", id.c_str());
 }
 
 bool
@@ -256,4 +256,4 @@ CallFactory::callCount(Call::LinkType link) const
     return map->size();
 }
 
-} // namespace jami
+} // namespace sip_core

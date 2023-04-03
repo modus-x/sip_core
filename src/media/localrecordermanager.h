@@ -23,7 +23,7 @@
 #include <memory>
 #include <localrecorder.h>
 
-namespace jami {
+namespace sip_core {
 
 class LocalRecorderManager
 {
@@ -56,4 +56,4 @@ private:
     std::mutex recorderMapMutex_;
 };
 
-} // namespace jami
+} // namespace sip_core

@@ -26,7 +26,7 @@
 #include <mutex>
 #include <cstdint>
 
-namespace jami {
+namespace sip_core {
 
 class SIPAccountBase;
 
@@ -96,4 +96,4 @@ private:
 };
 
 } // namespace im
-} // namespace jami
+} // namespace sip_core

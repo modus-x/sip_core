@@ -26,7 +26,7 @@
 
 #include "socket_pair.h"
 
-namespace jami {
+namespace sip_core {
 
 enum BandwidthUsage { bwNormal = 0, bwUnderusing = 1, bwOverusing = 2 };
 
@@ -66,5 +66,5 @@ private:
     BandwidthUsage last_state_;
 };
 
-} // namespace jami
+} // namespace sip_core
 #endif

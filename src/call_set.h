@@ -27,7 +27,7 @@
 #include <string>
 #include <mutex>
 
-namespace jami {
+namespace sip_core {
 
 class CallSet
 {
@@ -112,4 +112,4 @@ private:
     std::map<std::string, std::shared_ptr<Conference>> conferences_;
 };
 
-} // namespace jami
+} // namespace sip_core

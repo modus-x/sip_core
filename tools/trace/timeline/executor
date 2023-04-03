@@ -30,7 +30,7 @@ def main(args):
 
     filter_tid = args.tid
     threads    = {}
-    prefix     = "jami:scheduled_executor_"
+    prefix     = "sip_core:scheduled_executor_"
 
     for msg in bt2.TraceCollectionMessageIterator(args.path[0]):
 

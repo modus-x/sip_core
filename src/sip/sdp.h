@@ -44,7 +44,7 @@
 #include <string>
 #include <stdexcept>
 
-namespace jami {
+namespace sip_core {
 
 namespace test {
 class SDPTest;
@@ -300,4 +300,4 @@ private:
     SdpDirection sdpDirection_ {SdpDirection::NONE};
 };
 
-} // namespace jami
+} // namespace sip_core

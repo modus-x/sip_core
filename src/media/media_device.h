@@ -26,7 +26,7 @@
 #include <string>
 #include <chrono>
 
-namespace jami {
+namespace sip_core {
 
 constexpr static auto NEWPARAMS_TIMEOUT = std::chrono::milliseconds(1000);
 
@@ -55,6 +55,6 @@ struct DeviceParams
     int is_area {};
 };
 
-} // namespace jami
+} // namespace sip_core
 
 #endif // __MEDIA_DEVICE_H__

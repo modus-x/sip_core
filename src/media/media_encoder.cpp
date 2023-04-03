@@ -48,7 +48,7 @@ extern "C" {
 
 using namespace std::literals;
 
-namespace jami {
+namespace sip_core {
 
 constexpr double LOGREG_PARAM_A {101};
 constexpr double LOGREG_PARAM_B {-5.};
@@ -59,7 +59,7 @@ constexpr double LOGREG_PARAM_B_HEVC {-5.};
 MediaEncoder::MediaEncoder()
     : outputCtx_(avformat_alloc_context())
 {
-    JAMI_DBG("[%p] New instance created", this);
+    SIP_CORE_DBG("[%p] New instance created", this);
 }
 
 MediaEncoder::~MediaEncoder()
@@ -83,14 +83,14 @@ MediaEncoder::~MediaEncoder()
     }
     av_dict_free(&options_);
 
-    JAMI_DBG("[%p] Instance destroyed", this);
+    SIP_CORE_DBG("[%p] Instance destroyed", this);
 }
 
 void
 MediaEncoder::setOptions(const MediaStream& opts)
 {
     if (!opts.isValid()) {
-        JAMI_ERR() << "Invalid options";
+        SIP_CORE_ERR() << "Invalid options";
         return;
     }
 
@@ -121,7 +121,7 @@ MediaEncoder::setOptions(const MediaDescription& args)
                                   args.payload_type,
                                   AV_OPT_SEARCH_CHILDREN)
                    < 0))
-        JAMI_ERR() << "Failed to set payload type: " << libav_utils::getError(ret);
+        SIP_CORE_ERR() << "Failed to set payload type: " << libav_utils::getError(ret);
 
     if (not args.parameters.empty())
         libav_utils::setDictValue(&options_, "parameters", args.parameters);
@@ -167,7 +167,7 @@ MediaEncoder::openOutput(const std::string& filename, const std::string& format)
                                                 format.empty() ? nullptr : format.c_str(),
                                                 filename.c_str());
     if (result < 0)
-        JAMI_ERR() << "Cannot open " << filename << ": " << libav_utils::getError(-result);
+        SIP_CORE_ERR() << "Cannot open " << filename << ": " << libav_utils::getError(-result);
 }
 
 int
@@ -182,11 +182,11 @@ MediaEncoder::addStream(const SystemCodecInfo& systemCodecInfo)
     auto stream = avformat_new_stream(outputCtx_, outputCodec_);
 
     if (stream == nullptr) {
-        JAMI_ERR("[%p] Failed to create coding instance for %s", this, systemCodecInfo.name.c_str());
+        SIP_CORE_ERR("[%p] Failed to create coding instance for %s", this, systemCodecInfo.name.c_str());
         return -1;
     }
 
-    JAMI_DBG("[%p] Created new coding instance for %s @ index %d",
+    SIP_CORE_DBG("[%p] Created new coding instance for %s @ index %d",
              this,
              systemCodecInfo.name.c_str(),
              stream->index);
@@ -219,7 +219,7 @@ MediaEncoder::initStream(const std::string& codecName, AVBufferRef* framesCtx)
 int
 MediaEncoder::initStream(const SystemCodecInfo& systemCodecInfo, AVBufferRef* framesCtx)
 {
-    JAMI_DBG("[%p] Initializing stream: codec type %d, name %s, lib %s",
+    SIP_CORE_DBG("[%p] Initializing stream: codec type %d, name %s, lib %s",
              this,
              systemCodecInfo.codecType,
              systemCodecInfo.name.c_str(),
@@ -232,7 +232,7 @@ MediaEncoder::initStream(const SystemCodecInfo& systemCodecInfo, AVBufferRef* fr
 
     // Must already have codec instance(s)
     if (outputCtx_->nb_streams == 0) {
-        JAMI_ERR("[%p] Can not init, output context has no coding sessions!", this);
+        SIP_CORE_ERR("[%p] Can not init, output context has no coding sessions!", this);
         throw MediaEncoderException("Can not init, output context has no coding sessions!");
     }
 
@@ -261,7 +261,7 @@ MediaEncoder::initStream(const SystemCodecInfo& systemCodecInfo, AVBufferRef* fr
     }
 
     if (stream == nullptr) {
-        JAMI_ERR("[%p] Can not init, output context has no coding sessions for %s",
+        SIP_CORE_ERR("[%p] Can not init, output context has no coding sessions for %s",
                  this,
                  systemCodecInfo.name.c_str());
         throw MediaEncoderException("Cannot allocate stream");
@@ -300,7 +300,7 @@ MediaEncoder::initStream(const SystemCodecInfo& systemCodecInfo, AVBufferRef* fr
             accel_->setDetails(encoderCtx);
             if (avcodec_open2(encoderCtx, outputCodec_, &options_) < 0) {
                 // Failed to open codec
-                JAMI_WARN("Fail to open hardware encoder %s with %s ",
+                SIP_CORE_WARN("Fail to open hardware encoder %s with %s ",
                           avcodec_get_name(static_cast<AVCodecID>(systemCodecInfo.avcodecId)),
                           it.getName().c_str());
                 avcodec_free_context(&encoderCtx);
@@ -309,7 +309,7 @@ MediaEncoder::initStream(const SystemCodecInfo& systemCodecInfo, AVBufferRef* fr
                 continue;
             } else {
                 // Succeed to open codec
-                JAMI_WARN("Using hardware encoding for %s with %s ",
+                SIP_CORE_WARN("Using hardware encoding for %s with %s ",
                           avcodec_get_name(static_cast<AVCodecID>(systemCodecInfo.avcodecId)),
                           it.getName().c_str());
                 encoders_.push_back(encoderCtx);
@@ -320,7 +320,7 @@ MediaEncoder::initStream(const SystemCodecInfo& systemCodecInfo, AVBufferRef* fr
 #endif
 
     if (!encoderCtx) {
-        JAMI_WARN("Not using hardware encoding for %s",
+        SIP_CORE_WARN("Not using hardware encoding for %s",
                   avcodec_get_name(static_cast<AVCodecID>(systemCodecInfo.avcodecId)));
         encoderCtx = initCodec(mediaType,
                                static_cast<AVCodecID>(systemCodecInfo.avcodecId),
@@ -397,7 +397,7 @@ MediaEncoder::startIO()
     if (!outputCtx_->pb)
         openIOContext();
     if (avformat_write_header(outputCtx_, options_ ? &options_ : nullptr)) {
-        JAMI_ERR("Could not write header for output file... check codec parameters");
+        SIP_CORE_ERR("Could not write header for output file... check codec parameters");
         throw MediaEncoderException("Failed to write output file header");
     }
 
@@ -430,7 +430,7 @@ MediaEncoder::encode(const std::shared_ptr<VideoFrame>& input,
     std::shared_ptr<VideoFrame> output;
 #ifdef RING_ACCEL
     if (getHWFrame(input, output) < 0) {
-        JAMI_ERR("Fail to get hardware frame");
+        SIP_CORE_ERR("Fail to get hardware frame");
         return -1;
     }
 #else
@@ -438,7 +438,7 @@ MediaEncoder::encode(const std::shared_ptr<VideoFrame>& input,
 #endif // RING_ACCEL
 
     if (!output) {
-        JAMI_ERR("Fail to get frame");
+        SIP_CORE_ERR("Fail to get frame");
         return -1;
     }
     auto avframe = output->pointer();
@@ -513,7 +513,7 @@ MediaEncoder::encode(AVFrame* frame, int streamIdx)
         if (ret == AVERROR(EAGAIN))
             break;
         if (ret < 0 && ret != AVERROR_EOF) { // we still want to write our frame on EOF
-            JAMI_ERR() << "Failed to encode frame: " << libav_utils::getError(ret);
+            SIP_CORE_ERR() << "Failed to encode frame: " << libav_utils::getError(ret);
             return ret;
         }
 
@@ -552,7 +552,7 @@ MediaEncoder::send(AVPacket& pkt, int streamIdx)
     // write the compressed frame
     auto ret = av_write_frame(outputCtx_, &pkt);
     if (ret < 0) {
-        JAMI_ERR() << "av_write_frame failed: " << libav_utils::getError(ret);
+        SIP_CORE_ERR() << "av_write_frame failed: " << libav_utils::getError(ret);
     }
     return ret >= 0;
 }
@@ -563,7 +563,7 @@ MediaEncoder::flush()
     int ret = 0;
     for (size_t i = 0; i < outputCtx_->nb_streams; ++i) {
         if (encode(nullptr, i) < 0) {
-            JAMI_ERR() << "Could not flush stream #" << i;
+            SIP_CORE_ERR() << "Could not flush stream #" << i;
             ret |= 1u << i; // provide a way for caller to know which streams failed
         }
     }
@@ -582,13 +582,13 @@ MediaEncoder::print_sdp()
     result.reserve(sdp_size);
 
     std::string_view steam(sdp), line;
-    while (jami::getline(steam, line)) {
+    while (sip_core::getline(steam, line)) {
         /* strip windows line ending */
         result += line.substr(0, line.length() - 1);
         result += "\n"sv;
     }
 #ifdef DEBUG_SDP
-    JAMI_DBG("Sending SDP:\n%s", result.c_str());
+    SIP_CORE_DBG("Sending SDP:\n%s", result.c_str());
 #endif
     return result;
 }
@@ -601,7 +601,7 @@ MediaEncoder::prepareEncoderContext(const AVCodec* outputCodec, bool is_video)
     auto encoderName = outputCodec->name; // guaranteed to be non null if AVCodec is not null
 
     encoderCtx->thread_count = std::min(std::thread::hardware_concurrency(), is_video ? 16u : 4u);
-    JAMI_DBG("[%s] Using %d threads", encoderName, encoderCtx->thread_count);
+    SIP_CORE_DBG("[%s] Using %d threads", encoderName, encoderCtx->thread_count);
 
     if (is_video) {
         // resolution must be a multiple of two
@@ -642,7 +642,7 @@ MediaEncoder::prepareEncoderContext(const AVCodec* outputCodec, bool is_video)
         encoderCtx->time_base = AVRational {1, encoderCtx->sample_rate};
         if (audioOpts_.nbChannels > 2 || audioOpts_.nbChannels < 1) {
             encoderCtx->channels = std::clamp(audioOpts_.nbChannels, 1, 2);
-            JAMI_ERR() << "[" << encoderName
+            SIP_CORE_ERR() << "[" << encoderName
                        << "] Clamping invalid channel count: " << audioOpts_.nbChannels << " -> "
                        << encoderCtx->channels;
         } else {
@@ -651,9 +651,9 @@ MediaEncoder::prepareEncoderContext(const AVCodec* outputCodec, bool is_video)
         encoderCtx->channel_layout = av_get_default_channel_layout(encoderCtx->channels);
         if (audioOpts_.frameSize) {
             encoderCtx->frame_size = audioOpts_.frameSize;
-            JAMI_DBG() << "[" << encoderName << "] Frame size " << encoderCtx->frame_size;
+            SIP_CORE_DBG() << "[" << encoderName << "] Frame size " << encoderCtx->frame_size;
         } else {
-            JAMI_WARN() << "[" << encoderName << "] Frame size not set";
+            SIP_CORE_WARN() << "[" << encoderName << "] Frame size not set";
         }
     }
 
@@ -666,11 +666,11 @@ MediaEncoder::forcePresetX2645(AVCodecContext* encoderCtx)
 #ifdef RING_ACCEL
     if (accel_ && accel_->getName() == "nvenc") {
         if (av_opt_set(encoderCtx, "preset", "fast", AV_OPT_SEARCH_CHILDREN))
-            JAMI_WARN("Failed to set preset to 'fast'");
+            SIP_CORE_WARN("Failed to set preset to 'fast'");
         if (av_opt_set(encoderCtx, "level", "auto", AV_OPT_SEARCH_CHILDREN))
-            JAMI_WARN("Failed to set level to 'auto'");
+            SIP_CORE_WARN("Failed to set level to 'auto'");
         if (av_opt_set_int(encoderCtx, "zerolatency", 1, AV_OPT_SEARCH_CHILDREN))
-            JAMI_WARN("Failed to set zerolatency to '1'");
+            SIP_CORE_WARN("Failed to set zerolatency to '1'");
     } else
 #endif
     {
@@ -680,10 +680,10 @@ MediaEncoder::forcePresetX2645(AVCodecContext* encoderCtx)
         const char* speedPreset = "veryfast";
 #endif
         if (av_opt_set(encoderCtx, "preset", speedPreset, AV_OPT_SEARCH_CHILDREN))
-            JAMI_WARN("Failed to set preset '%s'", speedPreset);
+            SIP_CORE_WARN("Failed to set preset '%s'", speedPreset);
         const char* tune = "zerolatency";
         if (av_opt_set(encoderCtx, "tune", tune, AV_OPT_SEARCH_CHILDREN))
-            JAMI_WARN("Failed to set tune '%s'", tune);
+            SIP_CORE_WARN("Failed to set tune '%s'", tune);
     }
 }
 
@@ -732,7 +732,7 @@ MediaEncoder::extractProfileLevelID(const std::string& parameters, AVCodecContex
             ctx->profile |= FF_PROFILE_H264_INTRA;
         break;
     }
-    JAMI_DBG("Using profile %s (%x) and level %d",
+    SIP_CORE_DBG("Using profile %s (%x) and level %d",
              avcodec_profile_name(AV_CODEC_ID_H264, ctx->profile),
              ctx->profile,
              ctx->level);
@@ -743,7 +743,7 @@ void
 MediaEncoder::enableAccel(bool enableAccel)
 {
     enableAccel_ = enableAccel;
-    emitSignal<libjami::ConfigurationSignal::HardwareEncodingChanged>(enableAccel_);
+    emitSignal<libsip_core::ConfigurationSignal::HardwareEncodingChanged>(enableAccel_);
     if (!enableAccel_) {
         accel_.reset();
         for (auto enc : encoders_)
@@ -788,7 +788,7 @@ MediaEncoder::initCodec(AVMediaType mediaType, AVCodecID avcodecId, uint64_t br)
                 outputCodec_ = avcodec_find_encoder_by_name(accel_->getCodecName().c_str());
             }
         } else {
-            JAMI_WARN() << "Hardware encoding disabled";
+            SIP_CORE_WARN() << "Hardware encoding disabled";
         }
     }
 #endif
@@ -813,12 +813,12 @@ MediaEncoder::initCodec(AVMediaType mediaType, AVCodecID avcodecId, uint64_t br)
     // Only clamp video bitrate
     if (mediaType == AVMEDIA_TYPE_VIDEO && br > 0) {
         if (br < SystemCodecInfo::DEFAULT_MIN_BITRATE) {
-            JAMI_WARNING("Requested bitrate {:d} too low, setting to {:d}",
+            SIP_CORE_WARNING("Requested bitrate {:d} too low, setting to {:d}",
                          br,
                          SystemCodecInfo::DEFAULT_MIN_BITRATE);
             br = SystemCodecInfo::DEFAULT_MIN_BITRATE;
         } else if (br > SystemCodecInfo::DEFAULT_MAX_BITRATE) {
-            JAMI_WARNING("Requested bitrate {:d} too high, setting to {:d}",
+            SIP_CORE_WARNING("Requested bitrate {:d} too high, setting to {:d}",
                          br,
                          SystemCodecInfo::DEFAULT_MAX_BITRATE);
             br = SystemCodecInfo::DEFAULT_MAX_BITRATE;
@@ -926,7 +926,7 @@ MediaEncoder::initH264(AVCodecContext* encoderCtx, uint64_t br)
         av_opt_set_int(encoderCtx, "crf", crf, AV_OPT_SEARCH_CHILDREN);
         av_opt_set_int(encoderCtx, "maxrate", maxBitrate, AV_OPT_SEARCH_CHILDREN);
         av_opt_set_int(encoderCtx, "bufsize", bufSize, AV_OPT_SEARCH_CHILDREN);
-        JAMI_DEBUG("H264 encoder setup: crf={:d}, maxrate={:d} kbit/s, bufsize={:d} kbit",
+        SIP_CORE_DEBUG("H264 encoder setup: crf={:d}, maxrate={:d} kbit/s, bufsize={:d} kbit",
                    crf,
                    maxBitrate / 1000,
                    bufSize / 1000);
@@ -937,7 +937,7 @@ MediaEncoder::initH264(AVCodecContext* encoderCtx, uint64_t br)
         av_opt_set_int(encoderCtx, "bufsize", bufSize, AV_OPT_SEARCH_CHILDREN);
         av_opt_set_int(encoderCtx, "crf", -1, AV_OPT_SEARCH_CHILDREN);
 
-        JAMI_DEBUG("H264 encoder setup cbr: bitrate={:d} kbit/s", br);
+        SIP_CORE_DEBUG("H264 encoder setup cbr: bitrate={:d} kbit/s", br);
     }
 }
 
@@ -957,7 +957,7 @@ MediaEncoder::initH265(AVCodecContext* encoderCtx, uint64_t br)
         av_opt_set_int(encoderCtx, "crf", crf, AV_OPT_SEARCH_CHILDREN);
         av_opt_set_int(encoderCtx, "maxrate", maxBitrate, AV_OPT_SEARCH_CHILDREN);
         av_opt_set_int(encoderCtx, "bufsize", bufSize, AV_OPT_SEARCH_CHILDREN);
-        JAMI_DEBUG("H265 encoder setup: crf={:d}, maxrate={:d} kbit/s, bufsize={:d} kbit",
+        SIP_CORE_DEBUG("H265 encoder setup: crf={:d}, maxrate={:d} kbit/s, bufsize={:d} kbit",
                    crf,
                    maxBitrate / 1000,
                    bufSize / 1000);
@@ -967,7 +967,7 @@ MediaEncoder::initH265(AVCodecContext* encoderCtx, uint64_t br)
         av_opt_set_int(encoderCtx, "minrate", br * 1000, AV_OPT_SEARCH_CHILDREN);
         av_opt_set_int(encoderCtx, "bufsize", br * 500, AV_OPT_SEARCH_CHILDREN);
         av_opt_set_int(encoderCtx, "crf", -1, AV_OPT_SEARCH_CHILDREN);
-        JAMI_DEBUG("H265 encoder setup cbr: bitrate={:d} kbit/s", br);
+        SIP_CORE_DEBUG("H265 encoder setup cbr: bitrate={:d} kbit/s", br);
     }
 }
 
@@ -984,7 +984,7 @@ MediaEncoder::initVP8(AVCodecContext* encoderCtx, uint64_t br)
         av_opt_set_int(encoderCtx, "qmin", 0, AV_OPT_SEARCH_CHILDREN);
         av_opt_set_int(encoderCtx, "slices", 4, AV_OPT_SEARCH_CHILDREN);
         av_opt_set_int(encoderCtx, "crf", 18, AV_OPT_SEARCH_CHILDREN);
-        JAMI_DEBUG("VP8 encoder setup: crf=18");
+        SIP_CORE_DEBUG("VP8 encoder setup: crf=18");
     } else {
         // 1- if quality is set use it
         // bitrate need to be set. The target bitrate becomes the maximum allowed bitrate
@@ -1017,7 +1017,7 @@ MediaEncoder::initVP8(AVCodecContext* encoderCtx, uint64_t br)
         av_opt_set_int(encoderCtx, "b", maxBitrate, AV_OPT_SEARCH_CHILDREN);
         av_opt_set_int(encoderCtx, "maxrate", maxBitrate, AV_OPT_SEARCH_CHILDREN);
         av_opt_set_int(encoderCtx, "bufsize", bufSize, AV_OPT_SEARCH_CHILDREN);
-        JAMI_DEBUG("VP8 encoder setup: crf={:d}, maxrate={:d}, bufsize={:d}",
+        SIP_CORE_DEBUG("VP8 encoder setup: crf={:d}, maxrate={:d}, bufsize={:d}",
                    crf,
                    maxBitrate / 1000,
                    bufSize / 1000);
@@ -1033,7 +1033,7 @@ MediaEncoder::initMPEG4(AVCodecContext* encoderCtx, uint64_t br)
     // Use CBR (set bitrate)
     encoderCtx->rc_buffer_size = bufSize;
     encoderCtx->bit_rate = encoderCtx->rc_min_rate = encoderCtx->rc_max_rate = maxBitrate;
-    JAMI_DEBUG("MPEG4 encoder setup: maxrate={:d}, bufsize={:d}", maxBitrate, bufSize);
+    SIP_CORE_DEBUG("MPEG4 encoder setup: maxrate={:d}, bufsize={:d}", maxBitrate, bufSize);
 }
 
 void
@@ -1045,7 +1045,7 @@ MediaEncoder::initH263(AVCodecContext* encoderCtx, uint64_t br)
     // Use CBR (set bitrate)
     encoderCtx->rc_buffer_size = bufSize;
     encoderCtx->bit_rate = encoderCtx->rc_min_rate = encoderCtx->rc_max_rate = maxBitrate;
-    JAMI_DEBUG("H263 encoder setup: maxrate={:d}, bufsize={:d}", maxBitrate, bufSize);
+    SIP_CORE_DEBUG("H263 encoder setup: maxrate={:d}, bufsize={:d}", maxBitrate, bufSize);
 }
 
 void
@@ -1143,29 +1143,29 @@ MediaEncoder::readConfig(AVCodecContext* encoderCtx)
     std::string path = fileutils::get_config_dir() + DIR_SEPARATOR_STR + "encoder.json";
     std::string name = encoderCtx->codec->name;
     if (fileutils::isFile(path)) {
-        JAMI_WARN("encoder.json file found, default settings will be erased");
+        SIP_CORE_WARN("encoder.json file found, default settings will be erased");
         try {
             Json::Value root;
             std::ifstream file = fileutils::ifstream(path);
             file >> root;
             if (!root.isObject()) {
-                JAMI_ERR() << "Invalid encoder configuration: root is not an object";
+                SIP_CORE_ERR() << "Invalid encoder configuration: root is not an object";
                 return;
             }
             const auto& config = root[name];
             if (config.isNull()) {
-                JAMI_WARN() << "Encoder '" << name << "' not found in configuration file";
+                SIP_CORE_WARN() << "Encoder '" << name << "' not found in configuration file";
                 return;
             }
             if (!config.isObject()) {
-                JAMI_ERR() << "Invalid encoder configuration: '" << name << "' is not an object";
+                SIP_CORE_ERR() << "Invalid encoder configuration: '" << name << "' is not an object";
                 return;
             }
             for (Json::Value::const_iterator it = config.begin(); it != config.end(); ++it) {
                 Json::Value v = *it;
                 if (!it.key().isConvertibleTo(Json::ValueType::stringValue)
                     || !v.isConvertibleTo(Json::ValueType::stringValue)) {
-                    JAMI_ERR() << "Invalid configuration for '" << name << "'";
+                    SIP_CORE_ERR() << "Invalid configuration for '" << name << "'";
                     return;
                 }
                 const auto& key = it.key().asString();
@@ -1175,12 +1175,12 @@ MediaEncoder::readConfig(AVCodecContext* encoderCtx)
                                      value.c_str(),
                                      AV_OPT_SEARCH_CHILDREN);
                 if (ret < 0) {
-                    JAMI_ERR() << "Failed to set option " << key << " in " << name
+                    SIP_CORE_ERR() << "Failed to set option " << key << " in " << name
                                << " context: " << libav_utils::getError(ret) << "\n";
                 }
             }
         } catch (const Json::Exception& e) {
-            JAMI_ERR() << "Failed to load encoder configuration file: " << e.what();
+            SIP_CORE_ERR() << "Failed to load encoder configuration file: " << e.what();
         }
     }
 }
@@ -1189,7 +1189,7 @@ std::string
 MediaEncoder::testH265Accel()
 {
 #ifdef RING_ACCEL
-    if (jami::Manager::instance().videoPreferences.getEncodingAccelerated()) {
+    if (sip_core::Manager::instance().videoPreferences.getEncodingAccelerated()) {
         // Get compatible list of Hardware API
         auto APIs = video::HardwareAccel::getCompatibleAccel(AV_CODEC_ID_H265,
                                                              1280,
@@ -1232,7 +1232,7 @@ MediaEncoder::testH265Accel()
             accel->setDetails(encoderCtx);
             if (avcodec_open2(encoderCtx, outputCodec, nullptr) < 0) {
                 // Failed to open codec
-                JAMI_WARN("Fail to open hardware encoder H265 with %s ", it.getName().c_str());
+                SIP_CORE_WARN("Fail to open hardware encoder H265 with %s ", it.getName().c_str());
                 avcodec_free_context(&encoderCtx);
                 encoderCtx = nullptr;
                 accel = nullptr;
@@ -1279,7 +1279,7 @@ MediaEncoder::getHWFrame(const std::shared_ptr<VideoFrame>& input,
         } else if (isHardware) {
             // Hardware decoded frame, transfer back to main memory
             // Transfer to GPU if we have a hardware encoder
-            // Hardware decoders decode to NV12, but Jami's supported software encoders want YUV420P
+            // Hardware decoders decode to NV12, but sip_core's supported software encoders want YUV420P
             output = getUnlinkedHWFrame(*input.get());
         } else if (accel_) {
             // Software decoded frame with a hardware encoder, convert to accepted format first
@@ -1292,7 +1292,7 @@ MediaEncoder::getHWFrame(const std::shared_ptr<VideoFrame>& input,
         output = getScaledSWFrame(*input.get());
 #endif
     } catch (const std::runtime_error& e) {
-        JAMI_ERR("Accel failure: %s", e.what());
+        SIP_CORE_ERR("Accel failure: %s", e.what());
         return -1;
     }
 
@@ -1362,4 +1362,4 @@ MediaEncoder::resetStreams(int width, int height)
     }
 }
 
-} // namespace jami
+} // namespace sip_core

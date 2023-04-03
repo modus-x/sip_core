@@ -36,7 +36,7 @@
 #include <memory>
 #include <thread>
 
-namespace jami {
+namespace sip_core {
 
 class AudioPreference;
 class AudioStream;
@@ -256,4 +256,4 @@ private:
     friend class AudioLayerTest;
 };
 
-} // namespace jami
+} // namespace sip_core

@@ -55,8 +55,8 @@ namespace Json {
 class Value;
 }
 
-namespace jami {
-static constexpr uint64_t JAMI_ID_MAX_VAL = 9007199254740992;
+namespace sip_core {
+static constexpr uint64_t SIP_CORE_ID_MAX_VAL = 9007199254740992;
 constexpr static const char RINGDIR[] = "ringtones";
 
 class Call;
@@ -173,7 +173,7 @@ public:
      * @return The created call
      */
     virtual std::shared_ptr<Call> newOutgoingCall(std::string_view toUrl,
-                                                  const std::vector<libjami::MediaMap>& mediaList)
+                                                  const std::vector<libsip_core::MediaMap>& mediaList)
         = 0;
 
     /**
@@ -196,7 +196,7 @@ public:
         return false;
     };
 
-    virtual std::vector<libjami::Message> getLastMessages(const uint64_t& /*base_timestamp*/)
+    virtual std::vector<libsip_core::Message> getLastMessages(const uint64_t& /*base_timestamp*/)
     {
         return {};
     }
@@ -339,7 +339,7 @@ public:
     // Check if a Daemon version (typically peer's version) satisfies the
     // minimum required version. This check is typically used to disable a
     // feature if it's not backward compatible with the peer's version.
-    static bool meetMinimumRequiredVersion(const std::vector<unsigned>& jamiVersion,
+    static bool meetMinimumRequiredVersion(const std::vector<unsigned>& sip_coreVersion,
                                            const std::vector<unsigned>& minRequiredVersion);
 
     // Enable/disable compliancy with RFC-5245 for component IDs format.
@@ -375,7 +375,7 @@ public:
     {
         auto result = callSet_.removeConference(confId);
         if (result)
-            emitSignal<libjami::CallSignal::ConferenceRemoved>(getAccountID(), confId);
+            emitSignal<libsip_core::CallSignal::ConferenceRemoved>(getAccountID(), confId);
         return result;
     }
 
@@ -463,5 +463,5 @@ operator<<(std::ostream& os, const Account& acc)
     return os;
 }
 
-} // namespace jami
+} // namespace sip_core
 

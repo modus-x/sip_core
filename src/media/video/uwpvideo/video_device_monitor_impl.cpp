@@ -26,7 +26,7 @@
 #include "logger.h"
 #include "noncopyable.h"
 
-namespace jami {
+namespace sip_core {
 namespace video {
 
 class VideoDeviceMonitorImpl
@@ -92,4 +92,4 @@ VideoDeviceMonitor::VideoDeviceMonitor()
 VideoDeviceMonitor::~VideoDeviceMonitor() {}
 
 } // namespace video
-} // namespace jami
+} // namespace sip_core

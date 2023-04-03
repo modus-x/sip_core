@@ -36,7 +36,7 @@
 #endif
 #include "media_player.h"
 
-namespace jami {
+namespace sip_core {
 
 struct VideoManager
 {
@@ -82,4 +82,4 @@ bool mutePlayerAudio(const std::string& id, bool mute);
 bool playerSeekToTime(const std::string& id, int time);
 int64_t getPlayerPosition(const std::string& id);
 
-} // namespace jami
+} // namespace sip_core

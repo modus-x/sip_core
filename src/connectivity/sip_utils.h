@@ -36,7 +36,7 @@
 #include <pjsip/sip_endpoint.h>
 #include <pjsip/sip_dialog.h>
 
-namespace jami {
+namespace sip_core {
 namespace sip_utils {
 
 using namespace std::literals;
@@ -188,4 +188,4 @@ static constexpr int POOL_TP_INC {512};
 static constexpr int TRANSPORT_INFO_LENGTH {64};
 
 } // namespace sip_utils
-} // namespace jami
+} // namespace sip_core

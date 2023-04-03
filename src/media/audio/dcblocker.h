@@ -25,7 +25,7 @@
 #include "ring_types.h"
 #include "audiobuffer.h"
 
-namespace jami {
+namespace sip_core {
 
 class DcBlocker
 {
@@ -51,6 +51,6 @@ private:
     std::vector<StreamState> states;
 };
 
-} // namespace jami
+} // namespace sip_core
 
 #endif

@@ -36,7 +36,7 @@
 #endif
 #include "client/ring_signal.h"
 #include "audio/ringbufferpool.h"
-#include "jami/media_const.h"
+#include "sip_core/media_const.h"
 #include "libav_utils.h"
 #include "call_const.h"
 #include "system_codec_container.h"
@@ -55,7 +55,7 @@ extern "C" {
 #include <libavutil/display.h>
 }
 
-namespace libjami {
+namespace libsip_core {
 
 MediaFrame::MediaFrame()
     : frame_ {av_frame_alloc()}
@@ -99,7 +99,7 @@ MediaFrame::setPacket(std::unique_ptr<AVPacket, void (*)(AVPacket*)>&& pkt)
     packet_ = std::move(pkt);
 }
 
-AudioFrame::AudioFrame(const jami::AudioFormat& format, size_t nb_samples)
+AudioFrame::AudioFrame(const sip_core::AudioFormat& format, size_t nb_samples)
     : MediaFrame()
 {
     setFormat(format);
@@ -108,7 +108,7 @@ AudioFrame::AudioFrame(const jami::AudioFormat& format, size_t nb_samples)
 }
 
 void
-AudioFrame::setFormat(const jami::AudioFormat& format)
+AudioFrame::setFormat(const sip_core::AudioFormat& format)
 {
     auto d = pointer();
     d->channels = format.nb_channels;
@@ -117,7 +117,7 @@ AudioFrame::setFormat(const jami::AudioFormat& format)
     d->format = format.sampleFormat;
 }
 
-jami::AudioFormat
+sip_core::AudioFormat
 AudioFrame::getFormat() const
 {
     return {(unsigned) frame_->sample_rate,
@@ -154,7 +154,7 @@ AudioFrame::mix(const AudioFrame& frame)
     }
     if (f.nb_samples == 0) {
         reserve(fIn.nb_samples);
-        jami::libav_utils::fillWithSilence(&f);
+        sip_core::libav_utils::fillWithSilence(&f);
     } else if (f.nb_samples != fIn.nb_samples) {
         throw std::invalid_argument("Can't mix frames with different length");
     }
@@ -211,7 +211,7 @@ AudioFrame::calcRMS() const
         }
     } else {
         // Should not happen
-        JAMI_ERR() << "Unsupported format for getting volume level: "
+        SIP_CORE_ERR() << "Unsupported format for getting volume level: "
                    << av_get_sample_fmt_name(fmt);
         return 0.0;
     }
@@ -368,18 +368,18 @@ VideoFrame::getOrientation() const
 VideoFrame*
 getNewFrame(std::string_view id)
 {
-    if (auto input = jami::Manager::instance().getVideoManager().getVideoInput(id))
+    if (auto input = sip_core::Manager::instance().getVideoManager().getVideoInput(id))
         return &input->getNewFrame();
-    JAMI_WARN("getNewFrame: can't find input %.*s", (int) id.size(), id.data());
+    SIP_CORE_WARN("getNewFrame: can't find input %.*s", (int) id.size(), id.data());
     return nullptr;
 }
 
 void
 publishFrame(std::string_view id)
 {
-    if (auto input = jami::Manager::instance().getVideoManager().getVideoInput(id))
+    if (auto input = sip_core::Manager::instance().getVideoManager().getVideoInput(id))
         return input->publishFrame();
-    JAMI_WARN("publishFrame: can't find input %.*s", (int) id.size(), id.data());
+    SIP_CORE_WARN("publishFrame: can't find input %.*s", (int) id.size(), id.data());
 }
 
 void
@@ -391,39 +391,39 @@ registerVideoHandlers(const std::map<std::string, std::shared_ptr<CallbackWrappe
 std::vector<std::string>
 getDeviceList()
 {
-    return jami::Manager::instance().getVideoManager().videoDeviceMonitor.getDeviceList();
+    return sip_core::Manager::instance().getVideoManager().videoDeviceMonitor.getDeviceList();
 }
 
 VideoCapabilities
 getCapabilities(const std::string& deviceId)
 {
-    return jami::Manager::instance().getVideoManager().videoDeviceMonitor.getCapabilities(deviceId);
+    return sip_core::Manager::instance().getVideoManager().videoDeviceMonitor.getCapabilities(deviceId);
 }
 
 std::string
 getDefaultDevice()
 {
-    return jami::Manager::instance().getVideoManager().videoDeviceMonitor.getDefaultDevice();
+    return sip_core::Manager::instance().getVideoManager().videoDeviceMonitor.getDefaultDevice();
 }
 
 void
 setDefaultDevice(const std::string& deviceId)
 {
-    JAMI_DBG("Setting default device to %s", deviceId.c_str());
-    if (jami::Manager::instance().getVideoManager().videoDeviceMonitor.setDefaultDevice(deviceId))
-        jami::Manager::instance().saveConfig();
+    SIP_CORE_DBG("Setting default device to %s", deviceId.c_str());
+    if (sip_core::Manager::instance().getVideoManager().videoDeviceMonitor.setDefaultDevice(deviceId))
+        sip_core::Manager::instance().saveConfig();
 }
 
 void
 setDeviceOrientation(const std::string& deviceId, int angle)
 {
-    jami::Manager::instance().getVideoManager().setDeviceOrientation(deviceId, angle);
+    sip_core::Manager::instance().getVideoManager().setDeviceOrientation(deviceId, angle);
 }
 
 std::map<std::string, std::string>
 getDeviceParams(const std::string& deviceId)
 {
-    auto params = jami::Manager::instance().getVideoManager().videoDeviceMonitor.getDeviceParams(
+    auto params = sip_core::Manager::instance().getVideoManager().videoDeviceMonitor.getDeviceParams(
         deviceId);
     std::stringstream rate;
     rate << params.framerate;
@@ -436,7 +436,7 @@ getDeviceParams(const std::string& deviceId)
 std::map<std::string, std::string>
 getSettings(const std::string& deviceId)
 {
-    return jami::Manager::instance()
+    return sip_core::Manager::instance()
         .getVideoManager()
         .videoDeviceMonitor.getSettings(deviceId)
         .to_map();
@@ -445,19 +445,19 @@ getSettings(const std::string& deviceId)
 void
 applySettings(const std::string& deviceId, const std::map<std::string, std::string>& settings)
 {
-    jami::Manager::instance().getVideoManager().videoDeviceMonitor.applySettings(deviceId, settings);
-    jami::Manager::instance().saveConfig();
+    sip_core::Manager::instance().getVideoManager().videoDeviceMonitor.applySettings(deviceId, settings);
+    sip_core::Manager::instance().saveConfig();
 }
 
 std::string
 openVideoInput(const std::string& path)
 {
-    auto& vm = jami::Manager::instance().getVideoManager();
+    auto& vm = sip_core::Manager::instance().getVideoManager();
 
     auto id = path.empty() ? vm.videoDeviceMonitor.getMRLForDefaultDevice() : path;
     auto& input = vm.clientVideoInputs[id];
     if (not input) {
-        input = jami::getVideoInput(id);
+        input = sip_core::getVideoInput(id);
     }
     return id;
 }
@@ -465,34 +465,34 @@ openVideoInput(const std::string& path)
 bool
 closeVideoInput(const std::string& id)
 {
-    return jami::Manager::instance().getVideoManager().clientVideoInputs.erase(id) > 0;
+    return sip_core::Manager::instance().getVideoManager().clientVideoInputs.erase(id) > 0;
 }
 #endif
 
 void
 startAudioDevice()
 {
-    auto newPreview = jami::getAudioInput(jami::RingBufferPool::DEFAULT_ID);
-    jami::Manager::instance().getVideoManager().audioPreview = newPreview;
+    auto newPreview = sip_core::getAudioInput(sip_core::RingBufferPool::DEFAULT_ID);
+    sip_core::Manager::instance().getVideoManager().audioPreview = newPreview;
     newPreview->switchInput("");
 }
 
 void
 stopAudioDevice()
 {
-    jami::Manager::instance().getVideoManager().audioPreview.reset();
+    sip_core::Manager::instance().getVideoManager().audioPreview.reset();
 }
 
 std::string
 startLocalMediaRecorder(const std::string& videoInputId, const std::string& filepath)
 {
-    auto rec = std::make_unique<jami::LocalRecorder>(videoInputId);
+    auto rec = std::make_unique<sip_core::LocalRecorder>(videoInputId);
     rec->setPath(filepath);
 
     // retrieve final path (containing file extension)
     auto path = rec->getPath();
 
-    auto& recordManager = jami::LocalRecorderManager::instance();
+    auto& recordManager = sip_core::LocalRecorderManager::instance();
 
     try {
         recordManager.insertRecorder(path, std::move(rec));
@@ -512,25 +512,25 @@ startLocalMediaRecorder(const std::string& videoInputId, const std::string& file
 void
 stopLocalRecorder(const std::string& filepath)
 {
-    jami::LocalRecorder* rec = jami::LocalRecorderManager::instance().getRecorderByPath(filepath);
+    sip_core::LocalRecorder* rec = sip_core::LocalRecorderManager::instance().getRecorderByPath(filepath);
     if (!rec) {
-        JAMI_WARN("Can't stop non existing local recorder.");
+        SIP_CORE_WARN("Can't stop non existing local recorder.");
         return;
     }
 
     rec->stopRecording();
-    jami::LocalRecorderManager::instance().removeRecorderByPath(filepath);
+    sip_core::LocalRecorderManager::instance().removeRecorderByPath(filepath);
 }
 
 bool
 registerSinkTarget(const std::string& sinkId, SinkTarget target)
 {
 #ifdef ENABLE_VIDEO
-    if (auto sink = jami::Manager::instance().getSinkClient(sinkId)) {
+    if (auto sink = sip_core::Manager::instance().getSinkClient(sinkId)) {
         sink->registerTarget(std::move(target));
         return true;
     } else
-        JAMI_WARN("No sink found for id '%s'", sinkId.c_str());
+        SIP_CORE_WARN("No sink found for id '%s'", sinkId.c_str());
 #endif
     return false;
 }
@@ -540,10 +540,10 @@ void
 startShmSink(const std::string& sinkId, bool value)
 {
 #ifdef ENABLE_VIDEO
-    if (auto sink = jami::Manager::instance().getSinkClient(sinkId))
+    if (auto sink = sip_core::Manager::instance().getSinkClient(sinkId))
         sink->enableShm(value);
     else
-        JAMI_WARN("No sink found for id '%s'", sinkId.c_str());
+        SIP_CORE_WARN("No sink found for id '%s'", sinkId.c_str());
 #endif
 }
 #endif
@@ -552,64 +552,64 @@ std::map<std::string, std::string>
 getRenderer(const std::string& callId)
 {
 #ifdef ENABLE_VIDEO
-    if (auto sink = jami::Manager::instance().getSinkClient(callId))
+    if (auto sink = sip_core::Manager::instance().getSinkClient(callId))
         return {
-            {libjami::Media::Details::CALL_ID, callId},
-            {libjami::Media::Details::SHM_PATH, sink->openedName()},
-            {libjami::Media::Details::WIDTH, std::to_string(sink->getWidth())},
-            {libjami::Media::Details::HEIGHT, std::to_string(sink->getHeight())},
+            {libsip_core::Media::Details::CALL_ID, callId},
+            {libsip_core::Media::Details::SHM_PATH, sink->openedName()},
+            {libsip_core::Media::Details::WIDTH, std::to_string(sink->getWidth())},
+            {libsip_core::Media::Details::HEIGHT, std::to_string(sink->getHeight())},
         };
     else
 #endif
         return {
-            {libjami::Media::Details::CALL_ID, callId},
-            {libjami::Media::Details::SHM_PATH, ""},
-            {libjami::Media::Details::WIDTH, "0"},
-            {libjami::Media::Details::HEIGHT, "0"},
+            {libsip_core::Media::Details::CALL_ID, callId},
+            {libsip_core::Media::Details::SHM_PATH, ""},
+            {libsip_core::Media::Details::WIDTH, "0"},
+            {libsip_core::Media::Details::HEIGHT, "0"},
         };
 }
 
 std::string
 createMediaPlayer(const std::string& path)
 {
-    return jami::createMediaPlayer(path);
+    return sip_core::createMediaPlayer(path);
 }
 
 bool
 pausePlayer(const std::string& id, bool pause)
 {
-    return jami::pausePlayer(id, pause);
+    return sip_core::pausePlayer(id, pause);
 }
 
 bool
 closeMediaPlayer(const std::string& id)
 {
-    return jami::closeMediaPlayer(id);
+    return sip_core::closeMediaPlayer(id);
 }
 
 bool
 mutePlayerAudio(const std::string& id, bool mute)
 {
-    return jami::mutePlayerAudio(id, mute);
+    return sip_core::mutePlayerAudio(id, mute);
 }
 
 bool
 playerSeekToTime(const std::string& id, int time)
 {
-    return jami::playerSeekToTime(id, time);
+    return sip_core::playerSeekToTime(id, time);
 }
 
 int64_t
 getPlayerPosition(const std::string& id)
 {
-    return jami::getPlayerPosition(id);
+    return sip_core::getPlayerPosition(id);
 }
 
 bool
 getDecodingAccelerated()
 {
 #ifdef RING_ACCEL
-    return jami::Manager::instance().videoPreferences.getDecodingAccelerated();
+    return sip_core::Manager::instance().videoPreferences.getDecodingAccelerated();
 #else
     return false;
 #endif
@@ -619,9 +619,9 @@ void
 setDecodingAccelerated(bool state)
 {
 #ifdef RING_ACCEL
-    JAMI_DBG("%s hardware acceleration", (state ? "Enabling" : "Disabling"));
-    if (jami::Manager::instance().videoPreferences.setDecodingAccelerated(state))
-        jami::Manager::instance().saveConfig();
+    SIP_CORE_DBG("%s hardware acceleration", (state ? "Enabling" : "Disabling"));
+    if (sip_core::Manager::instance().videoPreferences.setDecodingAccelerated(state))
+        sip_core::Manager::instance().saveConfig();
 #endif
 }
 
@@ -629,7 +629,7 @@ bool
 getEncodingAccelerated()
 {
 #ifdef RING_ACCEL
-    return jami::Manager::instance().videoPreferences.getEncodingAccelerated();
+    return sip_core::Manager::instance().videoPreferences.getEncodingAccelerated();
 #else
     return false;
 #endif
@@ -639,20 +639,20 @@ void
 setEncodingAccelerated(bool state)
 {
 #ifdef RING_ACCEL
-    JAMI_DBG("%s hardware acceleration", (state ? "Enabling" : "Disabling"));
-    if (jami::Manager::instance().videoPreferences.setEncodingAccelerated(state))
-        jami::Manager::instance().saveConfig();
+    SIP_CORE_DBG("%s hardware acceleration", (state ? "Enabling" : "Disabling"));
+    if (sip_core::Manager::instance().videoPreferences.setEncodingAccelerated(state))
+        sip_core::Manager::instance().saveConfig();
     else
         return;
 #endif
-    for (const auto& acc : jami::Manager::instance().getAllAccounts()) {
+    for (const auto& acc : sip_core::Manager::instance().getAllAccounts()) {
         if (state)
             acc->setCodecActive(AV_CODEC_ID_HEVC);
         else
             acc->setCodecInactive(AV_CODEC_ID_HEVC);
         // Update and sort codecs
         acc->setActiveCodecs(acc->getActiveCodecs());
-        jami::Manager::instance().saveConfig(acc);
+        sip_core::Manager::instance().saveConfig(acc);
     }
 }
 
@@ -661,19 +661,19 @@ void
 addVideoDevice(const std::string& node,
                const std::vector<std::map<std::string, std::string>>& devInfo)
 {
-    jami::Manager::instance().getVideoManager().videoDeviceMonitor.addDevice(node, devInfo);
+    sip_core::Manager::instance().getVideoManager().videoDeviceMonitor.addDevice(node, devInfo);
 }
 
 void
 removeVideoDevice(const std::string& node)
 {
-    jami::Manager::instance().getVideoManager().videoDeviceMonitor.removeDevice(node);
+    sip_core::Manager::instance().getVideoManager().videoDeviceMonitor.removeDevice(node);
 }
 #endif
 
-} // namespace libjami
+} // namespace libsip_core
 
-namespace jami {
+namespace sip_core {
 
 #ifdef ENABLE_VIDEO
 video::VideoDeviceMonitor&
@@ -804,4 +804,4 @@ getPlayerPosition(const std::string& id)
     return -1;
 }
 
-} // namespace jami
+} // namespace sip_core

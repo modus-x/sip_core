@@ -1,6 +1,6 @@
 """
 This tool is designed to facilitate downloading, patching, and building
-of library dependencies for the Jami daemon project on windows. MSBuild
+of library dependencies for the sip_core daemon project on windows. MSBuild
 toolset and sdk versions can be supplied as parameters and will be sedded
 into vcxproj files accordingly.
 
@@ -733,7 +733,7 @@ def getMSbuilder():
 
 
 def parse_args():
-    ap = argparse.ArgumentParser(description="Windows Jami build tool")
+    ap = argparse.ArgumentParser(description="Windows sip_core build tool")
     ap.add_argument(
         '-b', '--build',
         help='Build latest contrib')

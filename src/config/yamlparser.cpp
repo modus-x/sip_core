@@ -22,7 +22,7 @@
 #include "yamlparser.h"
 #include "fileutils.h"
 
-namespace jami {
+namespace sip_core {
 namespace yaml_utils {
 
 void
@@ -66,4 +66,4 @@ parseVector(const YAML::Node& node)
     return result;
 }
 } // namespace yaml_utils
-} // namespace jami
+} // namespace sip_core

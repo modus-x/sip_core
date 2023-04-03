@@ -398,13 +398,13 @@ _CPP_HEADERS = frozenset([
 # List of unapproved C++11 headers
 _UNAPPROVED_CPP11_HEADERS = frozenset([
     'cfenv',
-    # Jami approved: 'condition_variable',
+    # sip_core approved: 'condition_variable',
     'fenv.h',
-    # Jami approved: 'future',
-    # Jami approved: 'mutex',
-    # Jami approved: 'thread',
-    # Jami approved: 'chrono',
-    # Jami approved: 'ratio',
+    # sip_core approved: 'future',
+    # sip_core approved: 'mutex',
+    # sip_core approved: 'thread',
+    # sip_core approved: 'chrono',
+    # sip_core approved: 'ratio',
     'regex',
     'system_error',
     ])

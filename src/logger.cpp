@@ -63,7 +63,7 @@
 
 #ifdef __ANDROID__
 #ifndef APP_NAME
-#define APP_NAME "libjami"
+#define APP_NAME "libsip_core"
 #endif /* APP_NAME */
 #endif
 
@@ -94,9 +94,9 @@
 #define LIGHT_GREEN      FOREGROUND_GREEN + 0x0008
 #endif // _WIN32
 
-#define LOGFILE "jami"
+#define LOGFILE "sip_core"
 
-namespace jami {
+namespace sip_core {
 
 static constexpr auto ENDL = '\n';
 
@@ -127,10 +127,10 @@ void
 strErr()
 {
 #ifdef __GLIBC__
-    JAMI_ERR("%m");
+    SIP_CORE_ERR("%m");
 #else
     char buf[1000];
-    JAMI_ERR("%s", check_error(strerror_r(errno, buf, sizeof(buf)), buf));
+    SIP_CORE_ERR("%s", check_error(strerror_r(errno, buf, sizeof(buf)), buf));
 #endif
 }
 
@@ -255,7 +255,7 @@ public:
     }
 
 #ifdef _WIN32
-    void printLogImpl(jami::Logger::Msg& msg, bool with_color)
+    void printLogImpl(sip_core::Logger::Msg& msg, bool with_color)
     {
         WORD saved_attributes;
         static HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -297,7 +297,7 @@ public:
         }
     }
 #else
-    void printLogImpl(jami::Logger::Msg& msg, bool with_color)
+    void printLogImpl(sip_core::Logger::Msg& msg, bool with_color)
     {
         if (with_color) {
             const char* color_header = CYAN;
@@ -333,7 +333,7 @@ public:
     }
 #endif /* _WIN32 */
 
-    virtual void consume(jami::Logger::Msg& msg) override
+    virtual void consume(sip_core::Logger::Msg& msg) override
     {
         static bool with_color = !(getenv("NO_COLOR") || getenv("NO_COLORS") || getenv("NO_COLOUR")
                                    || getenv("NO_COLOURS"));
@@ -418,7 +418,7 @@ public:
         return *self;
     }
 
-    virtual void consume(jami::Logger::Msg& msg) override
+    virtual void consume(sip_core::Logger::Msg& msg) override
     {
         /*
          * TODO - Maybe change the MessageSend sigature to avoid copying
@@ -426,7 +426,7 @@ public:
          */
         auto tmp = msg.header_ + msg.payload_;
 
-        jami::emitSignal<libjami::ConfigurationSignal::MessageSend>(tmp);
+        sip_core::emitSignal<libsip_core::ConfigurationSignal::MessageSend>(tmp);
     }
 };
 
@@ -525,7 +525,7 @@ Logger::setFileLog(const std::string& path)
     FileLog::instance().setFile(path);
 }
 
-LIBJAMI_PUBLIC void
+LIBSIP_CORE_PUBLIC void
 Logger::log(int level, const char* file, int line, bool linefeed, const char* fmt, ...)
 {
     va_list ap;
@@ -603,4 +603,4 @@ Logger::fini()
 #endif /* _WIN32 */
 }
 
-} // namespace jami
+} // namespace sip_core

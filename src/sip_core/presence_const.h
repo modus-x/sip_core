@@ -17,12 +17,12 @@
  *  along with this program; if not, write to the Free Software
  *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301 USA.
  */
-#ifndef LIBJAMI_PRESENCE_CONST_H
-#define LIBJAMI_PRESENCE_CONST_H
+#ifndef LIBSIP_CORE_PRESENCE_CONST_H
+#define LIBSIP_CORE_PRESENCE_CONST_H
 
 #include "def.h"
 
-namespace libjami {
+namespace libsip_core {
 
 namespace Presence {
 
@@ -34,6 +34,6 @@ constexpr static const char* OFFLINE_KEY = "Offline";
 
 } // namespace Presence
 
-} // namespace libjami
+} // namespace libsip_core
 
 #endif

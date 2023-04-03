@@ -40,7 +40,7 @@
 
 #include <ciso646> // fix windows compiler bug
 
-namespace jami {
+namespace sip_core {
 
 #ifdef _WIN32
 std::wstring
@@ -164,4 +164,4 @@ string_split_set(std::string& str, std::string_view separator)
     return output;
 }
 
-} // namespace jami
+} // namespace sip_core

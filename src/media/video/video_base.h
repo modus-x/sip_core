@@ -48,17 +48,17 @@ struct AVIOContext;
 #endif
 }
 
-namespace libjami {
+namespace libsip_core {
 class MediaFrame;
 class VideoFrame;
-} // namespace libjami
+} // namespace libsip_core
 
-namespace jami {
-using MediaFrame = libjami::MediaFrame;
-using VideoFrame = libjami::VideoFrame;
-} // namespace jami
+namespace sip_core {
+using MediaFrame = libsip_core::MediaFrame;
+using VideoFrame = libsip_core::VideoFrame;
+} // namespace sip_core
 
-namespace jami {
+namespace sip_core {
 namespace video {
 
 struct VideoFrameActiveWriter : Observable<std::shared_ptr<MediaFrame>>
@@ -108,16 +108,16 @@ struct VideoSettings
 };
 
 } // namespace video
-} // namespace jami
+} // namespace sip_core
 
 namespace YAML {
 template<>
-struct convert<jami::video::VideoSettings>
+struct convert<sip_core::video::VideoSettings>
 {
-    static Node encode(const jami::video::VideoSettings& rhs);
-    static bool decode(const Node& node, jami::video::VideoSettings& rhs);
+    static Node encode(const sip_core::video::VideoSettings& rhs);
+    static bool decode(const Node& node, sip_core::video::VideoSettings& rhs);
 };
 
-Emitter& operator<<(Emitter& out, const jami::video::VideoSettings& v);
+Emitter& operator<<(Emitter& out, const sip_core::video::VideoSettings& v);
 
 } // namespace YAML

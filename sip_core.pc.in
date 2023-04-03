@@ -3,8 +3,8 @@ exec_prefix=@exec_prefix@
 libdir=@libdir@
 includedir=@includedir@
 
-Name: jami
-Description: Jami core library and daemon
+Name: sip_core
+Description: sip_core core library and daemon
 Version: @PACKAGE_VERSION@
-Libs: -L${libdir} -ljami
+Libs: -L${libdir} -lsip_core
 Cflags: -I${includedir}

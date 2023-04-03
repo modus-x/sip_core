@@ -46,7 +46,7 @@
 
 #define PRES_TIMER 300 // 5min
 
-namespace jami {
+namespace sip_core {
 
 using sip_utils::CONST_PJ_STR;
 
@@ -56,7 +56,7 @@ void
 PresSubClient::pres_client_timer_cb(pj_timer_heap_t* /*th*/, pj_timer_entry* entry)
 {
     PresSubClient* c = (PresSubClient*) entry->user_data;
-    JAMI_DBG("timeout for %.*s", (int)c->getURI().size(), c->getURI().data());
+    SIP_CORE_DBG("timeout for %.*s", (int)c->getURI().size(), c->getURI().data());
 }
 
 /* Callback called when *client* subscription state has changed. */
@@ -69,11 +69,11 @@ PresSubClient::pres_client_evsub_on_state(pjsip_evsub* sub, pjsip_event* event)
     /* No need to pres->lock() here since the client has a locked dialog*/
 
     if (!pres_client) {
-        JAMI_WARN("pres_client not found");
+        SIP_CORE_WARN("pres_client not found");
         return;
     }
 
-    JAMI_DBG("Subscription for pres_client '%.*s' is '%s'",
+    SIP_CORE_DBG("Subscription for pres_client '%.*s' is '%s'",
              (int)pres_client->getURI().size(), pres_client->getURI().data(),
              pjsip_evsub_get_state_name(sub) ? pjsip_evsub_get_state_name(sub) : "null");
 
@@ -83,7 +83,7 @@ PresSubClient::pres_client_evsub_on_state(pjsip_evsub* sub, pjsip_event* event)
 
     if (state == PJSIP_EVSUB_STATE_ACCEPTED) {
         pres_client->enable(true);
-        emitSignal<libjami::PresenceSignal::SubscriptionStateChanged>(pres->getAccount()
+        emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(pres->getAccount()
                                                                         ->getAccountID(),
                                                                     std::string(pres_client->getURI()),
                                                                     PJ_TRUE);
@@ -96,7 +96,7 @@ PresSubClient::pres_client_evsub_on_state(pjsip_evsub* sub, pjsip_event* event)
                             &pres_client->term_reason_,
                             pjsip_evsub_get_termination_reason(sub));
 
-        emitSignal<libjami::PresenceSignal::SubscriptionStateChanged>(pres->getAccount()
+        emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(pres->getAccount()
                                                                         ->getAccountID(),
                                                                     std::string(pres_client->getURI()),
                                                                     PJ_FALSE);
@@ -154,7 +154,7 @@ PresSubClient::pres_client_evsub_on_state(pjsip_evsub* sub, pjsip_event* event)
                  *  2) change the support field in the account schema if the pres_sub's server
                  *  is the same as the account's server
                  */
-                emitSignal<libjami::PresenceSignal::ServerError>(
+                emitSignal<libsip_core::PresenceSignal::ServerError>(
                     pres_client->getPresence()->getAccount()->getAccountID(), error, msg);
 
                 auto account_host = sip_utils::as_view(*pj_gethostname());
@@ -254,7 +254,7 @@ PresSubClient::pres_client_evsub_on_tsx_state(pjsip_evsub* sub,
     /* No need to pres->lock() here since the client has a locked dialog*/
 
     if (!pres_client) {
-        JAMI_WARN("Couldn't find pres_client.");
+        SIP_CORE_WARN("Couldn't find pres_client.");
         return;
     }
 
@@ -304,7 +304,7 @@ PresSubClient::pres_client_evsub_on_rx_notify(pjsip_evsub* sub,
     PresSubClient* pres_client = (PresSubClient*) pjsip_evsub_get_mod_data(sub, modId_);
 
     if (!pres_client) {
-        JAMI_WARN("Couldn't find pres_client from ev_sub.");
+        SIP_CORE_WARN("Couldn't find pres_client from ev_sub.");
         return;
     }
     /* No need to pres->lock() here since the client has a locked dialog*/
@@ -349,7 +349,7 @@ PresSubClient::PresSubClient(const std::string& uri, SIPPresence* pres)
 
 PresSubClient::~PresSubClient()
 {
-    JAMI_DBG("Destroying pres_client object with uri %.*s", (int) uri_.slen, uri_.ptr);
+    SIP_CORE_DBG("Destroying pres_client object with uri %.*s", (int) uri_.slen, uri_.ptr);
     rescheduleTimer(PJ_FALSE, 0);
     unsubscribe();
     pj_pool_release(pool_);
@@ -403,7 +403,7 @@ PresSubClient::rescheduleTimer(bool reschedule, unsigned msec)
     if (reschedule) {
         pj_time_val delay;
 
-        JAMI_WARN("pres_client  %.*s will resubscribe in %u ms (reason: %.*s)",
+        SIP_CORE_WARN("pres_client  %.*s will resubscribe in %u ms (reason: %.*s)",
                   (int) uri_.slen,
                   uri_.ptr,
                   msec,
@@ -426,7 +426,7 @@ PresSubClient::rescheduleTimer(bool reschedule, unsigned msec)
 void
 PresSubClient::enable(bool flag)
 {
-    JAMI_DBG("pres_client %.*s is %s monitored.", (int)getURI().size(), getURI().data(), flag ? "" : "NOT");
+    SIP_CORE_DBG("pres_client %.*s is %s monitored.", (int)getURI().size(), getURI().data(), flag ? "" : "NOT");
     if (flag and not monitored_)
         pres_->addPresSubClient(this);
     monitored_ = flag;
@@ -470,7 +470,7 @@ PresSubClient::lock()
     }
 
     if (lock_flag_ == 0) {
-        JAMI_DBG("pres_client failed to lock : timeout");
+        SIP_CORE_DBG("pres_client failed to lock : timeout");
         return false;
     }
     return true;
@@ -498,20 +498,20 @@ PresSubClient::unsubscribe()
     pj_status_t retStatus;
 
     if (sub_ == NULL or dlg_ == NULL) {
-        JAMI_WARN("PresSubClient already unsubscribed.");
+        SIP_CORE_WARN("PresSubClient already unsubscribed.");
         unlock();
         return false;
     }
 
     if (pjsip_evsub_get_state(sub_) == PJSIP_EVSUB_STATE_TERMINATED) {
-        JAMI_WARN("pres_client already unsubscribed sub=TERMINATED.");
+        SIP_CORE_WARN("pres_client already unsubscribed sub=TERMINATED.");
         sub_ = NULL;
         unlock();
         return false;
     }
 
     /* Unsubscribe means send a subscribe with timeout=0s*/
-    JAMI_WARN("pres_client %.*s: unsubscribing..", (int) uri_.slen, uri_.ptr);
+    SIP_CORE_WARN("pres_client %.*s: unsubscribing..", (int) uri_.slen, uri_.ptr);
     retStatus = pjsip_pres_initiate(sub_, 0, &tdata);
 
     if (retStatus == PJ_SUCCESS) {
@@ -522,7 +522,7 @@ PresSubClient::unsubscribe()
     if (retStatus != PJ_SUCCESS and sub_) {
         pjsip_pres_terminate(sub_, PJ_FALSE);
         sub_ = NULL;
-        JAMI_WARN("Unable to unsubscribe presence (%d)", retStatus);
+        SIP_CORE_WARN("Unable to unsubscribe presence (%d)", retStatus);
         unlock();
         return false;
     }
@@ -538,7 +538,7 @@ PresSubClient::subscribe()
 {
     if (sub_ and dlg_) { // do not bother if already subscribed
         pjsip_evsub_terminate(sub_, PJ_FALSE);
-        JAMI_DBG("PreseSubClient %.*s: already subscribed. Refresh it.", (int) uri_.slen, uri_.ptr);
+        SIP_CORE_DBG("PreseSubClient %.*s: already subscribed. Refresh it.", (int) uri_.slen, uri_.ptr);
     }
 
     // subscribe
@@ -553,14 +553,14 @@ PresSubClient::subscribe()
     pres_callback.on_rx_notify = &pres_client_evsub_on_rx_notify;
 
     SIPAccount* acc = pres_->getAccount();
-    JAMI_DBG("PresSubClient %.*s: subscribing ", (int) uri_.slen, uri_.ptr);
+    SIP_CORE_DBG("PresSubClient %.*s: subscribing ", (int) uri_.slen, uri_.ptr);
 
     /* Create UAC dialog */
     pj_str_t from = pj_strdup3(pool_, acc->getFromUri().c_str());
     status = pjsip_dlg_create_uac(pjsip_ua_instance(), &from, &contact_, &uri_, NULL, &dlg_);
 
     if (status != PJ_SUCCESS) {
-        JAMI_ERR("Unable to create dialog \n");
+        SIP_CORE_ERR("Unable to create dialog \n");
         return false;
     }
 
@@ -570,7 +570,7 @@ PresSubClient::subscribe()
                                            acc->getCredentialCount(),
                                            acc->getCredInfo())
                 != PJ_SUCCESS) {
-        JAMI_ERR("Could not initialize credentials for subscribe session authentication");
+        SIP_CORE_ERR("Could not initialize credentials for subscribe session authentication");
     }
 
     /* Increment the dialog's lock otherwise when presence session creation
@@ -582,7 +582,7 @@ PresSubClient::subscribe()
 
     if (status != PJ_SUCCESS) {
         sub_ = NULL;
-        JAMI_WARN("Unable to create presence client (%d)", status);
+        SIP_CORE_WARN("Unable to create presence client (%d)", status);
 
         /* This should destroy the dialog since there's no session
          * referencing it
@@ -600,7 +600,7 @@ PresSubClient::subscribe()
                                            acc->getCredentialCount(),
                                            acc->getCredInfo())
                 != PJ_SUCCESS) {
-        JAMI_ERR("Could not initialize credentials for invite session authentication");
+        SIP_CORE_ERR("Could not initialize credentials for invite session authentication");
         return false;
     }
 
@@ -621,7 +621,7 @@ PresSubClient::subscribe()
         if (sub_)
             pjsip_pres_terminate(sub_, PJ_FALSE);
         sub_ = NULL;
-        JAMI_WARN("Unable to create initial SUBSCRIBE (%d)", status);
+        SIP_CORE_WARN("Unable to create initial SUBSCRIBE (%d)", status);
         return false;
     }
 
@@ -635,7 +635,7 @@ PresSubClient::subscribe()
         if (sub_)
             pjsip_pres_terminate(sub_, PJ_FALSE);
         sub_ = NULL;
-        JAMI_WARN("Unable to send initial SUBSCRIBE (%d)", status);
+        SIP_CORE_WARN("Unable to send initial SUBSCRIBE (%d)", status);
         return false;
     }
 
@@ -649,4 +649,4 @@ PresSubClient::match(PresSubClient* b)
     return (b->getURI() == getURI());
 }
 
-} // namespace jami
+} // namespace sip_core

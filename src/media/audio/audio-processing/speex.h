@@ -30,7 +30,7 @@ struct SpeexPreprocessState_;
 typedef struct SpeexPreprocessState_ SpeexPreprocessState;
 }
 
-namespace jami {
+namespace sip_core {
 
 class SpeexAudioProcessor final : public AudioProcessor
 {
@@ -65,4 +65,4 @@ private:
     // preprocess_run returns 1 if vad is disabled, so we have to know whether or not to ignore it
     bool shouldDetectVoice {false};
 };
-} // namespace jami
+} // namespace sip_core

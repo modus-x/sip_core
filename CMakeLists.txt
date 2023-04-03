@@ -1,19 +1,19 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(jami-daemon
+project(sip_core-daemon
     VERSION 13.7.0
     LANGUAGES C CXX)
-set(PACKAGE_NAME "Jami Daemon")
+set(PACKAGE_NAME "sip_core Daemon")
 
 ################################################################################
 # Build options
 ################################################################################
-option(JAMI_NATPMP "Build with NAT-PMP" ON)
-option(JAMI_PUPNP "Build with PUPNP" ON)
-option(JAMI_PLUGIN "Build with plugin support" ON)
-option(JAMI_JNI "Build the JNI binding" OFF)
-option(JAMI_DBUS "Build the DBUS binding" OFF)
-option(JAMI_VIDEO "Build with video support" ON)
+option(SIP_CORE_NATPMP "Build with NAT-PMP" ON)
+option(SIP_CORE_PUPNP "Build with PUPNP" ON)
+option(SIP_CORE_PLUGIN "Build with plugin support" ON)
+option(SIP_CORE_JNI "Build the JNI binding" OFF)
+option(SIP_CORE_DBUS "Build the DBUS binding" OFF)
+option(SIP_CORE_VIDEO "Build with video support" ON)
 option(BUILD_CONTRIB "Build contrib to CONTRIB_PATH" ON)
 option(BUILD_EXTRA_TOOLS "Build extra tools" OFF)
 
@@ -54,11 +54,11 @@ if(NOT MSVC)
             COMMAND make .gas
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/extras/tools)
     endif()
-    if (JAMI_JNI)
+    if (SIP_CORE_JNI)
         # Generate swig binding
         add_custom_command(
-            OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/bin/jni/jami_wrapper.cpp
-            COMMAND env PACKAGEDIR=${JAMI_JNI_PACKAGEDIR} "./make-swig.sh"
+            OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/bin/jni/sip_core_wrapper.cpp
+            COMMAND env PACKAGEDIR=${SIP_CORE_JNI_PACKAGEDIR} "./make-swig.sh"
             DEPENDS
             ${CMAKE_CURRENT_SOURCE_DIR}/bin/jni/make-swig.sh
             ${CMAKE_CURRENT_SOURCE_DIR}/bin/jni/jni_interface.i
@@ -108,20 +108,20 @@ endif()
 
 if(NOT MSVC)
     include(FindPkgConfig)
-    if (JAMI_NATPMP)
+    if (SIP_CORE_NATPMP)
         pkg_search_module (natpmp IMPORTED_TARGET natpmp)
         if (NOT natpmp_FOUND)
             find_library(natpmp_LIBRARIES natpmp)
             if (NOT natpmp_LIBRARIES)
                 message("NAT-PMP not found: disabling")
-                set(JAMI_NATPMP Off)
+                set(SIP_CORE_NATPMP Off)
             endif()
         endif()
     endif()
-    if (JAMI_PUPNP)
+    if (SIP_CORE_PUPNP)
         pkg_search_module (upnp IMPORTED_TARGET upnp libupnp)
         if (NOT upnp_FOUND)
-            set(JAMI_PUPNP Off)
+            set(SIP_CORE_PUPNP Off)
         endif()
     endif()
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -150,12 +150,12 @@ source_group("Source Files\\connectivity\\upnp" FILES ${Source_Files__upnp})
 source_group("Source Files\\connectivity\\upnp\\protocol" FILES ${Source_Files__upnp__protocol})
 source_group("Source Files\\connectivity\\upnp\\protocol\\natpmp" FILES ${Source_Files__upnp__protocol__natpmp})
 source_group("Source Files\\connectivity\\upnp\\protocol\\pupnp" FILES ${Source_Files__upnp__protocol__pupnp})
-source_group("Source Files\\jami" FILES ${Source_Files__jami})
+source_group("Source Files\\sip_core" FILES ${Source_Files__sip_core})
 source_group("Source Files\\hooks" FILES ${Source_Files__hooks})
 source_group("Source Files\\im" FILES ${Source_Files__im})
-source_group("Source Files\\jamidht" FILES ${Source_Files__jamidht})
-source_group("Source Files\\jamidht\\eth\\libdevcore" FILES ${Source_Files__jamidht__eth__libdevcore})
-source_group("Source Files\\jamidht\\eth\\libdevcrypto" FILES ${Source_Files__jamidht__eth__libdevcrypto})
+source_group("Source Files\\sip_coredht" FILES ${Source_Files__sip_coredht})
+source_group("Source Files\\sip_coredht\\eth\\libdevcore" FILES ${Source_Files__sip_coredht__eth__libdevcore})
+source_group("Source Files\\sip_coredht\\eth\\libdevcrypto" FILES ${Source_Files__sip_coredht__eth__libdevcrypto})
 source_group("Source Files\\media" FILES ${Source_Files__media})
 source_group("Source Files\\media\\audio" FILES ${Source_Files__media__audio})
 source_group("Source Files\\media\\audio\\audio-processing" FILES ${Source_Files__media__audio__audio_processing})
@@ -176,12 +176,12 @@ list (APPEND ALL_FILES
       ${Source_Files__client}
       ${Source_Files__config}
       ${Source_Files__connectivity}
-      ${Source_Files__jami}
+      ${Source_Files__sip_core}
       ${Source_Files__hooks}
       ${Source_Files__im}
-      ${Source_Files__jamidht}
-      ${Source_Files__jamidht__eth__libdevcore}
-      ${Source_Files__jamidht__eth__libdevcrypto}
+      ${Source_Files__sip_coredht}
+      ${Source_Files__sip_coredht__eth__libdevcore}
+      ${Source_Files__sip_coredht__eth__libdevcrypto}
       ${Source_Files__media}
       ${Source_Files__media__audio}
       ${Source_Files__media__audio__sound}
@@ -192,13 +192,13 @@ list (APPEND ALL_FILES
       ${Source_Files__upnp}
       ${Source_Files__upnp__protocol}
 )
-if (JAMI_NATPMP)
+if (SIP_CORE_NATPMP)
     list (APPEND ALL_FILES ${Source_Files__upnp__protocol__natpmp})
 endif()
-if (JAMI_PUPNP)
+if (SIP_CORE_PUPNP)
     list (APPEND ALL_FILES ${Source_Files__upnp__protocol__pupnp})
 endif()
-if (JAMI_PLUGIN)
+if (SIP_CORE_PLUGIN)
     list (APPEND ALL_FILES ${Source_Files__plugin})
 endif()
 if (ANDROID)
@@ -210,7 +210,7 @@ if (ANDROID)
         ${CMAKE_CURRENT_SOURCE_DIR}/src/media/audio/opensl/opensllayer.cpp
     )
 elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    if (JAMI_VIDEO)
+    if (SIP_CORE_VIDEO)
         list (APPEND ALL_FILES ${ALL_FILES}
             ${CMAKE_CURRENT_SOURCE_DIR}/src/media/video/v4l2/video_device_impl.cpp
             ${CMAKE_CURRENT_SOURCE_DIR}/src/media/video/v4l2/video_device_monitor_impl.cpp
@@ -234,16 +234,16 @@ set_target_properties (${PROJECT_NAME} PROPERTIES CXX_STANDARD 17)
 target_compile_definitions(${PROJECT_NAME} PRIVATE
     PACKAGE_NAME="${PACKAGE_NAME}"
     PACKAGE_VERSION="${PROJECT_VERSION}"
-    PACKAGE="jami"
-    LIBJAMI_BUILD
+    PACKAGE="sip_core"
+    LIBSIP_CORE_BUILD
     HAVE_RINGNS
     ASIO_STANDALONE
     MSGPACK_NO_BOOST
 )
-if (JAMI_VIDEO)
+if (SIP_CORE_VIDEO)
     target_compile_definitions(${PROJECT_NAME} PRIVATE ENABLE_VIDEO)
 endif()
-if (JAMI_NATPMP)
+if (SIP_CORE_NATPMP)
     target_compile_definitions(${PROJECT_NAME} PRIVATE HAVE_LIBNATPMP)
 endif()
 if (ANDROID)
@@ -263,11 +263,11 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src/hooks;"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/im;"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/media;"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/jamidht;"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/jamidht/eth;"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/sip_coredht;"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/sip_coredht/eth;"
     PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src;"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/jami;"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/sip_core;"
 )
 
 if(MSVC)
@@ -292,7 +292,7 @@ if(MSVC)
    ################################################################################
    if("${CMAKE_VS_PLATFORM_NAME}" STREQUAL "x64")
        set_target_properties(${PROJECT_NAME} PROPERTIES
-           TARGET_NAME_RELEASELIB_WIN32 "jami"
+           TARGET_NAME_RELEASELIB_WIN32 "sip_core"
        )
    endif()
    ################################################################################
@@ -510,7 +510,7 @@ else()
         -Wno-unknown-pragmas
     )
     target_compile_definitions(${PROJECT_NAME} PRIVATE
-        JAMI_DATADIR="${JAMI_DATADIR}"
+        SIP_CORE_DATADIR="${SIP_CORE_DATADIR}"
         PJ_AUTOCONF=1
     )
     if (ANDROID)
@@ -521,20 +521,20 @@ else()
             PkgConfig::pulseaudio
         )
     endif()
-    if (JAMI_NATPMP)
+    if (SIP_CORE_NATPMP)
         if (natpmp_FOUND)
             target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::natpmp)
         elseif (natpmp_LIBRARIES)
             target_link_libraries(${PROJECT_NAME} PRIVATE natpmp_LIBRARIES)
         endif()
     endif()
-    if (JAMI_PUPNP)
+    if (SIP_CORE_PUPNP)
         target_link_libraries(${PROJECT_NAME} PRIVATE upnp)
     endif()
 
-    if (JAMI_JNI)
+    if (SIP_CORE_JNI)
         # Build jni binding
-        add_library(${PROJECT_NAME}-jni SHARED ${CMAKE_CURRENT_SOURCE_DIR}/bin/jni/jami_wrapper.cpp)
+        add_library(${PROJECT_NAME}-jni SHARED ${CMAKE_CURRENT_SOURCE_DIR}/bin/jni/sip_core_wrapper.cpp)
         target_link_directories(${PROJECT_NAME}-jni PRIVATE ${CONTRIB_PATH}/lib)
         target_link_libraries(${PROJECT_NAME}-jni ${PROJECT_NAME} android log)
         set_target_properties(${PROJECT_NAME}-jni PROPERTIES CXX_STANDARD 17)
@@ -554,11 +554,11 @@ else()
         )
     endif()
 
-    if (JAMI_DBUS)
+    if (SIP_CORE_DBUS)
         find_program(DBusXml2Cpp dbusxx-xml2cpp REQUIRED)
         pkg_search_module (DBusCpp REQUIRED IMPORTED_TARGET dbus-c++-1)
         configure_file(
-            ${CMAKE_CURRENT_SOURCE_DIR}/bin/dbus/net.jami.daemon.service.in
+            ${CMAKE_CURRENT_SOURCE_DIR}/bin/dbus/net.sip_core.daemon.service.in
             ${CMAKE_CURRENT_SOURCE_DIR}/bin/dbus/cx.ring.Ring.service
             @ONLY)
         set(DBUS_XML_FILES
@@ -597,12 +597,12 @@ else()
             )
         endforeach()
 
-        # Jamid
-        add_executable(jamid
+        # sip_cored
+        add_executable(sip_cored
             ${DBUS_FILES}
             ${DBUS_ADAPTOR_FILES}
         )
-        target_link_libraries(jamid ${PROJECT_NAME} PkgConfig::DBusCpp)
+        target_link_libraries(sip_cored ${PROJECT_NAME} PkgConfig::DBusCpp)
     endif()
 
 endif()

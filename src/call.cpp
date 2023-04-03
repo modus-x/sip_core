@@ -24,7 +24,7 @@
 #include "account.h"
 #include "manager.h"
 #include "audio/ringbufferpool.h"
-#include "jami/call_const.h"
+#include "sip_core/call_const.h"
 #include "client/ring_signal.h"
 #include "connectivity/sip_utils.h"
 #include "connectivity/ip_utils.h"
@@ -41,7 +41,7 @@
 #include <functional>
 #include <utility>
 
-namespace jami {
+namespace sip_core {
 
 /// Hangup many calls with same error code, filtered by a predicate
 ///
@@ -93,13 +93,13 @@ Call::Call(const std::shared_ptr<Account>& account,
         // if call just started ringing, schedule call timeout
         if (type_ == CallType::INCOMING and cnx_state == ConnectionState::RINGING) {
             auto timeout = Manager::instance().getRingingTimeout();
-            JAMI_DBG("Scheduling call timeout in %d seconds", timeout);
+            SIP_CORE_DBG("Scheduling call timeout in %d seconds", timeout);
 
             Manager::instance().scheduler().scheduleIn(
                 [callWkPtr = weak()] {
                     if (auto callShPtr = callWkPtr.lock()) {
                         if (callShPtr->getConnectionState() == Call::ConnectionState::RINGING) {
-                            JAMI_DBG(
+                            SIP_CORE_DBG(
                                 "Call %s is still ringing after timeout, setting state to BUSY",
                                 callShPtr->getCallId().c_str());
                             callShPtr->hangup(PJSIP_SC_BUSY_HERE);
@@ -144,7 +144,7 @@ Call::getAccountId() const
 {
     if (auto shared = account_.lock())
         return shared->getAccountID();
-    JAMI_ERR("No account detected");
+    SIP_CORE_ERR("No account detected");
     return {};
 }
 
@@ -222,7 +222,7 @@ bool
 Call::setState(CallState call_state, ConnectionState cnx_state, signed code)
 {
     std::unique_lock<std::recursive_mutex> lock(callMutex_);
-    JAMI_DBG("[call:%s] state change %u/%u, cnx %u/%u, code %d",
+    SIP_CORE_DBG("[call:%s] state change %u/%u, cnx %u/%u, code %d",
              id_.c_str(),
              (unsigned) callState_,
              (unsigned) call_state,
@@ -232,7 +232,7 @@ Call::setState(CallState call_state, ConnectionState cnx_state, signed code)
 
     if (callState_ != call_state) {
         if (not validStateTransition(call_state)) {
-            JAMI_ERR("[call:%s] invalid call state transition from %u to %u",
+            SIP_CORE_ERR("[call:%s] invalid call state transition from %u to %u",
                      id_.c_str(),
                      (unsigned) callState_,
                      (unsigned) call_state);
@@ -256,12 +256,12 @@ Call::setState(CallState call_state, ConnectionState cnx_state, signed code)
 
     if (old_client_state != new_client_state) {
         if (not parent_) {
-            JAMI_DBG("[call:%s] emit client call state change %s, code %d",
+            SIP_CORE_DBG("[call:%s] emit client call state change %s, code %d",
                      id_.c_str(),
                      new_client_state.c_str(),
                      code);
             lock.unlock();
-            emitSignal<libjami::CallSignal::StateChange>(getAccountId(),
+            emitSignal<libsip_core::CallSignal::StateChange>(getAccountId(),
                                                          id_,
                                                          new_client_state,
                                                          code);
@@ -288,7 +288,7 @@ Call::setState(ConnectionState cnx_state, signed code)
 std::string
 Call::getStateStr() const
 {
-    using namespace libjami::Call;
+    using namespace libsip_core::Call;
 
     switch (getState()) {
     case CallState::ACTIVE:
@@ -352,7 +352,7 @@ Call::toggleRecording()
 void
 Call::updateDetails(const std::map<std::string, std::string>& details)
 {
-    const auto& iter = details.find(libjami::Call::Details::AUDIO_ONLY);
+    const auto& iter = details.find(libsip_core::Call::Details::AUDIO_ONLY);
     if (iter != std::end(details))
         isAudioOnly_ = iter->second == TRUE_STR;
 }
@@ -362,18 +362,18 @@ Call::getDetails() const
 {
     auto conference = conf_.lock();
     return {
-        {libjami::Call::Details::CALL_TYPE, std::to_string((unsigned) type_)},
-        {libjami::Call::Details::PEER_NUMBER, peerNumber_},
-        {libjami::Call::Details::DISPLAY_NAME, peerDisplayName_},
-        {libjami::Call::Details::CALL_STATE, getStateStr()},
-        {libjami::Call::Details::CONF_ID, conference ? conference->getConfId() : ""},
-        {libjami::Call::Details::TIMESTAMP_START, std::to_string(timestamp_start_)},
-        {libjami::Call::Details::ACCOUNTID, getAccountId()},
-        {libjami::Call::Details::AUDIO_MUTED,
+        {libsip_core::Call::Details::CALL_TYPE, std::to_string((unsigned) type_)},
+        {libsip_core::Call::Details::PEER_NUMBER, peerNumber_},
+        {libsip_core::Call::Details::DISPLAY_NAME, peerDisplayName_},
+        {libsip_core::Call::Details::CALL_STATE, getStateStr()},
+        {libsip_core::Call::Details::CONF_ID, conference ? conference->getConfId() : ""},
+        {libsip_core::Call::Details::TIMESTAMP_START, std::to_string(timestamp_start_)},
+        {libsip_core::Call::Details::ACCOUNTID, getAccountId()},
+        {libsip_core::Call::Details::AUDIO_MUTED,
          std::string(bool_to_str(isCaptureDeviceMuted(MediaType::MEDIA_AUDIO)))},
-        {libjami::Call::Details::VIDEO_MUTED,
+        {libsip_core::Call::Details::VIDEO_MUTED,
          std::string(bool_to_str(isCaptureDeviceMuted(MediaType::MEDIA_VIDEO)))},
-        {libjami::Call::Details::AUDIO_ONLY, std::string(bool_to_str(not hasVideo()))},
+        {libsip_core::Call::Details::AUDIO_ONLY, std::string(bool_to_str(not hasVideo()))},
     };
 }
 
@@ -426,11 +426,11 @@ Call::addSubCall(Call& subcall)
     }
 
     if (not subcalls_.emplace(getPtr(subcall)).second) {
-        JAMI_ERR("[call:%s] add twice subcall %s", getCallId().c_str(), subcall.getCallId().c_str());
+        SIP_CORE_ERR("[call:%s] add twice subcall %s", getCallId().c_str(), subcall.getCallId().c_str());
         return;
     }
 
-    JAMI_DBG("[call:%s] add subcall %s", getCallId().c_str(), subcall.getCallId().c_str());
+    SIP_CORE_DBG("[call:%s] add subcall %s", getCallId().c_str(), subcall.getCallId().c_str());
     subcall.parent_ = getPtr(*this);
 
     for (const auto& msg : pendingOutMessages_)
@@ -472,7 +472,7 @@ Call::subcallStateChanged(Call& subcall, Call::CallState new_state, Call::Connec
 
     // We found a responding device: hangup all other subcalls and merge
     if (new_state == CallState::ACTIVE and new_cstate == ConnectionState::CONNECTED) {
-        JAMI_DBG("[call:%s] subcall %s answered by peer",
+        SIP_CORE_DBG("[call:%s] subcall %s answered by peer",
                  getCallId().c_str(),
                  subcall.getCallId().c_str());
 
@@ -485,7 +485,7 @@ Call::subcallStateChanged(Call& subcall, Call::CallState new_state, Call::Connec
     // Hangup the call if any device hangup or send busy
     if ((new_state == CallState::ACTIVE or new_state == CallState::PEER_BUSY)
         and new_cstate == ConnectionState::DISCONNECTED) {
-        JAMI_WARN("[call:%s] subcall %s hangup by peer",
+        SIP_CORE_WARN("[call:%s] subcall %s hangup by peer",
                   getCallId().c_str(),
                   subcall.getCallId().c_str());
 
@@ -498,9 +498,9 @@ Call::subcallStateChanged(Call& subcall, Call::CallState new_state, Call::Connec
     // Subcall is busy or failed
     if (new_state >= CallState::BUSY) {
         if (new_state == CallState::BUSY || new_state == CallState::PEER_BUSY)
-            JAMI_WARN("[call:%s] subcall %s busy", getCallId().c_str(), subcall.getCallId().c_str());
+            SIP_CORE_WARN("[call:%s] subcall %s busy", getCallId().c_str(), subcall.getCallId().c_str());
         else
-            JAMI_WARN("[call:%s] subcall %s failed",
+            SIP_CORE_WARN("[call:%s] subcall %s failed",
                       getCallId().c_str(),
                       subcall.getCallId().c_str());
         std::lock_guard<std::recursive_mutex> lk {callMutex_};
@@ -525,7 +525,7 @@ Call::subcallStateChanged(Call& subcall, Call::CallState new_state, Call::Connec
             }
             removeCall();
         } else {
-            JAMI_DBG("[call:%s] remains %zu subcall(s)", getCallId().c_str(), subcalls_.size());
+            SIP_CORE_DBG("[call:%s] remains %zu subcall(s)", getCallId().c_str(), subcalls_.size());
         }
 
         return;
@@ -546,7 +546,7 @@ Call::subcallStateChanged(Call& subcall, Call::CallState new_state, Call::Connec
 void
 Call::merge(Call& subcall)
 {
-    JAMI_DBG("[call:%s] merge subcall %s", getCallId().c_str(), subcall.getCallId().c_str());
+    SIP_CORE_DBG("[call:%s] merge subcall %s", getCallId().c_str(), subcall.getCallId().c_str());
 
     // Merge data
     pendingInMessages_ = std::move(subcall.pendingInMessages_);
@@ -573,7 +573,7 @@ Call::checkPendingIM()
     auto state = getStateStr();
     // Let parent call handles IM after the merge
     if (not parent_) {
-        if (state == libjami::Call::StateEvent::CURRENT) {
+        if (state == libsip_core::Call::StateEvent::CURRENT) {
             for (const auto& msg : pendingInMessages_)
                 Manager::instance().incomingMessage(getAccountId(),
                                                     getCallId(),
@@ -596,7 +596,7 @@ Call::checkPendingIM()
 void
 Call::checkAudio()
 {
-    using namespace libjami::Call;
+    using namespace libsip_core::Call;
 
     auto state = getStateStr();
     if (state == StateEvent::RINGING) {
@@ -668,7 +668,7 @@ Call::setConferenceInfo(const std::string& msg)
             createSinks(confInfo_);
 #endif
             // Inform client that layout has changed
-            jami::emitSignal<libjami::CallSignal::OnConferenceInfosUpdated>(
+            sip_core::emitSignal<libsip_core::CallSignal::OnConferenceInfosUpdated>(
                 id_, confInfo_.toVectorMapStringString());
         } else if (auto conf = conf_.lock()) {
             conf->mergeConfInfo(newInfo, getPeerNumber());
@@ -712,4 +712,4 @@ Call::resetConfInfo()
     sendConfInfo("{}");
 }
 
-} // namespace jami
+} // namespace sip_core

@@ -49,7 +49,7 @@
 #include <thread>
 #include <atomic>
 
-namespace jami {
+namespace sip_core {
 
 class SIPCall;
 class SIPAccountBase;
@@ -168,4 +168,4 @@ private:
     friend class SIPTest;
 };
 
-} // namespace jami
+} // namespace sip_core

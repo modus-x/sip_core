@@ -41,7 +41,7 @@
  * @brief Main sound class. Manages the data transfers between the application and the hardware.
  */
 
-namespace jami {
+namespace sip_core {
 
 class AlsaThread;
 class RingBuffer;
@@ -248,4 +248,4 @@ private:
     std::thread audioThread_;
 };
 
-} // namespace jami
+} // namespace sip_core

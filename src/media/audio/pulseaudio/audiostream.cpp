@@ -26,7 +26,7 @@
 
 #include <stdexcept>
 
-namespace jami {
+namespace sip_core {
 
 AudioStream::AudioStream(pa_context* c,
                          pa_threaded_mainloop* m,
@@ -47,7 +47,7 @@ AudioStream::AudioStream(pa_context* c,
                                   samplrate,
                                   infos.channel_map.channels};
 
-    JAMI_DBG("%s: Creating stream with device %s (%dHz, %d channels)",
+    SIP_CORE_DBG("%s: Creating stream with device %s (%dHz, %d channels)",
              desc,
              infos.name.c_str(),
              samplrate,
@@ -66,7 +66,7 @@ AudioStream::AudioStream(pa_context* c,
                                                &infos.channel_map,
                                                ec ? pl.get() : nullptr);
     if (!audiostream_) {
-        JAMI_ERR("%s: pa_stream_new() failed : %s", desc, pa_strerror(pa_context_errno(c)));
+        SIP_CORE_ERR("%s: pa_stream_new() failed : %s", desc, pa_strerror(pa_context_errno(c)));
         throw std::runtime_error("Could not create stream\n");
     }
 
@@ -159,7 +159,7 @@ AudioStream::stop()
 {
     if (not audiostream_)
         return;
-    JAMI_DBG("Destroying stream with device %s", pa_stream_get_device_name(audiostream_));
+    SIP_CORE_DBG("Destroying stream with device %s", pa_stream_get_device_name(audiostream_));
     if (pa_stream_get_state(audiostream_) == PA_STREAM_CREATING) {
         disconnectStream(audiostream_);
         pa_stream_set_state_callback(
@@ -174,7 +174,7 @@ void
 AudioStream::moved(pa_stream* s)
 {
     audiostream_ = s;
-    JAMI_DBG("[audiostream] Stream moved: %d, %s",
+    SIP_CORE_DBG("[audiostream] Stream moved: %d, %s",
              pa_stream_get_index(s),
              pa_stream_get_device_name(s));
 
@@ -182,7 +182,7 @@ AudioStream::moved(pa_stream* s)
         // check for echo cancel
         const char* name = pa_stream_get_device_name(s);
         if (!name) {
-            JAMI_ERR("[audiostream] moved() unable to get audio stream device");
+            SIP_CORE_ERR("[audiostream] moved() unable to get audio stream device");
             return;
         }
 
@@ -195,17 +195,17 @@ AudioStream::moved(pa_stream* s)
                 // this whole closure gets called twice by pulse for some reason
                 // the 2nd time, i is invalid
                 if (!i) {
-                    // JAMI_ERR("[audiostream] source info not found for %s", realName);
+                    // SIP_CORE_ERR("[audiostream] source info not found for %s", realName);
                     return;
                 }
 
                 // string compare
                 bool usingEchoCancel = std::string_view(i->driver) == "module-echo-cancel.c";
-                JAMI_WARN("[audiostream] capture stream using pulse echo cancel module? %s (%s)",
+                SIP_CORE_WARN("[audiostream] capture stream using pulse echo cancel module? %s (%s)",
                           usingEchoCancel ? "yes" : "no",
                           i->name);
                 if (!thisPtr) {
-                    JAMI_ERR("[audiostream] AudioStream pointer became invalid during "
+                    SIP_CORE_ERR("[audiostream] AudioStream pointer became invalid during "
                              "pa_source_info_cb_t callback!");
                     return;
                 }
@@ -224,31 +224,31 @@ AudioStream::stateChanged(pa_stream* s)
 
     switch (pa_stream_get_state(s)) {
     case PA_STREAM_CREATING:
-        JAMI_DBG("Stream is creating...");
+        SIP_CORE_DBG("Stream is creating...");
         break;
 
     case PA_STREAM_TERMINATED:
-        JAMI_DBG("Stream is terminating...");
+        SIP_CORE_DBG("Stream is terminating...");
         break;
 
     case PA_STREAM_READY:
-        JAMI_DBG("Stream successfully created, connected to %s", pa_stream_get_device_name(s));
-        // JAMI_DBG("maxlength %u", pa_stream_get_buffer_attr(s)->maxlength);
-        // JAMI_DBG("tlength %u", pa_stream_get_buffer_attr(s)->tlength);
-        // JAMI_DBG("prebuf %u", pa_stream_get_buffer_attr(s)->prebuf);
-        // JAMI_DBG("minreq %u", pa_stream_get_buffer_attr(s)->minreq);
-        // JAMI_DBG("fragsize %u", pa_stream_get_buffer_attr(s)->fragsize);
-        // JAMI_DBG("samplespec %s", pa_sample_spec_snprint(str, sizeof(str), pa_stream_get_sample_spec(s)));
+        SIP_CORE_DBG("Stream successfully created, connected to %s", pa_stream_get_device_name(s));
+        // SIP_CORE_DBG("maxlength %u", pa_stream_get_buffer_attr(s)->maxlength);
+        // SIP_CORE_DBG("tlength %u", pa_stream_get_buffer_attr(s)->tlength);
+        // SIP_CORE_DBG("prebuf %u", pa_stream_get_buffer_attr(s)->prebuf);
+        // SIP_CORE_DBG("minreq %u", pa_stream_get_buffer_attr(s)->minreq);
+        // SIP_CORE_DBG("fragsize %u", pa_stream_get_buffer_attr(s)->fragsize);
+        // SIP_CORE_DBG("samplespec %s", pa_sample_spec_snprint(str, sizeof(str), pa_stream_get_sample_spec(s)));
         onReady_();
         break;
 
     case PA_STREAM_UNCONNECTED:
-        JAMI_DBG("Stream unconnected");
+        SIP_CORE_DBG("Stream unconnected");
         break;
 
     case PA_STREAM_FAILED:
     default:
-        JAMI_ERR("Stream failure: %s", pa_strerror(pa_context_errno(pa_stream_get_context(s))));
+        SIP_CORE_ERR("Stream failure: %s", pa_strerror(pa_context_errno(pa_stream_get_context(s))));
         break;
     }
 }
@@ -262,4 +262,4 @@ AudioStream::isReady()
     return pa_stream_get_state(audiostream_) == PA_STREAM_READY;
 }
 
-} // namespace jami
+} // namespace sip_core

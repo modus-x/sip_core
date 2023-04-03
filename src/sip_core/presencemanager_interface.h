@@ -18,8 +18,8 @@
  *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301 USA.
  */
 
-#ifndef LIBJAMI_PRESENCEMANAGERI_H
-#define LIBJAMI_PRESENCEMANAGERI_H
+#ifndef LIBSIP_CORE_PRESENCEMANAGERI_H
+#define LIBSIP_CORE_PRESENCEMANAGERI_H
 
 #include "def.h"
 
@@ -28,39 +28,39 @@
 #include <string>
 #include <memory>
 
-#include "jami.h"
+#include "sip_core.h"
 #include "presence_const.h"
 
-namespace libjami {
+namespace libsip_core {
 
-[[deprecated("Replaced by registerSignalHandlers")]] LIBJAMI_PUBLIC void registerPresHandlers(
+[[deprecated("Replaced by registerSignalHandlers")]] LIBSIP_CORE_PUBLIC void registerPresHandlers(
     const std::map<std::string, std::shared_ptr<CallbackWrapperBase>>&);
 
 /* Presence subscription/Notification. */
-LIBJAMI_PUBLIC void publish(const std::string& accountID, bool status, const std::string& note);
-LIBJAMI_PUBLIC void answerServerRequest(const std::string& uri, bool flag);
-LIBJAMI_PUBLIC void subscribeBuddy(const std::string& accountID, const std::string& uri, bool flag);
-LIBJAMI_PUBLIC std::vector<std::map<std::string, std::string>> getSubscriptions(
+LIBSIP_CORE_PUBLIC void publish(const std::string& accountID, bool status, const std::string& note);
+LIBSIP_CORE_PUBLIC void answerServerRequest(const std::string& uri, bool flag);
+LIBSIP_CORE_PUBLIC void subscribeBuddy(const std::string& accountID, const std::string& uri, bool flag);
+LIBSIP_CORE_PUBLIC std::vector<std::map<std::string, std::string>> getSubscriptions(
     const std::string& accountID);
-LIBJAMI_PUBLIC void setSubscriptions(const std::string& accountID,
+LIBSIP_CORE_PUBLIC void setSubscriptions(const std::string& accountID,
                                    const std::vector<std::string>& uris);
 
 // Presence signal type definitions
-struct LIBJAMI_PUBLIC PresenceSignal
+struct LIBSIP_CORE_PUBLIC PresenceSignal
 {
-    struct LIBJAMI_PUBLIC NewServerSubscriptionRequest
+    struct LIBSIP_CORE_PUBLIC NewServerSubscriptionRequest
     {
         constexpr static const char* name = "NewServerSubscriptionRequest";
         using cb_type = void(const std::string& /*remote*/);
     };
-    struct LIBJAMI_PUBLIC ServerError
+    struct LIBSIP_CORE_PUBLIC ServerError
     {
         constexpr static const char* name = "ServerError";
         using cb_type = void(const std::string& /*account_id*/,
                              const std::string& /*error*/,
                              const std::string& /*msg*/);
     };
-    struct LIBJAMI_PUBLIC NewBuddyNotification
+    struct LIBSIP_CORE_PUBLIC NewBuddyNotification
     {
         constexpr static const char* name = "NewBuddyNotification";
         using cb_type = void(const std::string& /*account_id*/,
@@ -68,7 +68,7 @@ struct LIBJAMI_PUBLIC PresenceSignal
                              int /*status*/,
                              const std::string& /*line_status*/);
     };
-    struct LIBJAMI_PUBLIC SubscriptionStateChanged
+    struct LIBSIP_CORE_PUBLIC SubscriptionStateChanged
     {
         constexpr static const char* name = "SubscriptionStateChanged";
         using cb_type = void(const std::string& /*account_id*/,
@@ -77,6 +77,6 @@ struct LIBJAMI_PUBLIC PresenceSignal
     };
 };
 
-} // namespace libjami
+} // namespace libsip_core
 
 #endif // PRESENCEMANAGERI_H

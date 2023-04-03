@@ -21,10 +21,10 @@
 #include "media_player.h"
 #include "client/videomanager.h"
 #include "client/ring_signal.h"
-#include "jami/media_const.h"
+#include "sip_core/media_const.h"
 #include "manager.h"
 #include <string>
-namespace jami {
+namespace sip_core {
 
 static constexpr auto MS_PER_PACKET = std::chrono::milliseconds(20);
 
@@ -33,21 +33,21 @@ MediaPlayer::MediaPlayer(const std::string& path)
             std::bind(&MediaPlayer::process, this),
             [] {})
 {
-    static const std::string& sep = libjami::Media::VideoProtocolPrefix::SEPARATOR;
+    static const std::string& sep = libsip_core::Media::VideoProtocolPrefix::SEPARATOR;
     const auto pos = path.find(sep);
     const auto suffix = path.substr(pos + sep.size());
 
     if (access(suffix.c_str(), R_OK) != 0) {
-        JAMI_ERR() << "File '" << path << "' not available";
+        SIP_CORE_ERR() << "File '" << path << "' not available";
         return;
     }
 
     path_ = path;
     id_ = std::to_string(rand());
-    audioInput_ = jami::getAudioInput(id_);
+    audioInput_ = sip_core::getAudioInput(id_);
     audioInput_->setPaused(paused_);
 #ifdef ENABLE_VIDEO
-    videoInput_ = jami::getVideoInput(id_, video::VideoInputMode::ManagedByDaemon);
+    videoInput_ = sip_core::getVideoInput(id_, video::VideoInputMode::ManagedByDaemon);
     videoInput_->setPaused(paused_);
 #endif
 
@@ -86,7 +86,7 @@ MediaPlayer::configureMediaInputs()
             audioInput_->start();
         }
     } catch (const std::exception& e) {
-        JAMI_ERR("media player: %s open audio input failed: %s", path_.c_str(), e.what());
+        SIP_CORE_ERR("media player: %s open audio input failed: %s", path_.c_str(), e.what());
     }
 #ifdef ENABLE_VIDEO
     try {
@@ -99,7 +99,7 @@ MediaPlayer::configureMediaInputs()
         }
     } catch (const std::exception& e) {
         videoInput_ = nullptr;
-        JAMI_ERR("media player: %s open video input failed: %s", path_.c_str(), e.what());
+        SIP_CORE_ERR("media player: %s open video input failed: %s", path_.c_str(), e.what());
     }
 #endif
 
@@ -148,7 +148,7 @@ MediaPlayer::process()
         demuxer_->updateCurrentState(MediaDemuxer::CurrentState::Finished);
         break;
     case MediaDemuxer::Status::ReadError:
-        JAMI_ERR() << "Failed to decode frame";
+        SIP_CORE_ERR() << "Failed to decode frame";
         break;
     case MediaDemuxer::Status::ReadBufferOverflow:
         readBufferOverflow_ = true;
@@ -165,7 +165,7 @@ MediaPlayer::emitInfo()
     std::map<std::string, std::string> info {{"duration", std::to_string(fileDuration_)},
                                              {"audio_stream", std::to_string(audioStream_)},
                                              {"video_stream", std::to_string(videoStream_)}};
-    emitSignal<libjami::MediaPlayerSignal::FileOpened>(id_, info);
+    emitSignal<libsip_core::MediaPlayerSignal::FileOpened>(id_, info);
 }
 
 bool
@@ -307,4 +307,4 @@ MediaPlayer::streamsFinished()
     return audioFinished && videoFinished;
 }
 
-} // namespace jami
+} // namespace sip_core

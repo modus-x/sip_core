@@ -30,13 +30,13 @@
 #include <string>
 #include <memory>
 
-namespace jami {
+namespace sip_core {
 class CongestionControl;
 class Conference;
 class MediaRecorder;
-} // namespace jami
+} // namespace sip_core
 
-namespace jami {
+namespace sip_core {
 namespace video {
 
 class VideoInput;
@@ -181,4 +181,4 @@ private:
 };
 
 } // namespace video
-} // namespace jami
+} // namespace sip_core

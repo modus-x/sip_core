@@ -31,7 +31,7 @@
 #include "logger.h"
 #include "accel.h"
 
-namespace jami {
+namespace sip_core {
 namespace video {
 
 struct HardwareAPI
@@ -151,7 +151,7 @@ getFormatCb(AVCodecContext* codecCtx, const AVPixelFormat* formats)
     for (int i = 0; formats[i] != AV_PIX_FMT_NONE; ++i) {
         if (accel && formats[i] == accel->getFormat()) {
             // found hardware format for codec with api
-            JAMI_DBG() << "Found compatible hardware format for "
+            SIP_CORE_DBG() << "Found compatible hardware format for "
                        << avcodec_get_name(static_cast<AVCodecID>(accel->getCodecId()))
                        << " decoder with " << accel->getName();
             // hardware tends to under-report supported levels
@@ -171,18 +171,18 @@ HardwareAccel::init_device(const char* name, const char* device, int flags)
     int err;
     err = av_hwdevice_ctx_create(&deviceCtx_, hwType_, device, NULL, flags);
     if (err < 0) {
-        JAMI_DBG("Failed to create %s device: %d.\n", name, err);
+        SIP_CORE_DBG("Failed to create %s device: %d.\n", name, err);
         return 1;
     }
 
     // Verify that the device create correspond to api
     dev = (AVHWDeviceContext*) deviceCtx_->data;
     if (dev->type != hwType_) {
-        JAMI_DBG("Device created as type %d has type %d.", hwType_, dev->type);
+        SIP_CORE_DBG("Device created as type %d has type %d.", hwType_, dev->type);
         av_buffer_unref(&deviceCtx_);
         return -1;
     }
-    JAMI_DBG("Device type %s successfully created.", name);
+    SIP_CORE_DBG("Device type %s successfully created.", name);
 
     return 0;
 }
@@ -196,17 +196,17 @@ HardwareAccel::init_device_type(std::string& dev)
 
     name = av_hwdevice_get_type_name(hwType_);
     if (!name) {
-        JAMI_DBG("No name available for device type %d.", hwType_);
+        SIP_CORE_DBG("No name available for device type %d.", hwType_);
         return -1;
     }
 
     check = av_hwdevice_find_type_by_name(name);
     if (check != hwType_) {
-        JAMI_DBG("Type %d maps to name %s maps to type %d.", hwType_, name, check);
+        SIP_CORE_DBG("Type %d maps to name %s maps to type %d.", hwType_, name, check);
         return -1;
     }
 
-    JAMI_WARN("-- Starting %s init for %s with default device.",
+    SIP_CORE_WARN("-- Starting %s init for %s with default device.",
               (type_ == CODEC_ENCODER) ? "encoding" : "decoding",
               name);
     if (possible_devices_->front().second != DeviceState::NOT_USABLE) {
@@ -215,32 +215,32 @@ HardwareAccel::init_device_type(std::string& dev)
         else
             err = init_device(name, nullptr, 0);
         if (err == 0) {
-            JAMI_DBG("-- Init passed for %s with default device.", name);
+            SIP_CORE_DBG("-- Init passed for %s with default device.", name);
             possible_devices_->front().second = DeviceState::USABLE;
             dev = "default";
             return 0;
         } else {
             possible_devices_->front().second = DeviceState::NOT_USABLE;
-            JAMI_DBG("-- Init failed for %s with default device.", name);
+            SIP_CORE_DBG("-- Init failed for %s with default device.", name);
         }
     }
 
     for (auto& device : *possible_devices_) {
         if (device.second == DeviceState::NOT_USABLE)
             continue;
-        JAMI_WARN("-- Init %s for %s with device %s.",
+        SIP_CORE_WARN("-- Init %s for %s with device %s.",
                   (type_ == CODEC_ENCODER) ? "encoding" : "decoding",
                   name,
                   device.first.c_str());
         err = init_device(name, device.first.c_str(), 0);
         if (err == 0) {
-            JAMI_DBG("-- Init passed for %s with device %s.", name, device.first.c_str());
+            SIP_CORE_DBG("-- Init passed for %s with device %s.", name, device.first.c_str());
             device.second = DeviceState::USABLE;
             dev = device.first;
             return 0;
         } else {
             device.second = DeviceState::NOT_USABLE;
-            JAMI_DBG("-- Init failed for %s with device %s.", name, device.first.c_str());
+            SIP_CORE_DBG("-- Init failed for %s with device %s.", name, device.first.c_str());
         }
     }
     return -1;
@@ -264,7 +264,7 @@ HardwareAccel::transfer(const VideoFrame& frame)
     if (type_ == CODEC_DECODER) {
         auto input = frame.pointer();
         if (input->format != format_) {
-            JAMI_ERR() << "Frame format mismatch: expected " << av_get_pix_fmt_name(format_)
+            SIP_CORE_ERR() << "Frame format mismatch: expected " << av_get_pix_fmt_name(format_)
                        << ", got "
                        << av_get_pix_fmt_name(static_cast<AVPixelFormat>(input->format));
             return nullptr;
@@ -274,7 +274,7 @@ HardwareAccel::transfer(const VideoFrame& frame)
     } else if (type_ == CODEC_ENCODER) {
         auto input = frame.pointer();
         if (input->format != swFormat_) {
-            JAMI_ERR() << "Frame format mismatch: expected " << av_get_pix_fmt_name(swFormat_)
+            SIP_CORE_ERR() << "Frame format mismatch: expected " << av_get_pix_fmt_name(swFormat_)
                        << ", got "
                        << av_get_pix_fmt_name(static_cast<AVPixelFormat>(input->format));
             return nullptr;
@@ -284,25 +284,25 @@ HardwareAccel::transfer(const VideoFrame& frame)
         auto hwFrame = framePtr->pointer();
 
         if ((ret = av_hwframe_get_buffer(framesCtx_, hwFrame, 0)) < 0) {
-            JAMI_ERR() << "Failed to allocate hardware buffer: "
+            SIP_CORE_ERR() << "Failed to allocate hardware buffer: "
                        << libav_utils::getError(ret).c_str();
             return nullptr;
         }
 
         if (!hwFrame->hw_frames_ctx) {
-            JAMI_ERR() << "Failed to allocate hardware buffer: Cannot allocate memory";
+            SIP_CORE_ERR() << "Failed to allocate hardware buffer: Cannot allocate memory";
             return nullptr;
         }
 
         if ((ret = av_hwframe_transfer_data(hwFrame, input, 0)) < 0) {
-            JAMI_ERR() << "Failed to push frame to GPU: " << libav_utils::getError(ret).c_str();
+            SIP_CORE_ERR() << "Failed to push frame to GPU: " << libav_utils::getError(ret).c_str();
             return nullptr;
         }
 
         hwFrame->pts = input->pts; // transfer does not copy timestamp
         return framePtr;
     } else {
-        JAMI_ERR() << "Invalid hardware accelerator";
+        SIP_CORE_ERR() << "Invalid hardware accelerator";
         return nullptr;
     }
 }
@@ -326,7 +326,7 @@ HardwareAccel::initFrame()
 {
     int ret = 0;
     if (!deviceCtx_) {
-        JAMI_ERR() << "Cannot initialize hardware frames without a valid hardware device";
+        SIP_CORE_ERR() << "Cannot initialize hardware frames without a valid hardware device";
         return false;
     }
 
@@ -342,7 +342,7 @@ HardwareAccel::initFrame()
     ctx->initial_pool_size = 20; // TODO try other values
 
     if ((ret = av_hwframe_ctx_init(framesCtx_)) < 0) {
-        JAMI_ERR("Failed to initialize hardware frame context: %s (%d)",
+        SIP_CORE_ERR("Failed to initialize hardware frame context: %s (%d)",
                  libav_utils::getError(ret).c_str(),
                  ret);
         av_buffer_unref(&framesCtx_);
@@ -364,7 +364,7 @@ HardwareAccel::linkHardware(AVBufferRef* framesCtx)
             av_buffer_unref(&framesCtx_);
         framesCtx_ = av_buffer_ref(framesCtx);
         if ((linked_ = (framesCtx_ != nullptr))) {
-            JAMI_DBG() << "Hardware transcoding pipeline successfully set up for"
+            SIP_CORE_DBG() << "Hardware transcoding pipeline successfully set up for"
                        << " encoder '" << getCodecName() << "'";
         }
         return linked_;
@@ -455,4 +455,4 @@ HardwareAccel::getCompatibleAccel(AVCodecID id, int width, int height, CodecType
 }
 
 } // namespace video
-} // namespace jami
+} // namespace sip_core

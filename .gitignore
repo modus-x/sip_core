@@ -119,10 +119,10 @@ tools/.vscode/
 
 build-aux/
 configure
-jami.pc
+sip_core.pc
 bin/dbus/*.adaptor.h
 bin/dbus/cx.ring.Ring.service
-bin/jamid
+bin/sip_cored
 doltcompile
 doltlibtool
 __pycache__

@@ -17,12 +17,12 @@
  *  along with this program; if not, write to the Free Software
  *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301 USA.
  */
-#ifndef LIBJAMI_CALL_H
-#define LIBJAMI_CALL_H
+#ifndef LIBSIP_CORE_CALL_H
+#define LIBSIP_CORE_CALL_H
 
 #include "def.h"
 
-namespace libjami {
+namespace libsip_core {
 
 namespace Call {
 
@@ -70,6 +70,6 @@ constexpr static char VIDEO_MAX_BITRATE[] = "VIDEO_MAX_BITRATE";
 
 } // namespace Call
 
-} // namespace libjami
+} // namespace libsip_core
 
 #endif

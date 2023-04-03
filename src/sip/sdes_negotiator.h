@@ -29,7 +29,7 @@
 
 using namespace std::literals;
 
-namespace jami {
+namespace sip_core {
 
 /**
  * General exception object that is thrown when
@@ -94,4 +94,4 @@ private:
     static std::vector<CryptoAttribute> parse(const std::vector<std::string>& attributes);
 };
 
-} // namespace jami
+} // namespace sip_core

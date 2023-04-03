@@ -30,7 +30,7 @@
 #include <string>
 #include <memory>
 
-namespace jami {
+namespace sip_core {
 
 class AudioInput;
 class AudioReceiveThread;
@@ -93,4 +93,4 @@ private:
     std::function<void(bool)> voiceCallback_;
 };
 
-} // namespace jami
+} // namespace sip_core

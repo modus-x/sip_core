@@ -38,9 +38,9 @@
 #include "client/ring_signal.h"
 #include "compiler_intrinsics.h"
 
-namespace libjami {
+namespace libsip_core {
 
-using jami::SIPAccount;
+using sip_core::SIPAccount;
 
 void
 registerPresHandlers(const std::map<std::string, std::shared_ptr<CallbackWrapperBase>>& handlers)
@@ -54,17 +54,17 @@ registerPresHandlers(const std::map<std::string, std::shared_ptr<CallbackWrapper
 void
 subscribeBuddy(const std::string& accountID, const std::string& uri, bool flag)
 {
-    if (auto sipaccount = jami::Manager::instance().getAccount<SIPAccount>(accountID)) {
+    if (auto sipaccount = sip_core::Manager::instance().getAccount<SIPAccount>(accountID)) {
         auto pres = sipaccount->getPresence();
         if (pres and pres->isEnabled() and pres->isSupported(PRESENCE_FUNCTION_SUBSCRIBE)) {
-            JAMI_DBG("%subscribePresence (acc:%s, buddy:%s)",
+            SIP_CORE_DBG("%subscribePresence (acc:%s, buddy:%s)",
                      flag ? "S" : "Uns",
                      accountID.c_str(),
                      uri.c_str());
             pres->subscribeClient(uri, flag);
         }
     } else
-        JAMI_ERR("Could not find account %s", accountID.c_str());
+        SIP_CORE_ERR("Could not find account %s", accountID.c_str());
 }
 
 /**
@@ -74,16 +74,16 @@ subscribeBuddy(const std::string& accountID, const std::string& uri, bool flag)
 void
 publish(const std::string& accountID, bool status, const std::string& note)
 {
-    if (auto sipaccount = jami::Manager::instance().getAccount<SIPAccount>(accountID)) {
+    if (auto sipaccount = sip_core::Manager::instance().getAccount<SIPAccount>(accountID)) {
         auto pres = sipaccount->getPresence();
         if (pres and pres->isEnabled() and pres->isSupported(PRESENCE_FUNCTION_PUBLISH)) {
-            JAMI_DBG("Send Presence (acc:%s, status %s).",
+            SIP_CORE_DBG("Send Presence (acc:%s, status %s).",
                      accountID.c_str(),
                      status ? "online" : "offline");
             pres->sendPresence(status, note);
         }
     } else
-        JAMI_ERR("Could not find account %s.", accountID.c_str());
+        SIP_CORE_ERR("Could not find account %s.", accountID.c_str());
 }
 
 /**
@@ -93,19 +93,19 @@ void
 answerServerRequest(UNUSED const std::string& uri, UNUSED bool flag)
 {
 #if 0 // DISABLED: removed IP2IP support, tuleap: #448
-    auto account = jami::Manager::instance().getIP2IPAccount();
+    auto account = sip_core::Manager::instance().getIP2IPAccount();
     if (auto sipaccount = static_cast<SIPAccount *>(account.get())) {
-        JAMI_DBG("Approve presence (acc:IP2IP, serv:%s, flag:%s)", uri.c_str(),
+        SIP_CORE_DBG("Approve presence (acc:IP2IP, serv:%s, flag:%s)", uri.c_str(),
                  flag ? "true" : "false");
 
         if (auto pres = sipaccount->getPresence())
             pres->approvePresSubServer(uri, flag);
         else
-            JAMI_ERR("Presence not initialized");
+            SIP_CORE_ERR("Presence not initialized");
     } else
-        JAMI_ERR("Could not find account IP2IP");
+        SIP_CORE_ERR("Could not find account IP2IP");
 #else
-    JAMI_ERR("answerServerRequest() is deprecated and does nothing");
+    SIP_CORE_ERR("answerServerRequest() is deprecated and does nothing");
 #endif
 }
 
@@ -117,22 +117,22 @@ getSubscriptions(const std::string& accountID)
 {
     std::vector<std::map<std::string, std::string>> ret;
 
-    if (auto sipaccount = jami::Manager::instance().getAccount<SIPAccount>(accountID)) {
+    if (auto sipaccount = sip_core::Manager::instance().getAccount<SIPAccount>(accountID)) {
         if (auto pres = sipaccount->getPresence()) {
             const auto& subs = pres->getClientSubscriptions();
             ret.reserve(subs.size());
             for (const auto& s : subs) {
                 ret.push_back(
-                    {{libjami::Presence::BUDDY_KEY, std::string(s->getURI())},
-                     {libjami::Presence::STATUS_KEY,
-                      s->isPresent() ? libjami::Presence::ONLINE_KEY
-                                     : libjami::Presence::OFFLINE_KEY},
-                     {libjami::Presence::LINESTATUS_KEY, std::string(s->getLineStatus())}});
+                    {{libsip_core::Presence::BUDDY_KEY, std::string(s->getURI())},
+                     {libsip_core::Presence::STATUS_KEY,
+                      s->isPresent() ? libsip_core::Presence::ONLINE_KEY
+                                     : libsip_core::Presence::OFFLINE_KEY},
+                     {libsip_core::Presence::LINESTATUS_KEY, std::string(s->getLineStatus())}});
             }
         } else
-            JAMI_ERR("Presence not initialized");
+            SIP_CORE_ERR("Presence not initialized");
     } else
-        JAMI_ERR("Could not find account %s.", accountID.c_str());
+        SIP_CORE_ERR("Could not find account %s.", accountID.c_str());
 
     return ret;
 }
@@ -143,14 +143,14 @@ getSubscriptions(const std::string& accountID)
 void
 setSubscriptions(const std::string& accountID, const std::vector<std::string>& uris)
 {
-    if (auto sipaccount = jami::Manager::instance().getAccount<SIPAccount>(accountID)) {
+    if (auto sipaccount = sip_core::Manager::instance().getAccount<SIPAccount>(accountID)) {
         if (auto pres = sipaccount->getPresence()) {
             for (const auto& u : uris)
                 pres->subscribeClient(u, true);
         } else
-            JAMI_ERR("Presence not initialized");
+            SIP_CORE_ERR("Presence not initialized");
     } else
-        JAMI_ERR("Could not find account %s.", accountID.c_str());
+        SIP_CORE_ERR("Could not find account %s.", accountID.c_str());
 }
 
-} // namespace libjami
+} // namespace libsip_core

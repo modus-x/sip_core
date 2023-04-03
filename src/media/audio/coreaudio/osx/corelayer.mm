@@ -22,7 +22,7 @@
 #include "manager.h"
 #include "audiodevice.h"
 
-namespace jami {
+namespace sip_core {
 
 dispatch_queue_t audioConfigurationQueueMacOS() {
     static dispatch_once_t queueCreationGuard;
@@ -102,7 +102,7 @@ CoreLayer::initAudioLayerIO(AudioDeviceType stream)
     // 3) Set the audio unit callback.
     // 4) Initialize everything.
     // 5) Profit...
-    JAMI_DBG("INIT AUDIO IO");
+    SIP_CORE_DBG("INIT AUDIO IO");
 
     AudioUnitScope outputBus = 0;
     AudioUnitScope inputBus = 1;
@@ -117,7 +117,7 @@ CoreLayer::initAudioLayerIO(AudioDeviceType stream)
 
     auto comp = AudioComponentFindNext(nullptr, &desc);
     if (comp == nullptr) {
-        JAMI_ERR("Can't find default output audio component.");
+        SIP_CORE_ERR("Can't find default output audio component.");
         return;
     }
 
@@ -157,7 +157,7 @@ CoreLayer::initAudioLayerIO(AudioDeviceType stream)
                                                      &size,
                                                      &inputDeviceID);
             if (status != kAudioServicesNoError) {
-                JAMI_ERR() << "failed to set audio input device";
+                SIP_CORE_ERR() << "failed to set audio input device";
                 return;
             }
         }
@@ -189,7 +189,7 @@ CoreLayer::initAudioLayerIO(AudioDeviceType stream)
                                                      &size,
                                                      &playbackDeviceID);
             if (status != kAudioServicesNoError) {
-                JAMI_ERR() << "failed to set audio output device";
+                SIP_CORE_ERR() << "failed to set audio output device";
                 return;
             }
         }
@@ -329,7 +329,7 @@ void
 CoreLayer::startStream(AudioDeviceType stream)
 {
     dispatch_async(audioConfigurationQueueMacOS(), ^{
-        JAMI_DBG("START STREAM");
+        SIP_CORE_DBG("START STREAM");
 
         if (status_ != Status::Idle)
             return;
@@ -360,7 +360,7 @@ void
 CoreLayer::stopStream(AudioDeviceType stream)
 {
     dispatch_async(audioConfigurationQueueMacOS(), ^{
-        JAMI_DBG("STOP STREAM");
+        SIP_CORE_DBG("STOP STREAM");
         if (status_ != Status::Started)
             return;
         status_ = Status::Idle;
@@ -461,7 +461,7 @@ CoreLayer::read(AudioUnitRenderActionFlags* ioActionFlags,
                 AudioBufferList* ioData)
 {
     if (inNumberFrames <= 0) {
-        JAMI_WARN("No frames for input.");
+        SIP_CORE_WARN("No frames for input.");
         return;
     }
 
@@ -555,4 +555,4 @@ CoreLayer::getDeviceList(bool getCapture) const
     }
     return ret;
 }
-} // namespace jami
+} // namespace sip_core

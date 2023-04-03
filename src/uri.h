@@ -22,13 +22,13 @@
 #include <string>
 #include <string_view>
 
-namespace jami {
+namespace sip_core {
 
 class Uri
 {
 public:
     enum class Scheme {
-        JAMI,          // Start with "jami:" and 45 ASCII chars OR 40 ASCII chars
+        SIP_CORE,          // Start with "sip_core:" and 45 ASCII chars OR 40 ASCII chars
         SIP,           // Start with "sip:"
         SWARM,         // Start with "swarm:" and 40 ASCII chars
         RENDEZVOUS,    // Start wutg "rdv" and used for call in swarms
@@ -50,4 +50,4 @@ private:
     Scheme scheme_;
     std::string authority_;
 };
-} // namespace jami
+} // namespace sip_core

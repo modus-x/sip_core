@@ -20,7 +20,7 @@
 
 #include "ring_signal.h"
 
-namespace jami {
+namespace sip_core {
 
 ScheduledExecutor eventScheduler {"eventEmitter"};
 
@@ -29,82 +29,82 @@ getSignalHandlers()
 {
     static SignalHandlerMap handlers = {
         /* Call */
-        exported_callback<libjami::CallSignal::StateChange>(),
-        exported_callback<libjami::CallSignal::TransferFailed>(),
-        exported_callback<libjami::CallSignal::TransferSucceeded>(),
-        exported_callback<libjami::CallSignal::RecordPlaybackStopped>(),
-        exported_callback<libjami::CallSignal::VoiceMailNotify>(),
-        exported_callback<libjami::CallSignal::IncomingMessage>(),
-        exported_callback<libjami::CallSignal::IncomingCall>(),
-        exported_callback<libjami::CallSignal::IncomingCallWithMedia>(),
-        exported_callback<libjami::CallSignal::MediaChangeRequested>(),
-        exported_callback<libjami::CallSignal::RecordPlaybackFilepath>(),
-        exported_callback<libjami::CallSignal::ConferenceCreated>(),
-        exported_callback<libjami::CallSignal::ConferenceChanged>(),
-        exported_callback<libjami::CallSignal::UpdatePlaybackScale>(),
-        exported_callback<libjami::CallSignal::ConferenceRemoved>(),
-        exported_callback<libjami::CallSignal::RecordingStateChanged>(),
-        exported_callback<libjami::CallSignal::RtcpReportReceived>(),
-        exported_callback<libjami::CallSignal::PeerHold>(),
-        exported_callback<libjami::CallSignal::VideoMuted>(),
-        exported_callback<libjami::CallSignal::AudioMuted>(),
-        exported_callback<libjami::CallSignal::SmartInfo>(),
-        exported_callback<libjami::CallSignal::ConnectionUpdate>(),
-        exported_callback<libjami::CallSignal::OnConferenceInfosUpdated>(),
-        exported_callback<libjami::CallSignal::RemoteRecordingChanged>(),
-        exported_callback<libjami::CallSignal::MediaNegotiationStatus>(),
+        exported_callback<libsip_core::CallSignal::StateChange>(),
+        exported_callback<libsip_core::CallSignal::TransferFailed>(),
+        exported_callback<libsip_core::CallSignal::TransferSucceeded>(),
+        exported_callback<libsip_core::CallSignal::RecordPlaybackStopped>(),
+        exported_callback<libsip_core::CallSignal::VoiceMailNotify>(),
+        exported_callback<libsip_core::CallSignal::IncomingMessage>(),
+        exported_callback<libsip_core::CallSignal::IncomingCall>(),
+        exported_callback<libsip_core::CallSignal::IncomingCallWithMedia>(),
+        exported_callback<libsip_core::CallSignal::MediaChangeRequested>(),
+        exported_callback<libsip_core::CallSignal::RecordPlaybackFilepath>(),
+        exported_callback<libsip_core::CallSignal::ConferenceCreated>(),
+        exported_callback<libsip_core::CallSignal::ConferenceChanged>(),
+        exported_callback<libsip_core::CallSignal::UpdatePlaybackScale>(),
+        exported_callback<libsip_core::CallSignal::ConferenceRemoved>(),
+        exported_callback<libsip_core::CallSignal::RecordingStateChanged>(),
+        exported_callback<libsip_core::CallSignal::RtcpReportReceived>(),
+        exported_callback<libsip_core::CallSignal::PeerHold>(),
+        exported_callback<libsip_core::CallSignal::VideoMuted>(),
+        exported_callback<libsip_core::CallSignal::AudioMuted>(),
+        exported_callback<libsip_core::CallSignal::SmartInfo>(),
+        exported_callback<libsip_core::CallSignal::ConnectionUpdate>(),
+        exported_callback<libsip_core::CallSignal::OnConferenceInfosUpdated>(),
+        exported_callback<libsip_core::CallSignal::RemoteRecordingChanged>(),
+        exported_callback<libsip_core::CallSignal::MediaNegotiationStatus>(),
 
         /* Configuration */
-        exported_callback<libjami::ConfigurationSignal::VolumeChanged>(),
-        exported_callback<libjami::ConfigurationSignal::AccountsChanged>(),
-        exported_callback<libjami::ConfigurationSignal::AccountDetailsChanged>(),
-        exported_callback<libjami::ConfigurationSignal::StunStatusFailed>(),
-        exported_callback<libjami::ConfigurationSignal::RegistrationStateChanged>(),
-        exported_callback<libjami::ConfigurationSignal::VolatileDetailsChanged>(),
-        exported_callback<libjami::ConfigurationSignal::IncomingAccountMessage>(),
-        exported_callback<libjami::ConfigurationSignal::AccountMessageStatusChanged>(),
-        exported_callback<libjami::ConfigurationSignal::ActiveCallsChanged>(),
-        exported_callback<libjami::ConfigurationSignal::MediaParametersChanged>(),
-        exported_callback<libjami::ConfigurationSignal::Error>(),
+        exported_callback<libsip_core::ConfigurationSignal::VolumeChanged>(),
+        exported_callback<libsip_core::ConfigurationSignal::AccountsChanged>(),
+        exported_callback<libsip_core::ConfigurationSignal::AccountDetailsChanged>(),
+        exported_callback<libsip_core::ConfigurationSignal::StunStatusFailed>(),
+        exported_callback<libsip_core::ConfigurationSignal::RegistrationStateChanged>(),
+        exported_callback<libsip_core::ConfigurationSignal::VolatileDetailsChanged>(),
+        exported_callback<libsip_core::ConfigurationSignal::IncomingAccountMessage>(),
+        exported_callback<libsip_core::ConfigurationSignal::AccountMessageStatusChanged>(),
+        exported_callback<libsip_core::ConfigurationSignal::ActiveCallsChanged>(),
+        exported_callback<libsip_core::ConfigurationSignal::MediaParametersChanged>(),
+        exported_callback<libsip_core::ConfigurationSignal::Error>(),
 #if defined(__ANDROID__) || (defined(TARGET_OS_IOS) && TARGET_OS_IOS)
-        exported_callback<libjami::ConfigurationSignal::GetHardwareAudioFormat>(),
+        exported_callback<libsip_core::ConfigurationSignal::GetHardwareAudioFormat>(),
 #endif
 #if defined(__ANDROID__) || (defined(TARGET_OS_IOS) && TARGET_OS_IOS) || defined(RING_UWP)
-        exported_callback<libjami::ConfigurationSignal::GetAppDataPath>(),
-        exported_callback<libjami::ConfigurationSignal::GetDeviceName>(),
+        exported_callback<libsip_core::ConfigurationSignal::GetAppDataPath>(),
+        exported_callback<libsip_core::ConfigurationSignal::GetDeviceName>(),
 #endif
-        exported_callback<libjami::ConfigurationSignal::HardwareDecodingChanged>(),
-        exported_callback<libjami::ConfigurationSignal::HardwareEncodingChanged>(),
-        exported_callback<libjami::ConfigurationSignal::MessageSend>(),
+        exported_callback<libsip_core::ConfigurationSignal::HardwareDecodingChanged>(),
+        exported_callback<libsip_core::ConfigurationSignal::HardwareEncodingChanged>(),
+        exported_callback<libsip_core::ConfigurationSignal::MessageSend>(),
 
         /* Presence */
-        exported_callback<libjami::PresenceSignal::NewServerSubscriptionRequest>(),
-        exported_callback<libjami::PresenceSignal::ServerError>(),
-        exported_callback<libjami::PresenceSignal::NewBuddyNotification>(),
-        exported_callback<libjami::PresenceSignal::SubscriptionStateChanged>(),
+        exported_callback<libsip_core::PresenceSignal::NewServerSubscriptionRequest>(),
+        exported_callback<libsip_core::PresenceSignal::ServerError>(),
+        exported_callback<libsip_core::PresenceSignal::NewBuddyNotification>(),
+        exported_callback<libsip_core::PresenceSignal::SubscriptionStateChanged>(),
 
         /* Audio */
-        exported_callback<libjami::AudioSignal::DeviceEvent>(),
-        exported_callback<libjami::AudioSignal::AudioMeter>(),
+        exported_callback<libsip_core::AudioSignal::DeviceEvent>(),
+        exported_callback<libsip_core::AudioSignal::AudioMeter>(),
 
 #ifdef ENABLE_VIDEO
         /* MediaPlayer */
-        exported_callback<libjami::MediaPlayerSignal::FileOpened>(),
+        exported_callback<libsip_core::MediaPlayerSignal::FileOpened>(),
 
         /* Video */
-        exported_callback<libjami::VideoSignal::DeviceEvent>(),
-        exported_callback<libjami::VideoSignal::DecodingStarted>(),
-        exported_callback<libjami::VideoSignal::DecodingStopped>(),
+        exported_callback<libsip_core::VideoSignal::DeviceEvent>(),
+        exported_callback<libsip_core::VideoSignal::DecodingStarted>(),
+        exported_callback<libsip_core::VideoSignal::DecodingStopped>(),
 #ifdef __ANDROID__
-        exported_callback<libjami::VideoSignal::GetCameraInfo>(),
-        exported_callback<libjami::VideoSignal::SetParameters>(),
-        exported_callback<libjami::VideoSignal::RequestKeyFrame>(),
-        exported_callback<libjami::VideoSignal::SetBitrate>(),
+        exported_callback<libsip_core::VideoSignal::GetCameraInfo>(),
+        exported_callback<libsip_core::VideoSignal::SetParameters>(),
+        exported_callback<libsip_core::VideoSignal::RequestKeyFrame>(),
+        exported_callback<libsip_core::VideoSignal::SetBitrate>(),
 #endif
-        exported_callback<libjami::VideoSignal::StartCapture>(),
-        exported_callback<libjami::VideoSignal::StopCapture>(),
-        exported_callback<libjami::VideoSignal::DeviceAdded>(),
-        exported_callback<libjami::VideoSignal::ParametersChanged>(),
+        exported_callback<libsip_core::VideoSignal::StartCapture>(),
+        exported_callback<libsip_core::VideoSignal::StopCapture>(),
+        exported_callback<libsip_core::VideoSignal::DeviceAdded>(),
+        exported_callback<libsip_core::VideoSignal::ParametersChanged>(),
 #endif
 
     };
@@ -112,18 +112,18 @@ getSignalHandlers()
     return handlers;
 }
 
-}; // namespace jami
+}; // namespace sip_core
 
-namespace libjami {
+namespace libsip_core {
 
 void
 registerSignalHandlers(const std::map<std::string, std::shared_ptr<CallbackWrapperBase>>& handlers)
 {
-    auto& handlers_ = jami::getSignalHandlers();
+    auto& handlers_ = sip_core::getSignalHandlers();
     for (auto& item : handlers) {
         auto iter = handlers_.find(item.first);
         if (iter == handlers_.end()) {
-            JAMI_ERR("Signal %s not supported", item.first.c_str());
+            SIP_CORE_ERR("Signal %s not supported", item.first.c_str());
             continue;
         }
         iter->second = item.second;
@@ -133,10 +133,10 @@ registerSignalHandlers(const std::map<std::string, std::shared_ptr<CallbackWrapp
 void
 unregisterSignalHandlers()
 {
-    auto& handlers_ = jami::getSignalHandlers();
+    auto& handlers_ = sip_core::getSignalHandlers();
     for (auto& item : handlers_) {
         item.second = {};
     }
 }
 
-} // namespace libjami
+} // namespace libsip_core

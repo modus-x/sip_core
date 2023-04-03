@@ -32,7 +32,7 @@
 #include <optional>
 #include <string>
 
-namespace jami {
+namespace sip_core {
 
 class TurnCache : public std::enable_shared_from_this<TurnCache>
 {
@@ -65,7 +65,7 @@ private:
     std::atomic_bool isRefreshing_ {false};
     /**
      * This will cache the turn server resolution each time we launch
-     * Jami, or for each connectivityChange()
+     * sip_core, or for each connectivityChange()
      */
     void testTurn(IpAddr server);
     std::unique_ptr<TurnTransport> testTurnV4_;
@@ -96,4 +96,4 @@ private:
     }
 };
 
-} // namespace jami
+} // namespace sip_core

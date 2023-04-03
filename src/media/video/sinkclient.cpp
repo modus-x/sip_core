@@ -34,7 +34,7 @@
 #include "logger.h"
 #include "noncopyable.h"
 #include "client/ring_signal.h"
-#include "jami/videomanager_interface.h"
+#include "sip_core/videomanager_interface.h"
 #include "libav_utils.h"
 #include "video_scaler.h"
 #include "media_filter.h"
@@ -57,7 +57,7 @@
 #include <stdexcept>
 #include <cmath>
 
-namespace jami {
+namespace sip_core {
 namespace video {
 
 const constexpr char FILTER_INPUT_NAME[] = "in";
@@ -101,7 +101,7 @@ private:
     void unMapShmArea() noexcept
     {
         if (area_ != MAP_FAILED and ::munmap(area_, areaSize_) < 0) {
-            JAMI_ERR("[ShmHolder:%s] munmap(%zu) failed with errno %d",
+            SIP_CORE_ERR("[ShmHolder:%s] munmap(%zu) failed with errno %d",
                      openedName_.c_str(),
                      areaSize_,
                      errno);
@@ -154,7 +154,7 @@ ShmHolder::ShmHolder(const std::string& name)
     if (::sem_init(&area_->frameGenMutex, 1, 0) < 0)
         shmFailedWithErrno("sem_init(frameGenMutex)");
 
-    JAMI_DBG("[ShmHolder:%s] New holder created", openedName_.c_str());
+    SIP_CORE_DBG("[ShmHolder:%s] New holder created", openedName_.c_str());
 }
 
 ShmHolder::~ShmHolder()
@@ -187,12 +187,12 @@ ShmHolder::resizeArea(std::size_t frameSize) noexcept
 
     // full area size: +15 to take care of maximum padding size
     const auto areaSize = sizeof(SHMHeader) + 2 * frameSize + 15;
-    JAMI_DBG("[ShmHolder:%s] New size: f=%zu, a=%zu", openedName_.c_str(), frameSize, areaSize);
+    SIP_CORE_DBG("[ShmHolder:%s] New size: f=%zu, a=%zu", openedName_.c_str(), frameSize, areaSize);
 
     unMapShmArea();
 
     if (::ftruncate(fd_, areaSize) < 0) {
-        JAMI_ERR("[ShmHolder:%s] ftruncate(%zu) failed with errno %d",
+        SIP_CORE_ERR("[ShmHolder:%s] ftruncate(%zu) failed with errno %d",
                  openedName_.c_str(),
                  areaSize,
                  errno);
@@ -204,7 +204,7 @@ ShmHolder::resizeArea(std::size_t frameSize) noexcept
 
     if (area_ == MAP_FAILED) {
         areaSize_ = 0;
-        JAMI_ERR("[ShmHolder:%s] mmap(%zu) failed with errno %d",
+        SIP_CORE_ERR("[ShmHolder:%s] mmap(%zu) failed with errno %d",
                  openedName_.c_str(),
                  areaSize,
                  errno);
@@ -239,7 +239,7 @@ ShmHolder::renderFrame(const VideoFrame& src) noexcept
     const auto frameSize = videoFrameSize(format, width, height);
 
     if (!resizeArea(frameSize)) {
-        JAMI_ERR("[ShmHolder:%s] Could not resize area size: %dx%d, format: %d",
+        SIP_CORE_ERR("[ShmHolder:%s] Could not resize area size: %dx%d, format: %d",
                  openedName_.c_str(),
                  width,
                  height,
@@ -277,13 +277,13 @@ SinkClient::start() noexcept
 {
     if (not shm_) {
         try {
-            char* envvar = getenv("JAMI_DISABLE_SHM");
+            char* envvar = getenv("SIP_CORE_DISABLE_SHM");
             if (envvar) // Do not use SHM if set
                 return true;
             shm_ = std::make_shared<ShmHolder>();
-            JAMI_DBG("[Sink:%p] Shared memory [%s] created", this, openedName().c_str());
+            SIP_CORE_DBG("[Sink:%p] Shared memory [%s] created", this, openedName().c_str());
         } catch (const std::runtime_error& e) {
-            JAMI_ERR("[Sink:%p] Failed to create shared memory: %s", this, e.what());
+            SIP_CORE_ERR("[Sink:%p] Failed to create shared memory: %s", this, e.what());
         }
     }
 
@@ -332,15 +332,15 @@ SinkClient::SinkClient(const std::string& id, bool mixer)
     , lastFrameDebug_(std::chrono::steady_clock::now())
 #endif
 {
-    JAMI_DBG("[Sink:%p] Sink [%s] created", this, getId().c_str());
+    SIP_CORE_DBG("[Sink:%p] Sink [%s] created", this, getId().c_str());
 }
 
 void
-SinkClient::sendFrameDirect(const std::shared_ptr<jami::MediaFrame>& frame_p)
+SinkClient::sendFrameDirect(const std::shared_ptr<sip_core::MediaFrame>& frame_p)
 {
     notify(frame_p);
 
-    libjami::FrameBuffer outFrame(av_frame_alloc());
+    libsip_core::FrameBuffer outFrame(av_frame_alloc());
     av_frame_ref(outFrame.get(), std::static_pointer_cast<VideoFrame>(frame_p)->pointer());
     if (crop_.w || crop_.h) {
         outFrame->crop_top = crop_.y;
@@ -377,7 +377,7 @@ SinkClient::applyTransform(VideoFrame& frame_p)
         try {
             frame = HardwareAccel::transferToMainMemory(frame_p, AV_PIX_FMT_NV12);
         } catch (const std::runtime_error& e) {
-            JAMI_ERR("[Sink:%p] Transfert to hardware acceleration memory failed: %s",
+            SIP_CORE_ERR("[Sink:%p] Transfert to hardware acceleration memory failed: %s",
                      this,
                      e.what());
             return {};
@@ -421,7 +421,7 @@ SinkClient::update(Observable<std::shared_ptr<MediaFrame>>* /*obs*/,
     ++frameCount_;
     if (seconds > std::chrono::seconds(1)) {
         auto fps = frameCount_ / std::chrono::duration<double>(seconds).count();
-        JAMI_WARNING("Sink {}, {} FPS", id_, fps);
+        SIP_CORE_WARNING("Sink {}, {} FPS", id_, fps);
         frameCount_ = 0;
         lastFrameDebug_ = currentTime;
     }
@@ -469,20 +469,20 @@ SinkClient::setFrameSize(int width, int height)
     width_ = width;
     height_ = height;
     if (width > 0 and height > 0) {
-        JAMI_DBG("[Sink:%p] Started - size=%dx%d, mixer=%s",
+        SIP_CORE_DBG("[Sink:%p] Started - size=%dx%d, mixer=%s",
                  this,
                  width,
                  height,
                  mixer_ ? "Yes" : "No");
-        emitSignal<libjami::VideoSignal::DecodingStarted>(getId(), openedName(), width, height, mixer_);
+        emitSignal<libsip_core::VideoSignal::DecodingStarted>(getId(), openedName(), width, height, mixer_);
         started_ = true;
     } else if (started_) {
-        JAMI_DBG("[Sink:%p] Stopped - size=%dx%d, mixer=%s",
+        SIP_CORE_DBG("[Sink:%p] Stopped - size=%dx%d, mixer=%s",
                  this,
                  width,
                  height,
                  mixer_ ? "Yes" : "No");
-        emitSignal<libjami::VideoSignal::DecodingStopped>(getId(), openedName(), mixer_);
+        emitSignal<libsip_core::VideoSignal::DecodingStopped>(getId(), openedName(), mixer_);
         started_ = false;
     }
 }
@@ -490,7 +490,7 @@ SinkClient::setFrameSize(int width, int height)
 void
 SinkClient::setCrop(int x, int y, int w, int h)
 {
-    JAMI_DBG("[Sink:%p] Change crop to [%dx%d at (%d, %d)]", this, w, h, x, y);
+    SIP_CORE_DBG("[Sink:%p] Change crop to [%dx%d at (%d, %d)]", this, w, h, x, y);
     crop_.x = x;
     crop_.y = y;
     crop_.w = w;
@@ -498,4 +498,4 @@ SinkClient::setCrop(int x, int y, int w, int h)
 }
 
 } // namespace video
-} // namespace jami
+} // namespace sip_core

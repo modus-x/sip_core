@@ -28,7 +28,7 @@
 #include <pjsip_ua.h>
 #include <pjsip.h>
 
-namespace jami {
+namespace sip_core {
 
 using sip_utils::CONST_PJ_STR;
 
@@ -63,7 +63,7 @@ createMessageBody(pj_pool_t* pool,
     // split mime type to type and subtype
     sep = mimeType.find('/');
     if (std::string::npos == sep) {
-        JAMI_DBG("bad mime type: '%.*s'", (int) mimeType.size(), mimeType.data());
+        SIP_CORE_DBG("bad mime type: '%.*s'", (int) mimeType.size(), mimeType.data());
         throw im::InstantMessageException("invalid mime type");
     }
 
@@ -87,7 +87,7 @@ createMessageBody(pj_pool_t* pool,
         // split paramPair into arg and value by '='
         auto paramSplit = paramPair.find('=');
         if (std::string::npos == paramSplit) {
-            JAMI_DBG("bad parameter: '%.*s'", (int) paramPair.size(), paramPair.data());
+            SIP_CORE_DBG("bad parameter: '%.*s'", (int) paramPair.size(), paramPair.data());
             throw im::InstantMessageException("invalid parameter");
         }
 
@@ -127,7 +127,7 @@ im::fillPJSIPMessageBody(pjsip_tx_data& tdata, const std::map<std::string, std::
     for (const auto& pair : payloads) {
         auto part = pjsip_multipart_create_part(tdata.pool);
         if (not part) {
-            JAMI_ERR("pjsip_multipart_create_part failed: not enough memory");
+            SIP_CORE_ERR("pjsip_multipart_create_part failed: not enough memory");
             throw InstantMessageException("Internal SIP error");
         }
 
@@ -135,7 +135,7 @@ im::fillPJSIPMessageBody(pjsip_tx_data& tdata, const std::map<std::string, std::
 
         auto status = pjsip_multipart_add_part(tdata.pool, tdata.msg->body, part);
         if (status != PJ_SUCCESS) {
-            JAMI_ERR("pjsip_multipart_add_part failed: %s", sip_utils::sip_strerror(status).c_str());
+            SIP_CORE_ERR("pjsip_multipart_add_part failed: %s", sip_utils::sip_strerror(status).c_str());
             throw InstantMessageException("Internal SIP error");
         }
     }
@@ -145,7 +145,7 @@ void
 im::sendSipMessage(pjsip_inv_session* session, const std::map<std::string, std::string>& payloads)
 {
     if (payloads.empty()) {
-        JAMI_WARN("the payloads argument is empty; ignoring message");
+        SIP_CORE_WARN("the payloads argument is empty; ignoring message");
         return;
     }
 
@@ -159,7 +159,7 @@ im::sendSipMessage(pjsip_inv_session* session, const std::map<std::string, std::
         pjsip_tx_data* tdata = nullptr;
         auto status = pjsip_dlg_create_request(dialog, &msg_method, -1, &tdata);
         if (status != PJ_SUCCESS) {
-            JAMI_ERR("pjsip_dlg_create_request failed: %s", sip_utils::sip_strerror(status).c_str());
+            SIP_CORE_ERR("pjsip_dlg_create_request failed: %s", sip_utils::sip_strerror(status).c_str());
             throw InstantMessageException("Internal SIP error");
         }
 
@@ -167,7 +167,7 @@ im::sendSipMessage(pjsip_inv_session* session, const std::map<std::string, std::
 
         status = pjsip_dlg_send_request(dialog, tdata, -1, nullptr);
         if (status != PJ_SUCCESS) {
-            JAMI_ERR("pjsip_dlg_send_request failed: %s", sip_utils::sip_strerror(status).c_str());
+            SIP_CORE_ERR("pjsip_dlg_send_request failed: %s", sip_utils::sip_strerror(status).c_str());
             throw InstantMessageException("Internal SIP error");
         }
     }
@@ -212,7 +212,7 @@ im::parseSipMessage(const pjsip_msg* msg)
     std::map<std::string, std::string> ret;
 
     if (!msg->body) {
-        JAMI_WARN("message body is empty");
+        SIP_CORE_WARN("message body is empty");
         return ret;
     }
 
@@ -236,4 +236,4 @@ im::parseSipMessage(const pjsip_msg* msg)
     return ret;
 }
 
-} // namespace jami
+} // namespace sip_core

@@ -34,7 +34,7 @@
 #include "videomanager_interface.h"
 #endif
 
-#include "jami.h"
+#include "sip_core.h"
 #include "logger.h"
 #include "trace-tools.h"
 #include "tracepoint.h"
@@ -50,9 +50,9 @@
 #include <string>
 #include "scheduled_executor.h"
 
-namespace jami {
+namespace sip_core {
 
-using SignalHandlerMap = std::map<std::string, std::shared_ptr<libjami::CallbackWrapperBase>>;
+using SignalHandlerMap = std::map<std::string, std::shared_ptr<libsip_core::CallbackWrapperBase>>;
 extern SignalHandlerMap& getSignalHandlers();
 extern ScheduledExecutor eventScheduler;
 
@@ -77,30 +77,30 @@ template<typename Ts, typename... Args>
 void
 emitSignal(Args... args)
 {
-    jami_tracepoint_if_enabled(emit_signal, demangle<Ts>().c_str());
+    sip_core_tracepoint_if_enabled(emit_signal, demangle<Ts>().c_str());
 
     const auto& handlers = getSignalHandlers();
-    if (auto wrap = libjami::CallbackWrapper<typename Ts::cb_type>(handlers.at(Ts::name))) {
+    if (auto wrap = libsip_core::CallbackWrapper<typename Ts::cb_type>(handlers.at(Ts::name))) {
         try {
-            jami_tracepoint(emit_signal_begin_callback, wrap.file_, wrap.linum_);
+            sip_core_tracepoint(emit_signal_begin_callback, wrap.file_, wrap.linum_);
             auto cb = *wrap;
             runOnEventThread([callback = cb, ... arguments = std::forward<Args>(args)] { callback(arguments...); });
-            jami_tracepoint(emit_signal_end_callback);
+            sip_core_tracepoint(emit_signal_end_callback);
         } catch (std::exception& e) {
-            JAMI_ERR("Exception during emit signal %s:\n%s", Ts::name, e.what());
+            SIP_CORE_ERR("Exception during emit signal %s:\n%s", Ts::name, e.what());
         }
     }
 
-    jami_tracepoint(emit_signal_end);
+    sip_core_tracepoint(emit_signal_end);
 }
 #pragma GCC diagnostic pop
 
 template<typename Ts>
-std::pair<std::string, std::shared_ptr<libjami::CallbackWrapper<typename Ts::cb_type>>>
+std::pair<std::string, std::shared_ptr<libsip_core::CallbackWrapper<typename Ts::cb_type>>>
 exported_callback()
 {
     return std::make_pair((const std::string&) Ts::name,
-                          std::make_shared<libjami::CallbackWrapper<typename Ts::cb_type>>());
+                          std::make_shared<libsip_core::CallbackWrapper<typename Ts::cb_type>>());
 }
 
-} // namespace jami
+} // namespace sip_core

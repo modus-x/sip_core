@@ -53,7 +53,7 @@ av_frame_new_side_data_from_buf(AVFrame* frame, enum AVFrameSideDataType type, A
 #endif
 }
 
-namespace jami {
+namespace sip_core {
 namespace libav_utils {
 
 #if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(58, 9, 100)
@@ -257,7 +257,7 @@ fillWithBlack(AVFrame* frame)
                                   frame->width,
                                   frame->height);
     if (ret < 0) {
-        JAMI_ERR() << "Failed to blacken frame";
+        SIP_CORE_ERR() << "Failed to blacken frame";
     }
 }
 
@@ -270,8 +270,8 @@ fillWithSilence(AVFrame* frame)
                                      frame->channels,
                                      (AVSampleFormat) frame->format);
     if (ret < 0)
-        JAMI_ERR() << "Failed to fill frame with silence";
+        SIP_CORE_ERR() << "Failed to fill frame with silence";
 }
 
 } // namespace libav_utils
-} // namespace jami
+} // namespace sip_core

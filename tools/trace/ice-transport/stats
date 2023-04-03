@@ -29,7 +29,7 @@ def analyze_trace(path, tid):
     send_hist = []
     recv_hist = []
 
-    prefix = "jami:ice_transport_"
+    prefix = "sip_core:ice_transport_"
 
     def pkt_hist(hist, size):
 

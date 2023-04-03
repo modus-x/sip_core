@@ -24,7 +24,7 @@
 
 #include <ciso646> // fix windows compiler bug
 
-namespace jami {
+namespace sip_core {
 
 TelephoneTone::CountryId
 TelephoneTone::getCountryId(const std::string& countryName)
@@ -146,4 +146,4 @@ TelephoneTone::buildTones(unsigned int sampleRate)
                                  sampleRate);
 }
 
-} // namespace jami
+} // namespace sip_core

@@ -36,7 +36,7 @@ extern "C" {
 #include <unistd.h>
 #include <map>
 
-namespace jami {
+namespace sip_core {
 namespace video {
 
 using std::string;
@@ -57,18 +57,18 @@ VideoReceiveThread::VideoReceiveThread(const std::string& id,
             std::bind(&VideoReceiveThread::decodeFrame, this),
             std::bind(&VideoReceiveThread::cleanup, this))
 {
-    JAMI_DBG("[%p] Instance created", this);
+    SIP_CORE_DBG("[%p] Instance created", this);
 }
 
 VideoReceiveThread::~VideoReceiveThread()
 {
-    JAMI_DBG("[%p] Instance destroyed", this);
+    SIP_CORE_DBG("[%p] Instance destroyed", this);
 }
 
 void
 VideoReceiveThread::startLoop()
 {
-    JAMI_DBG("[%p] Starting receiver's loop", this);
+    SIP_CORE_DBG("[%p] Starting receiver's loop", this);
     loop_.start();
 }
 
@@ -77,10 +77,10 @@ VideoReceiveThread::stopLoop()
 {
     if (loop_.isStopping())
         return;
-    JAMI_DBG("[%p] Stopping receiver's loop and waiting for the thread to exit ...", this);
+    SIP_CORE_DBG("[%p] Stopping receiver's loop and waiting for the thread to exit ...", this);
     loop_.stop();
     loop_.join();
-    JAMI_DBG("[%p] Receiver's thread exited", this);
+    SIP_CORE_DBG("[%p] Receiver's thread exited", this);
 }
 
 // We do this setup here instead of the constructor because we don't want the
@@ -88,7 +88,7 @@ VideoReceiveThread::stopLoop()
 bool
 VideoReceiveThread::setup()
 {
-    JAMI_DBG("[%p] Setupping video receiver", this);
+    SIP_CORE_DBG("[%p] Setupping video receiver", this);
 
     videoDecoder_.reset(new MediaDecoder([this](const std::shared_ptr<MediaFrame>& frame) mutable {
         libav_utils::AVBufferPtr displayMatrix;
@@ -131,7 +131,7 @@ VideoReceiveThread::setup()
         args_.sdp_flags = "custom_io";
 
         if (stream_.str().empty()) {
-            JAMI_ERR("No SDP loaded");
+            SIP_CORE_ERR("No SDP loaded");
             return false;
         }
 
@@ -139,7 +139,7 @@ VideoReceiveThread::setup()
     }
 
     if (videoDecoder_->openInput(args_)) {
-        JAMI_ERR("Could not open input \"%s\"", args_.input.c_str());
+        SIP_CORE_ERR("Could not open input \"%s\"", args_.input.c_str());
         return false;
     }
 
@@ -153,7 +153,7 @@ VideoReceiveThread::setup()
 void
 VideoReceiveThread::cleanup()
 {
-    JAMI_DBG("[%p] Stopping receiver", this);
+    SIP_CORE_DBG("[%p] Stopping receiver", this);
 
     detach(sink_.get());
     sink_->stop();
@@ -196,15 +196,15 @@ VideoReceiveThread::decodeFrame()
 
     if (not isVideoConfigured_) {
         if (!configureVideoOutput()) {
-            JAMI_ERR("[%p] Failed to configure video output", this);
+            SIP_CORE_ERR("[%p] Failed to configure video output", this);
             return;
         } else {
-            JAMI_DBG("[%p] Decoder configured, starting decoding", this);
+            SIP_CORE_DBG("[%p] Decoder configured, starting decoding", this);
         }
     }
     auto status = videoDecoder_->decode();
     if (status == MediaDemuxer::Status::EndOfFile || status == MediaDemuxer::Status::ReadError) {
-        JAMI_ERR("[%p] Decoding error: %s", this, MediaDemuxer::getStatusStr(status));
+        SIP_CORE_ERR("[%p] Decoding error: %s", this, MediaDemuxer::getStatusStr(status));
     }
     if (status == MediaDemuxer::Status::FallBack) {
         if (keyFrameRequestCallback_)
@@ -217,15 +217,15 @@ VideoReceiveThread::configureVideoOutput()
 {
     assert(not isVideoConfigured_);
 
-    JAMI_DBG("[%p] Configuring video output", this);
+    SIP_CORE_DBG("[%p] Configuring video output", this);
 
     if (not loop_.isRunning()) {
-        JAMI_WARN("[%p] Can not configure video output, the loop is not running!", this);
+        SIP_CORE_WARN("[%p] Can not configure video output, the loop is not running!", this);
         return false;
     }
 
     if (videoDecoder_->setupVideo() < 0) {
-        JAMI_ERR("decoder IO startup failed");
+        SIP_CORE_ERR("decoder IO startup failed");
         stopLoop();
         return false;
     }
@@ -237,7 +237,7 @@ VideoReceiveThread::configureVideoOutput()
     }
 
     if (not sink_->start()) {
-        JAMI_ERR("RX: sink startup failed");
+        SIP_CORE_ERR("RX: sink startup failed");
         stopLoop();
         return false;
     }
@@ -254,7 +254,7 @@ VideoReceiveThread::configureVideoOutput()
 void
 VideoReceiveThread::stopSink()
 {
-    JAMI_DBG("[%p] Stopping sink", this);
+    SIP_CORE_DBG("[%p] Stopping sink", this);
 
     if (!loop_.isRunning())
         return;
@@ -266,7 +266,7 @@ VideoReceiveThread::stopSink()
 void
 VideoReceiveThread::startSink()
 {
-    JAMI_DBG("[%p] Starting sink", this);
+    SIP_CORE_DBG("[%p] Starting sink", this);
 
     if (!loop_.isRunning())
         return;
@@ -313,4 +313,4 @@ VideoReceiveThread::setRotation(int angle)
 }
 
 } // namespace video
-} // namespace jami
+} // namespace sip_core

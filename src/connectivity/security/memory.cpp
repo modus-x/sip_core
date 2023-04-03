@@ -27,7 +27,7 @@
 
 #include <algorithm>
 
-namespace jami {
+namespace sip_core {
 namespace secure {
 
 void
@@ -42,10 +42,10 @@ memzero(void* ptr, std::size_t length)
 }
 
 } // namespace secure
-} // namespace jami
+} // namespace sip_core
 
 extern "C" void
 ring_secure_memzero(void* ptr, size_t length)
 {
-    jami::secure::memzero(ptr, length);
+    sip_core::secure::memzero(ptr, length);
 }

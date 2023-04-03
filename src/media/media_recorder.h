@@ -40,7 +40,7 @@
 #include <condition_variable>
 #include <atomic>
 
-namespace jami {
+namespace sip_core {
 
 class MediaRecorder : public std::enable_shared_from_this<MediaRecorder>
 {
@@ -83,7 +83,7 @@ public:
      *
      * Uses default if either is empty.
      * Default title is "Conversation at %Y-%m-%d %H:%M:%S".
-     * Default description is "Recorded with Jami https://jami.net".
+     * Default description is "Recorded with sip_core https://sip_core.net".
      *
      * NOTE replaces %TIMESTAMP with time at start of recording
      */
@@ -164,4 +164,4 @@ private:
     std::list<std::shared_ptr<MediaFrame>> frameBuff_;
 };
 
-}; // namespace jami
+}; // namespace sip_core

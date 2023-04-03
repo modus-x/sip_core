@@ -37,7 +37,7 @@
 #include <atomic>
 #include <chrono>
 
-namespace jami {
+namespace sip_core {
 
 AlsaLayer::AlsaLayer(const AudioPreference& pref)
     : AudioLayer(pref)
@@ -91,7 +91,7 @@ AlsaLayer::openDevice(snd_pcm_t** pcm,
                       snd_pcm_stream_t stream,
                       AudioFormat& format)
 {
-    JAMI_DBG("Alsa: Opening %s device '%s'",
+    SIP_CORE_DBG("Alsa: Opening %s device '%s'",
              (stream == SND_PCM_STREAM_CAPTURE) ? "capture" : "playback",
              dev.c_str());
 
@@ -108,7 +108,7 @@ AlsaLayer::openDevice(snd_pcm_t** pcm,
     } while (err == -EBUSY and ++tries <= MAX_RETRIES);
 
     if (err < 0) {
-        JAMI_ERR("Alsa: couldn't open %s device %s : %s",
+        SIP_CORE_ERR("Alsa: couldn't open %s device %s : %s",
                  (stream == SND_PCM_STREAM_CAPTURE)    ? "capture"
                  : (stream == SND_PCM_STREAM_PLAYBACK) ? "playback"
                                                        : "ringtone",
@@ -140,7 +140,7 @@ AlsaLayer::startStream(AudioDeviceType type)
                                        SND_PCM_STREAM_PLAYBACK,
                                        audioFormat_);
         if (not is_playback_open_)
-            emitSignal<libjami::ConfigurationSignal::Error>(ALSA_PLAYBACK_DEVICE);
+            emitSignal<libsip_core::ConfigurationSignal::Error>(ALSA_PLAYBACK_DEVICE);
 
         hardwareFormatAvailable(getFormat());
         startPlaybackStream();
@@ -152,7 +152,7 @@ AlsaLayer::startStream(AudioDeviceType type)
                         buildDeviceTopo(dsnop ? PCM_DMIX : audioPlugin_, indexRing_),
                         SND_PCM_STREAM_PLAYBACK,
                         audioFormat_))
-            emitSignal<libjami::ConfigurationSignal::Error>(ALSA_PLAYBACK_DEVICE);
+            emitSignal<libsip_core::ConfigurationSignal::Error>(ALSA_PLAYBACK_DEVICE);
     }
 
     if (type == AudioDeviceType::CAPTURE and not is_capture_open_) {
@@ -162,7 +162,7 @@ AlsaLayer::startStream(AudioDeviceType type)
                                       audioInputFormat_);
 
         if (not is_capture_open_)
-            emitSignal<libjami::ConfigurationSignal::Error>(ALSA_CAPTURE_DEVICE);
+            emitSignal<libsip_core::ConfigurationSignal::Error>(ALSA_CAPTURE_DEVICE);
         prepareCaptureStream();
         startCaptureStream();
     }
@@ -225,7 +225,7 @@ AlsaLayer::stopThread()
     ({ \
         int err_code = call; \
         if (err_code < 0) \
-            JAMI_ERR(error ": %s", snd_strerror(err_code)); \
+            SIP_CORE_ERR(error ": %s", snd_strerror(err_code)); \
         err_code; \
     })
 
@@ -244,7 +244,7 @@ AlsaLayer::closeCaptureStream()
     if (is_capture_prepared_ and is_capture_running_)
         stopCaptureStream();
 
-    JAMI_DBG("Alsa: Closing capture stream");
+    SIP_CORE_DBG("Alsa: Closing capture stream");
     if (is_capture_open_
         && ALSA_CALL(snd_pcm_close(captureHandle_), "Couldn't close capture") >= 0) {
         is_capture_open_ = false;
@@ -277,7 +277,7 @@ AlsaLayer::closePlaybackStream()
         stopPlaybackStream();
 
     if (is_playback_open_) {
-        JAMI_DBG("Alsa: Closing playback stream");
+        SIP_CORE_DBG("Alsa: Closing playback stream");
         if (ALSA_CALL(snd_pcm_close(playbackHandle_), "Coulnd't close playback") >= 0)
             is_playback_open_ = false;
         playbackHandle_ = nullptr;
@@ -352,8 +352,8 @@ AlsaLayer::alsa_set_params(snd_pcm_t* pcm_handle, AudioFormat& format)
     snd_pcm_hw_params_get_buffer_size_max(hwparams, &buffer_size_max);
     snd_pcm_hw_params_get_period_size_min(hwparams, &period_size_min, nullptr);
     snd_pcm_hw_params_get_period_size_max(hwparams, &period_size_max, nullptr);
-    JAMI_DBG("Buffer size range from %lu to %lu", buffer_size_min, buffer_size_max);
-    JAMI_DBG("Period size range from %lu to %lu", period_size_min, period_size_max);
+    SIP_CORE_DBG("Buffer size range from %lu to %lu", buffer_size_min, buffer_size_max);
+    SIP_CORE_DBG("Period size range from %lu to %lu", period_size_min, period_size_max);
     buffer_size = buffer_size > buffer_size_max ? buffer_size_max : buffer_size;
     buffer_size = buffer_size < buffer_size_min ? buffer_size_min : buffer_size;
     period_size = period_size > period_size_max ? period_size_max : period_size;
@@ -371,17 +371,17 @@ AlsaLayer::alsa_set_params(snd_pcm_t* pcm_handle, AudioFormat& format)
     snd_pcm_hw_params_get_period_size(hwparams, &period_size, nullptr);
     snd_pcm_hw_params_get_rate(hwparams, &format.sample_rate, nullptr);
     snd_pcm_hw_params_get_channels(hwparams, &format.nb_channels);
-    JAMI_DBG("Was set period_size = %lu", period_size);
-    JAMI_DBG("Was set buffer_size = %lu", buffer_size);
+    SIP_CORE_DBG("Was set period_size = %lu", period_size);
+    SIP_CORE_DBG("Was set buffer_size = %lu", buffer_size);
 
     if (2 * period_size > buffer_size) {
-        JAMI_ERR("buffer to small, could not use");
+        SIP_CORE_ERR("buffer to small, could not use");
         return false;
     }
 
 #undef HW
 
-    JAMI_DBG("%s using format %s",
+    SIP_CORE_DBG("%s using format %s",
              (snd_pcm_stream(pcm_handle) == SND_PCM_STREAM_PLAYBACK) ? "playback" : "capture",
              format.toString().c_str());
 
@@ -440,12 +440,12 @@ AlsaLayer::write(const AudioFrame& buffer, snd_pcm_t* handle)
 
         if (ALSA_CALL(snd_pcm_status(handle, status), "Cannot get playback handle status") >= 0) {
             if (snd_pcm_status_get_state(status) == SND_PCM_STATE_SETUP) {
-                JAMI_ERR("Writing in state SND_PCM_STATE_SETUP, should be "
+                SIP_CORE_ERR("Writing in state SND_PCM_STATE_SETUP, should be "
                          "SND_PCM_STATE_PREPARED or SND_PCM_STATE_RUNNING");
                 int error = snd_pcm_prepare(handle);
 
                 if (error < 0) {
-                    JAMI_ERR("Failed to prepare handle: %s", snd_strerror(error));
+                    SIP_CORE_ERR("Failed to prepare handle: %s", snd_strerror(error));
                     stopPlaybackStream();
                 }
             }
@@ -455,7 +455,7 @@ AlsaLayer::write(const AudioFrame& buffer, snd_pcm_t* handle)
     }
 
     default:
-        JAMI_ERR("Unknown write error, dropping frames: %s", snd_strerror(err));
+        SIP_CORE_ERR("Unknown write error, dropping frames: %s", snd_strerror(err));
         stopPlaybackStream();
         break;
     }
@@ -491,12 +491,12 @@ AlsaLayer::read(unsigned frames)
                 startCaptureStream();
             }
 
-        JAMI_ERR("XRUN capture ignored (%s)", snd_strerror(err));
+        SIP_CORE_ERR("XRUN capture ignored (%s)", snd_strerror(err));
         break;
     }
 
     case -EPERM:
-        JAMI_ERR("Can't capture, EPERM (%s)", snd_strerror(err));
+        SIP_CORE_ERR("Can't capture, EPERM (%s)", snd_strerror(err));
         prepareCaptureStream();
         startCaptureStream();
         break;
@@ -523,7 +523,7 @@ safeUpdate(snd_pcm_t* handle, long& samples)
         samples = snd_pcm_recover(handle, samples, 0);
 
         if (samples < 0) {
-            JAMI_ERR("Got unrecoverable error from snd_pcm_avail_update: %s", snd_strerror(samples));
+            SIP_CORE_ERR("Got unrecoverable error from snd_pcm_avail_update: %s", snd_strerror(samples));
             return false;
         }
     }
@@ -583,12 +583,12 @@ AlsaLayer::getAudioDeviceIndexMap(bool getCapture) const
 
                 int err;
                 if ((err = snd_ctl_pcm_info(handle, pcminfo)) < 0) {
-                    JAMI_WARN("Cannot get info for %s %s: %s",
+                    SIP_CORE_WARN("Cannot get info for %s %s: %s",
                               getCapture ? "capture device" : "playback device",
                               name.c_str(),
                               snd_strerror(err));
                 } else {
-                    JAMI_DBG("card %i : %s [%s]",
+                    SIP_CORE_DBG("card %i : %s [%s]",
                              numCard,
                              snd_ctl_card_info_get_id(info),
                              snd_ctl_card_info_get_name(info));
@@ -655,7 +655,7 @@ AlsaLayer::getAudioDeviceName(int index, AudioDeviceType type) const
         return getCaptureDeviceList().at(index);
     default:
         // Should never happen
-        JAMI_ERR("Unexpected type");
+        SIP_CORE_ERR("Unexpected type");
         return "";
     }
 }
@@ -670,7 +670,7 @@ AlsaLayer::capture()
 
     int toGetFrames = snd_pcm_avail_update(captureHandle_);
     if (toGetFrames < 0)
-        JAMI_ERR("Audio: Mic error: %s", snd_strerror(toGetFrames));
+        SIP_CORE_ERR("Audio: Mic error: %s", snd_strerror(toGetFrames));
     if (toGetFrames <= 0)
         return;
 
@@ -679,7 +679,7 @@ AlsaLayer::capture()
     if (auto r = read(toGetFrames)) {
         putRecorded(std::move(r));
     } else
-        JAMI_ERR("ALSA MIC : Couldn't read!");
+        SIP_CORE_ERR("ALSA MIC : Couldn't read!");
 }
 
 void
@@ -735,4 +735,4 @@ AlsaLayer::updatePreference(AudioPreference& preference, int index, AudioDeviceT
     }
 }
 
-} // namespace jami
+} // namespace sip_core

@@ -28,7 +28,7 @@
 #include <string>
 #include <sstream>
 
-namespace jami {
+namespace sip_core {
 
 /*
  * SystemCodecInfo
@@ -89,13 +89,13 @@ SystemAudioCodecInfo::~SystemAudioCodecInfo() {}
 std::map<std::string, std::string>
 SystemAudioCodecInfo::getCodecSpecifications() const
 {
-    return {{libjami::Account::ConfProperties::CodecInfo::NAME, longName},
-            {libjami::Account::ConfProperties::CodecInfo::TYPE,
+    return {{libsip_core::Account::ConfProperties::CodecInfo::NAME, longName},
+            {libsip_core::Account::ConfProperties::CodecInfo::TYPE,
              (mediaType & MEDIA_AUDIO ? "AUDIO" : "VIDEO")},
-            {libjami::Account::ConfProperties::CodecInfo::BITRATE, std::to_string(bitrate)},
-            {libjami::Account::ConfProperties::CodecInfo::SAMPLE_RATE,
+            {libsip_core::Account::ConfProperties::CodecInfo::BITRATE, std::to_string(bitrate)},
+            {libsip_core::Account::ConfProperties::CodecInfo::SAMPLE_RATE,
              std::to_string(audioformat.sample_rate)},
-            {libjami::Account::ConfProperties::CodecInfo::CHANNEL_NUMBER,
+            {libsip_core::Account::ConfProperties::CodecInfo::CHANNEL_NUMBER,
              std::to_string(audioformat.nb_channels)}};
 }
 
@@ -135,13 +135,13 @@ std::map<std::string, std::string>
 SystemVideoCodecInfo::getCodecSpecifications() const
 {
     return {
-        {libjami::Account::ConfProperties::CodecInfo::NAME, longName},
-        {libjami::Account::ConfProperties::CodecInfo::TYPE,
+        {libsip_core::Account::ConfProperties::CodecInfo::NAME, longName},
+        {libsip_core::Account::ConfProperties::CodecInfo::TYPE,
          (mediaType & MEDIA_AUDIO ? "AUDIO" : "VIDEO")},
-        {libjami::Account::ConfProperties::CodecInfo::BITRATE, std::to_string(bitrate)},
-        {libjami::Account::ConfProperties::CodecInfo::FRAME_RATE, std::to_string(frameRate)},
-        {libjami::Account::ConfProperties::CodecInfo::MIN_BITRATE, std::to_string(minBitrate)},
-        {libjami::Account::ConfProperties::CodecInfo::MAX_BITRATE, std::to_string(maxBitrate)},
+        {libsip_core::Account::ConfProperties::CodecInfo::BITRATE, std::to_string(bitrate)},
+        {libsip_core::Account::ConfProperties::CodecInfo::FRAME_RATE, std::to_string(frameRate)},
+        {libsip_core::Account::ConfProperties::CodecInfo::MIN_BITRATE, std::to_string(minBitrate)},
+        {libsip_core::Account::ConfProperties::CodecInfo::MAX_BITRATE, std::to_string(maxBitrate)},
     };
 }
 
@@ -177,24 +177,24 @@ AccountAudioCodecInfo::AccountAudioCodecInfo(const SystemAudioCodecInfo& sysCode
 std::map<std::string, std::string>
 AccountAudioCodecInfo::getCodecSpecifications() const
 {
-    return {{libjami::Account::ConfProperties::CodecInfo::NAME, systemCodecInfo.longName},
-            {libjami::Account::ConfProperties::CodecInfo::TYPE,
+    return {{libsip_core::Account::ConfProperties::CodecInfo::NAME, systemCodecInfo.longName},
+            {libsip_core::Account::ConfProperties::CodecInfo::TYPE,
              (systemCodecInfo.mediaType & MEDIA_AUDIO ? "AUDIO" : "VIDEO")},
-            {libjami::Account::ConfProperties::CodecInfo::BITRATE, std::to_string(bitrate)},
-            {libjami::Account::ConfProperties::CodecInfo::SAMPLE_RATE,
+            {libsip_core::Account::ConfProperties::CodecInfo::BITRATE, std::to_string(bitrate)},
+            {libsip_core::Account::ConfProperties::CodecInfo::SAMPLE_RATE,
              std::to_string(audioformat.sample_rate)},
-            {libjami::Account::ConfProperties::CodecInfo::CHANNEL_NUMBER,
+            {libsip_core::Account::ConfProperties::CodecInfo::CHANNEL_NUMBER,
              std::to_string(audioformat.nb_channels)}};
 }
 
 void
 AccountAudioCodecInfo::setCodecSpecifications(const std::map<std::string, std::string>& details)
 {
-    decltype(bitrate) tmp_bitrate = jami::stoi(
-        details.at(libjami::Account::ConfProperties::CodecInfo::BITRATE));
+    decltype(bitrate) tmp_bitrate = sip_core::stoi(
+        details.at(libsip_core::Account::ConfProperties::CodecInfo::BITRATE));
     decltype(audioformat) tmp_audioformat = audioformat;
-    tmp_audioformat.sample_rate = jami::stoi(
-        details.at(libjami::Account::ConfProperties::CodecInfo::SAMPLE_RATE));
+    tmp_audioformat.sample_rate = sip_core::stoi(
+        details.at(libsip_core::Account::ConfProperties::CodecInfo::SAMPLE_RATE));
 
     // copy back if no exception was raised
     bitrate = tmp_bitrate;
@@ -216,21 +216,21 @@ AccountVideoCodecInfo::AccountVideoCodecInfo(const SystemVideoCodecInfo& sysCode
 std::map<std::string, std::string>
 AccountVideoCodecInfo::getCodecSpecifications() const
 {
-    return {{libjami::Account::ConfProperties::CodecInfo::NAME, systemCodecInfo.longName},
-            {libjami::Account::ConfProperties::CodecInfo::TYPE,
+    return {{libsip_core::Account::ConfProperties::CodecInfo::NAME, systemCodecInfo.longName},
+            {libsip_core::Account::ConfProperties::CodecInfo::TYPE,
              (systemCodecInfo.mediaType & MEDIA_AUDIO ? "AUDIO" : "VIDEO")},
-            {libjami::Account::ConfProperties::CodecInfo::BITRATE, std::to_string(bitrate)},
-            {libjami::Account::ConfProperties::CodecInfo::MAX_BITRATE,
+            {libsip_core::Account::ConfProperties::CodecInfo::BITRATE, std::to_string(bitrate)},
+            {libsip_core::Account::ConfProperties::CodecInfo::MAX_BITRATE,
              std::to_string(systemCodecInfo.maxBitrate)},
-            {libjami::Account::ConfProperties::CodecInfo::MIN_BITRATE,
+            {libsip_core::Account::ConfProperties::CodecInfo::MIN_BITRATE,
              std::to_string(systemCodecInfo.minBitrate)},
-            {libjami::Account::ConfProperties::CodecInfo::QUALITY, std::to_string(quality)},
-            {libjami::Account::ConfProperties::CodecInfo::MAX_QUALITY,
+            {libsip_core::Account::ConfProperties::CodecInfo::QUALITY, std::to_string(quality)},
+            {libsip_core::Account::ConfProperties::CodecInfo::MAX_QUALITY,
              std::to_string(systemCodecInfo.maxQuality)},
-            {libjami::Account::ConfProperties::CodecInfo::MIN_QUALITY,
+            {libsip_core::Account::ConfProperties::CodecInfo::MIN_QUALITY,
              std::to_string(systemCodecInfo.minQuality)},
-            {libjami::Account::ConfProperties::CodecInfo::FRAME_RATE, std::to_string(frameRate)},
-            {libjami::Account::ConfProperties::CodecInfo::AUTO_QUALITY_ENABLED,
+            {libsip_core::Account::ConfProperties::CodecInfo::FRAME_RATE, std::to_string(frameRate)},
+            {libsip_core::Account::ConfProperties::CodecInfo::AUTO_QUALITY_ENABLED,
              bool_to_str(isAutoQualityEnabled)}};
 }
 
@@ -239,19 +239,19 @@ AccountVideoCodecInfo::setCodecSpecifications(const std::map<std::string, std::s
 {
     auto copy = *this;
 
-    auto it = details.find(libjami::Account::ConfProperties::CodecInfo::BITRATE);
+    auto it = details.find(libsip_core::Account::ConfProperties::CodecInfo::BITRATE);
     if (it != details.end())
-        copy.bitrate = jami::stoi(it->second);
+        copy.bitrate = sip_core::stoi(it->second);
 
-    it = details.find(libjami::Account::ConfProperties::CodecInfo::FRAME_RATE);
+    it = details.find(libsip_core::Account::ConfProperties::CodecInfo::FRAME_RATE);
     if (it != details.end())
-        copy.frameRate = jami::stoi(it->second);
+        copy.frameRate = sip_core::stoi(it->second);
 
-    it = details.find(libjami::Account::ConfProperties::CodecInfo::QUALITY);
+    it = details.find(libsip_core::Account::ConfProperties::CodecInfo::QUALITY);
     if (it != details.end())
-        copy.quality = jami::stoi(it->second);
+        copy.quality = sip_core::stoi(it->second);
 
-    it = details.find(libjami::Account::ConfProperties::CodecInfo::AUTO_QUALITY_ENABLED);
+    it = details.find(libsip_core::Account::ConfProperties::CodecInfo::AUTO_QUALITY_ENABLED);
     if (it != details.end())
         copy.isAutoQualityEnabled = (it->second == TRUE_STR) ? true : false;
 
@@ -259,4 +259,4 @@ AccountVideoCodecInfo::setCodecSpecifications(const std::map<std::string, std::s
     *this = std::move(copy);
 }
 
-} // namespace jami
+} // namespace sip_core

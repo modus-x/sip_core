@@ -28,7 +28,7 @@
 #include <vector>
 #include <memory>
 
-namespace jami {
+namespace sip_core {
 
 class SystemCodecContainer;
 
@@ -65,6 +65,6 @@ private:
     void checkInstalledCodecs();
 };
 
-} // namespace jami
+} // namespace sip_core
 
 #endif // SYSTEM_CODEC_CONTAINER

@@ -27,7 +27,7 @@
 #include <memory>
 #include "noncopyable.h"
 
-namespace jami {
+namespace sip_core {
 
 class AudioBuffer;
 
@@ -51,6 +51,6 @@ private:
     std::vector<SpeexStatePtr> dspStates_;
 };
 
-} // namespace jami
+} // namespace sip_core
 
 #endif // DSP_H_

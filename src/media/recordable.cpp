@@ -27,7 +27,7 @@
 
 #include <iomanip>
 
-namespace jami {
+namespace sip_core {
 
 Recordable::Recordable()
 {
@@ -50,7 +50,7 @@ bool
 Recordable::toggleRecording()
 {
     if (!recorder_) {
-        JAMI_ERR("couldn't toggle recording, non existent recorder");
+        SIP_CORE_ERR("couldn't toggle recording, non existent recorder");
         return false;
     }
 
@@ -79,13 +79,13 @@ Recordable::startRecording(const std::string& path)
 {
     std::lock_guard<std::mutex> lk {apiMutex_};
     if (!recorder_) {
-        JAMI_ERR("couldn't start recording, non existent recorder");
+        SIP_CORE_ERR("couldn't start recording, non existent recorder");
         return false;
     }
 
     if (!recording_) {
         if (path.empty()) {
-            JAMI_ERR("couldn't start recording, path is empty");
+            SIP_CORE_ERR("couldn't start recording, path is empty");
             return false;
         }
 
@@ -103,12 +103,12 @@ Recordable::stopRecording()
 {
     std::lock_guard<std::mutex> lk {apiMutex_};
     if (!recorder_) {
-        JAMI_WARN("couldn't stop recording, non existent recorder");
+        SIP_CORE_WARN("couldn't stop recording, non existent recorder");
         return;
     }
 
     if (not recording_) {
-        JAMI_WARN("couldn't stop non-running recording");
+        SIP_CORE_WARN("couldn't stop non-running recording");
         return;
     }
 
@@ -124,4 +124,4 @@ Recordable::isAudioOnly() const
     return isAudioOnly_;
 }
 
-} // namespace jami
+} // namespace sip_core

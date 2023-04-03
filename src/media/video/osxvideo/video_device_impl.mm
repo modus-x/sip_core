@@ -33,7 +33,7 @@
 
 #import <AVFoundation/AVFoundation.h>
 
-namespace jami { namespace video {
+namespace sip_core { namespace video {
 
 class VideoDeviceImpl {
     public:
@@ -224,4 +224,4 @@ VideoDevice::getRateList(const std::string& channel, VideoSize size) const
 VideoDevice::~VideoDevice()
 {}
 
-}} // namespace jami::video
+}} // namespace sip_core::video

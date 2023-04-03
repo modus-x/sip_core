@@ -37,7 +37,7 @@
  * @brief DMTF Generator Exception
  */
 
-namespace jami {
+namespace sip_core {
 
 class DTMFException : public std::runtime_error
 {
@@ -118,6 +118,6 @@ private:
     AudioSample* fillToneBuffer(int index);
 };
 
-} // namespace jami
+} // namespace sip_core
 
 #endif // DTMFGENERATOR_H

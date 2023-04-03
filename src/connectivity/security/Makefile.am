@@ -6,4 +6,4 @@ libsecurity_la_SOURCES = \
 		./connectivity/security/memory.cpp \
 		./connectivity/security/memory.h
 
-libjami_la_LIBADD += libsecurity.la
+libsip_core_la_LIBADD += libsecurity.la

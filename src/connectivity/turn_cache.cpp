@@ -25,7 +25,7 @@
 #include "manager.h"
 #include "turn_cache.h"
 
-namespace jami {
+namespace sip_core {
 
 TurnCache::TurnCache(const std::string& accountId,
                      const std::string& cachePath,
@@ -112,7 +112,7 @@ TurnCache::refresh(const asio::error_code& ec)
         isRefreshing_ = false;
         return;
     }
-    JAMI_INFO("[Account %s] Refresh cache for TURN server resolution", accountId_.c_str());
+    SIP_CORE_INFO("[Account %s] Refresh cache for TURN server resolution", accountId_.c_str());
     // Retrieve old cached value if available.
     // This means that we directly get the correct value when launching the application on the
     // same network
@@ -144,7 +144,7 @@ TurnCache::refresh(const asio::error_code& ec)
     auto turnV4 = IpAddr {server, AF_INET};
     {
         if (turnV4) {
-            // Cache value to avoid a delay when starting up Jami
+            // Cache value to avoid a delay when starting up sip_core
             std::ofstream turnV4File(pathV4);
             turnV4File << turnV4.toString();
         } else
@@ -155,7 +155,7 @@ TurnCache::refresh(const asio::error_code& ec)
     auto turnV6 = IpAddr {server, AF_INET6};
     {
         if (turnV6) {
-            // Cache value to avoid a delay when starting up Jami
+            // Cache value to avoid a delay when starting up sip_core
             std::ofstream turnV6File(pathV6);
             turnV6File << turnV6.toString();
         } else
@@ -191,7 +191,7 @@ TurnCache::testTurn(IpAddr server)
                 }
             });
     } catch (const std::exception& e) {
-        JAMI_ERROR("TurnTransport creation error: {}", e.what());
+        SIP_CORE_ERROR("TurnTransport creation error: {}", e.what());
     }
 }
 
@@ -204,10 +204,10 @@ TurnCache::onConnected(const asio::error_code& ec, bool ok, IpAddr server)
     std::lock_guard<std::mutex> lk(cachedTurnMutex_);
     auto& cacheTurn = server.isIpv4() ? cacheTurnV4_ : cacheTurnV6_;
     if (!ok) {
-        JAMI_ERROR("Connection to {:s} failed - reset", server.toString());
+        SIP_CORE_ERROR("Connection to {:s} failed - reset", server.toString());
         cacheTurn.reset();
     } else {
-        JAMI_DEBUG("Connection to {:s} ready", server.toString());
+        SIP_CORE_DEBUG("Connection to {:s} ready", server.toString());
         cacheTurn = std::make_unique<IpAddr>(server);
     }
     refreshTurnDelay(!cacheTurnV6_ && !cacheTurnV4_);
@@ -222,7 +222,7 @@ TurnCache::refreshTurnDelay(bool scheduleNext)
     isRefreshing_ = false;
     if (scheduleNext) {
         std::lock_guard<std::mutex> lock(shutdownMtx_);
-        JAMI_WARNING("[Account {:s}] Cache for TURN resolution failed.", accountId_);
+        SIP_CORE_WARNING("[Account {:s}] Cache for TURN resolution failed.", accountId_);
         if (refreshTimer_) {
             refreshTimer_->expires_at(std::chrono::steady_clock::now() + turnRefreshDelay_);
             refreshTimer_->async_wait(std::bind(&TurnCache::refresh, shared_from_this(), std::placeholders::_1));
@@ -230,9 +230,9 @@ TurnCache::refreshTurnDelay(bool scheduleNext)
         if (turnRefreshDelay_ < std::chrono::minutes(30))
             turnRefreshDelay_ *= 2;
     } else {
-        JAMI_DEBUG("[Account {:s}] Cache refreshed for TURN resolution", accountId_);
+        SIP_CORE_DEBUG("[Account {:s}] Cache refreshed for TURN resolution", accountId_);
         turnRefreshDelay_ = std::chrono::seconds(10);
     }
 }
 
-} // namespace jami
+} // namespace sip_core

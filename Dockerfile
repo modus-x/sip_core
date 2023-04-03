@@ -1,4 +1,4 @@
-FROM ubuntu:22.04 AS jami-daemon
+FROM ubuntu:22.04 AS sip_core-daemon
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG config_args

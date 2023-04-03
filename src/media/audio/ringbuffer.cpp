@@ -34,7 +34,7 @@
 #include <cstring>
 #include <algorithm>
 
-namespace jami {
+namespace sip_core {
 
 // corresponds to 160 ms (about 5 rtp packets)
 static const size_t MIN_BUFFER_SIZE = 1024;
@@ -52,12 +52,12 @@ RingBuffer::RingBuffer(const std::string& rbuf_id, size_t /*size*/, AudioFormat 
         putToBuffer(std::move(frame));
     })
 {
-    JAMI_INFO("Create new RingBuffer %s", id.c_str());
+    SIP_CORE_INFO("Create new RingBuffer %s", id.c_str());
 }
 
 RingBuffer::~RingBuffer()
 {
-    JAMI_INFO("Destroy RingBuffer %s", id.c_str());
+    SIP_CORE_INFO("Destroy RingBuffer %s", id.c_str());
 }
 
 void
@@ -95,7 +95,7 @@ RingBuffer::getLength(const std::string& call_id) const
 void
 RingBuffer::debug()
 {
-    JAMI_DBG("Start=%zu; End=%zu; BufferSize=%zu", getSmallestReadOffset(), endPos_, buffer_.size());
+    SIP_CORE_DBG("Start=%zu; End=%zu; BufferSize=%zu", getSmallestReadOffset(), endPos_, buffer_.size());
 }
 
 size_t
@@ -124,7 +124,7 @@ RingBuffer::storeReadOffset(size_t offset, const std::string& call_id)
     if (iter != readoffsets_.end())
         iter->second.offset = offset;
     else
-        JAMI_ERR("RingBuffer::storeReadOffset() failed: unknown call '%s'", call_id.c_str());
+        SIP_CORE_ERR("RingBuffer::storeReadOffset() failed: unknown call '%s'", call_id.c_str());
 }
 
 void
@@ -192,7 +192,7 @@ RingBuffer::putToBuffer(std::shared_ptr<AudioFrame>&& data)
         ++rmsFrameCount_;
         rmsLevel_ += newBuf->calcRMS();
         if (rmsFrameCount_ == RMS_SIGNAL_INTERVAL) {
-            emitSignal<libjami::AudioSignal::AudioMeter>(id, rmsLevel_ / RMS_SIGNAL_INTERVAL);
+            emitSignal<libsip_core::AudioSignal::AudioMeter>(id, rmsLevel_ / RMS_SIGNAL_INTERVAL);
             rmsLevel_ = 0;
             rmsFrameCount_ = 0;
         }
@@ -306,4 +306,4 @@ RingBuffer::discard(size_t toDiscard)
     return toDiscard;
 }
 
-} // namespace jami
+} // namespace sip_core

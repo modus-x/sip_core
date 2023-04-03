@@ -47,7 +47,7 @@ using socklen_t = int;
 #include <condition_variable>
 #include <functional>
 
-namespace jami {
+namespace sip_core {
 
 class SRTPProtoContext;
 
@@ -241,4 +241,4 @@ private:
     TS_Frame svgTS = {};
 };
 
-} // namespace jami
+} // namespace sip_core

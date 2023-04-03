@@ -34,7 +34,7 @@
 #include <thread>
 #include <vector>
 
-namespace jami {
+namespace sip_core {
 namespace video {
 
 using std::vector;
@@ -80,4 +80,4 @@ VideoDeviceMonitor::VideoDeviceMonitor()
 VideoDeviceMonitor::~VideoDeviceMonitor() {}
 
 } // namespace video
-} // namespace jami
+} // namespace sip_core

@@ -21,7 +21,7 @@
 
 #pragma once
 
-#include "jami/def.h"
+#include "sip_core/def.h"
 
 //#define __STDC_FORMAT_MACROS 1
 #include <fmt/core.h>
@@ -66,7 +66,7 @@
 #define PRINTF_ATTRIBUTE(a, b)
 #endif
 
-namespace jami {
+namespace sip_core {
 
 /**
  * Thread-safe function to print the stringified contents of errno
@@ -103,22 +103,22 @@ public:
         return *this;
     }
 
-    LIBJAMI_PUBLIC
+    LIBSIP_CORE_PUBLIC
     static void write(int level, const char* file, int line, std::string&& message);
 
     ///
     /// Printf fashion logging.
     ///
-    /// Example: JAMI_DBG("%s", "Hello, World!")
+    /// Example: SIP_CORE_DBG("%s", "Hello, World!")
     ///
-    LIBJAMI_PUBLIC
+    LIBSIP_CORE_PUBLIC
     static void log(int level, const char* file, int line, bool linefeed, const char* const fmt, ...)
         PRINTF_ATTRIBUTE(5, 6);
 
     ///
     /// Printf fashion logging (using va_list parameters)
     ///
-    LIBJAMI_PUBLIC
+    LIBSIP_CORE_PUBLIC
     static void vlog(int level, const char* file, int line, bool linefeed, const char* fmt, va_list);
 
     static void setConsoleLog(bool enable);
@@ -134,7 +134,7 @@ public:
     ///
     /// Stream fashion logging.
     ///
-    /// Example: JAMI_DBG() << "Hello, World!"
+    /// Example: SIP_CORE_DBG() << "Hello, World!"
     ///
     static Logger log(int level, const char* file, int line, bool linefeed)
     {
@@ -171,18 +171,18 @@ void error(const char* file, int line, S&& format, Args&&... args) {
 }
 
 // We need to use macros for contextual information
-#define JAMI_INFO(...) ::jami::Logger::log(LOG_INFO, __FILE__, __LINE__, true, ##__VA_ARGS__)
-#define JAMI_DBG(...)  ::jami::Logger::log(LOG_DEBUG, __FILE__, __LINE__, true, ##__VA_ARGS__)
-#define JAMI_WARN(...) ::jami::Logger::log(LOG_WARNING, __FILE__, __LINE__, true, ##__VA_ARGS__)
-#define JAMI_ERR(...)  ::jami::Logger::log(LOG_ERR, __FILE__, __LINE__, true, ##__VA_ARGS__)
+#define SIP_CORE_INFO(...) ::sip_core::Logger::log(LOG_INFO, __FILE__, __LINE__, true, ##__VA_ARGS__)
+#define SIP_CORE_DBG(...)  ::sip_core::Logger::log(LOG_DEBUG, __FILE__, __LINE__, true, ##__VA_ARGS__)
+#define SIP_CORE_WARN(...) ::sip_core::Logger::log(LOG_WARNING, __FILE__, __LINE__, true, ##__VA_ARGS__)
+#define SIP_CORE_ERR(...)  ::sip_core::Logger::log(LOG_ERR, __FILE__, __LINE__, true, ##__VA_ARGS__)
 
-#define JAMI_XINFO(...) ::jami::Logger::log(LOG_INFO, __FILE__, __LINE__, false, ##__VA_ARGS__)
-#define JAMI_XDBG(...)  ::jami::Logger::log(LOG_DEBUG, __FILE__, __LINE__, false, ##__VA_ARGS__)
-#define JAMI_XWARN(...) ::jami::Logger::log(LOG_WARNING, __FILE__, __LINE__, false, ##__VA_ARGS__)
-#define JAMI_XERR(...)  ::jami::Logger::log(LOG_ERR, __FILE__, __LINE__, false, ##__VA_ARGS__)
+#define SIP_CORE_XINFO(...) ::sip_core::Logger::log(LOG_INFO, __FILE__, __LINE__, false, ##__VA_ARGS__)
+#define SIP_CORE_XDBG(...)  ::sip_core::Logger::log(LOG_DEBUG, __FILE__, __LINE__, false, ##__VA_ARGS__)
+#define SIP_CORE_XWARN(...) ::sip_core::Logger::log(LOG_WARNING, __FILE__, __LINE__, false, ##__VA_ARGS__)
+#define SIP_CORE_XERR(...)  ::sip_core::Logger::log(LOG_ERR, __FILE__, __LINE__, false, ##__VA_ARGS__)
 
-#define JAMI_DEBUG(formatstr, ...) if(::jami::Logger::debugEnabled()) { ::jami::log::dbg(__FILE__, __LINE__, FMT_STRING(formatstr), ##__VA_ARGS__); }
-#define JAMI_WARNING(formatstr, ...) ::jami::log::warn(__FILE__, __LINE__, FMT_STRING(formatstr), ##__VA_ARGS__)
-#define JAMI_ERROR(formatstr, ...) ::jami::log::error(__FILE__, __LINE__, FMT_STRING(formatstr), ##__VA_ARGS__)
+#define SIP_CORE_DEBUG(formatstr, ...) if(::sip_core::Logger::debugEnabled()) { ::sip_core::log::dbg(__FILE__, __LINE__, FMT_STRING(formatstr), ##__VA_ARGS__); }
+#define SIP_CORE_WARNING(formatstr, ...) ::sip_core::log::warn(__FILE__, __LINE__, FMT_STRING(formatstr), ##__VA_ARGS__)
+#define SIP_CORE_ERROR(formatstr, ...) ::sip_core::log::error(__FILE__, __LINE__, FMT_STRING(formatstr), ##__VA_ARGS__)
 
-} // namespace jami
+} // namespace sip_core

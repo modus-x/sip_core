@@ -21,14 +21,14 @@
 #include "filter_transpose.h"
 #include "logger.h"
 
-namespace jami {
+namespace sip_core {
 namespace video {
 
 std::unique_ptr<MediaFilter>
 getTransposeFilter(
     int rotation, std::string inputName, int width, int height, int format, bool rescale)
 {
-    JAMI_WARN("Rotation set to %d", rotation);
+    SIP_CORE_WARN("Rotation set to %d", rotation);
     if (rotation == 0) {
         return {};
     }
@@ -76,11 +76,11 @@ getTransposeFilter(
     std::unique_ptr<MediaFilter> filter(new MediaFilter);
     auto ret = filter->initialize(ss.str(), msv);
     if (ret < 0) {
-        JAMI_ERR() << "filter init fail";
+        SIP_CORE_ERR() << "filter init fail";
         return {};
     }
     return filter;
 }
 
 } // namespace video
-} // namespace jami
+} // namespace sip_core

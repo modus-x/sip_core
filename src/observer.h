@@ -35,7 +35,7 @@
 #include "logger.h"
 #endif
 
-namespace jami {
+namespace sip_core {
 
 template<typename T>
 class Observer;
@@ -130,7 +130,7 @@ protected:
                     so->update(this, data);
                 } catch (std::exception& e) {
 #ifndef __DEBUG__
-                    JAMI_ERR() << e.what();
+                    SIP_CORE_ERR() << e.what();
 #endif
                 }
             } else {
@@ -243,4 +243,4 @@ private:
     Observable<T1>* obs_ = nullptr;
 };
 
-}; // namespace jami
+}; // namespace sip_core

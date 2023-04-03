@@ -39,7 +39,7 @@ struct pjsip_msg;
 struct pjsip_tx_data;
 }
 
-namespace jami {
+namespace sip_core {
 namespace im {
 
 struct InstantMessageException : std::runtime_error
@@ -82,4 +82,4 @@ std::map<std::string, std::string> parseSipMessage(const pjsip_msg* msg);
 void fillPJSIPMessageBody(pjsip_tx_data& tdata, const std::map<std::string, std::string>& payloads);
 
 } // namespace im
-} // namespace jami
+} // namespace sip_core

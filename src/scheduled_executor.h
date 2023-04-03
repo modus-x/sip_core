@@ -35,7 +35,7 @@
 #include "tracepoint.h"
 #include "trace-tools.h"
 
-namespace jami {
+namespace sip_core {
 
 extern std::atomic<uint64_t> task_cookie;
 
@@ -95,12 +95,12 @@ public:
     void run(const char* executor_name)
     {
         if (job_.fn) {
-            jami_tracepoint(scheduled_executor_task_begin,
+            sip_core_tracepoint(scheduled_executor_task_begin,
                             executor_name,
                             job_.filename, job_.linum,
                             cookie_);
             job_.fn();
-            jami_tracepoint(scheduled_executor_task_end,
+            sip_core_tracepoint(scheduled_executor_task_end,
                             cookie_);
         }
     }
@@ -135,12 +135,12 @@ public:
         std::lock_guard<std::mutex> l(lock_);
 
         if (not cancel_.load() and job_.fn) {
-            jami_tracepoint(scheduled_executor_task_begin,
+            sip_core_tracepoint(scheduled_executor_task_begin,
                             executor_name,
                             job_.filename, job_.linum,
                             cookie_);
             cont = job_.fn();
-            jami_tracepoint(scheduled_executor_task_end,
+            sip_core_tracepoint(scheduled_executor_task_end,
                             cookie_);
 
         } else {
@@ -236,4 +236,4 @@ private:
     std::thread thread_;
 };
 
-} // namespace jami
+} // namespace sip_core

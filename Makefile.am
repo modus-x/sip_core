@@ -6,7 +6,7 @@ SOURCES=
 
 ACLOCAL_AMFLAGS = -I m4
 
-SUBDIRS = src man doc
+SUBDIRS = src doc
 
 EXTRA_DIST = m4/libtool.m4 \
 			 m4/lt~obsolete.m4 \
@@ -17,15 +17,15 @@ EXTRA_DIST = m4/libtool.m4 \
 			 contrib/src
 
 pkgconfigdir = $(libdir)/pkgconfig
-pkgconfig_DATA = jami.pc
+pkgconfig_DATA = sip_core.pc
 
 coverage-html:
-	$(AM_V_at)lcov --no-external --capture --initial --directory $(top_builddir) --output-file jami-coverage-base.info
-	$(AM_V_at)lcov --no-external --capture --directory $(top_builddir) --output-file jami-coverage-tests.info
-	$(AM_V_at)lcov --add-tracefile jami-coverage-base.info --add-tracefile jami-coverage-tests.info --output-file jami-coverage.info
-	$(AM_V_at)lcov --remove jami-coverage.info "$(abs_top_builddir)/contrib/*" --output-file jami-coverage-filtered.info
+	$(AM_V_at)lcov --no-external --capture --initial --directory $(top_builddir) --output-file sip_core-coverage-base.info
+	$(AM_V_at)lcov --no-external --capture --directory $(top_builddir) --output-file sip_core-coverage-tests.info
+	$(AM_V_at)lcov --add-tracefile sip_core-coverage-base.info --add-tracefile sip_core-coverage-tests.info --output-file sip_core-coverage.info
+	$(AM_V_at)lcov --remove sip_core-coverage.info "$(abs_top_builddir)/contrib/*" --output-file sip_core-coverage-filtered.info
 	$(MKDIR_P) html-coverage-output
-	genhtml -o html-coverage-output jami-coverage-filtered.info
+	genhtml -o html-coverage-output sip_core-coverage-filtered.info
 
 coverage-%:
 	gcovr --filter src --filter test --$*-pretty --$* --output $*-coverage-output.$*

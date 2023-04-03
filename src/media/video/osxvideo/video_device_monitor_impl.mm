@@ -35,7 +35,7 @@
 
 #import <AVFoundation/AVFoundation.h>
 
-namespace jami { namespace video {
+namespace sip_core { namespace video {
 
 class VideoDeviceMonitorImpl {
     public:
@@ -84,7 +84,7 @@ void VideoDeviceMonitorImpl::start()
             try {
                 monitor_->addDevice([[avf_device uniqueID] UTF8String]);
             } catch (const std::runtime_error &e) {
-                JAMI_ERR("%s", e.what());
+                SIP_CORE_ERR("%s", e.what());
             }
         }
     }
@@ -129,4 +129,4 @@ VideoDeviceMonitor::VideoDeviceMonitor() :
 VideoDeviceMonitor::~VideoDeviceMonitor()
 {}
 
-}} // namespace jami::video
+}} // namespace sip_core::video

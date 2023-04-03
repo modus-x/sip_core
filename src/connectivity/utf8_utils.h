@@ -25,7 +25,7 @@
 #include <cstdlib>
 #include <string>
 
-namespace jami {
+namespace sip_core {
 
 /**
  * utf8_validate:
@@ -54,4 +54,4 @@ bool utf8_validate(std::string_view str);
  */
 std::string utf8_make_valid(std::string_view str);
 
-} // namespace jami
+} // namespace sip_core

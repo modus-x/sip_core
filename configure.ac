@@ -1,8 +1,8 @@
-dnl Jami - configure.ac
+dnl sip_core - configure.ac
 
 dnl Process this file with autoconf to produce a configure script.
 AC_PREREQ([2.69])
-AC_INIT([Jami Daemon],[13.7.0],[jami@gnu.org],[jami])
+AC_INIT([sip_core Daemon],[13.7.0],[sip_core@gnu.org],[sip_core])
 
 dnl Clear the implicit flags that default to '-g -O2', otherwise they
 dnl take precedence over the values we set via the
@@ -200,13 +200,13 @@ AC_COMPILE_IFELSE(
 
 AC_MSG_RESULT([$CLANG])
 
-dnl define LIBJAMI_BUILD because we are building libjami, not using it
-dnl if building shared library, define jami_EXPORTS
+dnl define LIBSIP_CORE_BUILD because we are building libsip_core, not using it
+dnl if building shared library, define sip_core_EXPORTS
 AC_MSG_CHECKING([if compiling shared library])
-DAEMONCPPFLAGS+=" -fvisibility=hidden -DLIBJAMI_BUILD"
+DAEMONCPPFLAGS+=" -fvisibility=hidden -DLIBSIP_CORE_BUILD"
 AS_IF([test "x$enable_shared" == "xyes"],
   [RING_SHARED=yes
-   DAEMONCPPFLAGS+=" -Djami_EXPORTS"],
+   DAEMONCPPFLAGS+=" -Dsip_core_EXPORTS"],
   [RING_SHARED=no])
 AC_MSG_RESULT([$RING_SHARED])
 
@@ -522,10 +522,9 @@ BB_ENABLE_DOXYGEN
 
 AC_CONFIG_FILES([Makefile \
                  src/Makefile \
-                 man/Makefile \
                  doc/Makefile \
                  doc/doxygen/Makefile
-                 jami.pc])
+                 sip_core.pc])
 
 dnl Transfer the Automake variables set here to Makefile.in.
 echo DAEMONCPPFLAGS=$DAEMONCPPFLAGS

@@ -39,7 +39,7 @@ extern "C" {
 struct pjsip_msg;
 }
 
-namespace jami {
+namespace sip_core {
 
 class AudioLayer;
 
@@ -289,7 +289,7 @@ public:
     {
         if (decodingAccelerated_ != decodingAccelerated) {
             decodingAccelerated_ = decodingAccelerated;
-            emitSignal<libjami::ConfigurationSignal::HardwareDecodingChanged>(decodingAccelerated_);
+            emitSignal<libsip_core::ConfigurationSignal::HardwareDecodingChanged>(decodingAccelerated_);
             return true;
         }
         return false;
@@ -301,7 +301,7 @@ public:
     {
         if (encodingAccelerated_ != encodingAccelerated) {
             encodingAccelerated_ = encodingAccelerated;
-            emitSignal<libjami::ConfigurationSignal::HardwareEncodingChanged>(encodingAccelerated_);
+            emitSignal<libsip_core::ConfigurationSignal::HardwareEncodingChanged>(encodingAccelerated_);
             return true;
         }
         return false;
@@ -329,6 +329,6 @@ private:
 };
 #endif // ENABLE_VIDEO
 
-} // namespace jami
+} // namespace sip_core
 
 #endif

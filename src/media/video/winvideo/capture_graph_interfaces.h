@@ -23,7 +23,7 @@
 
 #include <dshow.h>
 
-namespace jami {
+namespace sip_core {
 namespace video {
 
 class CaptureGraphInterfaces
@@ -43,6 +43,6 @@ public:
 };
 
 } // namespace video
-} // namespace jami
+} // namespace sip_core
 
 #endif

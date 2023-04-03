@@ -31,7 +31,7 @@
 
 #include <memory>
 
-namespace jami {
+namespace sip_core {
 
 AudioReceiveThread::AudioReceiveThread(const std::string& id,
                                        const AudioFormat& format,
@@ -68,21 +68,21 @@ AudioReceiveThread::setup()
     args_.sdp_flags = "custom_io";
 
     if (stream_.str().empty()) {
-        JAMI_ERR("No SDP loaded");
+        SIP_CORE_ERR("No SDP loaded");
         return false;
     }
 
     audioDecoder_->setIOContext(sdpContext_.get());
     audioDecoder_->setFEC(true);
     if (audioDecoder_->openInput(args_)) {
-        JAMI_ERR("Could not open input \"%s\"", SDP_FILENAME);
+        SIP_CORE_ERR("Could not open input \"%s\"", SDP_FILENAME);
         return false;
     }
 
     // Now replace our custom AVIOContext with one that will read packets
     audioDecoder_->setIOContext(demuxContext_.get());
     if (audioDecoder_->setupAudio()) {
-        JAMI_ERR("decoder IO startup failed");
+        SIP_CORE_ERR("decoder IO startup failed");
         return false;
     }
 
@@ -149,4 +149,4 @@ AudioReceiveThread::stopReceiver()
     loop_.stop();
 }
 
-}; // namespace jami
+}; // namespace sip_core

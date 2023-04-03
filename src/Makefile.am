@@ -8,8 +8,8 @@ noinst_LTLIBRARIES=
 noinst_HEADERS=
 nobase_include_HEADERS=
 
-lib_LTLIBRARIES = libjami.la
-libjami_la_LIBADD=
+lib_LTLIBRARIES = libsip_core.la
+libsip_core_la_LIBADD=
 
 include ./client/Makefile.am
 include ./config/Makefile.am
@@ -18,9 +18,9 @@ include ./im/Makefile.am
 include ./media/Makefile.am
 include ./sip/Makefile.am
 
-# libjami
+# libsip_core
 
-libjami_la_LIBADD += \
+libsip_core_la_LIBADD += \
 	$(ALSA_LIBS) \
 	$(PULSEAUDIO_LIBS) \
 	$(PORTAUDIO_LIBS) \
@@ -43,18 +43,18 @@ libjami_la_LIBADD += \
 # XXX: It seems this should be the default value when otherwise left
 # unspecified, but for some reason this is required otherwise the
 # shared object fails to link against ffmpeg's libswscale.a.
-libjami_la_LDFLAGS = $(AM_LDFLAGS)
+libsip_core_la_LDFLAGS = $(AM_LDFLAGS)
 
 if HAVE_WIN32
-libjami_la_LDFLAGS += -no-undefined -avoid-version
+libsip_core_la_LDFLAGS += -no-undefined -avoid-version
 endif
 
 if HAVE_OSX
 #FIXME necessary for -lintl
-libjami_la_LDFLAGS += -L/usr/local/opt/gettext/lib
+libsip_core_la_LDFLAGS += -L/usr/local/opt/gettext/lib
 endif
 
-libjami_la_SOURCES = \
+libsip_core_la_SOURCES = \
 		buildinfo.cpp \
 		conference.cpp \
 		conference_protocol.cpp \
@@ -99,29 +99,29 @@ libjami_la_SOURCES = \
 		vcard.h
 
 if HAVE_WIN32
-libjami_la_SOURCES += \
+libsip_core_la_SOURCES += \
 		dlfcn.c \
 		winsyslog.c
 endif
 
 nobase_include_HEADERS += \
-	./jami/account_const.h \
-	./jami/call_const.h \
-	./jami/callmanager_interface.h \
-	./jami/configurationmanager_interface.h \
-	./jami/def.h \
-	./jami/jami.h \
-	./jami/media_const.h \
-	./jami/presence_const.h \
-	./jami/presencemanager_interface.h \
-	./jami/trace-tools.h
+	./sip_core/account_const.h \
+	./sip_core/call_const.h \
+	./sip_core/callmanager_interface.h \
+	./sip_core/configurationmanager_interface.h \
+	./sip_core/def.h \
+	./sip_core/sip_core.h \
+	./sip_core/media_const.h \
+	./sip_core/presence_const.h \
+	./sip_core/presencemanager_interface.h \
+	./sip_core/trace-tools.h
 
 if ENABLE_VIDEO
 nobase_include_HEADERS += \
-		./jami/videomanager_interface.h
+		./sip_core/videomanager_interface.h
 endif
 
 if ENABLE_TRACEPOINTS
-libjami_la_SOURCES += jami/tracepoint.h jami/tracepoint-def.h jami/tracepoint.c
-libjami_la_LIBADD  += $(LTTNG_LIBS)
+libsip_core_la_SOURCES += sip_core/tracepoint.h sip_core/tracepoint-def.h sip_core/tracepoint.c
+libsip_core_la_LIBADD  += $(LTTNG_LIBS)
 endif

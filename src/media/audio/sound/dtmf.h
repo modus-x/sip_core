@@ -27,7 +27,7 @@
  * @file dtmf.h
  * @brief DMTF library to generate a dtmf sample
  */
-namespace jami {
+namespace sip_core {
 
 class DTMF
 {
@@ -57,4 +57,4 @@ private:
     DTMFGenerator dtmfgenerator_;
 };
 
-} // namespace jami
+} // namespace sip_core

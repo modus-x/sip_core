@@ -20,7 +20,7 @@
 
 #include "localrecordermanager.h"
 
-namespace jami {
+namespace sip_core {
 
 LocalRecorderManager&
 LocalRecorderManager::instance()
@@ -70,4 +70,4 @@ LocalRecorderManager::hasRunningRecorders()
     return false;
 }
 
-} // namespace jami
+} // namespace sip_core

@@ -1,10 +1,10 @@
 =================================
-Adding static tracepoints to Jami
+Adding static tracepoints to sip_core
 =================================
 
 :Author: Olivier Dion <olivier.dion@savoirfairelinux.com>
 
-This documentation explains the scope usage of static tracepoints in Jami and
+This documentation explains the scope usage of static tracepoints in sip_core and
 how to add new tracepoints.
 
 Scope
@@ -15,9 +15,9 @@ tolerant to faults and can incorporate additional contextual information only
 available in the kernel.
 
 For example, tracepoints are buffered in a ring buffer that is shared with a
-consumer daemon.  Thus, Jami is not slow down by I/O operations like with
+consumer daemon.  Thus, sip_core is not slow down by I/O operations like with
 regular text logging.  This makes some scenario much more reproducible.  Also,
-since the traces are in shared memory, even if Jami crashes the last traces are
+since the traces are in shared memory, even if sip_core crashes the last traces are
 still available to be consumed by the daemon
 
 For the contextual information, these can come from performance counters such
@@ -32,21 +32,21 @@ tracing session (see doc/trace/tracepoint-analysis.rst).
 Enabling tracepoints
 --------------------
 
-To enable tracepoints in Jami, you should configure the project using the
+To enable tracepoints in sip_core, you should configure the project using the
 ``--enable-tracepoints`` feature.  You also need ``lttng-ust >= 2.13.0`` and
 ``liburcu >= 0.13.0``.
 
 How to define a tracepoint
 --------------------------
 
-To define a new tracepoints, you need to add the definition in src/jami/tracepoint-def.h
+To define a new tracepoints, you need to add the definition in src/sip_core/tracepoint-def.h
 
 It's recommended to use the ``LTTNG_UST_TRACEPOINT_EVENT`` macro and avoid using
 the others except if you know what you're doing.
 
 The ``LTTNG_UST_TRACEPOINT_EVENT`` is composed of 4 parts:
 
-  1. The provider name.  This is always ``jami``.
+  1. The provider name.  This is always ``sip_core``.
   2. The tracepoint name.  A tracepoint name must be unique in a provider.
   3. The arguments passed to the tracepoints.  Arguments are only evaluated if
      the tracepoint is enabled at runtime.
@@ -56,10 +56,10 @@ NOTE!  As the documentation of LTTng says, the concatenation of provider name +
 tracepoint name must **not exceed 254 characters** or you will get bite.
 
 For example, here's the definition of a tracepoint for the scheduled executor in
-src/jami/tracepoint-def.h::
+src/sip_core/tracepoint-def.h::
 
   LTTNG_UST_TRACEPOINT_EVENT(
-    jami,
+    sip_core,
     scheduled_executor_task_begin,
     LTTNG_UST_TP_ARGS(
         const char *, executor_name,
@@ -77,7 +77,7 @@ src/jami/tracepoint-def.h::
 
 We can see that:
 
-  1. The provider name is ``jami``.
+  1. The provider name is ``sip_core``.
   2. The tracepoint name is ``scheduled_executor_task_begin``.
   3. The tracepoint takes 4 arguments of types ``const char *``, ``const char *``,
      ``uint32_t``, ``uint64_t`` respectively named ``executor_name``, ``filename``,
@@ -98,9 +98,9 @@ a member.  Just be careful for side effects.
 How to use a tracepoint
 -----------------------
 
-Now that you have defined a tracepoint, you perhaps want to use it in Jami or
-reuse an existing one.  The first thing to do is to import src/jami/tracepoint.h in
-your compilation unit.  Then you need to use the ``jami_tracepoint()``
+Now that you have defined a tracepoint, you perhaps want to use it in sip_core or
+reuse an existing one.  The first thing to do is to import src/sip_core/tracepoint.h in
+your compilation unit.  Then you need to use the ``sip_core_tracepoint()``
 macro.  It takes the tracepoint name followed by a variable number of
 arguments defined by the tracepoint.
 
@@ -112,19 +112,19 @@ used in src/scheduled_executor.h::
     void run(const char* executor_name)
     {
         if (job_.fn) {
-            jami_tracepoint(scheduled_executor_task_begin,
+            sip_core_tracepoint(scheduled_executor_task_begin,
                             executor_name,
                             job_.filename, job_.linum,
                             cookie_);
             job_.fn();
-            jami_tracepoint(scheduled_executor_task_end,
+            sip_core_tracepoint(scheduled_executor_task_end,
                             cookie_);
         }
     }
   #pragma GCC pop
 
-NOTE!  The ``jami_tracepoint(...)`` macro expands to
-``static_assert(true)`` if tracepoints are not enabled in Jami.  Thus, never do
+NOTE!  The ``sip_core_tracepoint(...)`` macro expands to
+``static_assert(true)`` if tracepoints are not enabled in sip_core.  Thus, never do
 side effects in tracepoint!  This is also why we use the GCC diagnostic pragma
 here to avoid the warnings about unused parameter when tracepoints are disabled.
 

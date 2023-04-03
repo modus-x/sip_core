@@ -18,8 +18,8 @@
  *  along with this program; if not, write to the Free Software
  *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301 USA.
  */
-#ifndef LIBJAMI_ACCOUNT_H
-#define LIBJAMI_ACCOUNT_H
+#ifndef LIBSIP_CORE_ACCOUNT_H
+#define LIBSIP_CORE_ACCOUNT_H
 
 #include "def.h"
 
@@ -28,7 +28,7 @@
 #undef ERROR
 #endif
 
-namespace libjami {
+namespace libsip_core {
 
 namespace Account {
 
@@ -68,7 +68,7 @@ enum class MessageStates : int {
     DISPLAYED,
     FAILURE,
     CANCELLED
-}; // libjami::Account::MessageStates
+}; // libsip_core::Account::MessageStates
 
 namespace VolatileProperties {
 
@@ -279,6 +279,6 @@ constexpr static const char CONVERSATIONID[] = "conversationId";
 
 } // namespace Account
 
-} // namespace libjami
+} // namespace libsip_core
 
 #endif

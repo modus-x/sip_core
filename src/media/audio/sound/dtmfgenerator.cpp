@@ -25,7 +25,7 @@
 
 #include "dtmfgenerator.h"
 
-namespace jami {
+namespace sip_core {
 
 /*
  * Tone frequencies
@@ -135,4 +135,4 @@ DTMFGenerator::fillToneBuffer(int index)
     return ptr;
 }
 
-} // namespace jami
+} // namespace sip_core

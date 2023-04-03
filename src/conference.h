@@ -45,7 +45,7 @@
 #include <video/sinkclient.h>
 #endif
 
-namespace jami {
+namespace sip_core {
 
 class Call;
 class Account;
@@ -276,7 +276,7 @@ public:
      * @param remoteMediaList new media list from the remote
      * @return true on success
      */
-    bool requestMediaChange(const std::vector<libjami::MediaMap>& mediaList);
+    bool requestMediaChange(const std::vector<libsip_core::MediaMap>& mediaList);
 
     /**
      * Process incoming media change request.
@@ -285,7 +285,7 @@ public:
      * @param remoteMediaList new media list from the remote
      */
     void handleMediaChangeRequest(const std::shared_ptr<Call>& call,
-                                  const std::vector<libjami::MediaMap>& remoteMediaList);
+                                  const std::vector<libsip_core::MediaMap>& remoteMediaList);
 
     /**
      * Add a new participant to the conference
@@ -398,7 +398,7 @@ public:
      * Retrieve current medias list
      * @return current medias
      */
-    std::vector<libjami::MediaMap> currentMediaList() const;
+    std::vector<libsip_core::MediaMap> currentMediaList() const;
 
     // Update layout if recording changes
     void stopRecording() override;
@@ -450,7 +450,7 @@ private:
     std::map<std::string, std::shared_ptr<video::SinkClient>> confSinksMap_ {};
 #endif
 
-    std::shared_ptr<jami::AudioInput> audioMixer_;
+    std::shared_ptr<sip_core::AudioInput> audioMixer_;
     std::set<std::string, std::less<>> moderators_ {};
     std::set<std::string, std::less<>> participantsMuted_ {};
     std::set<std::string, std::less<>> handsRaised_;
@@ -490,10 +490,10 @@ private:
     std::mutex sinksMtx_ {};
 
     ConfProtocolParser parser_;
-    std::string getRemoteId(const std::shared_ptr<jami::Call>& call) const;
+    std::string getRemoteId(const std::shared_ptr<sip_core::Call>& call) const;
 
     std::function<void(int)> shutdownCb_;
     clock::time_point duration_start_;
 };
 
-} // namespace jami
+} // namespace sip_core

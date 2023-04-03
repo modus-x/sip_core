@@ -24,7 +24,7 @@
 
 using namespace std::literals;
 
-namespace jami {
+namespace sip_core {
 constexpr const char* const DEFAULT_RINGTONE_PATH = "default.opus";
 
 struct AccountConfig: public Serializable {
@@ -54,7 +54,7 @@ struct AccountConfig: public Serializable {
 
     std::string username {};
 
-    /** SIP hostname (SIP account) or DHT bootstrap nodes (Jami account) */
+    /** SIP hostname (SIP account) or DHT bootstrap nodes (sip_core account) */
     std::string hostname {};
 
     /** True if the account is enabled. */

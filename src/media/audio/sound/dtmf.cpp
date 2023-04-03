@@ -21,7 +21,7 @@
 
 #include "dtmf.h"
 
-namespace jami {
+namespace sip_core {
 
 DTMF::DTMF(unsigned int sampleRate)
     : currentTone_(0)
@@ -71,4 +71,4 @@ DTMF::generateDTMF(std::vector<AudioSample>& buffer)
     }
 }
 
-} // namespace jami
+} // namespace sip_core

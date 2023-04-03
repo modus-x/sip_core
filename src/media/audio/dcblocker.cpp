@@ -22,7 +22,7 @@
 
 #include <ciso646> // fix windows compiler bug
 
-namespace jami {
+namespace sip_core {
 
 DcBlocker::DcBlocker(unsigned channels /* = 1 */)
     : states(channels, StreamState {0, 0, 0, 0})
@@ -72,4 +72,4 @@ DcBlocker::process(AudioBuffer& buf)
     }
 }
 
-} // namespace jami
+} // namespace sip_core

@@ -37,7 +37,7 @@ struct AVFilterGraph;
 struct AVFilterInOut;
 }
 
-namespace jami {
+namespace sip_core {
 
 /**
  * @brief Provides access to libavfilter.
@@ -182,4 +182,4 @@ private:
     bool initialized_ {false};
 };
 
-}; // namespace jami
+}; // namespace sip_core

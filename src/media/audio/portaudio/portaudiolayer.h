@@ -27,7 +27,7 @@
 #include <memory>
 #include <array>
 
-namespace jami {
+namespace sip_core {
 
 class PortAudioLayer final : public AudioLayer
 {
@@ -64,4 +64,4 @@ private:
     std::unique_ptr<PortAudioLayerImpl> pimpl_;
 };
 
-} // namespace jami
+} // namespace sip_core

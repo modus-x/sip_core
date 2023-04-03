@@ -40,12 +40,12 @@
 #include <sstream>
 #include <memory>
 
-namespace jami {
+namespace sip_core {
 class SocketPair;
 class MediaDecoder;
-} // namespace jami
+} // namespace sip_core
 
-namespace jami {
+namespace sip_core {
 namespace video {
 
 class SinkClient;
@@ -126,6 +126,6 @@ private:
 };
 
 } // namespace video
-} // namespace jami
+} // namespace sip_core
 
 #endif // _VIDEO_RECEIVE_THREAD_H_

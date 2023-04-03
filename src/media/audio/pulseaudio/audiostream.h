@@ -26,7 +26,7 @@
 #include <pulse/pulseaudio.h>
 #include <string>
 
-namespace jami {
+namespace sip_core {
 
 class AudioStream
 {
@@ -124,4 +124,4 @@ private:
     std::function<void(bool)> echoCancelCb;
 };
 
-} // namespace jami
+} // namespace sip_core

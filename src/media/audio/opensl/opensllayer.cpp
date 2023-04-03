@@ -37,7 +37,7 @@
 #include <cassert>
 #include <unistd.h>
 
-namespace jami {
+namespace sip_core {
 
 // Constructor
 OpenSLLayer::OpenSLLayer(const AudioPreference& pref)
@@ -59,7 +59,7 @@ OpenSLLayer::startStream(AudioDeviceType stream)
     if (!engineObject_)
         initAudioEngine();
 
-    JAMI_WARN("Start OpenSL audio layer");
+    SIP_CORE_WARN("Start OpenSL audio layer");
 
     if (stream == AudioDeviceType::PLAYBACK) {
         if (not player_) {
@@ -73,7 +73,7 @@ OpenSLLayer::startStream(AudioDeviceType stream)
                 player_->start();
                 playbackChanged(true);
             } catch (const std::exception& e) {
-                JAMI_ERR("Error initializing audio playback: %s", e.what());
+                SIP_CORE_ERR("Error initializing audio playback: %s", e.what());
             }
             if (recorder_)
                 startAudioCapture();
@@ -89,7 +89,7 @@ OpenSLLayer::startStream(AudioDeviceType stream)
                 ringtone_->registerCallback(std::bind(&OpenSLLayer::engineServiceRing, this));
                 ringtone_->start();
             } catch (const std::exception& e) {
-                JAMI_ERR("Error initializing ringtone playback: %s", e.what());
+                SIP_CORE_ERR("Error initializing ringtone playback: %s", e.what());
             }
         }
     } else if (stream == AudioDeviceType::CAPTURE) {
@@ -103,13 +103,13 @@ OpenSLLayer::startStream(AudioDeviceType stream)
                 setHasNativeAEC(recorder_->hasNativeAEC());
                 setHasNativeNS(recorder_->hasNativeNS());
             } catch (const std::exception& e) {
-                JAMI_ERR("Error initializing audio capture: %s", e.what());
+                SIP_CORE_ERR("Error initializing audio capture: %s", e.what());
             }
             if (player_)
                 startAudioCapture();
         }
     }
-    JAMI_WARN("OpenSL audio layer started");
+    SIP_CORE_WARN("OpenSL audio layer started");
     status_ = Status::Started;
 }
 
@@ -119,7 +119,7 @@ OpenSLLayer::stopStream(AudioDeviceType stream)
     std::lock_guard<std::mutex> lock(mutex_);
     if (!engineObject_)
         return; // bufs_ should be initialized
-    JAMI_WARN("Stopping OpenSL audio layer for type %u", (unsigned) stream);
+    SIP_CORE_WARN("Stopping OpenSL audio layer for type %u", (unsigned) stream);
 
     if (stream == AudioDeviceType::PLAYBACK) {
         if (player_) {
@@ -172,10 +172,10 @@ allocateSampleBufs(unsigned count, size_t sizeInByte)
 void
 OpenSLLayer::initAudioEngine()
 {
-    JAMI_WARN("OpenSL init started");
+    SIP_CORE_WARN("OpenSL init started");
     std::vector<int32_t> hw_infos;
     hw_infos.reserve(4);
-    emitSignal<libjami::ConfigurationSignal::GetHardwareAudioFormat>(&hw_infos);
+    emitSignal<libsip_core::ConfigurationSignal::GetHardwareAudioFormat>(&hw_infos);
     hardwareFormat_ = AudioFormat(hw_infos[0], 1); // Mono on Android
     hardwareBuffSize_ = hw_infos[1];
     hardwareFormatAvailable(hardwareFormat_, hardwareBuffSize_);
@@ -185,7 +185,7 @@ OpenSLLayer::initAudioEngine()
     SLASSERT((*engineObject_)->GetInterface(engineObject_, SL_IID_ENGINE, &engineInterface_));
 
     size_t bufSize = hardwareBuffSize_ * hardwareFormat_.getBytesPerFrame();
-    JAMI_DBG("OpenSL init: using buffer of %zu bytes to support %s with %zu samples per channel",
+    SIP_CORE_DBG("OpenSL init: using buffer of %zu bytes to support %s with %zu samples per channel",
              bufSize,
              hardwareFormat_.toString().c_str(),
              hardwareBuffSize_);
@@ -196,13 +196,13 @@ OpenSLLayer::initAudioEngine()
         freeRingBufQueue_.push(&bufs_[i]);
     for (int i = 2 * BUF_COUNT; i < 3 * BUF_COUNT; i++)
         freeRecBufQueue_.push(&bufs_[i]);
-    JAMI_WARN("OpenSL init ended");
+    SIP_CORE_WARN("OpenSL init ended");
 }
 
 void
 OpenSLLayer::shutdownAudioEngine()
 {
-    JAMI_DBG("Stopping OpenSL");
+    SIP_CORE_DBG("Stopping OpenSL");
     stopAudioCapture();
 
     if (player_) {
@@ -215,7 +215,7 @@ OpenSLLayer::shutdownAudioEngine()
     }
 
     // destroy engine object, and invalidate all associated interfaces
-    JAMI_DBG("Shutdown audio engine");
+    SIP_CORE_DBG("Shutdown audio engine");
     if (engineObject_ != nullptr) {
         (*engineObject_)->Destroy(engineObject_);
         engineObject_ = nullptr;
@@ -244,17 +244,17 @@ OpenSLLayer::dbgEngineGetBufCount()
     count_ringtone += freeRingBufQueue_.size();
     count_ringtone += ringBufQueue_.size();
 
-    JAMI_ERR("Buf Disrtibutions: PlayerDev=%zu, PlayQ=%u, FreePlayQ=%u",
+    SIP_CORE_ERR("Buf Disrtibutions: PlayerDev=%zu, PlayQ=%u, FreePlayQ=%u",
              player_->dbgGetDevBufCount(),
              playBufQueue_.size(),
              freePlayBufQueue_.size());
-    JAMI_ERR("Buf Disrtibutions: RingDev=%zu, RingQ=%u, FreeRingQ=%u",
+    SIP_CORE_ERR("Buf Disrtibutions: RingDev=%zu, RingQ=%u, FreeRingQ=%u",
              ringtone_->dbgGetDevBufCount(),
              ringBufQueue_.size(),
              freeRingBufQueue_.size());
 
     if (count_player != BUF_COUNT) {
-        JAMI_ERR("====Lost Bufs among the queue(supposed = %d, found = %u)",
+        SIP_CORE_ERR("====Lost Bufs among the queue(supposed = %d, found = %u)",
                  BUF_COUNT,
                  count_player);
     }
@@ -270,11 +270,11 @@ OpenSLLayer::engineServicePlay()
             buf->size_ = dat->pointer()->nb_samples * dat->pointer()->channels
                          * sizeof(AudioSample);
             if (buf->size_ > buf->cap_) {
-                JAMI_ERR("buf->size_(%zu) > buf->cap_(%zu)", buf->size_, buf->cap_);
+                SIP_CORE_ERR("buf->size_(%zu) > buf->cap_(%zu)", buf->size_, buf->cap_);
                 break;
             }
             if (not dat->pointer()->data[0] or not buf->buf_) {
-                JAMI_ERR("null bufer %p -> %p %d",
+                SIP_CORE_ERR("null bufer %p -> %p %d",
                          dat->pointer()->data[0],
                          buf->buf_,
                          dat->pointer()->nb_samples);
@@ -284,7 +284,7 @@ OpenSLLayer::engineServicePlay()
                         dat->pointer()->nb_samples,
                         (AudioSample*) buf->buf_);
             if (!playBufQueue_.push(buf)) {
-                JAMI_WARN("playThread player_ PLAY_KICKSTART_BUFFER_COUNT 1");
+                SIP_CORE_WARN("playThread player_ PLAY_KICKSTART_BUFFER_COUNT 1");
                 break;
             } else
                 freePlayBufQueue_.pop();
@@ -303,11 +303,11 @@ OpenSLLayer::engineServiceRing()
             buf->size_ = dat->pointer()->nb_samples * dat->pointer()->channels
                          * sizeof(AudioSample);
             if (buf->size_ > buf->cap_) {
-                JAMI_ERR("buf->size_(%zu) > buf->cap_(%zu)", buf->size_, buf->cap_);
+                SIP_CORE_ERR("buf->size_(%zu) > buf->cap_(%zu)", buf->size_, buf->cap_);
                 break;
             }
             if (not dat->pointer()->data[0] or not buf->buf_) {
-                JAMI_ERR("null bufer %p -> %p %d",
+                SIP_CORE_ERR("null bufer %p -> %p %d",
                          dat->pointer()->data[0],
                          buf->buf_,
                          dat->pointer()->nb_samples);
@@ -317,7 +317,7 @@ OpenSLLayer::engineServiceRing()
                         dat->pointer()->nb_samples,
                         (AudioSample*) buf->buf_);
             if (!ringBufQueue_.push(buf)) {
-                JAMI_WARN("playThread ringtone_ PLAY_KICKSTART_BUFFER_COUNT 1");
+                SIP_CORE_WARN("playThread ringtone_ PLAY_KICKSTART_BUFFER_COUNT 1");
                 break;
             } else
                 freeRingBufQueue_.pop();
@@ -338,7 +338,7 @@ OpenSLLayer::startAudioCapture()
 {
     if (not recorder_)
         return;
-    JAMI_DBG("Start audio capture");
+    SIP_CORE_DBG("Start audio capture");
 
     if (recThread.joinable())
         return;
@@ -372,13 +372,13 @@ OpenSLLayer::startAudioCapture()
         recordChanged(false);
     });
 
-    JAMI_DBG("Audio capture started");
+    SIP_CORE_DBG("Audio capture started");
 }
 
 void
 OpenSLLayer::stopAudioCapture()
 {
-    JAMI_DBG("Stop audio capture");
+    SIP_CORE_DBG("Stop audio capture");
 
     {
         std::lock_guard<std::mutex> lck(recMtx);
@@ -392,7 +392,7 @@ OpenSLLayer::stopAudioCapture()
         recThread.join();
     }
 
-    JAMI_DBG("Audio capture stopped");
+    SIP_CORE_DBG("Audio capture stopped");
 }
 
 std::vector<std::string>
@@ -441,14 +441,14 @@ OpenSLLayer::getCaptureDeviceList() const
         if (audioInputDescriptor_.deviceConnection == SL_DEVCONNECTION_ATTACHED_WIRED
             and audioInputDescriptor_.deviceScope == SL_DEVSCOPE_USER
             and audioInputDescriptor_.deviceLocation == SL_DEVLOCATION_HEADSET) {
-            JAMI_DBG("SL_DEVCONNECTION_ATTACHED_WIRED : mic_deviceID: %d", InputDeviceIDs[i]);
+            SIP_CORE_DBG("SL_DEVCONNECTION_ATTACHED_WIRED : mic_deviceID: %d", InputDeviceIDs[i]);
             mic_deviceID = InputDeviceIDs[i];
             mic_available = SL_BOOLEAN_TRUE;
             break;
         } else if (audioInputDescriptor_.deviceConnection == SL_DEVCONNECTION_INTEGRATED
                    and audioInputDescriptor_.deviceScope == SL_DEVSCOPE_USER
                    and audioInputDescriptor_.deviceLocation == SL_DEVLOCATION_HANDSET) {
-            JAMI_DBG("SL_DEVCONNECTION_INTEGRATED : mic_deviceID: %d", InputDeviceIDs[i]);
+            SIP_CORE_DBG("SL_DEVCONNECTION_INTEGRATED : mic_deviceID: %d", InputDeviceIDs[i]);
             mic_deviceID = InputDeviceIDs[i];
             mic_available = SL_BOOLEAN_TRUE;
             break;
@@ -456,7 +456,7 @@ OpenSLLayer::getCaptureDeviceList() const
     }
 
     if (!mic_available)
-        JAMI_ERR("No mic available");
+        SIP_CORE_ERR("No mic available");
 
     return captureDeviceList;
 }
@@ -478,14 +478,14 @@ void
 dumpAvailableEngineInterfaces()
 {
     SLresult result;
-    JAMI_DBG("Engine Interfaces");
+    SIP_CORE_DBG("Engine Interfaces");
     SLuint32 numSupportedInterfaces;
     result = slQueryNumSupportedEngineInterfaces(&numSupportedInterfaces);
     assert(SL_RESULT_SUCCESS == result);
     result = slQueryNumSupportedEngineInterfaces(NULL);
     assert(SL_RESULT_PARAMETER_INVALID == result);
 
-    JAMI_DBG("Engine number of supported interfaces %u", numSupportedInterfaces);
+    SIP_CORE_DBG("Engine number of supported interfaces %u", numSupportedInterfaces);
     for (SLuint32 i = 0; i < numSupportedInterfaces; i++) {
         SLInterfaceID pInterfaceId;
         slQuerySupportedEngineInterfaces(i, &pInterfaceId);
@@ -590,8 +590,8 @@ dumpAvailableEngineInterfaces()
         else if (pInterfaceId == SL_IID_ANDROIDSIMPLEBUFFERQUEUE)
             nm = "simplebuferqueue";
         // else if (pInterfaceId==//SL_IID_ANDROIDBUFFERQUEUESOURCE) nm="bufferqueuesource";
-        JAMI_DBG("%s,", nm);
+        SIP_CORE_DBG("%s,", nm);
     }
 }
 
-} // namespace jami
+} // namespace sip_core

@@ -24,7 +24,7 @@ class Emitter;
 class Node;
 } // namespace YAML
 
-namespace jami {
+namespace sip_core {
 
 class Serializable
 {
@@ -34,4 +34,4 @@ public:
     virtual void unserialize(const YAML::Node& node) = 0;
 };
 
-} // namespace jami
+} // namespace sip_core

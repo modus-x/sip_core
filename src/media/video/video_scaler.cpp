@@ -26,7 +26,7 @@
 
 #include <cassert>
 
-namespace jami {
+namespace sip_core {
 namespace video {
 
 VideoScaler::VideoScaler()
@@ -60,7 +60,7 @@ VideoScaler::scale(const AVFrame* input_frame, AVFrame* output_frame)
                                 NULL,
                                 NULL);
     if (!ctx_) {
-        JAMI_ERR("Unable to create a scaler context");
+        SIP_CORE_ERR("Unable to create a scaler context");
         return;
     }
 
@@ -122,7 +122,7 @@ VideoScaler::scale_and_pad(const VideoFrame& input,
     // buffer overflow checks
     if ((xoff + dest_width > (unsigned) output_frame->width)
         || (yoff + dest_height > (unsigned) output_frame->height)) {
-        JAMI_ERR("Unable to scale video");
+        SIP_CORE_ERR("Unable to scale video");
         return;
     }
 
@@ -138,7 +138,7 @@ VideoScaler::scale_and_pad(const VideoFrame& input,
                                 NULL,
                                 NULL);
     if (!ctx_) {
-        JAMI_ERR("Unable to create a scaler context");
+        SIP_CORE_ERR("Unable to create a scaler context");
         return;
     }
 
@@ -185,4 +185,4 @@ VideoScaler::reset()
 }
 
 } // namespace video
-} // namespace jami
+} // namespace sip_core

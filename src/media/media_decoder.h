@@ -57,15 +57,15 @@ struct AVCodec;
 enum AVMediaType;
 }
 
-namespace libjami {
+namespace libsip_core {
 class AudioFrame;
 }
 
-namespace jami {
+namespace sip_core {
 
-using AudioFrame = libjami::AudioFrame;
+using AudioFrame = libsip_core::AudioFrame;
 #ifdef ENABLE_VIDEO
-using VideoFrame = libjami::VideoFrame;
+using VideoFrame = libsip_core::VideoFrame;
 #endif
 struct AudioFormat;
 class RingBuffer;
@@ -127,7 +127,7 @@ public:
     AVStream* getStream(unsigned stream)
     {
         if (stream >= inputCtx_->nb_streams) {
-            JAMI_ERR("Stream index is out of range: %u", stream);
+            SIP_CORE_ERR("Stream index is out of range: %u", stream);
             return {};
         }
         return inputCtx_->streams[stream];
@@ -257,4 +257,4 @@ protected:
     AVDictionary* options_ = nullptr;
 };
 
-} // namespace jami
+} // namespace sip_core

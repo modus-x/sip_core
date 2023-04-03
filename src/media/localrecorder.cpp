@@ -28,7 +28,7 @@
 #include "logger.h"
 #include "client/videomanager.h"
 
-namespace jami {
+namespace sip_core {
 
 LocalRecorder::LocalRecorder(const std::string& inputUri)
 {
@@ -47,7 +47,7 @@ void
 LocalRecorder::setPath(const std::string& path)
 {
     if (isRecording()) {
-        JAMI_ERR("can't set path while recording");
+        SIP_CORE_ERR("can't set path while recording");
         return;
     }
 
@@ -59,17 +59,17 @@ bool
 LocalRecorder::startRecording()
 {
     if (isRecording()) {
-        JAMI_ERR("recording already started!");
+        SIP_CORE_ERR("recording already started!");
         return false;
     }
 
     if (path_.empty()) {
-        JAMI_ERR("could not start recording (path not set)");
+        SIP_CORE_ERR("could not start recording (path not set)");
         return false;
     }
 
     if (!recorder_) {
-        JAMI_ERR("could not start recording (no recorder)");
+        SIP_CORE_ERR("could not start recording (no recorder)");
         return false;
     }
 
@@ -89,7 +89,7 @@ LocalRecorder::startRecording()
         if (videoInput_) {
             videoInput_->attach(recorder_->addStream(videoInput_->getInfo()));
         } else {
-            JAMI_ERR() << "Unable to record video (no video input)";
+            SIP_CORE_ERR() << "Unable to record video (no video input)";
             return false;
         }
     }
@@ -113,4 +113,4 @@ LocalRecorder::stopRecording()
     Recordable::stopRecording();
 }
 
-} // namespace jami
+} // namespace sip_core

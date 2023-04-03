@@ -43,7 +43,7 @@ extern "C" {
 #include <sys/types.h>
 }
 
-namespace jami {
+namespace sip_core {
 namespace video {
 
 using std::vector;
@@ -147,11 +147,11 @@ VideoDeviceMonitorImpl::VideoDeviceMonitorImpl(VideoDeviceMonitor* monitor)
             }
             try {
                 auto unique_name = getDeviceString(dev);
-                JAMI_DBG("udev: adding device with id %s", unique_name.c_str());
+                SIP_CORE_DBG("udev: adding device with id %s", unique_name.c_str());
                 if (monitor_->addDevice(unique_name, {{{"devPath", path}}}))
                     currentPathToId_.emplace(path, unique_name);
             } catch (const std::exception& e) {
-                JAMI_WARN("udev: %s, fallback on path (your camera may be a fake camera)", e.what());
+                SIP_CORE_WARN("udev: %s, fallback on path (your camera may be a fake camera)", e.what());
                 if (monitor_->addDevice(path, {{{"devPath", path}}}))
                     currentPathToId_.emplace(path, path);
             }
@@ -164,7 +164,7 @@ VideoDeviceMonitorImpl::VideoDeviceMonitorImpl(VideoDeviceMonitor* monitor)
 
 udev_failed:
 
-    JAMI_ERR("udev enumeration failed");
+    SIP_CORE_ERR("udev enumeration failed");
 
     if (udev_mon_)
         udev_monitor_unref(udev_mon_);
@@ -179,7 +179,7 @@ udev_failed:
             if (!monitor_->addDevice("/dev/video" + std::to_string(idx)))
                 break;
         } catch (const std::runtime_error& e) {
-            JAMI_ERR("%s", e.what());
+            SIP_CORE_ERR("%s", e.what());
             return;
         }
     }
@@ -235,23 +235,23 @@ VideoDeviceMonitorImpl::run()
 
                     const char* action = udev_device_get_action(dev);
                     if (!strcmp(action, "add")) {
-                        JAMI_DBG("udev: adding device with id %s", unique_name.c_str());
+                        SIP_CORE_DBG("udev: adding device with id %s", unique_name.c_str());
                         if (monitor_->addDevice(unique_name, {{{"devPath", path}}}))
                             currentPathToId_.emplace(path, unique_name);
                     } else if (!strcmp(action, "remove")) {
                         auto it = currentPathToId_.find(path);
                         if (it != currentPathToId_.end()) {
-                            JAMI_DBG("udev: removing %s", it->second.c_str());
+                            SIP_CORE_DBG("udev: removing %s", it->second.c_str());
                             monitor_->removeDevice(it->second);
                             currentPathToId_.erase(it);
                         } else {
                             // In case of fallback
-                            JAMI_DBG("udev: removing %s", path);
+                            SIP_CORE_DBG("udev: removing %s", path);
                             monitor_->removeDevice(path);
                         }
                     }
                 } catch (const std::exception& e) {
-                    JAMI_ERR("%s", e.what());
+                    SIP_CORE_ERR("%s", e.what());
                 }
             }
             udev_device_unref(dev);
@@ -261,12 +261,12 @@ VideoDeviceMonitorImpl::run()
         case -1:
             if (errno == EAGAIN)
                 continue;
-            JAMI_ERR("udev monitoring thread: select failed (%m)");
+            SIP_CORE_ERR("udev monitoring thread: select failed (%m)");
             probing_ = false;
             return;
 
         default:
-            JAMI_ERR("select() returned %d (%m)", ret);
+            SIP_CORE_ERR("select() returned %d (%m)", ret);
             probing_ = false;
             return;
         }
@@ -285,4 +285,4 @@ VideoDeviceMonitor::VideoDeviceMonitor()
 VideoDeviceMonitor::~VideoDeviceMonitor() {}
 
 } // namespace video
-} // namespace jami
+} // namespace sip_core

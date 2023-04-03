@@ -35,7 +35,7 @@
 #include <iostream>
 #include <unistd.h>
 
-namespace jami {
+namespace sip_core {
 
 enum class KeyExchangeProtocol { NONE, SDES };
 
@@ -304,4 +304,4 @@ struct MediaDescription
     /** Crypto parameters */
     CryptoAttribute crypto {};
 };
-} // namespace jami
+} // namespace sip_core

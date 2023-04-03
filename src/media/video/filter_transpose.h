@@ -22,11 +22,11 @@
 
 #include "../media_filter.h"
 
-namespace jami {
+namespace sip_core {
 namespace video {
 
 std::unique_ptr<MediaFilter> getTransposeFilter(
     int rotation, std::string inputName, int width, int height, int format, bool rescale);
 
 }
-} // namespace jami
+} // namespace sip_core

@@ -32,7 +32,7 @@ extern "C" {
 
 //#include <ciso646>
 
-namespace jami {
+namespace sip_core {
 namespace video {
 
 typedef struct
@@ -91,15 +91,15 @@ VideoDeviceImpl::selectFormat()
             }
         }
         if (f == uwp_formats.end())
-            JAMI_WARN("Video: No format matching %s", fmt.c_str());
+            SIP_CORE_WARN("Video: No format matching %s", fmt.c_str());
     }
 
     if (best != UINT_MAX) {
         fmt_ = &uwp_formats[best];
-        JAMI_DBG("Video: picked format %s", fmt_->name.c_str());
+        SIP_CORE_DBG("Video: picked format %s", fmt_->name.c_str());
     } else {
         fmt_ = &uwp_formats[0];
-        JAMI_ERR("Video: Could not find a known format to use");
+        SIP_CORE_ERR("Video: Could not find a known format to use");
     }
 }
 
@@ -169,7 +169,7 @@ VideoDeviceImpl::setDeviceParams(const DeviceParams& params)
 {
     size_ = getSize({params.width, params.height});
     rate_ = getRate(params.framerate);
-    emitSignal<libjami::VideoSignal::ParametersChanged>(name);
+    emitSignal<libsip_core::VideoSignal::ParametersChanged>(name);
 }
 
 VideoDevice::VideoDevice(const std::string& path,
@@ -213,4 +213,4 @@ VideoDevice::getRateList(const std::string& channel, VideoSize size) const
 VideoDevice::~VideoDevice() {}
 
 } // namespace video
-} // namespace jami
+} // namespace sip_core

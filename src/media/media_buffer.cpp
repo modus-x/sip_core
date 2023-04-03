@@ -21,14 +21,14 @@
 #include "libav_deps.h" // MUST BE INCLUDED FIRST
 #include "libav_utils.h"
 #include "media_buffer.h"
-#include "jami/videomanager_interface.h"
+#include "sip_core/videomanager_interface.h"
 
 #include <new> // std::bad_alloc
 #include <cstdlib>
 #include <cstring> // std::memset
 #include <ciso646> // fix windows compiler bug
 
-namespace jami {
+namespace sip_core {
 
 #ifdef ENABLE_VIDEO
 
@@ -42,4 +42,4 @@ videoFrameSize(int format, int width, int height)
 
 #endif // ENABLE_VIDEO
 
-} // namespace jami
+} // namespace sip_core

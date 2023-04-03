@@ -32,7 +32,7 @@ extern "C" {
 #include <memory>
 #include <vector>
 
-namespace jami {
+namespace sip_core {
 
 SpeexAudioProcessor::SpeexAudioProcessor(AudioFormat format, unsigned frameSize)
     : AudioProcessor(format, frameSize)
@@ -43,7 +43,7 @@ SpeexAudioProcessor::SpeexAudioProcessor(AudioFormat format, unsigned frameSize)
                 &speex_echo_state_destroy)
     , iProcBuffer(frameSize_, format)
 {
-    JAMI_DBG("[speex-dsp] SpeexAudioProcessor, frame size = %d (=%d ms), channels = %d",
+    SIP_CORE_DBG("[speex-dsp] SpeexAudioProcessor, frame size = %d (=%d ms), channels = %d",
              frameSize,
              frameDurationMs_,
              format.nb_channels);
@@ -90,13 +90,13 @@ SpeexAudioProcessor::SpeexAudioProcessor(AudioFormat format, unsigned frameSize)
         preprocessorStates.push_back(std::move(channelPreprocessorState));
     }
 
-    JAMI_INFO("[speex-dsp] Done initializing");
+    SIP_CORE_INFO("[speex-dsp] Done initializing");
 }
 
 void
 SpeexAudioProcessor::enableEchoCancel(bool enabled)
 {
-    JAMI_DBG("[speex-dsp] enableEchoCancel %d", enabled);
+    SIP_CORE_DBG("[speex-dsp] enableEchoCancel %d", enabled);
     // need to set member variable so we know to do it in getProcessed
     shouldAEC = enabled;
 
@@ -124,7 +124,7 @@ SpeexAudioProcessor::enableEchoCancel(bool enabled)
 void
 SpeexAudioProcessor::enableNoiseSuppression(bool enabled)
 {
-    JAMI_DBG("[speex-dsp] enableNoiseSuppression %d", enabled);
+    SIP_CORE_DBG("[speex-dsp] enableNoiseSuppression %d", enabled);
     spx_int32_t speexSetValue = (spx_int32_t) enabled;
 
     // for each preprocessor
@@ -143,7 +143,7 @@ SpeexAudioProcessor::enableNoiseSuppression(bool enabled)
 void
 SpeexAudioProcessor::enableAutomaticGainControl(bool enabled)
 {
-    JAMI_DBG("[speex-dsp] enableAutomaticGainControl %d", enabled);
+    SIP_CORE_DBG("[speex-dsp] enableAutomaticGainControl %d", enabled);
     spx_int32_t speexSetValue = (spx_int32_t) enabled;
 
     // for each preprocessor
@@ -158,7 +158,7 @@ SpeexAudioProcessor::enableAutomaticGainControl(bool enabled)
 void
 SpeexAudioProcessor::enableVoiceActivityDetection(bool enabled)
 {
-    JAMI_DBG("[speex-dsp] enableVoiceActivityDetection %d", enabled);
+    SIP_CORE_DBG("[speex-dsp] enableVoiceActivityDetection %d", enabled);
 
     shouldDetectVoice = enabled;
 
@@ -235,4 +235,4 @@ SpeexAudioProcessor::getProcessed()
     return processed;
 }
 
-} // namespace jami
+} // namespace sip_core

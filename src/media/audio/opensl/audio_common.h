@@ -21,7 +21,7 @@
 
 #include "buf_manager.h"
 
-namespace jami {
+namespace sip_core {
 namespace opensl {
 
 /*
@@ -33,7 +33,7 @@ namespace opensl {
 #define BUF_COUNT                         16
 
 inline SLDataFormat_PCM
-convertToSLSampleFormat(const jami::AudioFormat& infos)
+convertToSLSampleFormat(const sip_core::AudioFormat& infos)
 {
     return SLDataFormat_PCM {
         .formatType = SL_DATAFORMAT_PCM,
@@ -62,4 +62,4 @@ convertToSLSampleFormat(const jami::AudioFormat& infos)
 using EngineCallback = std::function<void()>;
 
 } // namespace opensl
-} // namespace jami
+} // namespace sip_core

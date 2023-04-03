@@ -28,4 +28,4 @@ libsiplink_la_SOURCES = \
 	./sip/sdes_negotiator.cpp \
 	./sip/sdes_negotiator.h
 
-libjami_la_LIBADD += libsiplink.la
+libsip_core_la_LIBADD += libsiplink.la

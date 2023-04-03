@@ -58,7 +58,7 @@ def main(args):
 
     filter_tid = args.tid
     threads   = {}
-    prefix      = "jami:emit_signal"
+    prefix      = "sip_core:emit_signal"
 
     for msg in bt2.TraceCollectionMessageIterator(args.path[0]):
 

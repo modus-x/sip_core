@@ -33,7 +33,7 @@
 #include <condition_variable>
 #include <memory>
 
-namespace jami {
+namespace sip_core {
 
 class RingBuffer;
 
@@ -89,4 +89,4 @@ public:
     ~JackLayer();
 };
 
-} // namespace jami
+} // namespace sip_core

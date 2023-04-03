@@ -37,7 +37,7 @@ class Emitter;
 class Node;
 } // namespace YAML
 
-namespace jami {
+namespace sip_core {
 namespace video {
 
 class VideoDeviceMonitorImpl;
@@ -50,7 +50,7 @@ public:
 
     std::vector<std::string> getDeviceList() const;
 
-    libjami::VideoCapabilities getCapabilities(const std::string& name) const;
+    libsip_core::VideoCapabilities getCapabilities(const std::string& name) const;
     VideoSettings getSettings(const std::string& name);
     void applySettings(const std::string& name, const VideoSettings& settings);
 
@@ -103,6 +103,6 @@ private:
 };
 
 } // namespace video
-} // namespace jami
+} // namespace sip_core
 
 #endif /* VIDEO_DEVICE_MONITOR_H__ */

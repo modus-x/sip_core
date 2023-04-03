@@ -18,8 +18,8 @@
  *  along with this program; if not, write to the Free Software
  *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301 USA.
  */
-#ifndef LIBJAMI_H
-#define LIBJAMI_H
+#ifndef LIBSIP_CORE_H
+#define LIBSIP_CORE_H
 
 #include "def.h"
 
@@ -32,25 +32,25 @@
 
 #include "trace-tools.h"
 
-namespace libjami {
+namespace libsip_core {
 
 /* flags for initialization */
 enum InitFlag {
-    LIBJAMI_FLAG_DEBUG = 1 << 0,
-    LIBJAMI_FLAG_CONSOLE_LOG = 1 << 1,
-    LIBJAMI_FLAG_AUTOANSWER = 1 << 2,
-    LIBJAMI_FLAG_IOS_EXTENSION = 1 << 4,
+    LIBSIP_CORE_FLAG_DEBUG = 1 << 0,
+    LIBSIP_CORE_FLAG_CONSOLE_LOG = 1 << 1,
+    LIBSIP_CORE_FLAG_AUTOANSWER = 1 << 2,
+    LIBSIP_CORE_FLAG_IOS_EXTENSION = 1 << 4,
 };
 
 /**
  * Return the library version as string.
  */
-LIBJAMI_PUBLIC const char* version() noexcept;
+LIBSIP_CORE_PUBLIC const char* version() noexcept;
 
 /**
  * Return the target platform (OS) as a string.
  */
-LIBJAMI_PUBLIC const char* platform() noexcept;
+LIBSIP_CORE_PUBLIC const char* platform() noexcept;
 
 /**
  * Initialize globals, create underlaying daemon.
@@ -58,27 +58,27 @@ LIBJAMI_PUBLIC const char* platform() noexcept;
  * @param flags  Flags to customize this initialization
  * @returns      true if initialization succeed else false.
  */
-LIBJAMI_PUBLIC bool init(enum InitFlag flags) noexcept;
+LIBSIP_CORE_PUBLIC bool init(enum InitFlag flags) noexcept;
 
 /**
  * Start asynchronously daemon created by init().
  * @returns true if daemon started successfully
  */
-LIBJAMI_PUBLIC bool start(const std::string& config_file, const std::string& data_path) noexcept;
+LIBSIP_CORE_PUBLIC bool start(const std::string& config_file, const std::string& data_path) noexcept;
 
 /**
  * Stop and freeing any resource allocated by daemon
  */
-LIBJAMI_PUBLIC void fini() noexcept;
+LIBSIP_CORE_PUBLIC void fini() noexcept;
 
-LIBJAMI_PUBLIC bool initialized() noexcept;
+LIBSIP_CORE_PUBLIC bool initialized() noexcept;
 
 /**
  * Control log handlers.
  *
  * @param whom  Log handler to control
  */
-LIBJAMI_PUBLIC void logging(const std::string& whom, const std::string& action) noexcept;
+LIBSIP_CORE_PUBLIC void logging(const std::string& whom, const std::string& action) noexcept;
 
 /* External Callback Dynamic Utilities
  *
@@ -101,7 +101,7 @@ LIBJAMI_PUBLIC void logging(const std::string& whom, const std::string& action) 
  * Used conjointly with std::shared_ptr to hide the concrete class.
  * See CallbackWrapper template for details.
  */
-class LIBJAMI_PUBLIC CallbackWrapperBase
+class LIBSIP_CORE_PUBLIC CallbackWrapperBase
 {};
 
 /* Concrete class of CallbackWrapperBase.
@@ -173,12 +173,12 @@ exportable_callback(std::function<typename Ts::cb_type>&& func,
                               std::forward<std::function<typename Ts::cb_type>>(func), file, linum));
 }
 
-LIBJAMI_PUBLIC void registerSignalHandlers(
+LIBSIP_CORE_PUBLIC void registerSignalHandlers(
     const std::map<std::string, std::shared_ptr<CallbackWrapperBase>>&);
-LIBJAMI_PUBLIC void unregisterSignalHandlers();
+LIBSIP_CORE_PUBLIC void unregisterSignalHandlers();
 
 using MediaMap = std::map<std::string, std::string>;
 
-} // namespace libjami
+} // namespace libsip_core
 
-#endif /* LIBJAMI_H */
+#endif /* LIBSIP_CORE_H */

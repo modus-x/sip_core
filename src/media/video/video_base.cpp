@@ -28,7 +28,7 @@
 
 #include <cassert>
 
-namespace jami {
+namespace sip_core {
 namespace video {
 
 /*=== VideoGenerator =========================================================*/
@@ -108,12 +108,12 @@ VideoSettings::to_map() const
 }
 
 } // namespace video
-} // namespace jami
+} // namespace sip_core
 
 namespace YAML {
 
 Node
-convert<jami::video::VideoSettings>::encode(const jami::video::VideoSettings& rhs)
+convert<sip_core::video::VideoSettings>::encode(const sip_core::video::VideoSettings& rhs)
 {
     Node node;
     node["name"] = rhs.name;
@@ -126,10 +126,10 @@ convert<jami::video::VideoSettings>::encode(const jami::video::VideoSettings& rh
 }
 
 bool
-convert<jami::video::VideoSettings>::decode(const Node& node, jami::video::VideoSettings& rhs)
+convert<sip_core::video::VideoSettings>::decode(const Node& node, sip_core::video::VideoSettings& rhs)
 {
     if (not node.IsMap()) {
-        JAMI_WARN("Can't decode VideoSettings YAML node");
+        SIP_CORE_WARN("Can't decode VideoSettings YAML node");
         return false;
     }
     rhs.name = node["name"].as<std::string>();
@@ -142,9 +142,9 @@ convert<jami::video::VideoSettings>::decode(const Node& node, jami::video::Video
 }
 
 Emitter&
-operator<<(Emitter& out, const jami::video::VideoSettings& v)
+operator<<(Emitter& out, const sip_core::video::VideoSettings& v)
 {
-    out << convert<jami::video::VideoSettings>::encode(v);
+    out << convert<sip_core::video::VideoSettings>::encode(v);
     return out;
 }
 

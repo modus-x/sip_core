@@ -31,7 +31,7 @@
  * @brief Loop on a sound file
  */
 
-namespace jami {
+namespace sip_core {
 
 class AudioLoop
 {
@@ -85,4 +85,4 @@ private:
     virtual void onBufferFinish();
 };
 
-} // namespace jami
+} // namespace sip_core

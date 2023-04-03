@@ -28,7 +28,7 @@ extern "C" {
 #include <libswresample/swresample.h>
 }
 
-namespace jami {
+namespace sip_core {
 
 Resampler::Resampler()
     : swrCtx_(swr_alloc())
@@ -46,7 +46,7 @@ Resampler::reinit(const AVFrame* in, const AVFrame* out)
     // NOTE swr_set_matrix should be called on an uninitialized context
     auto swrCtx = swr_alloc();
     if (!swrCtx) {
-        JAMI_ERR() << "Cannot allocate resampler context";
+        SIP_CORE_ERR() << "Cannot allocate resampler context";
         throw std::bad_alloc();
     }
 
@@ -110,7 +110,7 @@ Resampler::reinit(const AVFrame* in, const AVFrame* out)
         ++initCount_;
     } else {
         std::string msg = "Failed to initialize resampler context";
-        JAMI_ERR() << msg;
+        SIP_CORE_ERR() << msg;
         throw std::runtime_error(msg);
     }
 }
@@ -133,7 +133,7 @@ Resampler::resample(const AVFrame* input, AVFrame* output)
         reinit(input, output);
         return resample(input, output);
     } else if (ret < 0) {
-        JAMI_ERR() << "Failed to resample frame";
+        SIP_CORE_ERR() << "Failed to resample frame";
         return -1;
     }
 
@@ -203,4 +203,4 @@ Resampler::resample(std::shared_ptr<AudioFrame>&& in, const AudioFormat& format)
     return {};
 }
 
-} // namespace jami
+} // namespace sip_core

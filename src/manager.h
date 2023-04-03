@@ -52,7 +52,7 @@ namespace asio {
 class io_context;
 }
 
-namespace jami {
+namespace sip_core {
 namespace video {
 class SinkClient;
 class VideoGenerator;
@@ -63,15 +63,15 @@ struct VideoManager;
 class Conference;
 class AudioLoop;
 class SIPVoIPLink;
-class JamiPluginManager;
+class sip_corePluginManager;
 
 /** Manager (controller) of daemon */
-// TODO LIBJAMI_PUBLIC only if tests
-class LIBJAMI_TESTABLE Manager
+// TODO LIBSIP_CORE_PUBLIC only if tests
+class LIBSIP_CORE_TESTABLE Manager
 {
 public:
-    // TODO LIBJAMI_PUBLIC only if tests
-    static LIBJAMI_TESTABLE Manager& instance();
+    // TODO LIBSIP_CORE_PUBLIC only if tests
+    static LIBSIP_CORE_TESTABLE Manager& instance();
 
     void setAutoAnswer(bool enable);
 
@@ -142,7 +142,7 @@ public:
      */
     std::string outgoingCall(const std::string& accountId,
                              const std::string& callee,
-                             const std::vector<libjami::MediaMap>& mediaList = {});
+                             const std::vector<libsip_core::MediaMap>& mediaList = {});
 
     /**
      * Functions which occur with a user's action
@@ -151,8 +151,8 @@ public:
      */
     bool answerCall(const std::string& accountId,
                     const std::string& callId,
-                    const std::vector<libjami::MediaMap>& mediaList = {});
-    bool answerCall(Call& call, const std::vector<libjami::MediaMap>& mediaList = {});
+                    const std::vector<libsip_core::MediaMap>& mediaList = {});
+    bool answerCall(Call& call, const std::vector<libsip_core::MediaMap>& mediaList = {});
 
     /**
      * Handle incoming call and notify user
@@ -665,7 +665,7 @@ public:
     bool isCurrentCall(const Call& call) const;
 
     /**
-     * Load the accounts order set by the user from the jamirc config file
+     * Load the accounts order set by the user from the sip_corerc config file
      * @return std::vector<std::string> A vector containing the account ID's
      */
     std::vector<std::string_view> loadAccountOrder() const;
@@ -764,7 +764,7 @@ public:
      */
     std::shared_ptr<Call> newOutgoingCall(std::string_view toUrl,
                                           const std::string& accountId,
-                                          const std::vector<libjami::MediaMap>& mediaList);
+                                          const std::vector<libsip_core::MediaMap>& mediaList);
 
     CallFactory callFactory;
 
@@ -825,7 +825,7 @@ public:
     std::atomic<unsigned> dhtLogLevel {0}; // default = disable
     AccountFactory accountFactory;
 
-    std::vector<libjami::Message> getLastMessages(const std::string& accountID,
+    std::vector<libsip_core::Message> getLastMessages(const std::string& accountID,
                                                   const uint64_t& base_timestamp);
 
     SIPVoIPLink& sipVoIPLink() const;
@@ -871,4 +871,4 @@ runOnMainThread(Callback&& cb,
                                         linum);
 }
 
-} // namespace jami
+} // namespace sip_core

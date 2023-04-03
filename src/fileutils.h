@@ -27,7 +27,7 @@
 #include <cstdio>
 #include <ios>
 
-#include "jami/def.h"
+#include "sip_core/def.h"
 
 #ifndef _WIN32
 #include <sys/stat.h>               // mode_t
@@ -41,7 +41,7 @@
 #define DIR_SEPARATOR_STR_ESC "//*" // Escaped directory separator string
 #endif
 
-namespace jami {
+namespace sip_core {
 namespace fileutils {
 
 std::string get_home_dir();
@@ -60,7 +60,7 @@ std::string get_cache_dir();
  * @param parents default mode for all created directories except the last
  */
 bool check_dir(const char* path, mode_t dir = 0755, mode_t parents = 0755);
-LIBJAMI_PUBLIC void set_program_dir(char* program_path); // public because bin/main.cpp uses it
+LIBSIP_CORE_PUBLIC void set_program_dir(char* program_path); // public because bin/main.cpp uses it
 std::string expand_path(const std::string& path);
 bool isDirectoryWritable(const std::string& directory);
 
@@ -150,4 +150,4 @@ int accessFile(const std::string& file, int mode);
 uint64_t lastWriteTime(const std::string& p);
 
 } // namespace fileutils
-} // namespace jami
+} // namespace sip_core

@@ -4,10 +4,10 @@
 #endif
 
 #undef LTTNG_UST_TRACEPOINT_PROVIDER
-#define LTTNG_UST_TRACEPOINT_PROVIDER jami
+#define LTTNG_UST_TRACEPOINT_PROVIDER sip_core
 
 #undef LTTNG_UST_TRACEPOINT_INCLUDE
-#define LTTNG_UST_TRACEPOINT_INCLUDE "src/jami/tracepoint-def.h"
+#define LTTNG_UST_TRACEPOINT_INCLUDE "src/sip_core/tracepoint-def.h"
 
 #if !defined(TRACEPOINT_DEF_H) || defined(LTTNG_UST_TRACEPOINT_HEADER_MULTI_READ)
 #define TRACEPOINT_DEF_H
@@ -22,7 +22,7 @@
  */
 
 LTTNG_UST_TRACEPOINT_EVENT(
-    jami,
+    sip_core,
     scheduled_executor_task_begin,
     LTTNG_UST_TP_ARGS(
         const char *, executor_name,
@@ -39,14 +39,14 @@ LTTNG_UST_TRACEPOINT_EVENT(
 )
 
 LTTNG_UST_TRACEPOINT_EVENT(
-    jami,
+    sip_core,
     scheduled_executor_task_end,
     LTTNG_UST_TP_ARGS(uint64_t, cookie),
     LTTNG_UST_TP_FIELDS(lttng_ust_field_integer(uint64_t, cookie, cookie))
 )
 
 LTTNG_UST_TRACEPOINT_EVENT(
-    jami,
+    sip_core,
     ice_transport_context,
     LTTNG_UST_TP_ARGS(
             uint64_t, context
@@ -57,7 +57,7 @@ LTTNG_UST_TRACEPOINT_EVENT(
 )
 
 LTTNG_UST_TRACEPOINT_EVENT(
-    jami,
+    sip_core,
     ice_transport_send,
     LTTNG_UST_TP_ARGS(
             uint64_t, context,
@@ -74,7 +74,7 @@ LTTNG_UST_TRACEPOINT_EVENT(
 )
 
 LTTNG_UST_TRACEPOINT_EVENT(
-    jami,
+    sip_core,
     ice_transport_send_status,
     LTTNG_UST_TP_ARGS(
             int, status
@@ -85,7 +85,7 @@ LTTNG_UST_TRACEPOINT_EVENT(
 )
 
 LTTNG_UST_TRACEPOINT_EVENT(
-    jami,
+    sip_core,
     ice_transport_recv,
     LTTNG_UST_TP_ARGS(
             uint64_t, context,
@@ -102,7 +102,7 @@ LTTNG_UST_TRACEPOINT_EVENT(
 )
 
 LTTNG_UST_TRACEPOINT_EVENT(
-    jami,
+    sip_core,
     emit_signal,
     LTTNG_UST_TP_ARGS(
             const char*, signal_type
@@ -114,7 +114,7 @@ LTTNG_UST_TRACEPOINT_EVENT(
 )
 
 LTTNG_UST_TRACEPOINT_EVENT(
-    jami,
+    sip_core,
     emit_signal_end,
     LTTNG_UST_TP_ARGS(
     ),
@@ -123,7 +123,7 @@ LTTNG_UST_TRACEPOINT_EVENT(
 )
 
 LTTNG_UST_TRACEPOINT_EVENT(
-    jami,
+    sip_core,
     emit_signal_begin_callback,
     LTTNG_UST_TP_ARGS(
             const char*, filename,
@@ -136,7 +136,7 @@ LTTNG_UST_TRACEPOINT_EVENT(
 )
 
 LTTNG_UST_TRACEPOINT_EVENT(
-    jami,
+    sip_core,
     emit_signal_end_callback,
     LTTNG_UST_TP_ARGS(
     ),
@@ -145,7 +145,7 @@ LTTNG_UST_TRACEPOINT_EVENT(
 )
 
 LTTNG_UST_TRACEPOINT_EVENT(
-    jami,
+    sip_core,
     audio_input_read_from_device_end,
     LTTNG_UST_TP_ARGS(
         const char*, id
@@ -156,7 +156,7 @@ LTTNG_UST_TRACEPOINT_EVENT(
 )
 
 LTTNG_UST_TRACEPOINT_EVENT(
-    jami,
+    sip_core,
     audio_layer_put_recorded_end,
     LTTNG_UST_TP_ARGS(
     ),
@@ -165,7 +165,7 @@ LTTNG_UST_TRACEPOINT_EVENT(
 )
 
 LTTNG_UST_TRACEPOINT_EVENT(
-    jami,
+    sip_core,
     audio_layer_get_to_play_end,
     LTTNG_UST_TP_ARGS(
     ),
@@ -174,7 +174,7 @@ LTTNG_UST_TRACEPOINT_EVENT(
 )
 
 LTTNG_UST_TRACEPOINT_EVENT(
-    jami,
+    sip_core,
     call_start,
     LTTNG_UST_TP_ARGS(
             const char*, id
@@ -185,7 +185,7 @@ LTTNG_UST_TRACEPOINT_EVENT(
 )
 
 LTTNG_UST_TRACEPOINT_EVENT(
-    jami,
+    sip_core,
     call_end,
     LTTNG_UST_TP_ARGS(
             const char*, id
@@ -196,7 +196,7 @@ LTTNG_UST_TRACEPOINT_EVENT(
 )
 
 LTTNG_UST_TRACEPOINT_EVENT(
-    jami,
+    sip_core,
     conference_begin,
     LTTNG_UST_TP_ARGS(
             const char*, id
@@ -207,7 +207,7 @@ LTTNG_UST_TRACEPOINT_EVENT(
 )
 
 LTTNG_UST_TRACEPOINT_EVENT(
-    jami,
+    sip_core,
     conference_end,
     LTTNG_UST_TP_ARGS(
             const char*, id
@@ -218,7 +218,7 @@ LTTNG_UST_TRACEPOINT_EVENT(
 )
 
 LTTNG_UST_TRACEPOINT_EVENT(
-    jami,
+    sip_core,
     conference_add_participant,
     LTTNG_UST_TP_ARGS(
             const char*, conference_id,

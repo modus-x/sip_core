@@ -33,7 +33,7 @@ extern "C" {
 #include <libavutil/hwcontext.h>
 }
 
-namespace jami {
+namespace sip_core {
 namespace video {
 
 
@@ -185,4 +185,4 @@ private:
 };
 
 } // namespace video
-} // namespace jami
+} // namespace sip_core

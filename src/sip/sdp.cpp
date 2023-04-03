@@ -43,7 +43,7 @@
 #include <algorithm>
 #include <cassert>
 
-namespace jami {
+namespace sip_core {
 
 using std::string;
 using std::vector;
@@ -134,7 +134,7 @@ void
 Sdp::setActiveLocalSdpSession(const pjmedia_sdp_session* sdp)
 {
     if (activeLocalSession_ != sdp)
-        JAMI_DBG("Set active local session to [%p]. Was [%p]", sdp, activeLocalSession_);
+        SIP_CORE_DBG("Set active local session to [%p]. Was [%p]", sdp, activeLocalSession_);
     activeLocalSession_ = sdp;
 }
 
@@ -142,7 +142,7 @@ void
 Sdp::setActiveRemoteSdpSession(const pjmedia_sdp_session* sdp)
 {
     if (activeLocalSession_ != sdp)
-        JAMI_DBG("Set active remote session to [%p]. Was [%p]", sdp, activeRemoteSession_);
+        SIP_CORE_DBG("Set active remote session to [%p]. Was [%p]", sdp, activeRemoteSession_);
     activeRemoteSession_ = sdp;
 }
 
@@ -151,12 +151,12 @@ Sdp::generateSdesAttribute()
 {
     static constexpr const unsigned cryptoSuite = 0;
     std::vector<uint8_t> keyAndSalt;
-    keyAndSalt.resize(jami::CryptoSuites[cryptoSuite].masterKeyLength / 8
-                      + jami::CryptoSuites[cryptoSuite].masterSaltLength / 8);
+    keyAndSalt.resize(sip_core::CryptoSuites[cryptoSuite].masterKeyLength / 8
+                      + sip_core::CryptoSuites[cryptoSuite].masterSaltLength / 8);
     // generate keys
     // randomFill(keyAndSalt);
 
-    std::string crypto_attr = "1 "s + jami::CryptoSuites[cryptoSuite].name
+    std::string crypto_attr = "1 "s + sip_core::CryptoSuites[cryptoSuite].name
                               + " inline:" + base64::encode(keyAndSalt);
     pj_str_t val {sip_utils::CONST_PJ_STR(crypto_attr)};
     return pjmedia_sdp_attr_create(memPool_.get(), "crypto", &val);
@@ -258,7 +258,7 @@ Sdp::addMediaDescription(const MediaAttribute& mediaAttr)
     auto type = mediaAttr.type_;
     auto secure = mediaAttr.secure_;
 
-    JAMI_DBG("Add media description [%s]", mediaAttr.toString(true).c_str());
+    SIP_CORE_DBG("Add media description [%s]", mediaAttr.toString(true).c_str());
 
     pjmedia_sdp_media* med = PJ_POOL_ZALLOC_T(memPool_.get(), pjmedia_sdp_media);
 
@@ -393,7 +393,7 @@ Sdp::setPublishedIP(const std::string& addr, pj_uint16_t addr_type)
         localSession_->origin.addr = sip_utils::CONST_PJ_STR(publishedIpAddr_);
         localSession_->conn->addr = localSession_->origin.addr;
         if (pjmedia_sdp_validate(localSession_) != PJ_SUCCESS)
-            JAMI_ERR("Could not validate SDP");
+            SIP_CORE_ERR("Could not validate SDP");
     }
 }
 
@@ -439,7 +439,7 @@ Sdp::setLocalMediaCapabilities(MediaType type,
 #ifdef ENABLE_VIDEO
         video_codec_list_ = selectedCodecs;
         // Do not expose H265 if accel is disactivated
-        if (not jami::Manager::instance().videoPreferences.getEncodingAccelerated()) {
+        if (not sip_core::Manager::instance().videoPreferences.getEncodingAccelerated()) {
             video_codec_list_.erase(std::remove_if(video_codec_list_.begin(),
                                                    video_codec_list_.end(),
                                                    [](const std::shared_ptr<AccountCodecInfo>& i) {
@@ -482,7 +482,7 @@ Sdp::printSession(const pjmedia_sdp_session* session, const char* header, SdpDir
 
     auto cloned_session = pjmedia_sdp_session_clone(tmpPool_.get(), session);
     if (!cloned_session) {
-        JAMI_ERR("Could not clone SDP for printing");
+        SIP_CORE_ERR("Could not clone SDP for printing");
         return;
     }
 
@@ -494,11 +494,11 @@ Sdp::printSession(const pjmedia_sdp_session* session, const char* header, SdpDir
     std::array<char, BUF_SZ + 1> buffer;
     auto size = pjmedia_sdp_print(cloned_session, buffer.data(), BUF_SZ);
     if (size < 0) {
-        JAMI_ERR("%s SDP too big for dump", header);
+        SIP_CORE_ERR("%s SDP too big for dump", header);
         return;
     }
 
-    JAMI_DBG("[SDP %s] %s\n%.*s", getSdpDirectionStr(direction), header, size, buffer.data());
+    SIP_CORE_DBG("[SDP %s] %s\n%.*s", getSdpDirectionStr(direction), header, size, buffer.data());
 }
 
 void
@@ -550,12 +550,12 @@ Sdp::createOffer(const std::vector<MediaAttribute>& mediaList)
     if (mediaList.size() >= PJMEDIA_MAX_SDP_MEDIA) {
         throw SdpException("Media list size exceeds SDP media maximum size");
     }
-    JAMI_DEBUG("Creating SDP offer with {} media", mediaList.size());
+    SIP_CORE_DEBUG("Creating SDP offer with {} media", mediaList.size());
 
     createLocalSession(SdpDirection::OFFER);
 
     if (validateSession() != PJ_SUCCESS) {
-        JAMI_ERR("Failed to create initial offer");
+        SIP_CORE_ERR("Failed to create initial offer");
         return false;
     }
 
@@ -568,13 +568,13 @@ Sdp::createOffer(const std::vector<MediaAttribute>& mediaList)
     }
 
     if (validateSession() != PJ_SUCCESS) {
-        JAMI_ERR("Failed to add medias");
+        SIP_CORE_ERR("Failed to add medias");
         return false;
     }
 
     if (pjmedia_sdp_neg_create_w_local_offer(memPool_.get(), localSession_, &negotiator_)
         != PJ_SUCCESS) {
-        JAMI_ERR("Failed to create an initial SDP negotiator");
+        SIP_CORE_ERR("Failed to create an initial SDP negotiator");
         return false;
     }
 
@@ -587,7 +587,7 @@ void
 Sdp::setReceivedOffer(const pjmedia_sdp_session* remote)
 {
     if (remote == nullptr) {
-        JAMI_ERR("Remote session is NULL");
+        SIP_CORE_ERR("Remote session is NULL");
         return;
     }
     remoteSession_ = pjmedia_sdp_session_clone(memPool_.get(), remote);
@@ -599,7 +599,7 @@ Sdp::processIncomingOffer(const std::vector<MediaAttribute>& mediaList)
     if (not remoteSession_)
         return false;
 
-    JAMI_DEBUG("Processing received offer for [{:s}] with {:d} media",
+    SIP_CORE_DEBUG("Processing received offer for [{:s}] with {:d} media",
                sessionName_,
                mediaList.size());
 
@@ -607,7 +607,7 @@ Sdp::processIncomingOffer(const std::vector<MediaAttribute>& mediaList)
 
     createLocalSession(SdpDirection::ANSWER);
     if (validateSession() != PJ_SUCCESS) {
-        JAMI_ERR("Failed to create local session");
+        SIP_CORE_ERR("Failed to create local session");
         return false;
     }
 
@@ -622,7 +622,7 @@ Sdp::processIncomingOffer(const std::vector<MediaAttribute>& mediaList)
     printSession(localSession_, "Local session:\n", sdpDirection_);
 
     if (validateSession() != PJ_SUCCESS) {
-        JAMI_ERR("Failed to add medias");
+        SIP_CORE_ERR("Failed to add medias");
         return false;
     }
 
@@ -631,7 +631,7 @@ Sdp::processIncomingOffer(const std::vector<MediaAttribute>& mediaList)
                                               remoteSession_,
                                               &negotiator_)
         != PJ_SUCCESS) {
-        JAMI_ERR("Failed to initialize media negotiation");
+        SIP_CORE_ERR("Failed to initialize media negotiation");
         return false;
     }
 
@@ -641,10 +641,10 @@ Sdp::processIncomingOffer(const std::vector<MediaAttribute>& mediaList)
 bool
 Sdp::startNegotiation()
 {
-    JAMI_DBG("Starting media negotiation for [%s]", sessionName_.c_str());
+    SIP_CORE_DBG("Starting media negotiation for [%s]", sessionName_.c_str());
 
     if (negotiator_ == NULL) {
-        JAMI_ERR("Can't start negotiation with invalid negotiator");
+        SIP_CORE_ERR("Can't start negotiation with invalid negotiator");
         return false;
     }
 
@@ -652,17 +652,17 @@ Sdp::startNegotiation()
     const pjmedia_sdp_session* active_remote;
 
     if (pjmedia_sdp_neg_get_state(negotiator_) != PJMEDIA_SDP_NEG_STATE_WAIT_NEGO) {
-        JAMI_WARN("Negotiator not in right state for negotiation");
+        SIP_CORE_WARN("Negotiator not in right state for negotiation");
         return false;
     }
 
     if (pjmedia_sdp_neg_negotiate(memPool_.get(), negotiator_, 0) != PJ_SUCCESS) {
-        JAMI_ERR("Failed to start media negotiation");
+        SIP_CORE_ERR("Failed to start media negotiation");
         return false;
     }
 
     if (pjmedia_sdp_neg_get_active_local(negotiator_, &active_local) != PJ_SUCCESS)
-        JAMI_ERR("Could not retrieve local active session");
+        SIP_CORE_ERR("Could not retrieve local active session");
 
     setActiveLocalSdpSession(active_local);
 
@@ -672,7 +672,7 @@ Sdp::startNegotiation()
 
     if (pjmedia_sdp_neg_get_active_remote(negotiator_, &active_remote) != PJ_SUCCESS
         or active_remote == nullptr) {
-        JAMI_ERR("Could not retrieve remote active session");
+        SIP_CORE_ERR("Could not retrieve remote active session");
         return false;
     }
 
@@ -696,7 +696,7 @@ Sdp::getFilteredSdp(const pjmedia_sdp_session* session, unsigned media_keep, uns
                  pj_pool_release);
     auto cloned = pjmedia_sdp_session_clone(tmpPool_.get(), session);
     if (!cloned) {
-        JAMI_ERR("Could not clone SDP");
+        SIP_CORE_ERR("Could not clone SDP");
         return "";
     }
 
@@ -705,13 +705,13 @@ Sdp::getFilteredSdp(const pjmedia_sdp_session* session, unsigned media_keep, uns
     for (unsigned i = 0; i < cloned->media_count; i++)
         if (i != media_keep) {
             if (pjmedia_sdp_media_deactivate(tmpPool_.get(), cloned->media[i]) != PJ_SUCCESS)
-                JAMI_ERR("Could not deactivate media");
+                SIP_CORE_ERR("Could not deactivate media");
         } else {
             hasKeep = true;
         }
 
     if (not hasKeep) {
-        JAMI_DBG("No media to keep present in SDP");
+        SIP_CORE_DBG("No media to keep present in SDP");
         return "";
     }
 
@@ -793,7 +793,7 @@ Sdp::getMediaDescriptions(const pjmedia_sdp_session* session, bool remote) const
         // get connection info
         pjmedia_sdp_conn* conn = media->conn ? media->conn : session->conn;
         if (not conn) {
-            JAMI_ERR("Could not find connection information for media");
+            SIP_CORE_ERR("Could not find connection information for media");
             continue;
         }
         descr.addr = std::string_view(conn->addr.ptr, conn->addr.slen);
@@ -822,7 +822,7 @@ Sdp::getMediaDescriptions(const pjmedia_sdp_session* session, bool remote) const
 
         descr.direction_ = getMediaDirection(media);
         if (descr.direction_ == MediaDirection::UNKNOWN) {
-            JAMI_ERR("Did not find media direction attribute in remote SDP");
+            SIP_CORE_ERR("Did not find media direction attribute in remote SDP");
         }
 
         // get codecs infos
@@ -832,20 +832,20 @@ Sdp::getMediaDescriptions(const pjmedia_sdp_session* session, bool remote) const
                                                                      &media->desc.fmt[j]);
             if (!rtpMapAttribute) {
                 descr.enabled = false;
-                JAMI_ERR("Could not find rtpmap attribute for %s, trying to guess by payload type",
+                SIP_CORE_ERR("Could not find rtpmap attribute for %s, trying to guess by payload type",
                          media->desc.fmt[j].ptr);
                 if (!pj_strcmp(&media->desc.fmt[j], &PCMA_PAYLOAD)) {
-                    JAMI_WARN("Found that payload %s can be PCMA 8000", media->desc.fmt[j].ptr);
+                    SIP_CORE_WARN("Found that payload %s can be PCMA 8000", media->desc.fmt[j].ptr);
                     descr.codec = findCodecBySpec("PCMA", 8000);
                     if (not descr.codec) {
-                        JAMI_ERR("Could not find codec for %s", media->desc.fmt[j].ptr);
+                        SIP_CORE_ERR("Could not find codec for %s", media->desc.fmt[j].ptr);
                     } else {
 
                         // for now, just keep the first codec only
                         descr.enabled = true;
                         descr.payload_type = 8;
                         descr.rtp_clockrate = 8000;
-                        JAMI_INFO("Found codec for %s", media->desc.fmt[j].ptr);
+                        SIP_CORE_INFO("Found codec for %s", media->desc.fmt[j].ptr);
                         break;
                     }
                 }
@@ -855,7 +855,7 @@ Sdp::getMediaDescriptions(const pjmedia_sdp_session* session, bool remote) const
             pjmedia_sdp_rtpmap rtpmap;
             if (pjmedia_sdp_attr_get_rtpmap(rtpMapAttribute, &rtpmap) != PJ_SUCCESS
                 || rtpmap.enc_name.slen == 0) {
-                JAMI_ERR("Could not find payload type %.*s in SDP",
+                SIP_CORE_ERR("Could not find payload type %.*s in SDP",
                          (int) media->desc.fmt[j].slen,
                          media->desc.fmt[j].ptr);
                 descr.enabled = false;
@@ -865,7 +865,7 @@ Sdp::getMediaDescriptions(const pjmedia_sdp_session* session, bool remote) const
             descr.rtp_clockrate = rtpmap.clock_rate;
             descr.codec = findCodecBySpec(codec_raw, rtpmap.clock_rate);
             if (not descr.codec) {
-                JAMI_ERR("Could not find codec %.*s", (int) codec_raw.size(), codec_raw.data());
+                SIP_CORE_ERR("Could not find codec %.*s", (int) codec_raw.size(), codec_raw.data());
                 descr.enabled = false;
                 continue;
             }
@@ -935,7 +935,7 @@ Sdp::getMediaAttributeListFromSdp(const pjmedia_sdp_session* sdpSession, bool ig
         else if (!pj_stricmp2(&media->desc.media, "video"))
             mediaAttr.type_ = MediaType::MEDIA_VIDEO;
         else {
-            JAMI_WARN("Media#%u only 'audio' and 'video' types are supported!", idx);
+            SIP_CORE_WARN("Media#%u only 'audio' and 'video' types are supported!", idx);
             // Disable the media. No need to parse the attributes.
             mediaAttr.enabled_ = false;
             continue;
@@ -957,7 +957,7 @@ Sdp::getMediaAttributeListFromSdp(const pjmedia_sdp_session* sdpSession, bool ig
         // Get transport.
         auto transp = getMediaTransport(media);
         if (transp == MediaTransport::UNKNOWN) {
-            JAMI_WARN("Media#%u could not determine transport type!", idx);
+            SIP_CORE_WARN("Media#%u could not determine transport type!", idx);
         }
 
         // A media is secure if the transport is of type RTP/SAVP
@@ -974,4 +974,4 @@ Sdp::getMediaAttributeListFromSdp(const pjmedia_sdp_session* sdpSession, bool ig
     return mediaList;
 }
 
-} // namespace jami
+} // namespace sip_core

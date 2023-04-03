@@ -5,4 +5,4 @@ libconfig_la_SOURCES = \
 	./config/yamlparser.h \
 	./config/yamlparser.cpp
 
-libjami_la_LIBADD += libconfig.la
+libsip_core_la_LIBADD += libconfig.la

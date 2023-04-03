@@ -27,7 +27,7 @@
 #include "observer.h"
 #include "socket_pair.h"
 
-namespace jami {
+namespace sip_core {
 
 class AudioInput;
 class MediaEncoder;
@@ -49,8 +49,8 @@ public:
 
     void setVoiceCallback(std::function<void(bool)> cb);
 
-    void update(Observable<std::shared_ptr<jami::MediaFrame>>*,
-                const std::shared_ptr<jami::MediaFrame>&) override;
+    void update(Observable<std::shared_ptr<sip_core::MediaFrame>>*,
+                const std::shared_ptr<sip_core::MediaFrame>&) override;
 
 private:
     NON_COPYABLE(AudioSender);
@@ -75,4 +75,4 @@ private:
     std::function<void(bool)> voiceCallback_;
 };
 
-} // namespace jami
+} // namespace sip_core

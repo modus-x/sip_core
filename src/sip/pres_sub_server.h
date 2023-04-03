@@ -29,7 +29,7 @@
 
 #include "noncopyable.h"
 
-namespace jami {
+namespace sip_core {
 
 extern pj_bool_t pres_on_rx_subscribe_request(pjsip_rx_data* rdata);
 
@@ -76,6 +76,6 @@ private:
     bool approved_;
 };
 
-} // namespace jami
+} // namespace sip_core
 
 #endif /* SERVERPRESENCESUB_H */

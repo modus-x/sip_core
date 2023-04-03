@@ -28,7 +28,7 @@
 #include <condition_variable>
 #include <mutex>
 
-namespace jami {
+namespace sip_core {
 
 struct ThreadLoopException : public std::runtime_error
 {
@@ -126,4 +126,4 @@ private:
     std::condition_variable cv_;
 };
 
-} // namespace jami
+} // namespace sip_core

@@ -30,7 +30,7 @@
 
 #include <string>
 
-namespace jami {
+namespace sip_core {
 
 class AudioDevice
 {
@@ -59,6 +59,6 @@ private:
 #endif
 };
 
-} // namespace jami
+} // namespace sip_core
 
 #endif /* defined(AUDIO_DEVICE_H) */

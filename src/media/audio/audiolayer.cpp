@@ -40,7 +40,7 @@
 #include <ctime>
 #include <algorithm>
 
-namespace jami {
+namespace sip_core {
 
 AudioLayer::AudioLayer(const AudioPreference& pref)
     : isCaptureMuted_(pref.getCaptureMuted())
@@ -58,7 +58,7 @@ AudioLayer::AudioLayer(const AudioPreference& pref)
 {
     urgentRingBuffer_.createReadOffset(RingBufferPool::DEFAULT_ID);
 
-    JAMI_INFO("[audiolayer] AGC: %d, noiseReduce: %s, VAD: %d, echoCancel: %s, audioProcessor: %s",
+    SIP_CORE_INFO("[audiolayer] AGC: %d, noiseReduce: %s, VAD: %d, echoCancel: %s, audioProcessor: %s",
               pref_.isAGCEnabled(),
               pref.getNoiseReduce().c_str(),
               pref.getVadEnabled(),
@@ -71,7 +71,7 @@ AudioLayer::~AudioLayer() {}
 void
 AudioLayer::hardwareFormatAvailable(AudioFormat playback, size_t bufSize)
 {
-    JAMI_DBG("Hardware audio format available : %s %zu", playback.toString().c_str(), bufSize);
+    SIP_CORE_DBG("Hardware audio format available : %s %zu", playback.toString().c_str(), bufSize);
     audioFormat_ = Manager::instance().hardwareAudioFormatChanged(playback);
     urgentRingBuffer_.setFormat(audioFormat_);
     nativeFrameSize_ = bufSize;
@@ -80,13 +80,13 @@ AudioLayer::hardwareFormatAvailable(AudioFormat playback, size_t bufSize)
 void
 AudioLayer::hardwareInputFormatAvailable(AudioFormat capture)
 {
-    JAMI_DBG("Hardware input audio format available : %s", capture.toString().c_str());
+    SIP_CORE_DBG("Hardware input audio format available : %s", capture.toString().c_str());
 }
 
 void
 AudioLayer::devicesChanged()
 {
-    emitSignal<libjami::AudioSignal::DeviceEvent>();
+    emitSignal<libsip_core::AudioSignal::DeviceEvent>();
 }
 
 void
@@ -153,7 +153,7 @@ shouldUseAudioProcessorNoiseSuppression(bool hasNativeNS, const std::string& noi
 void
 AudioLayer::setHasNativeAEC(bool hasNativeAEC)
 {
-    JAMI_INFO("[audiolayer] setHasNativeAEC: %d", hasNativeAEC);
+    SIP_CORE_INFO("[audiolayer] setHasNativeAEC: %d", hasNativeAEC);
     std::lock_guard<std::mutex> lock(audioProcessorMutex);
     hasNativeAEC_ = hasNativeAEC;
     // if we have a current audio processor, tell it to enable/disable its own AEC
@@ -166,7 +166,7 @@ AudioLayer::setHasNativeAEC(bool hasNativeAEC)
 void
 AudioLayer::setHasNativeNS(bool hasNativeNS)
 {
-    JAMI_INFO("[audiolayer] setHasNativeNS: %d", hasNativeNS);
+    SIP_CORE_INFO("[audiolayer] setHasNativeNS: %d", hasNativeNS);
     std::lock_guard<std::mutex> lock(audioProcessorMutex);
     hasNativeNS_ = hasNativeNS;
     // if we have a current audio processor, tell it to enable/disable its own noise suppression
@@ -195,38 +195,38 @@ AudioLayer::createAudioProcessor()
         frame_size = sample_rate / 100u;
     }
 
-    JAMI_WARN("Input {%d Hz, %d channels}",
+    SIP_CORE_WARN("Input {%d Hz, %d channels}",
               audioInputFormat_.sample_rate,
               audioInputFormat_.nb_channels);
-    JAMI_WARN("Output {%d Hz, %d channels}", audioFormat_.sample_rate, audioFormat_.nb_channels);
-    JAMI_WARN("Starting audio processor with: {%d Hz, %d channels, %d samples/frame}",
+    SIP_CORE_WARN("Output {%d Hz, %d channels}", audioFormat_.sample_rate, audioFormat_.nb_channels);
+    SIP_CORE_WARN("Starting audio processor with: {%d Hz, %d channels, %d samples/frame}",
               sample_rate,
               nb_channels,
               frame_size);
 
     if (pref_.getAudioProcessor() == "webrtc") {
 #if HAVE_WEBRTC_AP
-        JAMI_WARN("[audiolayer] using WebRTCAudioProcessor");
+        SIP_CORE_WARN("[audiolayer] using WebRTCAudioProcessor");
         audioProcessor.reset(new WebRTCAudioProcessor(formatForProcessor, frame_size));
 #else
-        JAMI_ERR("[audiolayer] audioProcessor preference is webrtc, but library not linked! "
+        SIP_CORE_ERR("[audiolayer] audioProcessor preference is webrtc, but library not linked! "
                  "using NullAudioProcessor instead");
         audioProcessor.reset(new NullAudioProcessor(formatForProcessor, frame_size));
 #endif
     } else if (pref_.getAudioProcessor() == "speex") {
 #if HAVE_SPEEXDSP
-        JAMI_WARN("[audiolayer] using SpeexAudioProcessor");
+        SIP_CORE_WARN("[audiolayer] using SpeexAudioProcessor");
         audioProcessor.reset(new SpeexAudioProcessor(formatForProcessor, frame_size));
 #else
-        JAMI_ERR("[audiolayer] audioProcessor preference is speex, but library not linked! "
+        SIP_CORE_ERR("[audiolayer] audioProcessor preference is speex, but library not linked! "
                  "using NullAudioProcessor instead");
         audioProcessor.reset(new NullAudioProcessor(formatForProcessor, frame_size));
 #endif
     } else if (pref_.getAudioProcessor() == "null") {
-        JAMI_WARN("[audiolayer] using NullAudioProcessor");
+        SIP_CORE_WARN("[audiolayer] using NullAudioProcessor");
         audioProcessor.reset(new NullAudioProcessor(formatForProcessor, frame_size));
     } else {
-        JAMI_ERR("[audiolayer] audioProcessor preference not recognized, using NullAudioProcessor "
+        SIP_CORE_ERR("[audiolayer] audioProcessor preference not recognized, using NullAudioProcessor "
                  "instead");
         audioProcessor.reset(new NullAudioProcessor(formatForProcessor, frame_size));
     }
@@ -344,7 +344,7 @@ AudioLayer::getToPlay(AudioFormat format, size_t writableSamples)
             break;
     }
 
-    jami_tracepoint(audio_layer_get_to_play_end);
+    sip_core_tracepoint(audio_layer_get_to_play_end);
 
     return playbackBuf;
 }
@@ -363,7 +363,7 @@ AudioLayer::putRecorded(std::shared_ptr<AudioFrame>&& frame)
         mainRingBuffer_->put(std::move(frame));
     }
 
-    jami_tracepoint(audio_layer_put_recorded_end, );
+    sip_core_tracepoint(audio_layer_put_recorded_end, );
 }
 
-} // namespace jami
+} // namespace sip_core

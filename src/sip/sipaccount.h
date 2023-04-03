@@ -40,7 +40,7 @@
 #include <vector>
 #include <map>
 
-namespace jami {
+namespace sip_core {
 
 typedef std::vector<pj_ssl_cipher> CipherArray;
 
@@ -384,7 +384,7 @@ public:
      * @return a shared pointer on the created call.
      */
     std::shared_ptr<Call> newOutgoingCall(std::string_view toUrl,
-                                          const std::vector<libjami::MediaMap>& mediaList) override;
+                                          const std::vector<libsip_core::MediaMap>& mediaList) override;
 
     /**
      * Create incoming SIPCall.
@@ -395,7 +395,7 @@ public:
      */
     std::shared_ptr<SIPCall> newIncomingCall(
         const std::string& from,
-        const std::vector<libjami::MediaMap>& mediaList,
+        const std::vector<libsip_core::MediaMap>& mediaList,
         const std::shared_ptr<SipTransport>& sipTr = {}) override;
 
     void onRegister(pjsip_regc_cbparam* param);
@@ -622,4 +622,4 @@ private:
     pj_uint16_t publishedPortUsed_ {sip_utils::DEFAULT_SIP_PORT};
 };
 
-} // namespace jami
+} // namespace sip_core

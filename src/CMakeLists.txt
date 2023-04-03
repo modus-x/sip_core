@@ -2,7 +2,7 @@
 # Source groups - src
 ################################################################################
 
-# client|config|connectivity|jami.hooks|im|jamidht|media
+# client|config|connectivity|sip_core.hooks|im|sip_coredht|media
 
 list (APPEND Source_Files
       "${CMAKE_CURRENT_SOURCE_DIR}/account.cpp"
@@ -70,7 +70,7 @@ set (Source_Files ${Source_Files} PARENT_SCOPE)
 add_subdirectory(client)
 add_subdirectory(config)
 add_subdirectory(connectivity)
-add_subdirectory(jami)
+add_subdirectory(sip_core)
 add_subdirectory(im)
 add_subdirectory(media)
 add_subdirectory(sip)
@@ -78,12 +78,12 @@ add_subdirectory(sip)
 set (Source_Files__client ${Source_Files__client} PARENT_SCOPE)
 set (Source_Files__config ${Source_Files__config} PARENT_SCOPE)
 set (Source_Files__connectivity ${Source_Files__connectivity} PARENT_SCOPE)
-set (Source_Files__jami ${Source_Files__jami} PARENT_SCOPE)
+set (Source_Files__sip_core ${Source_Files__sip_core} PARENT_SCOPE)
 set (Source_Files__hooks ${Source_Files__hooks} PARENT_SCOPE)
 set (Source_Files__im ${Source_Files__im} PARENT_SCOPE)
-set (Source_Files__jamidht ${Source_Files__jamidht} PARENT_SCOPE)
-set (Source_Files__jamidht__eth__libdevcore ${Source_Files__jamidht__eth__libdevcore} PARENT_SCOPE)
-set (Source_Files__jamidht__eth__libdevcrypto ${Source_Files__jamidht__eth__libdevcrypto} PARENT_SCOPE)
+set (Source_Files__sip_coredht ${Source_Files__sip_coredht} PARENT_SCOPE)
+set (Source_Files__sip_coredht__eth__libdevcore ${Source_Files__sip_coredht__eth__libdevcore} PARENT_SCOPE)
+set (Source_Files__sip_coredht__eth__libdevcrypto ${Source_Files__sip_coredht__eth__libdevcrypto} PARENT_SCOPE)
 set (Source_Files__media ${Source_Files__media} PARENT_SCOPE)
 set (Source_Files__media__audio ${Source_Files__media__audio} PARENT_SCOPE)
 set (Source_Files__media__audio__sound ${Source_Files__media__audio__sound} PARENT_SCOPE)

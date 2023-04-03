@@ -35,11 +35,11 @@
 
 #define DEBUG_FPS
 
-namespace jami {
+namespace sip_core {
 class MediaFilter;
 }
 
-namespace jami {
+namespace sip_core {
 namespace video {
 
 #ifdef ENABLE_SHM
@@ -67,8 +67,8 @@ public:
     }
 
     // as VideoFramePassiveReader
-    void update(Observable<std::shared_ptr<jami::MediaFrame>>*,
-                const std::shared_ptr<jami::MediaFrame>&) override;
+    void update(Observable<std::shared_ptr<sip_core::MediaFrame>>*,
+                const std::shared_ptr<sip_core::MediaFrame>&) override;
 
     bool start() noexcept;
     bool stop() noexcept;
@@ -76,7 +76,7 @@ public:
     void setFrameSize(int width, int height);
     void setCrop(int x, int y, int w, int h);
 
-    void registerTarget(libjami::SinkTarget target) noexcept
+    void registerTarget(libsip_core::SinkTarget target) noexcept
     {
         std::lock_guard<std::mutex> lock(mtx_);
         target_ = std::move(target);
@@ -101,12 +101,12 @@ private:
 
     bool started_ {false}; // used to arbitrate client's stop signal.
     int rotation_ {0};
-    libjami::SinkTarget target_;
+    libsip_core::SinkTarget target_;
     std::unique_ptr<VideoScaler> scaler_;
     std::unique_ptr<MediaFilter> filter_;
     std::mutex mtx_;
 
-    void sendFrameDirect(const std::shared_ptr<jami::MediaFrame>&);
+    void sendFrameDirect(const std::shared_ptr<sip_core::MediaFrame>&);
     void sendFrameTransformed(AVFrame* frame);
 
     /**
@@ -130,4 +130,4 @@ private:
 };
 
 } // namespace video
-} // namespace jami
+} // namespace sip_core

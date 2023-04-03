@@ -39,7 +39,7 @@
 #include <sys/types.h>
 #include <ctime>
 
-namespace jami {
+namespace sip_core {
 
 const constexpr char ROTATION_FILTER_INPUT_NAME[] = "in";
 
@@ -80,10 +80,10 @@ struct MediaRecorder::StreamObserver : public Observer<std::shared_ptr<MediaFram
                 (AVPixelFormat) (std::static_pointer_cast<VideoFrame>(m))->format());
             if (desc && (desc->flags & AV_PIX_FMT_FLAG_HWACCEL)) {
                 try {
-                    framePtr = jami::video::HardwareAccel::transferToMainMemory(
+                    framePtr = sip_core::video::HardwareAccel::transferToMainMemory(
                         *std::static_pointer_cast<VideoFrame>(m), AV_PIX_FMT_NV12);
                 } catch (const std::runtime_error& e) {
-                    JAMI_ERR("Accel failure: %s", e.what());
+                    SIP_CORE_ERR("Accel failure: %s", e.what());
                     return;
                 }
             } else
@@ -91,7 +91,7 @@ struct MediaRecorder::StreamObserver : public Observer<std::shared_ptr<MediaFram
                 framePtr = std::static_pointer_cast<VideoFrame>(m);
             int angle = framePtr->getOrientation();
             if (angle != rotation_) {
-                videoRotationFilter_ = jami::video::getTransposeFilter(angle,
+                videoRotationFilter_ = sip_core::video::getTransposeFilter(angle,
                                                                        ROTATION_FILTER_INPUT_NAME,
                                                                        framePtr->width(),
                                                                        framePtr->height(),
@@ -168,7 +168,7 @@ MediaRecorder::startRecording()
 
     encoder_.reset(new MediaEncoder);
 
-    JAMI_DBG() << "Start recording '" << getPath() << "'";
+    SIP_CORE_DBG() << "Start recording '" << getPath() << "'";
 //     if (initRecord() >= 0) {
 //         isRecording_ = true;
 //         // start thread after isRecording_ is set to true
@@ -199,7 +199,7 @@ MediaRecorder::startRecording()
 // #endif // ENABLE_VIDEO
 //                     }
 //                 } catch (const MediaEncoderException& e) {
-//                     JAMI_ERR() << "Failed to record frame: " << e.what();
+//                     SIP_CORE_ERR() << "Failed to record frame: " << e.what();
 //                 }
 //             }
 //             rec->flush();
@@ -215,9 +215,9 @@ MediaRecorder::stopRecording()
     interrupted_ = true;
     cv_.notify_all();
     if (isRecording_) {
-        JAMI_DBG() << "Stop recording '" << getPath() << "'";
+        SIP_CORE_DBG() << "Stop recording '" << getPath() << "'";
         isRecording_ = false;
-        emitSignal<libjami::CallSignal::RecordPlaybackStopped>(getPath());
+        emitSignal<libsip_core::CallSignal::RecordPlaybackStopped>(getPath());
     }
 }
 
@@ -225,11 +225,11 @@ Observer<std::shared_ptr<MediaFrame>>*
 MediaRecorder::addStream(const MediaStream& ms)
 {
     if (audioOnly_ && ms.isVideo) {
-        JAMI_ERR() << "Trying to add video stream to audio only recording";
+        SIP_CORE_ERR() << "Trying to add video stream to audio only recording";
         return nullptr;
     }
     if (ms.isVideo && ms.format < 0) {
-        JAMI_ERR() << "Trying to add invalid video stream to recording";
+        SIP_CORE_ERR() << "Trying to add invalid video stream to recording";
         return nullptr;
     }
 
@@ -240,14 +240,14 @@ MediaRecorder::addStream(const MediaStream& ms)
                                                 });
     auto p = streams_.insert(std::make_pair(ms.name, std::move(ptr)));
     if (p.second) {
-        // JAMI_DBG() << "Recorder input #" << streams_.size() << ": " << ms;
+        // SIP_CORE_DBG() << "Recorder input #" << streams_.size() << ": " << ms;
         if (ms.isVideo)
             hasVideo_ = true;
         else
             hasAudio_ = true;
         return p.first->second.get();
     } else {
-        // JAMI_WARN() << "Recorder already has '" << ms.name << "' as input";
+        // SIP_CORE_WARN() << "Recorder already has '" << ms.name << "' as input";
         return p.first->second.get();
     }
 }
@@ -280,7 +280,7 @@ MediaRecorder::onFrame(const std::string& name, const std::shared_ptr<MediaFrame
                     *std::static_pointer_cast<VideoFrame>(frame),
                     static_cast<AVPixelFormat>(ms.format));
             } catch (const std::runtime_error& e) {
-                JAMI_ERR("Accel failure: %s", e.what());
+                SIP_CORE_ERR("Accel failure: %s", e.what());
                 return;
             }
         } else {
@@ -351,7 +351,7 @@ MediaRecorder::initRecord()
     if (hasVideo_) {
         const MediaStream& videoStream = setupVideoOutput();
         if (videoStream.format < 0) {
-            JAMI_ERR() << "Could not retrieve video recorder stream properties";
+            SIP_CORE_ERR() << "Could not retrieve video recorder stream properties";
             return -1;
         }
         MediaDescription args;
@@ -365,29 +365,29 @@ MediaRecorder::initRecord()
     if (hasAudio_) {
         const MediaStream& audioStream = setupAudioOutput();
         if (audioStream.format < 0) {
-            JAMI_ERR() << "Could not retrieve audio recorder stream properties";
+            SIP_CORE_ERR() << "Could not retrieve audio recorder stream properties";
             return -1;
         }
         encoder_->setOptions(audioStream);
     }
 
     if (hasAudio_) {
-        auto audioCodec = std::static_pointer_cast<jami::SystemAudioCodecInfo>(
-            getSystemCodecContainer()->searchCodecByName("opus", jami::MEDIA_AUDIO));
+        auto audioCodec = std::static_pointer_cast<sip_core::SystemAudioCodecInfo>(
+            getSystemCodecContainer()->searchCodecByName("opus", sip_core::MEDIA_AUDIO));
         audioIdx_ = encoder_->addStream(*audioCodec.get());
         if (audioIdx_ < 0) {
-            JAMI_ERR() << "Failed to add audio stream to encoder";
+            SIP_CORE_ERR() << "Failed to add audio stream to encoder";
             return -1;
         }
     }
 
 #ifdef ENABLE_VIDEO
     if (hasVideo_) {
-        auto videoCodec = std::static_pointer_cast<jami::SystemVideoCodecInfo>(
-            getSystemCodecContainer()->searchCodecByName("VP8", jami::MEDIA_VIDEO));
+        auto videoCodec = std::static_pointer_cast<sip_core::SystemVideoCodecInfo>(
+            getSystemCodecContainer()->searchCodecByName("VP8", sip_core::MEDIA_VIDEO));
         videoIdx_ = encoder_->addStream(*videoCodec.get());
         if (videoIdx_ < 0) {
-            JAMI_ERR() << "Failed to add video stream to encoder";
+            SIP_CORE_ERR() << "Failed to add video stream to encoder";
             return -1;
         }
     }
@@ -395,7 +395,7 @@ MediaRecorder::initRecord()
 
     encoder_->setIOContext(nullptr);
 
-    JAMI_DBG() << "Recording initialized";
+    SIP_CORE_DBG() << "Recording initialized";
     return 0;
 }
 
@@ -430,7 +430,7 @@ MediaRecorder::setupVideoOutput()
     int streams = peer.isValid() + local.isValid() + mixer.isValid();
     switch (streams) {
     case 0: {
-        JAMI_ERR("Trying to record a stream but none is valid");
+        SIP_CORE_ERR("Trying to record a stream but none is valid");
         break;
     }
     case 1: {
@@ -442,7 +442,7 @@ MediaRecorder::setupVideoOutput()
         else if (mixer.isValid())
             inputStream = mixer;
         else {
-            JAMI_ERR("Trying to record a stream but none is valid");
+            SIP_CORE_ERR("Trying to record a stream but none is valid");
             break;
         }
 
@@ -453,7 +453,7 @@ MediaRecorder::setupVideoOutput()
         ret = videoFilter_->initialize(buildVideoFilter({peer}, local), {peer, local});
         break;
     default:
-        JAMI_ERR() << "Recording more than 2 video streams is not supported";
+        SIP_CORE_ERR() << "Recording more than 2 video streams is not supported";
         break;
     }
 
@@ -461,9 +461,9 @@ MediaRecorder::setupVideoOutput()
     if (ret >= 0) {
         encoderStream = videoFilter_->getOutputParams();
         encoderStream.bitrate = Manager::instance().videoPreferences.getRecordQuality();
-        JAMI_DBG() << "Recorder output: " << encoderStream;
+        SIP_CORE_DBG() << "Recorder output: " << encoderStream;
     } else {
-        JAMI_ERR() << "Failed to initialize video filter";
+        SIP_CORE_ERR() << "Failed to initialize video filter";
     }
 #endif
 
@@ -500,7 +500,7 @@ MediaRecorder::buildVideoFilter(const std::vector<MediaStream>& peers,
           << ", format=pix_fmts=yuv420p";
     } break;
     default:
-        JAMI_ERR() << "Video recordings with more than 2 video streams are not supported";
+        SIP_CORE_ERR() << "Video recordings with more than 2 video streams are not supported";
         break;
     }
 
@@ -546,7 +546,7 @@ MediaRecorder::setupAudioOutput()
         else if (mixer.isValid())
             inputStream = mixer;
         else {
-            JAMI_ERR("Trying to record a stream but none is valid");
+            SIP_CORE_ERR("Trying to record a stream but none is valid");
             break;
         }
         ret = audioFilter_->initialize(buildAudioFilter({}, inputStream), {inputStream});
@@ -556,15 +556,15 @@ MediaRecorder::setupAudioOutput()
         ret = audioFilter_->initialize(buildAudioFilter({peer}, local), {peer, local});
         break;
     default:
-        JAMI_ERR() << "Recording more than 2 audio streams is not supported";
+        SIP_CORE_ERR() << "Recording more than 2 audio streams is not supported";
         break;
     }
 
     if (ret >= 0) {
         encoderStream = audioFilter_->getOutputParams();
-        JAMI_DBG() << "Recorder output: " << encoderStream;
+        SIP_CORE_DBG() << "Recorder output: " << encoderStream;
     } else {
-        JAMI_ERR() << "Failed to initialize audio filter";
+        SIP_CORE_ERR() << "Failed to initialize audio filter";
     }
 
     return encoderStream;
@@ -622,4 +622,4 @@ MediaRecorder::reset()
     encoder_.reset();
 }
 
-} // namespace jami
+} // namespace sip_core

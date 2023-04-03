@@ -24,7 +24,7 @@
 
 namespace vCard {
 
-constexpr static const char* PROFILE_VCF = "x-jami/jami.profile.vcard";
+constexpr static const char* PROFILE_VCF = "x-sip_core/sip_core.profile.vcard";
 
 struct Delimiter
 {

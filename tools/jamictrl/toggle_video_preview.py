@@ -25,7 +25,7 @@ import sys
 import os
 from random import randint
 
-class libjamiToggleVideo():
+class libsip_coreToggleVideo():
     def start(self):
         bus = dbus.SessionBus()
 

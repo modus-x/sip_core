@@ -25,7 +25,7 @@
 #include <cstring> // memset
 #include <algorithm>
 
-namespace jami {
+namespace sip_core {
 
 std::ostream&
 operator<<(std::ostream& stream, const AudioFormat& f)
@@ -115,7 +115,7 @@ AudioBuffer::setChannelNum(unsigned n, bool mix /* = false */)
         return;
     }
 
-    JAMI_WARN("Unsupported channel mixing: %dch->%dch", c, n);
+    SIP_CORE_WARN("Unsupported channel mixing: %dch->%dch", c, n);
     samples_.resize(n, samples_[0]);
 }
 
@@ -143,7 +143,7 @@ AudioBuffer::getChannel(unsigned chan /* = 0 */)
     if (chan < samples_.size())
         return &samples_[chan];
 
-    JAMI_ERR("Audio channel %u out of range", chan);
+    SIP_CORE_ERR("Audio channel %u out of range", chan);
     return nullptr;
 }
 
@@ -155,7 +155,7 @@ AudioBuffer::applyGain(double gain)
 
     const double g = std::max(std::min(1.0, gain), -1.0);
     if (g != gain)
-        JAMI_DBG("Normalizing %f to [-1.0, 1.0]", gain);
+        SIP_CORE_DBG("Normalizing %f to [-1.0, 1.0]", gain);
 
     for (auto& channel : samples_)
         for (auto& sample : channel)
@@ -366,4 +366,4 @@ AudioBuffer::append(const AudioFrame& audioFrame)
     return 0;
 }
 
-} // namespace jami
+} // namespace sip_core

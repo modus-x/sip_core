@@ -35,7 +35,7 @@ class AudioPreference;
 
 #include <memory>
 
-namespace jami {
+namespace sip_core {
 
 class RingBuffer;
 
@@ -168,4 +168,4 @@ private:
     std::thread recThread {};
 };
 
-} // namespace jami
+} // namespace sip_core

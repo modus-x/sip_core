@@ -122,15 +122,15 @@ winGetEnv(const wchar_t* name)
 
 #define PROTECTED_GETENV(str) winGetEnv(str)
 
-#define JAMI_DATA_HOME   PROTECTED_GETENV(L"JAMI_DATA_HOME")
-#define JAMI_CONFIG_HOME PROTECTED_GETENV(L"JAMI_CONFIG_HOME")
-#define JAMI_CACHE_HOME  PROTECTED_GETENV(L"JAMI_CACHE_HOME")
+#define SIP_CORE_DATA_HOME   PROTECTED_GETENV(L"SIP_CORE_DATA_HOME")
+#define SIP_CORE_CONFIG_HOME PROTECTED_GETENV(L"SIP_CORE_CONFIG_HOME")
+#define SIP_CORE_CACHE_HOME  PROTECTED_GETENV(L"SIP_CORE_CACHE_HOME")
 #endif
 
 #define PIDFILE     ".ring.pid"
 #define ERASE_BLOCK 4096
 
-namespace jami {
+namespace sip_core {
 namespace fileutils {
 
 // returns true if directory exists
@@ -146,7 +146,7 @@ check_dir(const char* path, mode_t UNUSED dirmode, mode_t parentmode)
         }
 #ifndef _WIN32
         if (chmod(path, dirmode) < 0) {
-            JAMI_ERR("fileutils::check_dir(): chmod() failed on '%s', %s", path, strerror(errno));
+            SIP_CORE_ERR("fileutils::check_dir(): chmod() failed on '%s', %s", path, strerror(errno));
             return false;
         }
 #endif
@@ -159,7 +159,7 @@ std::string
 expand_path(const std::string& path)
 {
 #if defined __ANDROID__ || defined _MSC_VER || defined WIN32 || defined __APPLE__
-    JAMI_ERR("Path expansion not implemented, returning original");
+    SIP_CORE_ERR("Path expansion not implemented, returning original");
     return path;
 #else
 
@@ -170,20 +170,20 @@ expand_path(const std::string& path)
 
     switch (ret) {
     case WRDE_BADCHAR:
-        JAMI_ERR("Illegal occurrence of newline or one of |, &, ;, <, >, "
+        SIP_CORE_ERR("Illegal occurrence of newline or one of |, &, ;, <, >, "
                  "(, ), {, }.");
         return result;
     case WRDE_BADVAL:
-        JAMI_ERR("An undefined shell variable was referenced");
+        SIP_CORE_ERR("An undefined shell variable was referenced");
         return result;
     case WRDE_CMDSUB:
-        JAMI_ERR("Command substitution occurred");
+        SIP_CORE_ERR("Command substitution occurred");
         return result;
     case WRDE_SYNTAX:
-        JAMI_ERR("Shell syntax error");
+        SIP_CORE_ERR("Shell syntax error");
         return result;
     case WRDE_NOSPACE:
-        JAMI_ERR("Out of memory.");
+        SIP_CORE_ERR("Out of memory.");
         // This is the only error where we must call wordfree
         break;
     default:
@@ -216,10 +216,10 @@ isFile(const std::string& path, bool resolveSymlink)
 #ifdef _WIN32
     if (resolveSymlink) {
         struct _stat64i32 s;
-        if (_wstat(jami::to_wstring(path).c_str(), &s) == 0)
+        if (_wstat(sip_core::to_wstring(path).c_str(), &s) == 0)
             return S_ISREG(s.st_mode);
     } else {
-        DWORD attr = GetFileAttributes(jami::to_wstring(path).c_str());
+        DWORD attr = GetFileAttributes(sip_core::to_wstring(path).c_str());
         if ((attr != INVALID_FILE_ATTRIBUTES) && !(attr & FILE_ATTRIBUTE_DIRECTORY)
             && !(attr & FILE_ATTRIBUTE_REPARSE_POINT))
             return true;
@@ -262,7 +262,7 @@ isSymLink(const std::string& path)
     if (lstat(path.c_str(), &s) == 0)
         return S_ISLNK(s.st_mode);
 #elif !defined(_MSC_VER)
-    DWORD attr = GetFileAttributes(jami::to_wstring(path).c_str());
+    DWORD attr = GetFileAttributes(sip_core::to_wstring(path).c_str());
     if (attr & FILE_ATTRIBUTE_REPARSE_POINT)
         return true;
 #endif
@@ -287,13 +287,13 @@ writeTime(const std::string& path)
     ext_params.dwSecurityQosFlags = SECURITY_ANONYMOUS;
     ext_params.lpSecurityAttributes = nullptr;
     ext_params.hTemplateFile = nullptr;
-    HANDLE h = CreateFile2(jami::to_wstring(path).c_str(),
+    HANDLE h = CreateFile2(sip_core::to_wstring(path).c_str(),
                            GENERIC_READ,
                            FILE_SHARE_READ,
                            OPEN_EXISTING,
                            &ext_params);
 #elif _WIN32
-    HANDLE h = CreateFileW(jami::to_wstring(path).c_str(),
+    HANDLE h = CreateFileW(sip_core::to_wstring(path).c_str(),
                            GENERIC_READ,
                            FILE_SHARE_READ,
                            nullptr,
@@ -328,14 +328,14 @@ createSymlink(const std::string& linkFile, const std::string& target)
 {
 #if !USE_STD_FILESYSTEM
     if (symlink(target.c_str(), linkFile.c_str())) {
-        JAMI_ERR("Couldn't create soft link: %s", strerror(errno));
+        SIP_CORE_ERR("Couldn't create soft link: %s", strerror(errno));
         return false;
     }
 #else
     try {
         std::filesystem::create_symlink(target, linkFile);
     } catch (const std::exception& e) {
-        JAMI_ERR("Couldn't create soft link: %s", e.what());
+        SIP_CORE_ERR("Couldn't create soft link: %s", e.what());
         return false;
     }
 #endif
@@ -347,14 +347,14 @@ createHardlink(const std::string& linkFile, const std::string& target)
 {
 #if !USE_STD_FILESYSTEM
     if (link(target.c_str(), linkFile.c_str())) {
-        JAMI_ERR("Couldn't create hard link: %s", strerror(errno));
+        SIP_CORE_ERR("Couldn't create hard link: %s", strerror(errno));
         return false;
     }
 #else
     try {
         std::filesystem::create_hard_link(target, linkFile);
     } catch (const std::exception& e) {
-        JAMI_ERR("Couldn't create hard link: %s", e.what());
+        SIP_CORE_ERR("Couldn't create hard link: %s", e.what());
         return false;
     }
 #endif
@@ -450,13 +450,13 @@ saveFile(const std::string& path, const uint8_t* data, size_t data_size, mode_t 
 {
     std::ofstream file = fileutils::ofstream(path, std::ios::trunc | std::ios::binary);
     if (!file.is_open()) {
-        JAMI_ERR("Could not write data to %s", path.c_str());
+        SIP_CORE_ERR("Could not write data to %s", path.c_str());
         return;
     }
     file.write((char*) data, data_size);
 #ifndef _WIN32
     if (chmod(path.c_str(), mode) < 0)
-        JAMI_WARN("fileutils::saveFile(): chmod() failed on '%s', %s",
+        SIP_CORE_WARN("fileutils::saveFile(): chmod() failed on '%s', %s",
                   path.c_str(),
                   strerror(errno));
 #endif
@@ -470,7 +470,7 @@ loadCacheFile(const std::string& path, std::chrono::system_clock::duration maxAg
     if (duration > maxAge)
         throw std::runtime_error("file too old");
 
-    JAMI_DBG("Loading cache file '%.*s'", (int) path.size(), path.c_str());
+    SIP_CORE_DBG("Loading cache file '%.*s'", (int) path.size(), path.c_str());
     return loadFile(path);
 }
 
@@ -482,7 +482,7 @@ loadCacheTextFile(const std::string& path, std::chrono::system_clock::duration m
     if (duration > maxAge)
         throw std::runtime_error("file too old");
 
-    JAMI_DBG("Loading cache file '%.*s'", (int) path.size(), path.c_str());
+    SIP_CORE_DBG("Loading cache file '%.*s'", (int) path.size(), path.c_str());
     return loadTextFile(path);
 }
 
@@ -559,20 +559,20 @@ get_cache_dir(const char* pkg)
     std::string cache_path;
     std::vector<std::string> paths;
     paths.reserve(1);
-    emitSignal<libjami::ConfigurationSignal::GetAppDataPath>("", &paths);
+    emitSignal<libsip_core::ConfigurationSignal::GetAppDataPath>("", &paths);
     if (not paths.empty()) {
         cache_path = paths[0] + DIR_SEPARATOR_STR + std::string(".cache");
         if (fileutils::recursive_mkdir(cache_path.data(), 0700) != true) {
             // If directory creation failed
             if (errno != EEXIST)
-                JAMI_DBG("Cannot create directory: %s!", cache_path.c_str());
+                SIP_CORE_DBG("Cannot create directory: %s!", cache_path.c_str());
         }
     }
     return cache_path;
 #elif defined(__ANDROID__) || (defined(TARGET_OS_IOS) && TARGET_OS_IOS)
     std::vector<std::string> paths;
     paths.reserve(1);
-    emitSignal<libjami::ConfigurationSignal::GetAppDataPath>("cache", &paths);
+    emitSignal<libsip_core::ConfigurationSignal::GetAppDataPath>("cache", &paths);
     if (not paths.empty())
         return paths[0];
     return {};
@@ -581,9 +581,9 @@ get_cache_dir(const char* pkg)
            + DIR_SEPARATOR_STR + pkg;
 #else
 #ifdef _WIN32
-    const std::wstring cache_home(JAMI_CACHE_HOME);
+    const std::wstring cache_home(SIP_CORE_CACHE_HOME);
     if (not cache_home.empty())
-        return jami::to_string(cache_home);
+        return sip_core::to_string(cache_home);
 #else
     const std::string cache_home(XDG_CACHE_HOME);
     if (not cache_home.empty())
@@ -605,21 +605,21 @@ get_home_dir()
 #if defined(__ANDROID__) || (defined(TARGET_OS_IOS) && TARGET_OS_IOS)
     std::vector<std::string> paths;
     paths.reserve(1);
-    emitSignal<libjami::ConfigurationSignal::GetAppDataPath>("files", &paths);
+    emitSignal<libsip_core::ConfigurationSignal::GetAppDataPath>("files", &paths);
     if (not paths.empty())
         return paths[0];
     return {};
 #elif defined RING_UWP
     std::vector<std::string> paths;
     paths.reserve(1);
-    emitSignal<libjami::ConfigurationSignal::GetAppDataPath>("", &paths);
+    emitSignal<libsip_core::ConfigurationSignal::GetAppDataPath>("", &paths);
     if (not paths.empty())
         return paths[0];
     return {};
 #elif defined _WIN32
     TCHAR path[MAX_PATH];
     if (SUCCEEDED(SHGetFolderPath(nullptr, CSIDL_PROFILE, nullptr, 0, path))) {
-        return jami::to_string(path);
+        return sip_core::to_string(path);
     }
     return program_dir;
 #else
@@ -648,7 +648,7 @@ get_data_dir(const char* pkg)
 #if defined(__ANDROID__) || (defined(TARGET_OS_IOS) && TARGET_OS_IOS)
     std::vector<std::string> paths;
     paths.reserve(1);
-    emitSignal<libjami::ConfigurationSignal::GetAppDataPath>("files", &paths);
+    emitSignal<libsip_core::ConfigurationSignal::GetAppDataPath>("files", &paths);
     if (not paths.empty())
         return paths[0];
     return {};
@@ -656,9 +656,9 @@ get_data_dir(const char* pkg)
     return get_home_dir() + DIR_SEPARATOR_STR + "Library" + DIR_SEPARATOR_STR
            + "Application Support" + DIR_SEPARATOR_STR + pkg;
 #elif defined(_WIN32)
-    const std::wstring data_home(JAMI_DATA_HOME);
+    const std::wstring data_home(SIP_CORE_DATA_HOME);
     if (not data_home.empty())
-        return jami::to_string(data_home) + DIR_SEPARATOR_STR + pkg;
+        return sip_core::to_string(data_home) + DIR_SEPARATOR_STR + pkg;
 
     if (!strcmp(pkg, "ring")) {
         return get_home_dir() + DIR_SEPARATOR_STR + ".local" + DIR_SEPARATOR_STR
@@ -670,13 +670,13 @@ get_data_dir(const char* pkg)
 #elif defined(RING_UWP)
     std::vector<std::string> paths;
     paths.reserve(1);
-    emitSignal<libjami::ConfigurationSignal::GetAppDataPath>("", &paths);
+    emitSignal<libsip_core::ConfigurationSignal::GetAppDataPath>("", &paths);
     if (not paths.empty()) {
         auto files_path = paths[0] + DIR_SEPARATOR_STR + std::string(".data");
         if (fileutils::recursive_mkdir(files_path.data(), 0700) != true) {
             // If directory creation failed
             if (errno != EEXIST)
-                JAMI_DBG("Cannot create directory: %s!", files_path.c_str());
+                SIP_CORE_DBG("Cannot create directory: %s!", files_path.c_str());
         }
         return files_path;
     }
@@ -704,21 +704,21 @@ get_config_dir(const char* pkg)
     std::string configdir;
 #if defined(__ANDROID__) || (defined(TARGET_OS_IOS) && TARGET_OS_IOS)
     std::vector<std::string> paths;
-    emitSignal<libjami::ConfigurationSignal::GetAppDataPath>("config", &paths);
+    emitSignal<libsip_core::ConfigurationSignal::GetAppDataPath>("config", &paths);
     if (not paths.empty())
         configdir = std::move(paths[0]);
 #elif defined(RING_UWP)
     std::vector<std::string> paths;
-    emitSignal<libjami::ConfigurationSignal::GetAppDataPath>("", &paths);
+    emitSignal<libsip_core::ConfigurationSignal::GetAppDataPath>("", &paths);
     if (not paths.empty())
         configdir = paths[0] + DIR_SEPARATOR_STR + std::string(".config");
 #elif defined(__APPLE__)
     configdir = fileutils::get_home_dir() + DIR_SEPARATOR_STR + "Library" + DIR_SEPARATOR_STR
                 + "Application Support" + DIR_SEPARATOR_STR + pkg;
 #elif defined(_WIN32)
-    const std::wstring xdg_env(JAMI_CONFIG_HOME);
+    const std::wstring xdg_env(SIP_CORE_CONFIG_HOME);
     if (not xdg_env.empty()) {
-        configdir = jami::to_string(xdg_env) + DIR_SEPARATOR_STR + pkg;
+        configdir = sip_core::to_string(xdg_env) + DIR_SEPARATOR_STR + pkg;
     } else if (!strcmp(pkg, "ring")) {
         configdir = fileutils::get_home_dir() + DIR_SEPARATOR_STR + ".config" + DIR_SEPARATOR_STR
                     + pkg;
@@ -737,7 +737,7 @@ get_config_dir(const char* pkg)
     if (fileutils::recursive_mkdir(configdir.data(), 0700) != true) {
         // If directory creation failed
         if (errno != EEXIST)
-            JAMI_DBG("Cannot create directory: %s!", configdir.c_str());
+            SIP_CORE_DBG("Cannot create directory: %s!", configdir.c_str());
     }
     return configdir;
 }
@@ -754,20 +754,20 @@ recursive_mkdir(const std::string& path, mode_t mode)
 #ifndef _WIN32
     if (mkdir(path.data(), mode) != 0) {
 #else
-    if (_wmkdir(jami::to_wstring(path.data()).c_str()) != 0) {
+    if (_wmkdir(sip_core::to_wstring(path.data()).c_str()) != 0) {
 #endif
         if (errno == ENOENT) {
             recursive_mkdir(path.substr(0, path.find_last_of(DIR_SEPARATOR_CH)), mode);
 #ifndef _WIN32
             if (mkdir(path.data(), mode) != 0) {
 #else
-            if (_wmkdir(jami::to_wstring(path.data()).c_str()) != 0) {
+            if (_wmkdir(sip_core::to_wstring(path.data()).c_str()) != 0) {
 #endif
-                JAMI_ERR("Could not create directory.");
+                SIP_CORE_ERR("Could not create directory.");
                 return false;
             }
         }
-    } // namespace jami
+    } // namespace sip_core
     return true;
 }
 
@@ -778,13 +778,13 @@ eraseFile_win32(const std::string& path, bool dosync)
     HANDLE h
         = CreateFileA(path.c_str(), GENERIC_WRITE, 0, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
     if (h == INVALID_HANDLE_VALUE) {
-        JAMI_WARN("Can not open file %s for erasing.", path.c_str());
+        SIP_CORE_WARN("Can not open file %s for erasing.", path.c_str());
         return false;
     }
 
     LARGE_INTEGER size;
     if (!GetFileSizeEx(h, &size)) {
-        JAMI_WARN("Can not erase file %s: GetFileSizeEx() failed.", path.c_str());
+        SIP_CORE_WARN("Can not erase file %s: GetFileSizeEx() failed.", path.c_str());
         CloseHandle(h);
         return false;
     }
@@ -801,7 +801,7 @@ eraseFile_win32(const std::string& path, bool dosync)
     try {
         buffer = new char[ERASE_BLOCK];
     } catch (std::bad_alloc& ba) {
-        JAMI_WARN("Can not allocate buffer for erasing %s.", path.c_str());
+        SIP_CORE_WARN("Can not allocate buffer for erasing %s.", path.c_str());
         CloseHandle(h);
         return false;
     }
@@ -837,13 +837,13 @@ eraseFile_posix(const std::string& path, bool dosync)
 {
     int fd = open(path.c_str(), O_WRONLY);
     if (fd == -1) {
-        JAMI_WARN("Can not open file %s for erasing.", path.c_str());
+        SIP_CORE_WARN("Can not open file %s for erasing.", path.c_str());
         return false;
     }
 
     struct stat st;
     if (fstat(fd, &st) == -1) {
-        JAMI_WARN("Can not erase file %s: fstat() failed.", path.c_str());
+        SIP_CORE_WARN("Can not erase file %s: fstat() failed.", path.c_str());
         close(fd);
         return false;
     }
@@ -861,7 +861,7 @@ eraseFile_posix(const std::string& path, bool dosync)
     while (written < st.st_size) {
         auto ret = write(fd, buffer.data(), buffer.size());
         if (ret < 0) {
-            JAMI_WARNING("Error while overriding file with zeros.");
+            SIP_CORE_WARNING("Error while overriding file with zeros.");
             break;
         } else
             written += ret;
@@ -895,7 +895,7 @@ remove(const std::string& path, bool erase)
 #ifdef _WIN32
     // use Win32 api since std::remove will not unlink directory in use
     if (isDirectory(path))
-        return !RemoveDirectory(jami::to_wstring(path).c_str());
+        return !RemoveDirectory(sip_core::to_wstring(path).c_str());
 #endif
 
     return std::remove(path.c_str());
@@ -920,7 +920,7 @@ void
 openStream(std::ifstream& file, const std::string& path, std::ios_base::openmode mode)
 {
 #ifdef _WIN32
-    file.open(jami::to_wstring(path), mode);
+    file.open(sip_core::to_wstring(path), mode);
 #else
     file.open(path, mode);
 #endif
@@ -930,7 +930,7 @@ void
 openStream(std::ofstream& file, const std::string& path, std::ios_base::openmode mode)
 {
 #ifdef _WIN32
-    file.open(jami::to_wstring(path), mode);
+    file.open(sip_core::to_wstring(path), mode);
 #else
     file.open(path, mode);
 #endif
@@ -940,7 +940,7 @@ std::ifstream
 ifstream(const std::string& path, std::ios_base::openmode mode)
 {
 #ifdef _WIN32
-    return std::ifstream(jami::to_wstring(path), mode);
+    return std::ifstream(sip_core::to_wstring(path), mode);
 #else
     return std::ifstream(path, mode);
 #endif
@@ -950,7 +950,7 @@ std::ofstream
 ofstream(const std::string& path, std::ios_base::openmode mode)
 {
 #ifdef _WIN32
-    return std::ofstream(jami::to_wstring(path), mode);
+    return std::ofstream(sip_core::to_wstring(path), mode);
 #else
     return std::ofstream(path, mode);
 #endif
@@ -975,7 +975,7 @@ int
 accessFile(const std::string& file, int mode)
 {
 #ifdef _WIN32
-    return _waccess(jami::to_wstring(file).c_str(), mode);
+    return _waccess(sip_core::to_wstring(file).c_str(), mode);
 #else
     return access(file.c_str(), mode);
 #endif
@@ -997,4 +997,4 @@ lastWriteTime(const std::string& p)
 }
 
 } // namespace fileutils
-} // namespace jami
+} // namespace sip_core

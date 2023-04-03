@@ -8,7 +8,7 @@ if lttng status | grep -q "Recording session"; then
     exit 1
 fi
 
-SESSION="jami"
+SESSION="sip_core"
 
 # Prepare a capture session
 
@@ -61,5 +61,5 @@ done
 IFS=$OLDIFS
 
 # add start and end trigger
-lttng add-trigger --name "jami call start" --condition=event-rule-matches --type=user --name='jami:call_start' --action=start-session $SESSION
-lttng add-trigger --name "jami conference end" --condition=event-rule-matches --type=user --name="jami:conference_end" --action=stop-session $SESSION
+lttng add-trigger --name "sip_core call start" --condition=event-rule-matches --type=user --name='sip_core:call_start' --action=start-session $SESSION
+lttng add-trigger --name "sip_core conference end" --condition=event-rule-matches --type=user --name="sip_core:conference_end" --action=stop-session $SESSION

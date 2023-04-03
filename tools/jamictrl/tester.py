@@ -41,7 +41,7 @@ ALL_TEST_NAME = {
         'DhtCallHold' : 'testLoopCallDhtWithHold'
         }
 
-class libjamiTester():
+class libsip_coreTester():
 
 # init to default values
     dhtAccountId = ''

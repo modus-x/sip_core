@@ -71,7 +71,7 @@
 #include "fileutils.h"
 #include "string_utils.h"
 
-namespace jami {
+namespace sip_core {
 
 using yaml_utils::parseValue;
 
@@ -104,7 +104,7 @@ static constexpr const char* PULSEMAP_KEY {"pulse"};
 static constexpr const char* PORTAUDIO_KEY {"portaudio"};
 static constexpr const char* CARDIN_KEY {"cardIn"};
 static constexpr const char* CARDOUT_KEY {"cardOut"};
-static constexpr const char* CARLIBJAMI_KEY {"cardRing"};
+static constexpr const char* CARLIBSIP_CORE_KEY {"cardRing"};
 static constexpr const char* PLUGIN_KEY {"plugin"};
 static constexpr const char* SMPLRATE_KEY {"smplRate"};
 static constexpr const char* DEVICE_PLAYBACK_KEY {"devicePlayback"};
@@ -164,7 +164,7 @@ Preferences::verifyAccountOrder(const std::vector<std::string>& accountIDs)
             if (find(accountIDs.begin(), accountIDs.end(), token) != accountIDs.end())
                 tokens.push_back(token);
             else {
-                JAMI_DBG("Dropping nonexistent account %s", token.c_str());
+                SIP_CORE_DBG("Dropping nonexistent account %s", token.c_str());
                 drop = true;
             }
             token.clear();
@@ -284,7 +284,7 @@ static void
 checkSoundCard(int& card, AudioDeviceType type)
 {
     if (not AlsaLayer::soundCardIndexExists(card, type)) {
-        JAMI_WARN(" Card with index %d doesn't exist or is unusable.", card);
+        SIP_CORE_WARN(" Card with index %d doesn't exist or is unusable.", card);
         card = ALSA_DFT_CARD_ID;
     }
 }
@@ -293,7 +293,7 @@ checkSoundCard(int& card, AudioDeviceType type)
 AudioLayer*
 AudioPreference::createAudioLayer()
 {
-    JAMI_WARN("Creating audio layer");
+    SIP_CORE_WARN("Creating audio layer");
 #if HAVE_OPENSL
     return new OpenSLLayer(*this);
 #else
@@ -304,7 +304,7 @@ AudioPreference::createAudioLayer()
         audioApi_ = JACK_API_STR;
         return new JackLayer(*this);
     } catch (const std::runtime_error& e) {
-        JAMI_WARN("coukd not create jack layer: %s, trying another audio layers", e.what());
+        SIP_CORE_WARN("coukd not create jack layer: %s, trying another audio layers", e.what());
     }
 #endif
 
@@ -313,7 +313,7 @@ AudioPreference::createAudioLayer()
         audioApi_ = PULSEAUDIO_API_STR;
         return new PulseLayer(*this);
     } catch (const std::runtime_error& e) {
-        JAMI_WARN("Could not create pulseaudio layer, trying another audio layers");
+        SIP_CORE_WARN("Could not create pulseaudio layer, trying another audio layers");
     }
 #endif
 
@@ -322,7 +322,7 @@ AudioPreference::createAudioLayer()
         audioApi_ = PORTAUDIO_API_STR;
         return new PortAudioLayer(*this);
     } catch (const std::runtime_error& e) {
-        JAMI_WARN("Could not create PortAudio layer, trying another audio layers.");
+        SIP_CORE_WARN("Could not create PortAudio layer, trying another audio layers.");
     }
     return nullptr;
 #endif
@@ -333,7 +333,7 @@ AudioPreference::createAudioLayer()
     checkSoundCard(alsaCardout_, AudioDeviceType::PLAYBACK);
     checkSoundCard(alsaCardRingtone_, AudioDeviceType::RINGTONE);
 
-    JAMI_WARN("returning alsa layer");
+    SIP_CORE_WARN("returning alsa layer");
 
     return new AlsaLayer(*this);
 #endif
@@ -343,14 +343,14 @@ AudioPreference::createAudioLayer()
     try {
         return new CoreLayer(*this);
     } catch (const std::runtime_error& e) {
-        JAMI_WARN("Could not create coreaudio layer. There will be no sound.");
+        SIP_CORE_WARN("Could not create coreaudio layer. There will be no sound.");
     }
     return NULL;
 #endif
 
 #endif // HAVE_OPENSL
 
-    JAMI_WARN("No audio layer provided");
+    SIP_CORE_WARN("No audio layer provided");
     return nullptr;
 }
 
@@ -388,7 +388,7 @@ AudioPreference::serialize(YAML::Emitter& out) const
     out << YAML::Key << ALSAMAP_KEY << YAML::Value << YAML::BeginMap;
     out << YAML::Key << CARDIN_KEY << YAML::Value << alsaCardin_;
     out << YAML::Key << CARDOUT_KEY << YAML::Value << alsaCardout_;
-    out << YAML::Key << CARLIBJAMI_KEY << YAML::Value << alsaCardRingtone_;
+    out << YAML::Key << CARLIBSIP_CORE_KEY << YAML::Value << alsaCardRingtone_;
     out << YAML::Key << PLUGIN_KEY << YAML::Value << alsaPlugin_;
     out << YAML::Key << SMPLRATE_KEY << YAML::Value << alsaSmplrate_;
     out << YAML::EndMap;
@@ -436,7 +436,7 @@ AudioPreference::setRecordPath(const std::string& r)
         recordpath_ = path;
         return true;
     } else {
-        JAMI_ERR("%s is not writable, cannot be the recording path", path.c_str());
+        SIP_CORE_ERR("%s is not writable, cannot be the recording path", path.c_str());
         return false;
     }
 }
@@ -451,7 +451,7 @@ AudioPreference::unserialize(const YAML::Node& in)
 
     parseValue(alsa, CARDIN_KEY, alsaCardin_);
     parseValue(alsa, CARDOUT_KEY, alsaCardout_);
-    parseValue(alsa, CARLIBJAMI_KEY, alsaCardRingtone_);
+    parseValue(alsa, CARLIBSIP_CORE_KEY, alsaCardRingtone_);
     parseValue(alsa, PLUGIN_KEY, alsaPlugin_);
     parseValue(alsa, SMPLRATE_KEY, alsaSmplrate_);
 
@@ -538,4 +538,4 @@ VideoPreferences::unserialize(const YAML::Node& in)
 }
 #endif // ENABLE_VIDEO
 
-} // namespace jami
+} // namespace sip_core

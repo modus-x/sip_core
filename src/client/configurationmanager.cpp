@@ -58,12 +58,12 @@
 #undef interface
 #endif
 
-namespace libjami {
+namespace libsip_core {
 
 constexpr unsigned CODECS_NOT_LOADED = 0x1000; /** Codecs not found */
 
-using jami::SIPAccount;
-using jami::AudioDeviceType;
+using sip_core::SIPAccount;
+using sip_core::AudioDeviceType;
 
 void
 registerConfHandlers(const std::map<std::string, std::shared_ptr<CallbackWrapperBase>>& handlers)
@@ -74,37 +74,37 @@ registerConfHandlers(const std::map<std::string, std::shared_ptr<CallbackWrapper
 std::map<std::string, std::string>
 getAccountDetails(const std::string& accountID)
 {
-    return jami::Manager::instance().getAccountDetails(accountID);
+    return sip_core::Manager::instance().getAccountDetails(accountID);
 }
 
 std::map<std::string, std::string>
 getVolatileAccountDetails(const std::string& accountID)
 {
-    return jami::Manager::instance().getVolatileAccountDetails(accountID);
+    return sip_core::Manager::instance().getVolatileAccountDetails(accountID);
 }
 
 void
 setAccountDetails(const std::string& accountID, const std::map<std::string, std::string>& details)
 {
-    jami::Manager::instance().setAccountDetails(accountID, details);
+    sip_core::Manager::instance().setAccountDetails(accountID, details);
 }
 
 void
 setAccountActive(const std::string& accountID, bool enable, bool shutdownConnections)
 {
-    jami::Manager::instance().setAccountActive(accountID, enable, shutdownConnections);
+    sip_core::Manager::instance().setAccountActive(accountID, enable, shutdownConnections);
 }
 
 void
 sendRegister(const std::string& accountID, bool enable)
 {
-    jami::Manager::instance().sendRegister(accountID, enable);
+    sip_core::Manager::instance().sendRegister(accountID, enable);
 }
 
 void
 registerAllAccounts()
 {
-    jami::Manager::instance().registerAccounts();
+    sip_core::Manager::instance().registerAccounts();
 }
 
 uint64_t
@@ -112,13 +112,13 @@ sendAccountTextMessage(const std::string& accountID,
                        const std::string& to,
                        const std::map<std::string, std::string>& payloads)
 {
-    return jami::Manager::instance().sendTextMessage(accountID, to, payloads);
+    return sip_core::Manager::instance().sendTextMessage(accountID, to, payloads);
 }
 
 std::vector<Message>
 getLastMessages(const std::string& accountID, const uint64_t& base_timestamp)
 {
-    if (const auto acc = jami::Manager::instance().getAccount(accountID))
+    if (const auto acc = sip_core::Manager::instance().getAccount(accountID))
         return acc->getLastMessages(base_timestamp);
     return {};
 }
@@ -126,19 +126,19 @@ getLastMessages(const std::string& accountID, const uint64_t& base_timestamp)
 int
 getMessageStatus(uint64_t messageId)
 {
-    return jami::Manager::instance().getMessageStatus(messageId);
+    return sip_core::Manager::instance().getMessageStatus(messageId);
 }
 
 int
 getMessageStatus(const std::string& accountID, uint64_t messageId)
 {
-    return jami::Manager::instance().getMessageStatus(accountID, messageId);
+    return sip_core::Manager::instance().getMessageStatus(accountID, messageId);
 }
 
 bool
 cancelMessage(const std::string& accountID, uint64_t messageId)
 {
-    if (const auto acc = jami::Manager::instance().getAccount(accountID))
+    if (const auto acc = sip_core::Manager::instance().getAccount(accountID))
         return acc->cancelMessage(messageId);
     return {};
 }
@@ -146,7 +146,7 @@ cancelMessage(const std::string& accountID, uint64_t messageId)
 void
 setIsComposing(const std::string& accountID, const std::string& conversationUri, bool isWriting)
 {
-    if (const auto acc = jami::Manager::instance().getAccount(accountID))
+    if (const auto acc = sip_core::Manager::instance().getAccount(accountID))
         acc->setIsComposing(conversationUri, isWriting);
 }
 
@@ -156,7 +156,7 @@ setMessageDisplayed(const std::string& accountID,
                     const std::string& messageId,
                     int status)
 {
-    if (const auto acc = jami::Manager::instance().getAccount(accountID))
+    if (const auto acc = sip_core::Manager::instance().getAccount(accountID))
         return acc->setMessageDisplayed(conversationUri, messageId, status);
     return false;
 }
@@ -166,32 +166,32 @@ std::map<std::string, std::string>
 getAccountTemplate(const std::string& accountType)
 {
     if (accountType == Account::ProtocolNames::SIP)
-        return jami::SipAccountConfig().toMap();
+        return sip_core::SipAccountConfig().toMap();
     return {};
 }
 
 std::string
 addAccount(const std::map<std::string, std::string>& details, const std::string& accountID)
 {
-    return jami::Manager::instance().addAccount(details, accountID);
+    return sip_core::Manager::instance().addAccount(details, accountID);
 }
 
 void
 monitor(bool continuous)
 {
-    return jami::Manager::instance().monitor(continuous);
+    return sip_core::Manager::instance().monitor(continuous);
 }
 
 void
 removeAccount(const std::string& accountID)
 {
-    return jami::Manager::instance().removeAccount(accountID, true); // with 'flush' enabled
+    return sip_core::Manager::instance().removeAccount(accountID, true); // with 'flush' enabled
 }
 
 std::vector<std::string>
 getAccountList()
 {
-    return jami::Manager::instance().getAccountList();
+    return sip_core::Manager::instance().getAccountList();
 }
 
 /**
@@ -202,9 +202,9 @@ std::vector<unsigned>
 getCodecList()
 {
     std::vector<unsigned> list {
-        jami::getSystemCodecContainer()->getSystemCodecInfoIdList(jami::MEDIA_ALL)};
+        sip_core::getSystemCodecContainer()->getSystemCodecInfoIdList(sip_core::MEDIA_ALL)};
     if (list.empty())
-        jami::emitSignal<ConfigurationSignal::Error>(CODECS_NOT_LOADED);
+        sip_core::emitSignal<ConfigurationSignal::Error>(CODECS_NOT_LOADED);
     return list;
 }
 
@@ -213,43 +213,43 @@ setCodecDetails(const std::string& accountID,
                 const unsigned& codecId,
                 const std::map<std::string, std::string>& details)
 {
-    auto acc = jami::Manager::instance().getAccount(accountID);
+    auto acc = sip_core::Manager::instance().getAccount(accountID);
     if (!acc) {
-        JAMI_ERR("Could not find account %s. can not set codec details", accountID.c_str());
+        SIP_CORE_ERR("Could not find account %s. can not set codec details", accountID.c_str());
         return false;
     }
 
-    auto codec = acc->searchCodecById(codecId, jami::MEDIA_ALL);
+    auto codec = acc->searchCodecById(codecId, sip_core::MEDIA_ALL);
     if (!codec) {
-        JAMI_ERR("can not find codec %d", codecId);
+        SIP_CORE_ERR("can not find codec %d", codecId);
         return false;
     }
     try {
-        if (codec->systemCodecInfo.mediaType & jami::MEDIA_AUDIO) {
-            if (auto foundCodec = std::static_pointer_cast<jami::AccountAudioCodecInfo>(codec)) {
+        if (codec->systemCodecInfo.mediaType & sip_core::MEDIA_AUDIO) {
+            if (auto foundCodec = std::static_pointer_cast<sip_core::AccountAudioCodecInfo>(codec)) {
                 foundCodec->setCodecSpecifications(details);
-                jami::emitSignal<ConfigurationSignal::MediaParametersChanged>(accountID);
+                sip_core::emitSignal<ConfigurationSignal::MediaParametersChanged>(accountID);
                 return true;
             }
         }
 
-        if (codec->systemCodecInfo.mediaType & jami::MEDIA_VIDEO) {
-            if (auto foundCodec = std::static_pointer_cast<jami::AccountVideoCodecInfo>(codec)) {
+        if (codec->systemCodecInfo.mediaType & sip_core::MEDIA_VIDEO) {
+            if (auto foundCodec = std::static_pointer_cast<sip_core::AccountVideoCodecInfo>(codec)) {
                 foundCodec->setCodecSpecifications(details);
-                JAMI_WARN("parameters for %s changed ", foundCodec->systemCodecInfo.name.c_str());
-                if (auto call = jami::Manager::instance().getCurrentCall()) {
+                SIP_CORE_WARN("parameters for %s changed ", foundCodec->systemCodecInfo.name.c_str());
+                if (auto call = sip_core::Manager::instance().getCurrentCall()) {
                     if (call->getVideoCodec() == foundCodec) {
-                        JAMI_WARN("%s running. Need to restart encoding",
+                        SIP_CORE_WARN("%s running. Need to restart encoding",
                                   foundCodec->systemCodecInfo.name.c_str());
                         call->restartMediaSender();
                     }
                 }
-                jami::emitSignal<ConfigurationSignal::MediaParametersChanged>(accountID);
+                sip_core::emitSignal<ConfigurationSignal::MediaParametersChanged>(accountID);
                 return true;
             }
         }
     } catch (const std::exception& e) {
-        JAMI_ERR("Cannot set codec specifications: %s", e.what());
+        SIP_CORE_ERR("Cannot set codec specifications: %s", e.what());
     }
 
     return false;
@@ -258,47 +258,47 @@ setCodecDetails(const std::string& accountID,
 std::map<std::string, std::string>
 getCodecDetails(const std::string& accountID, const unsigned& codecId)
 {
-    auto acc = jami::Manager::instance().getAccount(accountID);
+    auto acc = sip_core::Manager::instance().getAccount(accountID);
     if (!acc) {
-        JAMI_ERR("Could not find account %s return default codec details", accountID.c_str());
-        return jami::Account::getDefaultCodecDetails(codecId);
+        SIP_CORE_ERR("Could not find account %s return default codec details", accountID.c_str());
+        return sip_core::Account::getDefaultCodecDetails(codecId);
     }
 
-    auto codec = acc->searchCodecById(codecId, jami::MEDIA_ALL);
+    auto codec = acc->searchCodecById(codecId, sip_core::MEDIA_ALL);
     if (!codec) {
-        jami::emitSignal<ConfigurationSignal::Error>(CODECS_NOT_LOADED);
+        sip_core::emitSignal<ConfigurationSignal::Error>(CODECS_NOT_LOADED);
         return {};
     }
 
-    if (codec->systemCodecInfo.mediaType & jami::MEDIA_AUDIO)
-        if (auto foundCodec = std::static_pointer_cast<jami::AccountAudioCodecInfo>(codec))
+    if (codec->systemCodecInfo.mediaType & sip_core::MEDIA_AUDIO)
+        if (auto foundCodec = std::static_pointer_cast<sip_core::AccountAudioCodecInfo>(codec))
             return foundCodec->getCodecSpecifications();
 
-    if (codec->systemCodecInfo.mediaType & jami::MEDIA_VIDEO)
-        if (auto foundCodec = std::static_pointer_cast<jami::AccountVideoCodecInfo>(codec))
+    if (codec->systemCodecInfo.mediaType & sip_core::MEDIA_VIDEO)
+        if (auto foundCodec = std::static_pointer_cast<sip_core::AccountVideoCodecInfo>(codec))
             return foundCodec->getCodecSpecifications();
 
-    jami::emitSignal<ConfigurationSignal::Error>(CODECS_NOT_LOADED);
+    sip_core::emitSignal<ConfigurationSignal::Error>(CODECS_NOT_LOADED);
     return {};
 }
 
 std::vector<unsigned>
 getActiveCodecList(const std::string& accountID)
 {
-    if (auto acc = jami::Manager::instance().getAccount(accountID))
+    if (auto acc = sip_core::Manager::instance().getAccount(accountID))
         return acc->getActiveCodecs();
-    JAMI_ERR("Could not find account %s, returning default", accountID.c_str());
-    return jami::Account::getDefaultCodecsId();
+    SIP_CORE_ERR("Could not find account %s, returning default", accountID.c_str());
+    return sip_core::Account::getDefaultCodecsId();
 }
 
 void
 setActiveCodecList(const std::string& accountID, const std::vector<unsigned>& list)
 {
-    if (auto acc = jami::Manager::instance().getAccount(accountID)) {
+    if (auto acc = sip_core::Manager::instance().getAccount(accountID)) {
         acc->setActiveCodecs(list);
-        jami::Manager::instance().saveConfig(acc);
+        sip_core::Manager::instance().saveConfig(acc);
     } else {
-        JAMI_ERR("Could not find account %s", accountID.c_str());
+        SIP_CORE_ERR("Could not find account %s", accountID.c_str());
     }
 }
 
@@ -311,130 +311,130 @@ getAudioPluginList()
 void
 setAudioPlugin(const std::string& audioPlugin)
 {
-    return jami::Manager::instance().setAudioPlugin(audioPlugin);
+    return sip_core::Manager::instance().setAudioPlugin(audioPlugin);
 }
 
 std::vector<std::string>
 getAudioOutputDeviceList()
 {
-    return jami::Manager::instance().getAudioOutputDeviceList();
+    return sip_core::Manager::instance().getAudioOutputDeviceList();
 }
 
 std::vector<std::string>
 getAudioInputDeviceList()
 {
-    return jami::Manager::instance().getAudioInputDeviceList();
+    return sip_core::Manager::instance().getAudioInputDeviceList();
 }
 
 void
 setAudioOutputDevice(int32_t index)
 {
-    return jami::Manager::instance().setAudioDevice(index, AudioDeviceType::PLAYBACK);
+    return sip_core::Manager::instance().setAudioDevice(index, AudioDeviceType::PLAYBACK);
 }
 
 void
 setAudioInputDevice(int32_t index)
 {
-    return jami::Manager::instance().setAudioDevice(index, AudioDeviceType::CAPTURE);
+    return sip_core::Manager::instance().setAudioDevice(index, AudioDeviceType::CAPTURE);
 }
 
 void
 startAudio()
 {
-    jami::Manager::instance().startAudio();
+    sip_core::Manager::instance().startAudio();
 }
 
 void
 setAudioRingtoneDevice(int32_t index)
 {
-    return jami::Manager::instance().setAudioDevice(index, AudioDeviceType::RINGTONE);
+    return sip_core::Manager::instance().setAudioDevice(index, AudioDeviceType::RINGTONE);
 }
 
 std::vector<std::string>
 getCurrentAudioDevicesIndex()
 {
-    return jami::Manager::instance().getCurrentAudioDevicesIndex();
+    return sip_core::Manager::instance().getCurrentAudioDevicesIndex();
 }
 
 int32_t
 getAudioInputDeviceIndex(const std::string& name)
 {
-    return jami::Manager::instance().getAudioInputDeviceIndex(name);
+    return sip_core::Manager::instance().getAudioInputDeviceIndex(name);
 }
 
 int32_t
 getAudioOutputDeviceIndex(const std::string& name)
 {
-    return jami::Manager::instance().getAudioOutputDeviceIndex(name);
+    return sip_core::Manager::instance().getAudioOutputDeviceIndex(name);
 }
 
 std::string
 getCurrentAudioOutputPlugin()
 {
-    auto plugin = jami::Manager::instance().getCurrentAudioOutputPlugin();
-    JAMI_DBG("Get audio plugin %s", plugin.c_str());
+    auto plugin = sip_core::Manager::instance().getCurrentAudioOutputPlugin();
+    SIP_CORE_DBG("Get audio plugin %s", plugin.c_str());
     return plugin;
 }
 
 std::string
 getNoiseSuppressState()
 {
-    return jami::Manager::instance().getNoiseSuppressState();
+    return sip_core::Manager::instance().getNoiseSuppressState();
 }
 
 void
 setNoiseSuppressState(const std::string& state)
 {
-    jami::Manager::instance().setNoiseSuppressState(state);
+    sip_core::Manager::instance().setNoiseSuppressState(state);
 }
 
 bool
 isAgcEnabled()
 {
-    return jami::Manager::instance().isAGCEnabled();
+    return sip_core::Manager::instance().isAGCEnabled();
 }
 
 void
 setAgcState(bool enabled)
 {
-    jami::Manager::instance().setAGCState(enabled);
+    sip_core::Manager::instance().setAGCState(enabled);
 }
 
 std::string
 getRecordPath()
 {
-    return jami::Manager::instance().audioPreference.getRecordPath();
+    return sip_core::Manager::instance().audioPreference.getRecordPath();
 }
 
 std::string
 getHomePath()
 {
-    return jami::Manager::instance().getHomePath();
+    return sip_core::Manager::instance().getHomePath();
 }
 
 void
 setRecordPath(const std::string& recPath)
 {
-    jami::Manager::instance().audioPreference.setRecordPath(recPath);
+    sip_core::Manager::instance().audioPreference.setRecordPath(recPath);
 }
 
 bool
 getIsAlwaysRecording()
 {
-    return jami::Manager::instance().getIsAlwaysRecording();
+    return sip_core::Manager::instance().getIsAlwaysRecording();
 }
 
 void
 setIsAlwaysRecording(bool rec)
 {
-    jami::Manager::instance().setIsAlwaysRecording(rec);
+    sip_core::Manager::instance().setIsAlwaysRecording(rec);
 }
 
 bool
 getRecordPreview()
 {
 #ifdef ENABLE_VIDEO
-    return jami::Manager::instance().videoPreferences.getRecordPreview();
+    return sip_core::Manager::instance().videoPreferences.getRecordPreview();
 #else
     return false;
 #endif
@@ -444,8 +444,8 @@ void
 setRecordPreview(bool rec)
 {
 #ifdef ENABLE_VIDEO
-    jami::Manager::instance().videoPreferences.setRecordPreview(rec);
-    jami::Manager::instance().saveConfig();
+    sip_core::Manager::instance().videoPreferences.setRecordPreview(rec);
+    sip_core::Manager::instance().saveConfig();
 #endif
 }
 
@@ -453,7 +453,7 @@ int32_t
 getRecordQuality()
 {
 #ifdef ENABLE_VIDEO
-    return jami::Manager::instance().videoPreferences.getRecordQuality();
+    return sip_core::Manager::instance().videoPreferences.getRecordQuality();
 #else
     return 0;
 #endif
@@ -463,81 +463,81 @@ void
 setRecordQuality(int32_t quality)
 {
 #ifdef ENABLE_VIDEO
-    jami::Manager::instance().videoPreferences.setRecordQuality(quality);
-    jami::Manager::instance().saveConfig();
+    sip_core::Manager::instance().videoPreferences.setRecordQuality(quality);
+    sip_core::Manager::instance().saveConfig();
 #endif
 }
 
 int32_t
 getHistoryLimit()
 {
-    return jami::Manager::instance().getHistoryLimit();
+    return sip_core::Manager::instance().getHistoryLimit();
 }
 
 void
 setHistoryLimit(int32_t days)
 {
-    jami::Manager::instance().setHistoryLimit(days);
+    sip_core::Manager::instance().setHistoryLimit(days);
 }
 
 int32_t
 getRingingTimeout()
 {
-    return jami::Manager::instance().getRingingTimeout();
+    return sip_core::Manager::instance().getRingingTimeout();
 }
 
 void
 setRingingTimeout(int32_t timeout)
 {
-    jami::Manager::instance().setRingingTimeout(timeout);
+    sip_core::Manager::instance().setRingingTimeout(timeout);
 }
 
 std::vector<std::string>
 getSupportedAudioManagers()
 {
-    return jami::AudioPreference::getSupportedAudioManagers();
+    return sip_core::AudioPreference::getSupportedAudioManagers();
 }
 
 bool
 setAudioManager(const std::string& api)
 {
-    return jami::Manager::instance().setAudioManager(api);
+    return sip_core::Manager::instance().setAudioManager(api);
 }
 
 std::string
 getAudioManager()
 {
-    return jami::Manager::instance().getAudioManager();
+    return sip_core::Manager::instance().getAudioManager();
 }
 
 void
 setVolume(const std::string& device, double value)
 {
-    if (auto audiolayer = jami::Manager::instance().getAudioDriver()) {
-        JAMI_DBG("set volume for %s: %f", device.c_str(), value);
+    if (auto audiolayer = sip_core::Manager::instance().getAudioDriver()) {
+        SIP_CORE_DBG("set volume for %s: %f", device.c_str(), value);
 
         if (device == "speaker")
             audiolayer->setPlaybackGain(value);
         else if (device == "mic")
             audiolayer->setCaptureGain(value);
 
-        jami::emitSignal<ConfigurationSignal::VolumeChanged>(device, value);
+        sip_core::emitSignal<ConfigurationSignal::VolumeChanged>(device, value);
     } else {
-        JAMI_ERR("Audio layer not valid while updating volume");
+        SIP_CORE_ERR("Audio layer not valid while updating volume");
     }
 }
 
 double
 getVolume(const std::string& device)
 {
-    if (auto audiolayer = jami::Manager::instance().getAudioDriver()) {
+    if (auto audiolayer = sip_core::Manager::instance().getAudioDriver()) {
         if (device == "speaker")
             return audiolayer->getPlaybackGain();
         if (device == "mic")
             return audiolayer->getCaptureGain();
     }
 
-    JAMI_ERR("Audio layer not valid while updating volume");
+    SIP_CORE_ERR("Audio layer not valid while updating volume");
     return 0.0;
 }
 
@@ -546,103 +546,103 @@ getVolume(const std::string& device)
 bool
 isDtmfMuted()
 {
-    return not jami::Manager::instance().voipPreferences.getPlayDtmf();
+    return not sip_core::Manager::instance().voipPreferences.getPlayDtmf();
 }
 
 void
 muteDtmf(bool mute)
 {
-    jami::Manager::instance().voipPreferences.setPlayDtmf(not mute);
+    sip_core::Manager::instance().voipPreferences.setPlayDtmf(not mute);
 }
 
 bool
 isCaptureMuted()
 {
-    if (auto audiolayer = jami::Manager::instance().getAudioDriver())
+    if (auto audiolayer = sip_core::Manager::instance().getAudioDriver())
         return audiolayer->isCaptureMuted();
 
-    JAMI_ERR("Audio layer not valid");
+    SIP_CORE_ERR("Audio layer not valid");
     return false;
 }
 
 void
 muteCapture(bool mute)
 {
-    if (auto audiolayer = jami::Manager::instance().getAudioDriver())
+    if (auto audiolayer = sip_core::Manager::instance().getAudioDriver())
         return audiolayer->muteCapture(mute);
 
-    JAMI_ERR("Audio layer not valid");
+    SIP_CORE_ERR("Audio layer not valid");
     return;
 }
 
 bool
 isPlaybackMuted()
 {
-    if (auto audiolayer = jami::Manager::instance().getAudioDriver())
+    if (auto audiolayer = sip_core::Manager::instance().getAudioDriver())
         return audiolayer->isPlaybackMuted();
 
-    JAMI_ERR("Audio layer not valid");
+    SIP_CORE_ERR("Audio layer not valid");
     return false;
 }
 
 void
 mutePlayback(bool mute)
 {
-    if (auto audiolayer = jami::Manager::instance().getAudioDriver())
+    if (auto audiolayer = sip_core::Manager::instance().getAudioDriver())
         return audiolayer->mutePlayback(mute);
 
-    JAMI_ERR("Audio layer not valid");
+    SIP_CORE_ERR("Audio layer not valid");
     return;
 }
 
 bool
 isRingtoneMuted()
 {
-    if (auto audiolayer = jami::Manager::instance().getAudioDriver())
+    if (auto audiolayer = sip_core::Manager::instance().getAudioDriver())
         return audiolayer->isRingtoneMuted();
 
-    JAMI_ERR("Audio layer not valid");
+    SIP_CORE_ERR("Audio layer not valid");
     return false;
 }
 
 void
 muteRingtone(bool mute)
 {
-    if (auto audiolayer = jami::Manager::instance().getAudioDriver())
+    if (auto audiolayer = sip_core::Manager::instance().getAudioDriver())
         return audiolayer->muteRingtone(mute);
 
-    JAMI_ERR("Audio layer not valid");
+    SIP_CORE_ERR("Audio layer not valid");
     return;
 }
 
 void
 setAccountsOrder(const std::string& order)
 {
-    jami::Manager::instance().setAccountsOrder(order);
+    sip_core::Manager::instance().setAccountsOrder(order);
 }
 
 std::string
 getAddrFromInterfaceName(const std::string& interface)
 {
-    return jami::ip_utils::getInterfaceAddr(interface, AF_INET);
+    return sip_core::ip_utils::getInterfaceAddr(interface, AF_INET);
 }
 
 std::vector<std::string>
 getAllIpInterface()
 {
-    return jami::ip_utils::getAllIpInterface();
+    return sip_core::ip_utils::getAllIpInterface();
 }
 
 std::vector<std::string>
 getAllIpInterfaceByName()
 {
-    return jami::ip_utils::getAllIpInterfaceByName();
+    return sip_core::ip_utils::getAllIpInterfaceByName();
 }
 
 std::vector<std::map<std::string, std::string>>
 getCredentials(const std::string& accountID)
 {
-    if (auto sipaccount = jami::Manager::instance().getAccount<SIPAccount>(accountID))
+    if (auto sipaccount = sip_core::Manager::instance().getAccount<SIPAccount>(accountID))
         return sipaccount->getCredentials();
     return {};
 }
@@ -651,24 +651,24 @@ void
 setCredentials(const std::string& accountID,
                const std::vector<std::map<std::string, std::string>>& details)
 {
-    if (auto sipaccount = jami::Manager::instance().getAccount<SIPAccount>(accountID)) {
+    if (auto sipaccount = sip_core::Manager::instance().getAccount<SIPAccount>(accountID)) {
         sipaccount->doUnregister([&](bool /* transport_free */) {
             sipaccount->editConfig(
-                [&](jami::SipAccountConfig& config) { config.setCredentials(details); });
+                [&](sip_core::SipAccountConfig& config) { config.setCredentials(details); });
             sipaccount->loadConfig();
             if (sipaccount->isEnabled())
                 sipaccount->doRegister();
         });
-        jami::Manager::instance().saveConfig(sipaccount);
+        sip_core::Manager::instance().saveConfig(sipaccount);
     }
 }
 
 void
 connectivityChanged()
 {
-    JAMI_WARN("received connectivity changed - trying to re-connect enabled accounts");
+    SIP_CORE_WARN("received connectivity changed - trying to re-connect enabled accounts");
 
-    for (const auto& account : jami::Manager::instance().getAllAccounts()) {
+    for (const auto& account : sip_core::Manager::instance().getAllAccounts()) {
         account->connectivityChanged();
     }
 }
@@ -676,49 +676,49 @@ connectivityChanged()
 bool
 isAudioMeterActive(const std::string& id)
 {
-    return jami::Manager::instance().getRingBufferPool().isAudioMeterActive(id);
+    return sip_core::Manager::instance().getRingBufferPool().isAudioMeterActive(id);
 }
 
 void
 setAudioMeterState(const std::string& id, bool state)
 {
-    jami::Manager::instance().getRingBufferPool().setAudioMeterState(id, state);
+    sip_core::Manager::instance().getRingBufferPool().setAudioMeterState(id, state);
 }
 
 void
 setDefaultModerator(const std::string& accountID, const std::string& peerURI, bool state)
 {
-    jami::Manager::instance().setDefaultModerator(accountID, peerURI, state);
+    sip_core::Manager::instance().setDefaultModerator(accountID, peerURI, state);
 }
 
 std::vector<std::string>
 getDefaultModerators(const std::string& accountID)
 {
-    return jami::Manager::instance().getDefaultModerators(accountID);
+    return sip_core::Manager::instance().getDefaultModerators(accountID);
 }
 
 void
 enableLocalModerators(const std::string& accountID, bool isModEnabled)
 {
-    jami::Manager::instance().enableLocalModerators(accountID, isModEnabled);
+    sip_core::Manager::instance().enableLocalModerators(accountID, isModEnabled);
 }
 
 bool
 isLocalModeratorsEnabled(const std::string& accountID)
 {
-    return jami::Manager::instance().isLocalModeratorsEnabled(accountID);
+    return sip_core::Manager::instance().isLocalModeratorsEnabled(accountID);
 }
 
 void
 setAllModerators(const std::string& accountID, bool allModerators)
 {
-    jami::Manager::instance().setAllModerators(accountID, allModerators);
+    sip_core::Manager::instance().setAllModerators(accountID, allModerators);
 }
 
 bool
 isAllModerators(const std::string& accountID)
 {
-    return jami::Manager::instance().isAllModerators(accountID);
+    return sip_core::Manager::instance().isAllModerators(accountID);
 }
 
-} // namespace libjami
+} // namespace libsip_core

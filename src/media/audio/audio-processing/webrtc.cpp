@@ -20,7 +20,7 @@
 
 #include <webrtc/modules/audio_processing/include/audio_processing.h>
 
-namespace jami {
+namespace sip_core {
 
 constexpr int webrtcNoError = webrtc::AudioProcessing::kNoError;
 
@@ -31,7 +31,7 @@ WebRTCAudioProcessor::WebRTCAudioProcessor(AudioFormat format, unsigned frameSiz
     , iRecordBuffer_(frameSize_, format)
     , iPlaybackBuffer_(frameSize_, format)
 {
-    JAMI_DBG("[webrtc-ap] WebRTCAudioProcessor, frame size = %d (=%d ms), channels = %d",
+    SIP_CORE_DBG("[webrtc-ap] WebRTCAudioProcessor, frame size = %d (=%d ms), channels = %d",
              frameSize,
              frameDurationMs_,
              format.nb_channels);
@@ -50,74 +50,74 @@ WebRTCAudioProcessor::WebRTCAudioProcessor(AudioFormat format, unsigned frameSiz
     };
 
     if (apm->Initialize(pconfig) != webrtcNoError) {
-        JAMI_ERR("[webrtc-ap] Error initialising audio processing module");
+        SIP_CORE_ERR("[webrtc-ap] Error initialising audio processing module");
     }
 
-    JAMI_INFO("[webrtc-ap] Done initializing");
+    SIP_CORE_INFO("[webrtc-ap] Done initializing");
 }
 
 void
 WebRTCAudioProcessor::enableNoiseSuppression(bool enabled)
 {
-    JAMI_DBG("[webrtc-ap] enableNoiseSuppression %d", enabled);
+    SIP_CORE_DBG("[webrtc-ap] enableNoiseSuppression %d", enabled);
     if (apm->noise_suppression()->Enable(enabled) != webrtcNoError) {
-        JAMI_ERR("[webrtc-ap] Error enabling noise suppression");
+        SIP_CORE_ERR("[webrtc-ap] Error enabling noise suppression");
     }
     if (apm->noise_suppression()->set_level(webrtc::NoiseSuppression::kVeryHigh) != webrtcNoError) {
-        JAMI_ERR("[webrtc-ap] Error setting noise suppression level");
+        SIP_CORE_ERR("[webrtc-ap] Error setting noise suppression level");
     }
     if (apm->high_pass_filter()->Enable(enabled) != webrtcNoError) {
-        JAMI_ERR("[webrtc-ap] Error enabling high pass filter");
+        SIP_CORE_ERR("[webrtc-ap] Error enabling high pass filter");
     }
 }
 
 void
 WebRTCAudioProcessor::enableAutomaticGainControl(bool enabled)
 {
-    JAMI_DBG("[webrtc-ap] enableAutomaticGainControl %d", enabled);
+    SIP_CORE_DBG("[webrtc-ap] enableAutomaticGainControl %d", enabled);
     if (apm->gain_control()->Enable(enabled) != webrtcNoError) {
-        JAMI_ERR("[webrtc-ap] Error enabling automatic gain control");
+        SIP_CORE_ERR("[webrtc-ap] Error enabling automatic gain control");
     }
     if (apm->gain_control()->set_analog_level_limits(0, 255) != webrtcNoError) {
-        JAMI_ERR("[webrtc-ap] Error setting automatic gain control analog level limits");
+        SIP_CORE_ERR("[webrtc-ap] Error setting automatic gain control analog level limits");
     }
     if (apm->gain_control()->set_mode(webrtc::GainControl::kAdaptiveAnalog) != webrtcNoError) {
-        JAMI_ERR("[webrtc-ap] Error setting automatic gain control mode");
+        SIP_CORE_ERR("[webrtc-ap] Error setting automatic gain control mode");
     }
 }
 
 void
 WebRTCAudioProcessor::enableEchoCancel(bool enabled)
 {
-    JAMI_DBG("[webrtc-ap] enableEchoCancel %d", enabled);
+    SIP_CORE_DBG("[webrtc-ap] enableEchoCancel %d", enabled);
 
     if (apm->echo_cancellation()->Enable(enabled) != webrtcNoError) {
-        JAMI_ERR("[webrtc-ap] Error enabling echo cancellation");
+        SIP_CORE_ERR("[webrtc-ap] Error enabling echo cancellation");
     }
     if (apm->echo_cancellation()->set_suppression_level(
             webrtc::EchoCancellation::SuppressionLevel::kHighSuppression)
         != webrtcNoError) {
-        JAMI_ERR("[webrtc-ap] Error setting echo cancellation level");
+        SIP_CORE_ERR("[webrtc-ap] Error setting echo cancellation level");
     }
     if (apm->echo_cancellation()->enable_drift_compensation(true) != webrtcNoError) {
-        JAMI_ERR("[webrtc-ap] Error enabling echo cancellation drift compensation");
+        SIP_CORE_ERR("[webrtc-ap] Error enabling echo cancellation drift compensation");
     }
 }
 
 void
 WebRTCAudioProcessor::enableVoiceActivityDetection(bool enabled)
 {
-    JAMI_DBG("[webrtc-ap] enableVoiceActivityDetection %d", enabled);
+    SIP_CORE_DBG("[webrtc-ap] enableVoiceActivityDetection %d", enabled);
     if (apm->voice_detection()->Enable(enabled) != webrtcNoError) {
-        JAMI_ERR("[webrtc-ap] Error enabling voice activation detection");
+        SIP_CORE_ERR("[webrtc-ap] Error enabling voice activation detection");
     }
     if (apm->voice_detection()->set_likelihood(webrtc::VoiceDetection::kVeryLowLikelihood)
         != webrtcNoError) {
-        JAMI_ERR("[webrtc-ap] Error setting voice detection likelihood");
+        SIP_CORE_ERR("[webrtc-ap] Error setting voice detection likelihood");
     }
     // asserted to be 10 in voice_detection_impl.cc
     if (apm->voice_detection()->set_frame_size_ms(10) != webrtcNoError) {
-        JAMI_ERR("[webrtc-ap] Error setting voice detection frame size");
+        SIP_CORE_ERR("[webrtc-ap] Error setting voice detection frame size");
     }
 }
 
@@ -156,7 +156,7 @@ WebRTCAudioProcessor::getProcessed()
 
     // process reverse in place
     if (apm->ProcessReverseStream(playData.data(), sc, sc, playData.data()) != webrtcNoError) {
-        JAMI_ERR("[webrtc-ap] ProcessReverseStream failed");
+        SIP_CORE_ERR("[webrtc-ap] ProcessReverseStream failed");
     }
 
     // process deinterleaved float recorded data
@@ -175,17 +175,17 @@ WebRTCAudioProcessor::getProcessed()
     // (it MUST be called prior to ProcessStream)
     // delay = (t_render - t_analyze) + (t_process - t_capture)
     if (apm->set_stream_delay_ms(0) != webrtcNoError) {
-        JAMI_ERR("[webrtc-ap] set_stream_delay_ms failed");
+        SIP_CORE_ERR("[webrtc-ap] set_stream_delay_ms failed");
     }
 
     if (apm->gain_control()->set_stream_analog_level(analogLevel_) != webrtcNoError) {
-        JAMI_ERR("[webrtc-ap] set_stream_analog_level failed");
+        SIP_CORE_ERR("[webrtc-ap] set_stream_analog_level failed");
     }
     apm->echo_cancellation()->set_stream_drift_samples(driftSamples);
 
     // process in place
     if (apm->ProcessStream(recData.data(), sc, sc, recData.data()) != webrtcNoError) {
-        JAMI_ERR("[webrtc-ap] ProcessStream failed");
+        SIP_CORE_ERR("[webrtc-ap] ProcessStream failed");
     }
 
     analogLevel_ = apm->gain_control()->stream_analog_level();
@@ -202,4 +202,4 @@ WebRTCAudioProcessor::getProcessed()
     return processed;
 }
 
-} // namespace jami
+} // namespace sip_core
