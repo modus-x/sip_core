@@ -22,9 +22,6 @@ X264CONF += --enable-win32thread
 endif
 ifndef HAVE_IOS
 ifndef HAVE_ANDROID
-ifdef HAVE_CROSS_COMPILE
-X264CONF += --cross-prefix="$(CROSS_COMPILE)"
-endif
 endif
 endif
 

@@ -306,30 +306,6 @@ SipTransportBroker::createUdpTransport(const IpAddr& ipAddress)
     return std::make_shared<SipTransport>(transport);
 }
 
-std::shared_ptr<TlsListener>
-SipTransportBroker::getTlsListener(const IpAddr& ipAddress, const pjsip_tls_setting* settings)
-{
-    RETURN_IF_FAIL(settings, nullptr, "TLS settings not specified");
-    RETURN_IF_FAIL(ipAddress, nullptr, "Could not determine IP address for this transport");
-    SIP_CORE_DEBUG("Creating TLS listener on {:s}...", ipAddress.toString(true));
-#if 0
-    SIP_CORE_DBG(" ca_list_file : %s", settings->ca_list_file.ptr);
-    SIP_CORE_DBG(" cert_file    : %s", settings->cert_file.ptr);
-    SIP_CORE_DBG(" ciphers_num    : %d", settings->ciphers_num);
-    SIP_CORE_DBG(" verify server %d client %d client_cert %d", settings->verify_server, settings->verify_client, settings->require_client_cert);
-    SIP_CORE_DBG(" reuse_addr    : %d", settings->reuse_addr);
-#endif
-
-    pjsip_tpfactory* listener = nullptr;
-    const pj_status_t status
-        = pjsip_tls_transport_start2(endpt_, settings, ipAddress.pjPtr(), nullptr, 1, &listener);
-    if (status != PJ_SUCCESS) {
-        SIP_CORE_ERR("TLS listener did not start: %s", sip_utils::sip_strerror(status).c_str());
-        return nullptr;
-    }
-    return std::make_shared<TlsListener>(listener);
-}
-
 std::shared_ptr<SipTransport>
 SipTransportBroker::getTlsTransport(const std::shared_ptr<TlsListener>& l,
                                     const IpAddr& remote,

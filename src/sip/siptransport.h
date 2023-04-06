@@ -147,8 +147,6 @@ public:
 
     std::shared_ptr<SipTransport> getUdpTransport(const IpAddr&);
 
-    std::shared_ptr<TlsListener> getTlsListener(const IpAddr&, const pjsip_tls_setting*);
-
     std::shared_ptr<SipTransport> getTlsTransport(const std::shared_ptr<TlsListener>&,
                                                   const IpAddr& remote,
                                                   const std::string& remote_name = {});

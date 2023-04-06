@@ -19,7 +19,7 @@ speexdsp: speexdsp-$(SPEEXDSP_HASH).tar.gz
 	$(ZCAT) "$<" | (cd $@-$(SPEEXDSP_HASH) && tar x $(if ${BATCH_MODE},,-v) --strip-components=1)
 	$(MOVE)
 
-SPEEXDSP_CONF := --enable-resample-full-sinc-table --disable-examples
+SPEEXDSP_CONF := --enable-resample-full-sinc-table --disable-examples --disable-shared
 ifeq ($(ARCH),aarch64)
 # old neon, not compatible with aarch64
 SPEEXDSP_CONF += --disable-neon

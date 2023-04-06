@@ -294,9 +294,6 @@ endif
 
 ifndef HAVE_IOS
 ifndef HAVE_ANDROID
-ifdef HAVE_CROSS_COMPILE
-FFMPEGCONF += --cross-prefix=$(HOST)-
-endif
 endif
 endif
 

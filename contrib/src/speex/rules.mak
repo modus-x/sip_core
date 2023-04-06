@@ -19,7 +19,7 @@ speex: speex-$(SPEEX_HASH).tar.gz
 	$(ZCAT) "$<" | (cd $@-$(SPEEX_HASH) && tar x $(if ${BATCH_MODE},,-v) --strip-components=1)
 	$(MOVE)
 
-SPEEX_CONF := --disable-binaries
+SPEEX_CONF := --disable-binaries --disable-shared
 ifndef HAVE_FPU
 SPEEX_CONF += --enable-fixed-point
 ifeq ($(ARCH),arm)

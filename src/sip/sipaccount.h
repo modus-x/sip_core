@@ -498,17 +498,6 @@ private:
     static pj_uint32_t tlsProtocolFromString(const std::string& method);
 
     /**
-     * Initializes tls settings from configuration file.
-     */
-    void initTlsConfiguration();
-
-    /**
-     * PJSIP aborts if the string length of our cipher list is too
-     * great, so this function forces our cipher list to fit this constraint.
-     */
-    void trimCiphers();
-
-    /**
      * Initializes STUN config from the config file
      */
     void initStunConfiguration();

@@ -513,27 +513,6 @@ SIPAccount::doRegister2_()
     transportType_ = config().tlsEnable ? (ipv6 ? PJSIP_TRANSPORT_TLS6 : PJSIP_TRANSPORT_TLS)
                                         : (ipv6 ? PJSIP_TRANSPORT_UDP6 : PJSIP_TRANSPORT_UDP);
 
-    // Init TLS settings if the user wants to use TLS
-    if (config().tlsEnable) {
-        SIP_CORE_DBG("TLS is enabled for account %s", accountID_.c_str());
-
-        // Dropping current calls already using the transport is currently required
-        // with TLS.
-        hangupCalls();
-        initTlsConfiguration();
-
-        if (!tlsListener_) {
-            tlsListener_ = link_.sipTransportBroker->getTlsListener(bindAddress, getTlsSetting());
-            if (!tlsListener_) {
-                setRegistrationState(RegistrationState::ERROR_GENERIC);
-                SIP_CORE_ERR("Error creating TLS listener.");
-                return;
-            }
-        }
-    } else {
-        tlsListener_.reset();
-    }
-
     // In our definition of the ip2ip profile (aka Direct IP Calls),
     // no registration should be performed
     if (isIP2IP()) {
@@ -858,83 +837,6 @@ SIPAccount::tlsProtocolFromString(const std::string& method)
     return PJSIP_SSL_DEFAULT_PROTO;
 }
 
-/**
- * PJSIP aborts if our cipher list exceeds 1000 characters
- */
-void
-SIPAccount::trimCiphers()
-{
-    size_t sum = 0;
-    unsigned count = 0;
-    static const size_t MAX_CIPHERS_STRLEN = 1000;
-    for (const auto& item : ciphers_) {
-        sum += strlen(pj_ssl_cipher_name(item));
-        if (sum > MAX_CIPHERS_STRLEN)
-            break;
-        ++count;
-    }
-    ciphers_.resize(count);
-}
-
-void
-SIPAccount::initTlsConfiguration()
-{
-    pjsip_tls_setting_default(&tlsSetting_);
-    const auto& conf = config();
-    tlsSetting_.proto = tlsProtocolFromString(conf.tlsMethod);
-
-    // Determine the cipher list supported on this machine
-    CipherArray avail_ciphers(256);
-    unsigned cipherNum = avail_ciphers.size();
-    if (pj_ssl_cipher_get_availables(&avail_ciphers.front(), &cipherNum) != PJ_SUCCESS)
-        SIP_CORE_ERR("Could not determine cipher list on this system");
-    avail_ciphers.resize(cipherNum);
-
-    ciphers_.clear();
-    std::string_view stream(conf.tlsCiphers), item;
-    while (sip_core::getline(stream, item, ' ')) {
-        std::string cipher(item);
-        auto item_cid = pj_ssl_cipher_id(cipher.c_str());
-        if (item_cid != PJ_TLS_UNKNOWN_CIPHER) {
-            SIP_CORE_WARN("Valid cipher: %s", cipher.c_str());
-            ciphers_.push_back(item_cid);
-        } else
-            SIP_CORE_ERR("Invalid cipher: %s", cipher.c_str());
-    }
-
-    ciphers_.erase(std::remove_if(ciphers_.begin(),
-                                  ciphers_.end(),
-                                  [&](pj_ssl_cipher c) {
-                                      return std::find(avail_ciphers.cbegin(),
-                                                       avail_ciphers.cend(),
-                                                       c)
-                                             == avail_ciphers.cend();
-                                  }),
-                   ciphers_.end());
-
-    trimCiphers();
-
-    tlsSetting_.ca_list_file = CONST_PJ_STR(conf.tlsCaListFile);
-    tlsSetting_.cert_file = CONST_PJ_STR(conf.tlsCaListFile);
-    tlsSetting_.privkey_file = CONST_PJ_STR(conf.tlsPrivateKeyFile);
-    tlsSetting_.password = CONST_PJ_STR(conf.tlsPassword);
-
-    SIP_CORE_DBG("Using %zu ciphers", ciphers_.size());
-    tlsSetting_.ciphers_num = ciphers_.size();
-    if (tlsSetting_.ciphers_num > 0) {
-        tlsSetting_.ciphers = &ciphers_.front();
-    }
-
-    tlsSetting_.verify_server = conf.tlsVerifyServer;
-    tlsSetting_.verify_client = conf.tlsVerifyClient;
-    tlsSetting_.require_client_cert = conf.tlsRequireClientCertificate;
-    pjsip_cfg()->endpt.disable_secure_dlg_check = conf.tlsDisableSecureDlgCheck;
-    tlsSetting_.timeout.sec = conf.tlsNegotiationTimeout;
-
-    tlsSetting_.qos_type = PJ_QOS_TYPE_BEST_EFFORT;
-    tlsSetting_.qos_ignore_error = PJ_TRUE;
-}
-
 void
 SIPAccount::initStunConfiguration()
 {
@@ -957,11 +859,7 @@ SIPAccount::loadConfig()
     setCredentials(config().credentials);
     enablePresence(config().presenceEnabled);
     initStunConfiguration();
-    if (config().tlsEnable) {
-        initTlsConfiguration();
-        transportType_ = PJSIP_TRANSPORT_TLS;
-    } else
-        transportType_ = PJSIP_TRANSPORT_UDP;
+    transportType_ = PJSIP_TRANSPORT_UDP;
 }
 
 bool
