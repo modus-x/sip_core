@@ -28,12 +28,12 @@ if(NOT MSVC)
     if(CMAKE_OSX_DEPLOYMENT_TARGET)
       message(
         STATUS
-        "apple detected non empty CMAKE_OSX_DEPLOYMENT_TARGET, propagading to ${CMAKE_OSX_DEPLOYMENT_TARGET} env"
+          "apple detected non empty CMAKE_OSX_DEPLOYMENT_TARGET, propagading to ${CMAKE_OSX_DEPLOYMENT_TARGET} env"
       )
       set(ENV{CMAKE_OSX_DEPLOYMENT_TARGET} ${CMAKE_OSX_DEPLOYMENT_TARGET})
       set(ENV{MACOSX_DEPLOYMENT_TARGET} ${CMAKE_OSX_DEPLOYMENT_TARGET})
       set(ENV{RECOMMENDED_MACOSX_DEPLOYMENT_TARGET}
-        ${CMAKE_OSX_DEPLOYMENT_TARGET})
+          ${CMAKE_OSX_DEPLOYMENT_TARGET})
     endif()
   endif()
 
@@ -63,15 +63,15 @@ if(NOT MSVC)
 
   if(BUILD_EXTRA_TOOLS)
     set(ENV{PATH}
-      "${CMAKE_CURRENT_SOURCE_DIR}/extras/tools/build/bin:$ENV{PATH}")
+        "${CMAKE_CURRENT_SOURCE_DIR}/extras/tools/build/bin:$ENV{PATH}")
     execute_process(COMMAND ./bootstrap
-      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/extras/tools)
+                    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/extras/tools)
     execute_process(COMMAND make
-      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/extras/tools)
+                    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/extras/tools)
     execute_process(COMMAND make .pkg-config
-      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/extras/tools)
+                    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/extras/tools)
     execute_process(COMMAND make .gas
-      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/extras/tools)
+                    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/extras/tools)
   endif()
 
   if(BUILD_CONTRIB)
@@ -100,7 +100,7 @@ if(NOT MSVC)
 
       foreach(osx_arch ${OSX_ARCH_LIST})
         string(REPLACE ${TARGET_ARCH} ${osx_arch} NEW_TARGET
-          ${CURRENT_ARCH_TRIPLE})
+                       ${CURRENT_ARCH_TRIPLE})
         list(APPEND TARGETS ${NEW_TARGET})
       endforeach()
     endif()
@@ -110,12 +110,15 @@ if(NOT MSVC)
       set(CONTRIB_PATH ${CMAKE_CURRENT_SOURCE_DIR}/contrib/${TARGET})
       list(APPEND CONTRIB_PATHS ${CONTRIB_PATH})
       set(CONTRIB_BUILD_PATH
-        ${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-${TARGET})
+          ${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-${TARGET})
       file(MAKE_DIRECTORY ${CONTRIB_BUILD_PATH})
       file(MAKE_DIRECTORY ${CONTRIB_PATH})
 
       if(APPLE)
         string(REGEX MATCH "^([^-]+)" TARGET_ARCH ${TARGET})
+        if(TARGET_ARCH STREQUAL "aarch64")
+          set(TARGET_ARCH "arm64")
+        endif()
         message(STATUS "passing extra darwin flag -arch ${TARGET_ARCH}")
         set(ENV{LDFLAGS} "-arch ${TARGET_ARCH} ${original_ldflags}")
         set(ENV{CFLAGS} "-arch ${TARGET_ARCH} ${original_cflags}")
@@ -134,7 +137,7 @@ if(NOT MSVC)
       if(CMD_RESULT)
         message(
           FATAL_ERROR
-          "Bootstrap for target ${TARGET} failed with code ${CMD_RESULT}")
+            "Bootstrap for target ${TARGET} failed with code ${CMD_RESULT}")
       endif()
 
       execute_process(
@@ -145,7 +148,7 @@ if(NOT MSVC)
       if(CMD_RESULT)
         message(
           FATAL_ERROR
-          "Make native deps list for target ${TARGET} failed with code ${CMD_RESULT}"
+            "Make native deps list for target ${TARGET} failed with code ${CMD_RESULT}"
         )
       endif()
 
@@ -157,7 +160,7 @@ if(NOT MSVC)
       if(CMD_RESULT)
         message(
           FATAL_ERROR
-          "Make native deps for target ${TARGET} failed with code ${CMD_RESULT}"
+            "Make native deps for target ${TARGET} failed with code ${CMD_RESULT}"
         )
       endif()
     endforeach()
@@ -191,35 +194,35 @@ source_group("Source Files\\client" FILES ${Source_Files__client})
 source_group("Source Files\\config" FILES ${Source_Files__config})
 source_group("Source Files\\connectivity" FILES ${Source_Files__connectivity})
 source_group("Source Files\\connectivity\\security"
-  FILES ${Source_Files__security})
+             FILES ${Source_Files__security})
 source_group("Source Files\\connectivity\\sip" FILES ${Source_Files__sip})
 source_group("Source Files\\sip_core" FILES ${Source_Files__sip_core})
 source_group("Source Files\\im" FILES ${Source_Files__im})
 source_group("Source Files\\media" FILES ${Source_Files__media})
 source_group("Source Files\\media\\audio" FILES ${Source_Files__media__audio})
 source_group("Source Files\\media\\audio\\audio-processing"
-  FILES ${Source_Files__media__audio__audio_processing})
+             FILES ${Source_Files__media__audio__audio_processing})
 source_group("Source Files\\media\\audio\\sound"
-  FILES ${Source_Files__media__audio__sound})
+             FILES ${Source_Files__media__audio__sound})
 source_group("Source Files\\media\\video" FILES ${Source_Files__media__video})
 
 if(APPLE)
   source_group("Source Files\\media\\audio\\coreaudio"
-    FILES ${Source_Files__media__audio__coreaudio})
+               FILES ${Source_Files__media__audio__coreaudio})
   source_group("Source Files\\media\\video\\apple"
-    FILES ${Source_Files__media__video__apple})
+               FILES ${Source_Files__media__video__apple})
 endif()
 
 if(MSVC)
   if(WINDOWS_STORE)
     source_group("Source Files\\media\\video\\uwpvideo"
-      FILES ${Source_Files__media__video__uwpvideo})
+                 FILES ${Source_Files__media__video__uwpvideo})
   endif()
 
   source_group("Source Files\\media\\audio\\portaudio"
-    FILES ${Source_Files__media__audio__portaudio})
+               FILES ${Source_Files__media__audio__portaudio})
   source_group("Source Files\\media\\video\\winvideo"
-    FILES ${Source_Files__media__video__winvideo})
+               FILES ${Source_Files__media__video__winvideo})
 endif()
 
 list(
@@ -261,16 +264,15 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   endif()
 
   list(APPEND ALL_FILES ${ALL_FILES}
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/media/audio/pulseaudio/audiostream.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/media/audio/pulseaudio/pulselayer.cpp)
+       ${CMAKE_CURRENT_SOURCE_DIR}/src/media/audio/pulseaudio/audiostream.cpp
+       ${CMAKE_CURRENT_SOURCE_DIR}/src/media/audio/pulseaudio/pulselayer.cpp)
 elseif(MSVC)
   list(APPEND ALL_FILES ${ALL_FILES} "${Source_Files__media__audio__portaudio}"
-    "${Source_Files__media__video__uwpvideo}"
-    "${Source_Files__media__video__winvideo}")
+       "${Source_Files__media__video__uwpvideo}"
+       "${Source_Files__media__video__winvideo}")
 elseif(APPLE)
   list(APPEND ALL_FILES ${ALL_FILES} "${Source_Files__media__audio__coreaudio}"
-    "${Source_Files__media__video__apple}"
-  )
+       "${Source_Files__media__video__apple}")
 endif()
 
 add_library(${PROJECT_NAME} SHARED ${ALL_FILES})
@@ -280,14 +282,19 @@ set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 20)
 target_compile_definitions(
   ${PROJECT_NAME}
   PRIVATE PACKAGE_NAME="${PACKAGE_NAME}"
-  PACKAGE_VERSION="${PROJECT_VERSION}"
-  PACKAGE="sip_core"
-
-  # we are building sip_core, not using it!
-  LIBSIP_CORE_BUILD
-
-  # define exports
-  SIP_CORE_EXPORTS)
+          PACKAGE_VERSION="${PROJECT_VERSION}"
+          PACKAGE="sip_core"
+          # try to enable hardware accel
+          RING_ACCEL
+          # we are building sip_core, not using it!
+          LIBSIP_CORE_BUILD
+          # define exports
+          SIP_CORE_EXPORTS)
+if(IOS)
+target_compile_definitions(
+  ${PROJECT_NAME}
+  PRIVATE TARGET_OS_IOS)
+endif()
 
 if(SIP_CORE_VIDEO)
   target_compile_definitions(${PROJECT_NAME} PRIVATE ENABLE_VIDEO)
@@ -300,14 +307,14 @@ endif()
 target_include_directories(
   ${PROJECT_NAME}
   PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/.;"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/config;"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/connectivity;"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/connectivity/security;"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/client;"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/im;"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/media;"
+          "${CMAKE_CURRENT_SOURCE_DIR}/src/config;"
+          "${CMAKE_CURRENT_SOURCE_DIR}/src/connectivity;"
+          "${CMAKE_CURRENT_SOURCE_DIR}/src/connectivity/security;"
+          "${CMAKE_CURRENT_SOURCE_DIR}/src/client;"
+          "${CMAKE_CURRENT_SOURCE_DIR}/src/im;"
+          "${CMAKE_CURRENT_SOURCE_DIR}/src/media;"
   PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src;"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/sip_core;")
+         "${CMAKE_CURRENT_SOURCE_DIR}/src/sip_core;")
 
 if(MSVC)
   # ############################################################################
@@ -315,7 +322,7 @@ if(MSVC)
   # ############################################################################
   include("CMake/Utils.cmake")
   use_props(${PROJECT_NAME} "${CMAKE_CONFIGURATION_TYPES}"
-    "${DEFAULT_CXX_PROPS}")
+            "${DEFAULT_CXX_PROPS}")
 
   # ############################################################################
   # Include necessary .cmake file (need to init use_props first)
@@ -332,7 +339,7 @@ if(MSVC)
   # ############################################################################
   if("${CMAKE_VS_PLATFORM_NAME}" STREQUAL "x64")
     set_target_properties(${PROJECT_NAME}
-      PROPERTIES TARGET_NAME_RELEASELIB_WIN32 "sip_core")
+                          PROPERTIES TARGET_NAME_RELEASELIB_WIN32 "sip_core")
   endif()
 
   # ############################################################################
@@ -342,15 +349,15 @@ if(MSVC)
     set_target_properties(
       ${PROJECT_NAME}
       PROPERTIES
-      OUTPUT_DIRECTORY_RELEASELIB_WIN32
-      "${CMAKE_CURRENT_SOURCE_DIR}/build/${CMAKE_VS_PLATFORM_NAME}/$<CONFIG>/bin/"
+        OUTPUT_DIRECTORY_RELEASELIB_WIN32
+        "${CMAKE_CURRENT_SOURCE_DIR}/build/${CMAKE_VS_PLATFORM_NAME}/$<CONFIG>/bin/"
     )
   endif()
 
   if("${CMAKE_VS_PLATFORM_NAME}" STREQUAL "x64")
     set_target_properties(
       ${PROJECT_NAME} PROPERTIES INTERPROCEDURAL_OPTIMIZATION_RELEASELIB_WIN32
-      "FALSE")
+                                 "FALSE")
   endif()
 
   # ############################################################################
@@ -360,33 +367,33 @@ if(MSVC)
     target_include_directories(
       ${PROJECT_NAME}
       PUBLIC
-      "${CMAKE_CURRENT_SOURCE_DIR}/compat/msvc;"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/msvc;"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/msvc/include;"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/msvc/include/upnp;"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/ffmpeg/Build/win32/x64/include;"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/sndfile/src;"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/openssl/include;"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/asio/asio/include;"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/restinio/dev;"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/fmt/include;"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/http_parser;"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/natpmp/include"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/msgpack-c/include;"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/opendht/include;"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/libarchive/libarchive;"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/jsoncpp/include;"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/yaml-cpp/include;"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/pjproject/pjlib/include;"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/pjproject/pjnath/include;"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/pjproject/pjlib-util/include;"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/pjproject/pjsip/include;"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/pjproject/third_party;"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/speexdsp/include;"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/webrtc-audio-processing;"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/portaudio/include;"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/pjproject/pjmedia/include;"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/libgit2/include")
+        "${CMAKE_CURRENT_SOURCE_DIR}/compat/msvc;"
+        "${CMAKE_CURRENT_SOURCE_DIR}/contrib/msvc;"
+        "${CMAKE_CURRENT_SOURCE_DIR}/contrib/msvc/include;"
+        "${CMAKE_CURRENT_SOURCE_DIR}/contrib/msvc/include/upnp;"
+        "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/ffmpeg/Build/win32/x64/include;"
+        "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/sndfile/src;"
+        "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/openssl/include;"
+        "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/asio/asio/include;"
+        "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/restinio/dev;"
+        "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/fmt/include;"
+        "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/http_parser;"
+        "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/natpmp/include"
+        "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/msgpack-c/include;"
+        "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/opendht/include;"
+        "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/libarchive/libarchive;"
+        "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/jsoncpp/include;"
+        "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/yaml-cpp/include;"
+        "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/pjproject/pjlib/include;"
+        "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/pjproject/pjnath/include;"
+        "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/pjproject/pjlib-util/include;"
+        "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/pjproject/pjsip/include;"
+        "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/pjproject/third_party;"
+        "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/speexdsp/include;"
+        "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/webrtc-audio-processing;"
+        "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/portaudio/include;"
+        "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/pjproject/pjmedia/include;"
+        "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/libgit2/include")
   endif()
 
   # ############################################################################
@@ -396,22 +403,22 @@ if(MSVC)
     target_compile_definitions(
       ${PROJECT_NAME}
       PRIVATE "_WIN32_WINNT=0x0A00;"
-      "STATIC_GETOPT;"
-      "LIBARCHIVE_STATIC;"
-      "OPENDHT_PROXY_CLIENT;"
-      "OPENDHT_PROXY_SERVER;"
-      "OPENDHT_PUSH_NOTIFICATIONS;"
-      "NATPMP_STATICLIB;"
-      "NDEBUG;"
-      "_USE_MATH_DEFINES;"
-      "_SCL_SECURE_NO_WARNINGS;"
-      "_CRT_SECURE_NO_WARNINGS;"
-      "NOMINMAX;"
-      "HAVE_CONFIG_H;"
-      "WIN32_LEAN_AND_MEAN;"
-      "WEBRTC_WIN;"
-      "WEBRTC_AUDIO_PROCESSING_ONLY_BUILD;"
-      "WEBRTC_NS_FLOAT;")
+              "STATIC_GETOPT;"
+              "LIBARCHIVE_STATIC;"
+              "OPENDHT_PROXY_CLIENT;"
+              "OPENDHT_PROXY_SERVER;"
+              "OPENDHT_PUSH_NOTIFICATIONS;"
+              "NATPMP_STATICLIB;"
+              "NDEBUG;"
+              "_USE_MATH_DEFINES;"
+              "_SCL_SECURE_NO_WARNINGS;"
+              "_CRT_SECURE_NO_WARNINGS;"
+              "NOMINMAX;"
+              "HAVE_CONFIG_H;"
+              "WIN32_LEAN_AND_MEAN;"
+              "WEBRTC_WIN;"
+              "WEBRTC_AUDIO_PROCESSING_ONLY_BUILD;"
+              "WEBRTC_NS_FLOAT;")
   endif()
 
   # ############################################################################
@@ -421,24 +428,24 @@ if(MSVC)
     target_compile_options(
       ${PROJECT_NAME}
       PRIVATE /O2;
-      /Oi;
-      ${DEFAULT_CXX_RUNTIME_LIBRARY};
-      /Gy;
-      /MP;
-      /Oy-;
-      /sdl-;
-      /W0;
-      /FC;
-      /FS
-      /nologo;
-      /Zi;
-      /wd4996;
-      /wd4503;
-      /wd4180;
-      /wd4244;
-      /wd4267;
-      /Zc:__cplusplus;
-      ${DEFAULT_CXX_EXCEPTION_HANDLING})
+              /Oi;
+              ${DEFAULT_CXX_RUNTIME_LIBRARY};
+              /Gy;
+              /MP;
+              /Oy-;
+              /sdl-;
+              /W0;
+              /FC;
+              /FS
+              /nologo;
+              /Zi;
+              /wd4996;
+              /wd4503;
+              /wd4180;
+              /wd4244;
+              /wd4267;
+              /Zc:__cplusplus;
+              ${DEFAULT_CXX_EXCEPTION_HANDLING})
   endif()
 
   if("${CMAKE_VS_PLATFORM_NAME}" STREQUAL "x64")
@@ -460,7 +467,7 @@ if(MSVC)
   # Dependencies
   # ############################################################################
   set(libAdditionalDependencies
-    "${CMAKE_STATIC_LINKER_FLAGS} /LTCG
+      "${CMAKE_STATIC_LINKER_FLAGS} /LTCG
         ws2_32.lib
         advapi32.lib
         Secur32.lib
@@ -520,83 +527,85 @@ else()
 
     if(LINUX)
       pkg_search_module(webrtcap_${CONTRIB_TARGET_NAME} REQUIRED
-        IMPORTED_TARGET webrtc-audio-processing)
+                        IMPORTED_TARGET webrtc-audio-processing)
     endif()
 
     pkg_search_module(pjproject_${CONTRIB_TARGET_NAME} REQUIRED IMPORTED_TARGET
-      libpjproject)
+                      libpjproject)
     pkg_search_module(avformat_${CONTRIB_TARGET_NAME} REQUIRED IMPORTED_TARGET
-      libavformat)
+                      libavformat)
     pkg_search_module(avdevice_${CONTRIB_TARGET_NAME} REQUIRED IMPORTED_TARGET
-      libavdevice)
+                      libavdevice)
     pkg_search_module(avfilter_${CONTRIB_TARGET_NAME} REQUIRED IMPORTED_TARGET
-      libavfilter)
+                      libavfilter)
     pkg_search_module(avcodec_${CONTRIB_TARGET_NAME} REQUIRED IMPORTED_TARGET
-      libavcodec)
+                      libavcodec)
     pkg_search_module(swresample_${CONTRIB_TARGET_NAME} REQUIRED
-      IMPORTED_TARGET libswresample)
+                      IMPORTED_TARGET libswresample)
     pkg_search_module(swscale_${CONTRIB_TARGET_NAME} REQUIRED IMPORTED_TARGET
-      libswscale)
+                      libswscale)
     pkg_search_module(avutil_${CONTRIB_TARGET_NAME} REQUIRED IMPORTED_TARGET
-      libavutil)
+                      libavutil)
     pkg_search_module(yaml_${CONTRIB_TARGET_NAME} REQUIRED IMPORTED_TARGET
-      yaml-cpp)
+                      yaml-cpp)
     pkg_search_module(json_${CONTRIB_TARGET_NAME} REQUIRED IMPORTED_TARGET
-      jsoncpp)
+                      jsoncpp)
     pkg_search_module(speex_${CONTRIB_TARGET_NAME} REQUIRED IMPORTED_TARGET
-      speex)
+                      speex)
     pkg_search_module(speexdsp_${CONTRIB_TARGET_NAME} REQUIRED IMPORTED_TARGET
-      speexdsp)
+                      speexdsp)
 
     # LD_FLAGS are broken on Apple, erase them
     if(APPLE)
       set_target_properties(PkgConfig::pjproject_${CONTRIB_TARGET_NAME}
-        PROPERTIES INTERFACE_LINK_OPTIONS "")
+                            PROPERTIES INTERFACE_LINK_OPTIONS "")
       set_target_properties(PkgConfig::avformat_${CONTRIB_TARGET_NAME}
-        PROPERTIES INTERFACE_LINK_OPTIONS "")
+                            PROPERTIES INTERFACE_LINK_OPTIONS "")
       set_target_properties(PkgConfig::avdevice_${CONTRIB_TARGET_NAME}
-        PROPERTIES INTERFACE_LINK_OPTIONS "")
+                            PROPERTIES INTERFACE_LINK_OPTIONS "")
       set_target_properties(PkgConfig::avfilter_${CONTRIB_TARGET_NAME}
-        PROPERTIES INTERFACE_LINK_OPTIONS "")
+                            PROPERTIES INTERFACE_LINK_OPTIONS "")
       set_target_properties(PkgConfig::avcodec_${CONTRIB_TARGET_NAME}
-        PROPERTIES INTERFACE_LINK_OPTIONS "")
+                            PROPERTIES INTERFACE_LINK_OPTIONS "")
       set_target_properties(PkgConfig::swresample_${CONTRIB_TARGET_NAME}
-        PROPERTIES INTERFACE_LINK_OPTIONS "")
+                            PROPERTIES INTERFACE_LINK_OPTIONS "")
       set_target_properties(PkgConfig::swscale_${CONTRIB_TARGET_NAME}
-        PROPERTIES INTERFACE_LINK_OPTIONS "")
+                            PROPERTIES INTERFACE_LINK_OPTIONS "")
       set_target_properties(PkgConfig::avutil_${CONTRIB_TARGET_NAME}
-        PROPERTIES INTERFACE_LINK_OPTIONS "")
+                            PROPERTIES INTERFACE_LINK_OPTIONS "")
     endif()
 
     target_link_libraries(
       ${PROJECT_NAME}
       PRIVATE PkgConfig::pjproject_${CONTRIB_TARGET_NAME}
-      PkgConfig::avformat_${CONTRIB_TARGET_NAME}
-      PkgConfig::avdevice_${CONTRIB_TARGET_NAME}
-      PkgConfig::avfilter_${CONTRIB_TARGET_NAME}
-      PkgConfig::avcodec_${CONTRIB_TARGET_NAME}
-      PkgConfig::swresample_${CONTRIB_TARGET_NAME}
-      PkgConfig::swscale_${CONTRIB_TARGET_NAME}
-      PkgConfig::yaml_${CONTRIB_TARGET_NAME}
-      PkgConfig::json_${CONTRIB_TARGET_NAME}
-      PkgConfig::speex_${CONTRIB_TARGET_NAME}
-      PkgConfig::speexdsp_${CONTRIB_TARGET_NAME}
-      PkgConfig::fmt_${CONTRIB_TARGET_NAME}
+              PkgConfig::avformat_${CONTRIB_TARGET_NAME}
+              PkgConfig::avdevice_${CONTRIB_TARGET_NAME}
+              PkgConfig::avfilter_${CONTRIB_TARGET_NAME}
+              PkgConfig::avcodec_${CONTRIB_TARGET_NAME}
+              PkgConfig::swresample_${CONTRIB_TARGET_NAME}
+              PkgConfig::swscale_${CONTRIB_TARGET_NAME}
+              PkgConfig::yaml_${CONTRIB_TARGET_NAME}
+              PkgConfig::json_${CONTRIB_TARGET_NAME}
+              PkgConfig::speex_${CONTRIB_TARGET_NAME}
+              PkgConfig::speexdsp_${CONTRIB_TARGET_NAME}
+              PkgConfig::fmt_${CONTRIB_TARGET_NAME}
       PUBLIC PkgConfig::avutil_${CONTRIB_TARGET_NAME})
 
     if(LINUX)
       target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::webrtcap)
       target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::udev
-        PkgConfig::pulseaudio)
+                                                    PkgConfig::pulseaudio)
     endif()
   endforeach(CONTRIB_PATH)
 
   if(APPLE)
-    target_link_libraries(${PROJECT_NAME} PRIVATE
-      resolv
-      "-framework AudioToolbox"
-      "-framework CoreAudio"
-    )
+    target_link_libraries(${PROJECT_NAME} PRIVATE resolv "-framework CFNetwork")
+    if(IOS)
+
+    endif()
+    target_link_libraries(
+      ${PROJECT_NAME} PRIVATE resolv "-framework AudioToolbox"
+                              "-framework CoreAudio")
   endif()
 
   if(ANDROID)
@@ -606,18 +615,16 @@ else()
   target_compile_options(
     ${PROJECT_NAME}
     PRIVATE -fvisibility=hidden
-    -Wall
-    -Wextra
-    -Wnon-virtual-dtor
-    -Wno-deprecated
-    -Wno-deprecated-declarations
-    -Wno-unknown-pragmas)
+            -Wall
+            -Wextra
+            -Wnon-virtual-dtor
+            -Wno-deprecated
+            -Wno-deprecated-declarations
+            -Wno-unknown-pragmas)
   target_compile_definitions(
     ${PROJECT_NAME} PRIVATE SIP_CORE_DATADIR="${SIP_CORE_DATADIR}"
-    PJ_AUTOCONF=1)
-  if (APPLE)
-  target_compile_definitions(
-    ${PROJECT_NAME} PRIVATE HAVE_COREAUDIO
-  )
+                            PJ_AUTOCONF=1)
+  if(APPLE)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE HAVE_COREAUDIO)
   endif()
 endif()
