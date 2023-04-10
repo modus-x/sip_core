@@ -674,10 +674,6 @@ Manager::init(const std::string& config_file, const std::string& data_path)
     // So only create the SipLink once
     pimpl_->sipLink_ = std::make_unique<SIPVoIPLink>();
 
-    check_rename(fileutils::get_cache_dir(PACKAGE_OLD), fileutils::get_cache_dir());
-    check_rename(fileutils::get_data_dir(PACKAGE_OLD), fileutils::get_data_dir());
-    check_rename(fileutils::get_config_dir(PACKAGE_OLD), fileutils::get_config_dir());
-
     pimpl_->path_ = config_file.empty() ? pimpl_->retrieveConfigPath() : config_file;
     SIP_CORE_DBG("Configuration file path: %s", pimpl_->path_.c_str());
 
@@ -696,22 +692,22 @@ Manager::init(const std::string& config_file, const std::string& data_path)
     }
 
     // always back up last error-free configuration
-    if (no_errors) {
-        make_backup(pimpl_->path_);
-    } else {
-        // restore previous configuration
-        SIP_CORE_WARN("Restoring last working configuration");
+    // if (no_errors) {
+    //     make_backup(pimpl_->path_);
+    // } else {
+    //     // restore previous configuration
+    //     SIP_CORE_WARN("Restoring last working configuration");
 
-        try {
-            // remove accounts from broken configuration
-            removeAccounts();
-            restore_backup(pimpl_->path_);
-            pimpl_->parseConfiguration();
-        } catch (const YAML::Exception& e) {
-            SIP_CORE_ERR("%s", e.what());
-            SIP_CORE_WARN("Restoring backup failed");
-        }
-    }
+    //     try {
+    //         // remove accounts from broken configuration
+    //         removeAccounts();
+    //         restore_backup(pimpl_->path_);
+    //         pimpl_->parseConfiguration();
+    //     } catch (const YAML::Exception& e) {
+    //         SIP_CORE_ERR("%s", e.what());
+    //         SIP_CORE_WARN("Restoring backup failed");
+    //     }
+    // }
 
     {
         std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
@@ -806,6 +802,13 @@ Manager::getDataPath() const
 {
     return pimpl_->data_path_;
 }
+
+std::string
+Manager::getConfigPath() const
+{
+    return pimpl_->path_;
+}
+
 
 bool
 Manager::isCurrentCall(const Call& call) const

@@ -44,7 +44,7 @@ extern "C" {
 #include <cmath>
 
 // Define following line if you need to debug libav SDP
-//#define DEBUG_SDP 1
+// #define DEBUG_SDP 1
 
 using namespace std::literals;
 
@@ -182,14 +182,16 @@ MediaEncoder::addStream(const SystemCodecInfo& systemCodecInfo)
     auto stream = avformat_new_stream(outputCtx_, outputCodec_);
 
     if (stream == nullptr) {
-        SIP_CORE_ERR("[%p] Failed to create coding instance for %s", this, systemCodecInfo.name.c_str());
+        SIP_CORE_ERR("[%p] Failed to create coding instance for %s",
+                     this,
+                     systemCodecInfo.name.c_str());
         return -1;
     }
 
     SIP_CORE_DBG("[%p] Created new coding instance for %s @ index %d",
-             this,
-             systemCodecInfo.name.c_str(),
-             stream->index);
+                 this,
+                 systemCodecInfo.name.c_str(),
+                 stream->index);
     // Only init audio now, video will be intialized when
     // encoding the first frame.
     if (systemCodecInfo.mediaType == MEDIA_AUDIO) {
@@ -220,10 +222,10 @@ int
 MediaEncoder::initStream(const SystemCodecInfo& systemCodecInfo, AVBufferRef* framesCtx)
 {
     SIP_CORE_DBG("[%p] Initializing stream: codec type %d, name %s, lib %s",
-             this,
-             systemCodecInfo.codecType,
-             systemCodecInfo.name.c_str(),
-             systemCodecInfo.libName.c_str());
+                 this,
+                 systemCodecInfo.codecType,
+                 systemCodecInfo.name.c_str(),
+                 systemCodecInfo.libName.c_str());
 
     std::lock_guard<std::mutex> lk(encMutex_);
 
@@ -262,8 +264,8 @@ MediaEncoder::initStream(const SystemCodecInfo& systemCodecInfo, AVBufferRef* fr
 
     if (stream == nullptr) {
         SIP_CORE_ERR("[%p] Can not init, output context has no coding sessions for %s",
-                 this,
-                 systemCodecInfo.name.c_str());
+                     this,
+                     systemCodecInfo.name.c_str());
         throw MediaEncoderException("Cannot allocate stream");
     }
 
@@ -301,8 +303,8 @@ MediaEncoder::initStream(const SystemCodecInfo& systemCodecInfo, AVBufferRef* fr
             if (avcodec_open2(encoderCtx, outputCodec_, &options_) < 0) {
                 // Failed to open codec
                 SIP_CORE_WARN("Fail to open hardware encoder %s with %s ",
-                          avcodec_get_name(static_cast<AVCodecID>(systemCodecInfo.avcodecId)),
-                          it.getName().c_str());
+                              avcodec_get_name(static_cast<AVCodecID>(systemCodecInfo.avcodecId)),
+                              it.getName().c_str());
                 avcodec_free_context(&encoderCtx);
                 encoderCtx = nullptr;
                 accel_ = nullptr;
@@ -310,8 +312,8 @@ MediaEncoder::initStream(const SystemCodecInfo& systemCodecInfo, AVBufferRef* fr
             } else {
                 // Succeed to open codec
                 SIP_CORE_WARN("Using hardware encoding for %s with %s ",
-                          avcodec_get_name(static_cast<AVCodecID>(systemCodecInfo.avcodecId)),
-                          it.getName().c_str());
+                              avcodec_get_name(static_cast<AVCodecID>(systemCodecInfo.avcodecId)),
+                              it.getName().c_str());
                 encoders_.push_back(encoderCtx);
                 break;
             }
@@ -321,7 +323,7 @@ MediaEncoder::initStream(const SystemCodecInfo& systemCodecInfo, AVBufferRef* fr
 
     if (!encoderCtx) {
         SIP_CORE_WARN("Not using hardware encoding for %s",
-                  avcodec_get_name(static_cast<AVCodecID>(systemCodecInfo.avcodecId)));
+                      avcodec_get_name(static_cast<AVCodecID>(systemCodecInfo.avcodecId)));
         encoderCtx = initCodec(mediaType,
                                static_cast<AVCodecID>(systemCodecInfo.avcodecId),
                                videoOpts_.bitrate);
@@ -643,8 +645,8 @@ MediaEncoder::prepareEncoderContext(const AVCodec* outputCodec, bool is_video)
         if (audioOpts_.nbChannels > 2 || audioOpts_.nbChannels < 1) {
             encoderCtx->channels = std::clamp(audioOpts_.nbChannels, 1, 2);
             SIP_CORE_ERR() << "[" << encoderName
-                       << "] Clamping invalid channel count: " << audioOpts_.nbChannels << " -> "
-                       << encoderCtx->channels;
+                           << "] Clamping invalid channel count: " << audioOpts_.nbChannels
+                           << " -> " << encoderCtx->channels;
         } else {
             encoderCtx->channels = audioOpts_.nbChannels;
         }
@@ -733,9 +735,9 @@ MediaEncoder::extractProfileLevelID(const std::string& parameters, AVCodecContex
         break;
     }
     SIP_CORE_DBG("Using profile %s (%x) and level %d",
-             avcodec_profile_name(AV_CODEC_ID_H264, ctx->profile),
-             ctx->profile,
-             ctx->level);
+                 avcodec_profile_name(AV_CODEC_ID_H264, ctx->profile),
+                 ctx->profile,
+                 ctx->level);
 }
 
 #ifdef RING_ACCEL
@@ -814,13 +816,13 @@ MediaEncoder::initCodec(AVMediaType mediaType, AVCodecID avcodecId, uint64_t br)
     if (mediaType == AVMEDIA_TYPE_VIDEO && br > 0) {
         if (br < SystemCodecInfo::DEFAULT_MIN_BITRATE) {
             SIP_CORE_WARNING("Requested bitrate {:d} too low, setting to {:d}",
-                         br,
-                         SystemCodecInfo::DEFAULT_MIN_BITRATE);
+                             br,
+                             SystemCodecInfo::DEFAULT_MIN_BITRATE);
             br = SystemCodecInfo::DEFAULT_MIN_BITRATE;
         } else if (br > SystemCodecInfo::DEFAULT_MAX_BITRATE) {
             SIP_CORE_WARNING("Requested bitrate {:d} too high, setting to {:d}",
-                         br,
-                         SystemCodecInfo::DEFAULT_MAX_BITRATE);
+                             br,
+                             SystemCodecInfo::DEFAULT_MAX_BITRATE);
             br = SystemCodecInfo::DEFAULT_MAX_BITRATE;
         }
     }
@@ -927,9 +929,9 @@ MediaEncoder::initH264(AVCodecContext* encoderCtx, uint64_t br)
         av_opt_set_int(encoderCtx, "maxrate", maxBitrate, AV_OPT_SEARCH_CHILDREN);
         av_opt_set_int(encoderCtx, "bufsize", bufSize, AV_OPT_SEARCH_CHILDREN);
         SIP_CORE_DEBUG("H264 encoder setup: crf={:d}, maxrate={:d} kbit/s, bufsize={:d} kbit",
-                   crf,
-                   maxBitrate / 1000,
-                   bufSize / 1000);
+                       crf,
+                       maxBitrate / 1000,
+                       bufSize / 1000);
     } else if (mode_ == RateMode::CBR) {
         av_opt_set_int(encoderCtx, "b", maxBitrate, AV_OPT_SEARCH_CHILDREN);
         av_opt_set_int(encoderCtx, "maxrate", maxBitrate, AV_OPT_SEARCH_CHILDREN);
@@ -958,9 +960,9 @@ MediaEncoder::initH265(AVCodecContext* encoderCtx, uint64_t br)
         av_opt_set_int(encoderCtx, "maxrate", maxBitrate, AV_OPT_SEARCH_CHILDREN);
         av_opt_set_int(encoderCtx, "bufsize", bufSize, AV_OPT_SEARCH_CHILDREN);
         SIP_CORE_DEBUG("H265 encoder setup: crf={:d}, maxrate={:d} kbit/s, bufsize={:d} kbit",
-                   crf,
-                   maxBitrate / 1000,
-                   bufSize / 1000);
+                       crf,
+                       maxBitrate / 1000,
+                       bufSize / 1000);
     } else if (mode_ == RateMode::CBR) {
         av_opt_set_int(encoderCtx, "b", br * 1000, AV_OPT_SEARCH_CHILDREN);
         av_opt_set_int(encoderCtx, "maxrate", br * 1000, AV_OPT_SEARCH_CHILDREN);
@@ -1018,9 +1020,9 @@ MediaEncoder::initVP8(AVCodecContext* encoderCtx, uint64_t br)
         av_opt_set_int(encoderCtx, "maxrate", maxBitrate, AV_OPT_SEARCH_CHILDREN);
         av_opt_set_int(encoderCtx, "bufsize", bufSize, AV_OPT_SEARCH_CHILDREN);
         SIP_CORE_DEBUG("VP8 encoder setup: crf={:d}, maxrate={:d}, bufsize={:d}",
-                   crf,
-                   maxBitrate / 1000,
-                   bufSize / 1000);
+                       crf,
+                       maxBitrate / 1000,
+                       bufSize / 1000);
     }
 }
 
@@ -1140,7 +1142,8 @@ MediaEncoder::isDynPacketLossSupported(AVCodecID codecid)
 void
 MediaEncoder::readConfig(AVCodecContext* encoderCtx)
 {
-    std::string path = fileutils::get_config_dir() + DIR_SEPARATOR_STR + "encoder.json";
+    std::string path = Manager::instance().getConfigPath();
+    path.replace(path.find("sip"), 3, "encoder");
     std::string name = encoderCtx->codec->name;
     if (fileutils::isFile(path)) {
         SIP_CORE_WARN("encoder.json file found, default settings will be erased");
@@ -1158,7 +1161,8 @@ MediaEncoder::readConfig(AVCodecContext* encoderCtx)
                 return;
             }
             if (!config.isObject()) {
-                SIP_CORE_ERR() << "Invalid encoder configuration: '" << name << "' is not an object";
+                SIP_CORE_ERR() << "Invalid encoder configuration: '" << name
+                               << "' is not an object";
                 return;
             }
             for (Json::Value::const_iterator it = config.begin(); it != config.end(); ++it) {
@@ -1176,7 +1180,7 @@ MediaEncoder::readConfig(AVCodecContext* encoderCtx)
                                      AV_OPT_SEARCH_CHILDREN);
                 if (ret < 0) {
                     SIP_CORE_ERR() << "Failed to set option " << key << " in " << name
-                               << " context: " << libav_utils::getError(ret) << "\n";
+                                   << " context: " << libav_utils::getError(ret) << "\n";
                 }
             }
         } catch (const Json::Exception& e) {

@@ -509,6 +509,8 @@ public:
 
     std::string getDataPath() const;
 
+    std::string getConfigPath() const;
+
     /**
      * Get is always recording functionality
      */
