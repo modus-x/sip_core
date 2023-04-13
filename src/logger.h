@@ -155,17 +155,17 @@ namespace log {
 
 template<typename S, typename... Args>
 void dbg(const char* file, int line, S&& format, Args&&... args) {
-    Logger::write(LOG_DEBUG, file, line, fmt::format(std::forward<S>(format), std::forward<Args>(args)...));
+    Logger::write(LOG_DEBUG, file, line, fmt::format(fmt::runtime(std::forward<S>(format)), std::forward<Args>(args)...));
 }
 
 template<typename S, typename... Args>
 void warn(const char* file, int line, S&& format, Args&&... args) {
-    Logger::write(LOG_WARNING, file, line, fmt::format(std::forward<S>(format), std::forward<Args>(args)...));
+    Logger::write(LOG_WARNING, file, line, fmt::format(fmt::runtime(std::forward<S>(format)), std::forward<Args>(args)...));
 }
 
 template<typename S, typename... Args>
 void error(const char* file, int line, S&& format, Args&&... args) {
-    Logger::write(LOG_ERR, file, line, fmt::format(std::forward<S>(format), std::forward<Args>(args)...));
+    Logger::write(LOG_ERR, file, line, fmt::format(fmt::runtime(std::forward<S>(format)), std::forward<Args>(args)...));
 }
 
 }

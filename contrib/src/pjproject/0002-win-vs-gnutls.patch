@@ -51,8 +51,8 @@ index 85cf2ed..fe65725 100644
   */
  #define THIRD_PARTY_MEDIA                       0
 +#define PJ_OS_HAS_CHECK_STACK                   0
-+#define PJ_HAS_SSL_SOCK                         1
-+#define PJ_SSL_SOCK_IMP                         PJ_SSL_SOCK_IMP_GNUTLS
++#define PJ_HAS_SSL_SOCK                         0
++
 diff --git a/pjmedia/build/pjmedia.vcxproj b/pjmedia/build/pjmedia.vcxproj
 index 146bfa8de..1dac92caf 100644
 --- a/pjmedia/build/pjmedia.vcxproj

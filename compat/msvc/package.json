@@ -1,20 +1,16 @@
 {
-    "name": "daemon",
+    "name": "sip_core",
     "deps": [
         "asio",
         "ffmpeg",
-        "natpmp",
-        "opendht",
         "pjproject",
         "portaudio",
-        "secp256k1",
         "speexdsp",
-        "upnp",
+        "speex",
         "yaml-cpp",
-        "libarchive",
-        "webrtc-audio-processing",
-        "libgit2"
+        "jsoncpp",
+        "webrtc-audio-processing"
     ],
     "configuration": "ReleaseLib_win32",
-    "project_paths": ["sip_core-daemon.vcxproj"]
+    "project_paths": ["sip_core.vcxproj"]
 }

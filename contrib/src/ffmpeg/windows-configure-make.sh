@@ -36,8 +36,6 @@ FFMPEGCONF+='
             --enable-parser=h264
             --enable-parser=hevc
             --enable-parser=mpeg4video
-            --enable-parser=vp8
-            --enable-parser=vp9
             --enable-parser=opus'
 
 #encoders/decoders
@@ -145,12 +143,7 @@ if [ "$1" == "uwp" ]; then
             OUTDIR=Output/Windows10/x86
     fi
 elif [ "$1" == "win32" ]; then
-    EXTRACFLAGS='-MD -D_WINDLL -I../../../../../msvc/include -I../../../../../msvc/include/opus -I../../../../../msvc/include/vpx -I../../../../../msvc/include/ffnvcodec -I../../../../../msvc/include/mfx  -D_WIN32_WINNT=0x0A00'
-    FFMPEGCONF+='
-                --enable-libvpx
-                --enable-encoder=libvpx_vp8
-                --enable-decoder=vp8
-                --enable-decoder=vp9'
+    EXTRACFLAGS='-MD -D_WINDLL -I../../../../../msvc/include -I../../../../../msvc/include/opus -I../../../../../msvc/include/ffnvcodec -I../../../../../msvc/include/mfx  -D_WIN32_WINNT=0x0A00'
     FFMPEGCONF+='
                 --enable-indev=dshow
                 --enable-indev=gdigrab
@@ -163,7 +156,6 @@ elif [ "$1" == "win32" ]; then
                 --enable-nvenc
                 --enable-hwaccel=h264_nvdec
                 --enable-hwaccel=hevc_nvdec
-                --enable-hwaccel=vp8_nvdec
                 --enable-hwaccel=mjpeg_nvdec
                 --enable-encoder=h264_nvenc
                 --enable-encoder=hevc_nvenc'
@@ -172,22 +164,20 @@ elif [ "$1" == "win32" ]; then
                 --enable-encoder=h264_qsv
                 --enable-encoder=hevc_qsv
                 --enable-encoder=mjpeg_qsv
-                --enable-decoder=vp8_qsv
                 --enable-decoder=h264_qsv
                 --enable-decoder=hevc_qsv
                 --enable-decoder=mjpeg_qsv
-                --enable-decoder=vp9_qsv
                 --enable-filter=scale_qsv
                 --enable-filter=overlay_qsv'
     if [ "$2" == "x64" ]; then
         echo "configure and make ffmpeg for win32-x64..."
-        EXTRALDFLAGS='-APPCONTAINER:NO -MACHINE:x64 Ole32.lib Kernel32.lib Gdi32.lib User32.lib Strmiids.lib Advapi32.lib OleAut32.lib Shlwapi.lib Vfw32.lib Secur32.lib Advapi32.lib libopus.lib libx264.lib libvpx.lib libmfx.lib -LIBPATH:../../../../../msvc/lib/x64'
+        EXTRALDFLAGS='-APPCONTAINER:NO -MACHINE:x64 Ole32.lib Kernel32.lib Gdi32.lib User32.lib Strmiids.lib Advapi32.lib OleAut32.lib Shlwapi.lib Vfw32.lib Secur32.lib Advapi32.lib libopus.lib libx264.lib libmfx.lib -LIBPATH:../../../../../msvc/lib/x64'
         FFMPEGCONF+=' --arch=x86_64'
         PREFIX=../../../Build/win32/x64
         OUTDIR=Output/win32/x64
     elif [ "$2" == "x86" ]; then
         echo "configure and make ffmpeg for win32-x86..."
-        EXTRALDFLAGS='-APPCONTAINER:NO -MACHINE:x86 Ole32.lib Kernel32.lib Gdi32.lib User32.lib Strmiids.lib OleAut32.lib Shlwapi.lib Vfw32.lib Secur32.lib Advapi32.lib libopus.lib libx264.lib libvpx.lib libmfx.lib -LIBPATH:../../../../../msvc/lib/x86'
+        EXTRALDFLAGS='-APPCONTAINER:NO -MACHINE:x86 Ole32.lib Kernel32.lib Gdi32.lib User32.lib Strmiids.lib OleAut32.lib Shlwapi.lib Vfw32.lib Secur32.lib Advapi32.lib libopus.lib libx264.lib libmfx.lib -LIBPATH:../../../../../msvc/lib/x86'
         FFMPEGCONF+=' --arch=x86'
         PREFIX=../../../Build/win32/x86
         OUTDIR=Output/win32/x86
@@ -200,6 +190,6 @@ pwd
 FFMPEGCONF=$(echo $FFMPEGCONF | sed -e "s/[[:space:]]\+/ /g")
 set -x
 set -e
-../../../configure $FFMPEGCONF --extra-cflags="${EXTRACFLAGS}" --extra-ldflags="${EXTRALDFLAGS}" --prefix="${PREFIX}" --extra-cxxflags="-std:c++17"
+../../../configure $FFMPEGCONF --extra-cflags="${EXTRACFLAGS}" --extra-ldflags="${EXTRALDFLAGS}" --prefix="${PREFIX}" --extra-cxxflags="-std:c++20"
 make -j8 install
 cd ../../..

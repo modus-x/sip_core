@@ -1,8 +1,8 @@
 {
     "name": "asio",
-    "version": "asio-1-12-2",
+    "version": "asio-1-22-1",
     "url": "https://github.com/chriskohlhoff/asio/archive/__VERSION__.tar.gz",
-    "deps": ["openssl"],
+    "deps": [],
     "patches": [],
     "win_patches": [
         "asio-vcxproj.patch"

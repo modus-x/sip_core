@@ -212,7 +212,7 @@ AudioFrame::calcRMS() const
     } else {
         // Should not happen
         SIP_CORE_ERR() << "Unsupported format for getting volume level: "
-                   << av_get_sample_fmt_name(fmt);
+                       << av_get_sample_fmt_name(fmt);
         return 0.0;
     }
     // divide by the number of multi-byte samples
@@ -397,7 +397,8 @@ getDeviceList()
 VideoCapabilities
 getCapabilities(const std::string& deviceId)
 {
-    return sip_core::Manager::instance().getVideoManager().videoDeviceMonitor.getCapabilities(deviceId);
+    return sip_core::Manager::instance().getVideoManager().videoDeviceMonitor.getCapabilities(
+        deviceId);
 }
 
 std::string
@@ -410,7 +411,8 @@ void
 setDefaultDevice(const std::string& deviceId)
 {
     SIP_CORE_DBG("Setting default device to %s", deviceId.c_str());
-    if (sip_core::Manager::instance().getVideoManager().videoDeviceMonitor.setDefaultDevice(deviceId))
+    if (sip_core::Manager::instance().getVideoManager().videoDeviceMonitor.setDefaultDevice(
+            deviceId))
         sip_core::Manager::instance().saveConfig();
 }
 
@@ -445,7 +447,8 @@ getSettings(const std::string& deviceId)
 void
 applySettings(const std::string& deviceId, const std::map<std::string, std::string>& settings)
 {
-    sip_core::Manager::instance().getVideoManager().videoDeviceMonitor.applySettings(deviceId, settings);
+    sip_core::Manager::instance().getVideoManager().videoDeviceMonitor.applySettings(deviceId,
+                                                                                     settings);
     sip_core::Manager::instance().saveConfig();
 }
 
@@ -465,7 +468,22 @@ openVideoInput(const std::string& path)
 bool
 closeVideoInput(const std::string& id)
 {
-    return sip_core::Manager::instance().getVideoManager().clientVideoInputs.erase(id) > 0;
+    auto& vm = sip_core::Manager::instance().getVideoManager();
+    std::lock_guard<std::mutex> lk(vm.videoMutex);
+    auto path = id.empty() ? vm.videoDeviceMonitor.getMRLForDefaultDevice() : id;
+
+    auto& clientInput = vm.clientVideoInputs[path];
+    if (clientInput) {
+        clientInput->stopInput();
+        return vm.clientVideoInputs.erase(path) > 0;
+    }
+
+    auto input = vm.getVideoInput(path);
+    if (input) {
+        input->stopInput();
+        return vm.videoInputs.erase(path) > 0;
+    }
+    return false;
 }
 #endif
 
@@ -512,7 +530,8 @@ startLocalMediaRecorder(const std::string& videoInputId, const std::string& file
 void
 stopLocalRecorder(const std::string& filepath)
 {
-    sip_core::LocalRecorder* rec = sip_core::LocalRecorderManager::instance().getRecorderByPath(filepath);
+    sip_core::LocalRecorder* rec = sip_core::LocalRecorderManager::instance().getRecorderByPath(
+        filepath);
     if (!rec) {
         SIP_CORE_WARN("Can't stop non existing local recorder.");
         return;

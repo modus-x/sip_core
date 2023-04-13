@@ -37,6 +37,8 @@
 namespace sip_core {
 namespace video {
 
+
+
 constexpr GUID guidCamera
     = {0xe5323777, 0xf976, 0x4f5b, 0x9b, 0x55, 0xb9, 0x46, 0x99, 0xc4, 0x6e, 0x44};
 
@@ -161,7 +163,7 @@ VideoDeviceMonitorImpl::WinProcCallback(HWND hWnd, UINT message, WPARAM wParam, 
             auto unique_name = getDeviceUniqueName(pbdi);
             if (!unique_name.empty()) {
                 SIP_CORE_DBG() << unique_name
-                           << ((wParam == DBT_DEVICEARRIVAL) ? " plugged" : " unplugged");
+                               << ((wParam == DBT_DEVICEARRIVAL) ? " plugged" : " unplugged");
                 if (pThis = reinterpret_cast<VideoDeviceMonitorImpl*>(
                         GetWindowLongPtr(hWnd, GWLP_USERDATA))) {
                     if (wParam == DBT_DEVICEARRIVAL) {
@@ -203,7 +205,8 @@ void
 VideoDeviceMonitorImpl::run()
 {
     // Create a dummy window with the sole purpose to receive device change messages.
-    static const char* className = "Message";
+    static const wchar_t* className = L"Message";
+    static const wchar_t* windowName = L"devicenotifications";
     WNDCLASSEX wx = {};
     wx.cbSize = sizeof(WNDCLASSEX);
     wx.lpfnWndProc = WinProcCallback;
@@ -212,7 +215,7 @@ VideoDeviceMonitorImpl::run()
     if (RegisterClassEx(&wx)) {
         // Pass this as lpParam so WinProcCallback can access members of VideoDeviceMonitorImpl.
         hWnd_ = CreateWindowEx(
-            0, className, "devicenotifications", 0, 0, 0, 0, 0, HWND_MESSAGE, NULL, NULL, this);
+            0, className, windowName, 0, 0, 0, 0, 0, HWND_MESSAGE, NULL, NULL, this);
     }
 
     // Run the message loop that will finish once a WM_DESTROY message
