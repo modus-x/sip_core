@@ -287,6 +287,11 @@ FFMPEGCONF += \
 	--enable-hwaccel=hevc_videotoolbox \
 	--enable-encoder=h264_videotoolbox \
 	--enable-encoder=hevc_videotoolbox \
+	--disable-autodetect \
+	--disable-libxcb \
+	--disable-libxcb-shm \
+	--disable-libxcb-xfixes \
+	--disable-libxcb-shape \
 	--target-os=darwin \
 	--enable-cross-compile \
 	--enable-pic
