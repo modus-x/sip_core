@@ -194,6 +194,8 @@ private:
     std::map<Observable<std::shared_ptr<MediaFrame>>*, StreamInfo> videoToStreamInfo_ {};
 
     std::mutex audioOnlySourcesMtx_;
+
+    // pair callId, streamId
     std::set<std::pair<std::string, std::string>> audioOnlySources_;
     std::string activeStream_ {};
 

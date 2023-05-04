@@ -251,7 +251,8 @@ public:
                          const std::string& callId1,
                          const std::string& account2Id,
                          const std::string& callId2,
-                         bool attached = true);
+                         bool attached = true,
+                         bool audioOnly=false);
 
     /**
      * Create a conference from a list of participant

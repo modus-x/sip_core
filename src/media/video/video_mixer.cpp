@@ -147,8 +147,8 @@ VideoMixer::stopInput(const std::shared_ptr<VideoFrameActiveWriter>& input)
     input->detach(this);
 #if !VIDEO_CLIENT_INPUT
     // Stop old VideoInput
-    if (auto oldInput = std::dynamic_pointer_cast<VideoInput>(input))
-        oldInput->stopInput();
+    // if (auto oldInput = std::dynamic_pointer_cast<VideoInput>(input))
+    //     oldInput->stopInput();
 #endif
 }
 

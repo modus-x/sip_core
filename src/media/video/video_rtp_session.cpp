@@ -59,7 +59,6 @@ keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
 
     rtp_session = (VideoRtpSession*) te->user_data;
 
-
     /* Send some empty rtp packet with correct params */
     rtp_session->natPing();
 
@@ -82,7 +81,8 @@ keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
     if (status == PJ_SUCCESS) {
         te->id = PJ_TRUE;
     } else {
-        SIP_CORE_ERROR("VideoRtpSession Error starting keep-alive rtp timer from callback: {:d}", status);
+        SIP_CORE_ERROR("VideoRtpSession Error starting keep-alive rtp timer from callback: {:d}",
+                       status);
     }
 }
 
@@ -108,7 +108,9 @@ VideoRtpSession::VideoRtpSession(const string& callId,
     recorder_ = rec;
     setupVideoBitrateInfo(); // reset bitrate
     cc = std::make_unique<CongestionControl>();
-    SIP_CORE_DBG("VideoRtpSession [%p] Video RTP session created for call %s", this, callId_.c_str());
+    SIP_CORE_DBG("VideoRtpSession [%p] Video RTP session created for call %s",
+                 this,
+                 callId_.c_str());
 }
 
 VideoRtpSession::~VideoRtpSession()
@@ -136,7 +138,8 @@ VideoRtpSession::updateMedia(const MediaDescription& send, const MediaDescriptio
 void
 VideoRtpSession::natPing()
 {
-    SIP_CORE_DEBUG("VideoRtpSession Sending keep-alive rtp packet to session {:s}", getRemoteRtpUri());
+    SIP_CORE_DEBUG("VideoRtpSession Sending keep-alive rtp packet to session {:s}",
+                   getRemoteRtpUri());
     sender_->natPing();
 }
 
@@ -176,9 +179,7 @@ VideoRtpSession::startSender()
             videoLocal_ = input;
             if (input) {
                 videoLocal_->setRecorderCallback(
-                    [this](const MediaStream& ms) {
-                        attachLocalRecorder(ms);
-                    });
+                    [this](const MediaStream& ms) { attachLocalRecorder(ms); });
                 auto newParams = input->getParams();
                 try {
                     if (newParams.valid()
@@ -189,7 +190,8 @@ VideoRtpSession::startSender()
                         return;
                     }
                 } catch (const std::exception& e) {
-                    SIP_CORE_ERR("VideoRtpSession Exception during retrieving video parameters: %s", e.what());
+                    SIP_CORE_ERR("VideoRtpSession Exception during retrieving video parameters: %s",
+                                 e.what());
                     return;
                 }
             } else {
@@ -330,8 +332,14 @@ VideoRtpSession::stopSender()
     cancelKeepAliveTimer();
 
     if (sender_) {
-        if (videoLocal_)
+        if (videoLocal_) {
+            auto ms = videoLocal_->getInfo();
+            if (auto ob = recorder_->getStream(ms.name)) {
+                videoLocal_->detach(ob);
+                recorder_->removeStream(ms);
+            }
             videoLocal_->detach(sender_.get());
+        }
         if (videoMixer_)
             videoMixer_->detach(sender_.get());
         sender_.reset();
@@ -454,7 +462,8 @@ VideoRtpSession::start()
     startSender();
 
     if (not send_.enabled and not receive_.enabled) {
-        SIP_CORE_WARN("VideoRtpSession [%p] Video rtp session stopped, because send is not enabled", this);
+        SIP_CORE_WARN("VideoRtpSession [%p] Video rtp session stopped, because send is not enabled",
+                      this);
         stop();
         return;
     }
@@ -474,10 +483,8 @@ VideoRtpSession::start()
 void
 VideoRtpSession::stop()
 {
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
-
-    stopSender();
     stopReceiver();
+    stopSender();
 
     rtcpCheckerThread_.join();
 
@@ -598,10 +605,11 @@ void
 VideoRtpSession::setupConferenceVideoPipeline(Conference& conference, Direction dir)
 {
     if (dir == Direction::SEND) {
-        SIP_CORE_DBG("VideoRtpSession [%p] Setup video sender pipeline on conference %s for call %s",
-                     this,
-                     conference.getConfId().c_str(),
-                     callId_.c_str());
+        SIP_CORE_DBG(
+            "VideoRtpSession [%p] Setup video sender pipeline on conference %s for call %s",
+            this,
+            conference.getConfId().c_str(),
+            callId_.c_str());
         videoMixer_ = conference.getVideoMixer();
         if (sender_) {
             // Swap sender from local video to conference video mixer
@@ -613,10 +621,11 @@ VideoRtpSession::setupConferenceVideoPipeline(Conference& conference, Direction 
             SIP_CORE_WARN("[%p] no sender", this);
         }
     } else {
-        SIP_CORE_DBG("VideoRtpSession [%p] Setup video receiver pipeline on conference %s for call %s",
-                     this,
-                     conference.getConfId().c_str(),
-                     callId_.c_str());
+        SIP_CORE_DBG(
+            "VideoRtpSession [%p] Setup video receiver pipeline on conference %s for call %s",
+            this,
+            conference.getConfId().c_str(),
+            callId_.c_str());
         if (receiveThread_) {
             receiveThread_->stopSink();
             if (videoMixer_)
@@ -636,7 +645,9 @@ VideoRtpSession::enterConference(Conference& conference)
 
     conference_ = &conference;
     videoMixer_ = conference.getVideoMixer();
-    SIP_CORE_DBG("VideoRtpSession [%p] enterConference (conf: %s)", this, conference.getConfId().c_str());
+    SIP_CORE_DBG("VideoRtpSession [%p] enterConference (conf: %s)",
+                 this,
+                 conference.getConfId().c_str());
 
     if (send_.enabled or receiveThread_) {
         // Restart encoder with conference parameter ON in order to unlink HW encoder
@@ -656,7 +667,9 @@ VideoRtpSession::exitConference()
     if (!conference_)
         return;
 
-    SIP_CORE_DBG("VideoRtpSession [%p] exitConference (conf: %s)", this, conference_->getConfId().c_str());
+    SIP_CORE_DBG("VideoRtpSession [%p] exitConference (conf: %s)",
+                 this,
+                 conference_->getConfId().c_str());
 
     if (videoMixer_) {
         if (sender_)
@@ -881,15 +894,14 @@ VideoRtpSession::attachLocalRecorder(const MediaStream& ms)
 void
 VideoRtpSession::initRecorder()
 {
-	if (!recorder_)
-		return;
+    if (!recorder_)
+        return;
     if (receiveThread_) {
         receiveThread_->setRecorderCallback(
             [this](const MediaStream& ms) { attachRemoteRecorder(ms); });
     }
     if (videoLocal_ && !send_.onHold) {
-        videoLocal_->setRecorderCallback(
-            [this](const MediaStream& ms) { attachLocalRecorder(ms); });
+        videoLocal_->setRecorderCallback([this](const MediaStream& ms) { attachLocalRecorder(ms); });
     }
 }
 

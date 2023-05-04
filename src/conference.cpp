@@ -151,7 +151,8 @@ Conference::Conference(const std::shared_ptr<Account>& account,
                                                           isModerator,
                                                           isHandRaised,
                                                           isVoiceActive,
-                                                          isPeerRecording});
+                                                          isPeerRecording,
+                                                          callId});
                 } else {
                     auto isModeratorMuted = false;
                     // If not local
@@ -204,7 +205,8 @@ Conference::Conference(const std::shared_ptr<Account>& account,
                                                           isModerator,
                                                           isHandRaised,
                                                           isVoiceActive,
-                                                          isPeerRecording});
+                                                          isPeerRecording,
+                                                          ""});
                 }
             }
             if (auto videoMixer = shared->videoMixer_) {
@@ -508,15 +510,22 @@ Conference::requestMediaChange(const std::vector<libsip_core::MediaMap>& mediaLi
     }
 
     std::vector<std::string> newVideoInputs;
-    for (auto const& mediaAttr : mediaAttrList) {
+    for (auto& mediaAttr : mediaAttrList) {
         // Find media
         auto oldIdx = std::find_if(hostSources_.begin(), hostSources_.end(), [&](auto oldAttr) {
             return oldAttr.sourceUri_ == mediaAttr.sourceUri_ && oldAttr.type_ == mediaAttr.type_;
         });
         // If video, add to newVideoInputs
         // NOTE: For now, only supports video
-        if (mediaAttr.type_ == MediaType::MEDIA_VIDEO)
+        if (mediaAttr.type_ == MediaType::MEDIA_VIDEO) {
+
+            if (mediaAttr.sourceUri_ == "") {
+                mediaAttr.sourceUri_ =  Manager::instance().getVideoManager().videoDeviceMonitor.getMRLForDefaultDevice();
+            }
+
             newVideoInputs.emplace_back(mediaAttr.sourceUri_);
+
+        }
         if (oldIdx != hostSources_.end()) {
             // Check if muted status changes
             if (mediaAttr.muted_ != oldIdx->muted_) {
@@ -528,6 +537,7 @@ Conference::requestMediaChange(const std::vector<libsip_core::MediaMap>& mediaLi
                                   : libsip_core::Media::Details::MEDIA_TYPE_VIDEO);
             }
         }
+
     }
 
 #ifdef ENABLE_VIDEO

@@ -28,7 +28,6 @@
  *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301 USA.
  */
 
-
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
@@ -348,7 +347,6 @@ Manager::ManagerPimpl::ManagerPimpl(Manager& base)
 #endif
 {
     sip_core::libav_utils::av_init();
-
 }
 
 bool
@@ -1265,7 +1263,8 @@ Manager::joinParticipant(const std::string& accountId,
                          const std::string& callId1,
                          const std::string& account2Id,
                          const std::string& callId2,
-                         bool attached)
+                         bool attached,
+                         bool audioOnly)
 {
     SIP_CORE_INFO("JoinParticipant(%s, %s, %i)", callId1.c_str(), callId2.c_str(), attached);
     auto account = getAccount(accountId);
@@ -1297,8 +1296,20 @@ Manager::joinParticipant(const std::string& accountId,
         SIP_CORE_ERR("Could not find call %s", callId2.c_str());
         return false;
     }
+    std::vector<MediaAttribute> media {};
 
-    auto conf = std::make_shared<Conference>(account);
+    if (audioOnly) {
+        MediaAttribute audioAttr = {MediaType::MEDIA_AUDIO,
+                         false,
+                         false,
+                         true,
+                         {},
+                         sip_utils::DEFAULT_AUDIO_STREAMID};
+
+        media.emplace_back(audioAttr);
+    }
+
+    auto conf = std::make_shared<Conference>(account, "", attached, media);
     account->attach(conf);
     emitSignal<libsip_core::CallSignal::ConferenceCreated>(account->getAccountID(),
                                                            conf->getConfId());
@@ -2773,10 +2784,12 @@ Manager::createSinkClients(
         }
         if (participant.w && participant.h && !participant.videoMuted) {
             auto currentSink = getSinkClient(sinkId);
-            if (!accountId.empty() &&
-                currentSink &&
-                string_remove_suffix(participant.uri, '@') == getAccount(accountId)->getUsername() &&
-                participant.device == Manager::instance().getVideoManager().videoDeviceMonitor.getMRLForDefaultDevice()) {
+            if (!accountId.empty() && currentSink
+                && string_remove_suffix(participant.uri, '@') == getAccount(accountId)->getUsername()
+                && participant.device
+                       == Manager::instance()
+                              .getVideoManager()
+                              .videoDeviceMonitor.getMRLForDefaultDevice()) {
                 // This is a local sink that must already exist
                 continue;
             }

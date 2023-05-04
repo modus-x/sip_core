@@ -74,6 +74,7 @@ struct ParticipantInfo
     bool handRaised {false};
     bool voiceActivity {false};
     bool recording {false};
+    std::string callId;
 
     void fromJson(const Json::Value& v)
     {
@@ -131,6 +132,7 @@ struct ParticipantInfo
                 {"isModerator", isModerator ? "true" : "false"},
                 {"handRaised", handRaised ? "true" : "false"},
                 {"voiceActivity", voiceActivity ? "true" : "false"},
+                {"callId", callId},
                 {"recording", recording ? "true" : "false"}};
     }
 
