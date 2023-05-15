@@ -34,6 +34,7 @@
 #include "manager.h"
 #include "sip/sipaccount.h"
 #include "sip/sippresence.h"
+#include "sip/sipevents.h"
 #include "sip/pres_sub_client.h"
 #include "client/ring_signal.h"
 #include "compiler_intrinsics.h"
@@ -58,11 +59,32 @@ subscribeBuddy(const std::string& accountID, const std::string& uri, bool flag)
         auto pres = sipaccount->getPresence();
         if (pres and pres->isEnabled() and pres->isSupported(PRESENCE_FUNCTION_SUBSCRIBE)) {
             SIP_CORE_DBG("%subscribePresence (acc:%s, buddy:%s)",
-                     flag ? "S" : "Uns",
-                     accountID.c_str(),
-                     uri.c_str());
+                         flag ? "S" : "Uns",
+                         accountID.c_str(),
+                         uri.c_str());
             pres->subscribeClient(uri, flag);
         }
+    } else
+        SIP_CORE_ERR("Could not find account %s", accountID.c_str());
+}
+
+/**
+ * Un/subscribe to events of some uri for an accountID
+ */
+void
+subscribeToEvents(const std::string& accountID,
+                  const std::string& uri,
+                  const std::string& eventType,
+                  bool flag)
+{
+    if (auto sipaccount = sip_core::Manager::instance().getAccount<SIPAccount>(accountID)) {
+        auto events = sipaccount->getSIPEvents();
+        SIP_CORE_DBG("%subscribeToEvents (acc:%s, uri:%s, event type:%s)",
+                     flag ? "S" : "Uns",
+                     accountID.c_str(),
+                     uri.c_str(),
+                     eventType.c_str());
+        events->subscribeClient(uri, eventType, flag);
     } else
         SIP_CORE_ERR("Could not find account %s", accountID.c_str());
 }
@@ -78,8 +100,8 @@ publish(const std::string& accountID, bool status, const std::string& note)
         auto pres = sipaccount->getPresence();
         if (pres and pres->isEnabled() and pres->isSupported(PRESENCE_FUNCTION_PUBLISH)) {
             SIP_CORE_DBG("Send Presence (acc:%s, status %s).",
-                     accountID.c_str(),
-                     status ? "online" : "offline");
+                         accountID.c_str(),
+                         status ? "online" : "offline");
             pres->sendPresence(status, note);
         }
     } else

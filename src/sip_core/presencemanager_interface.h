@@ -39,11 +39,17 @@ namespace libsip_core {
 /* Presence subscription/Notification. */
 LIBSIP_CORE_PUBLIC void publish(const std::string& accountID, bool status, const std::string& note);
 LIBSIP_CORE_PUBLIC void answerServerRequest(const std::string& uri, bool flag);
-LIBSIP_CORE_PUBLIC void subscribeBuddy(const std::string& accountID, const std::string& uri, bool flag);
+LIBSIP_CORE_PUBLIC void subscribeBuddy(const std::string& accountID,
+                                       const std::string& uri,
+                                       bool flag);
+LIBSIP_CORE_PUBLIC void subscribeToEvents(const std::string& accountID,
+                                          const std::string& uri,
+                                          const std::string& eventType,
+                                          bool flag);
 LIBSIP_CORE_PUBLIC std::vector<std::map<std::string, std::string>> getSubscriptions(
     const std::string& accountID);
 LIBSIP_CORE_PUBLIC void setSubscriptions(const std::string& accountID,
-                                   const std::vector<std::string>& uris);
+                                         const std::vector<std::string>& uris);
 
 // Presence signal type definitions
 struct LIBSIP_CORE_PUBLIC PresenceSignal

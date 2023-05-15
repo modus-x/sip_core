@@ -36,6 +36,7 @@
 #include "call_factory.h"
 
 #include "sip/sippresence.h"
+#include "sip/sipevents.h"
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
@@ -124,6 +125,7 @@ registration_cb(pjsip_regc_cbparam* param)
 SIPAccount::SIPAccount(const std::string& accountID, bool presenceEnabled)
     : SIPAccountBase(accountID)
     , ciphers_(100)
+    , sip_events_(new SIPEvents(this))
     , presence_(presenceEnabled ? new SIPPresence(this) : nullptr)
 {
     via_addr_.host.ptr = 0;
@@ -153,7 +155,8 @@ SIPAccount::newIncomingCall(const std::string& from UNUSED,
 }
 
 std::shared_ptr<Call>
-SIPAccount::newOutgoingCall(std::string_view toUrl, const std::vector<libsip_core::MediaMap>& mediaList)
+SIPAccount::newOutgoingCall(std::string_view toUrl,
+                            const std::vector<libsip_core::MediaMap>& mediaList)
 {
     std::string to;
     int family;
@@ -198,7 +201,9 @@ SIPAccount::newOutgoingCall(std::string_view toUrl, const std::vector<libsip_cor
         // Use the same address family as the SIP transport
         family = pjsip_transport_type_get_af(getTransportType());
 
-        SIP_CORE_DBG("UserAgent: New registered account call to %.*s", (int) toUrl.size(), toUrl.data());
+        SIP_CORE_DBG("UserAgent: New registered account call to %.*s",
+                     (int) toUrl.size(),
+                     toUrl.data());
     }
 
     auto toUri = getToUri(to);
@@ -211,7 +216,7 @@ SIPAccount::newOutgoingCall(std::string_view toUrl, const std::vector<libsip_cor
     IpAddr addrSdp;
 
     addrSdp = isStunEnabled() or (not getPublishedSameasLocal()) ? getPublishedIpAddress()
-                                                                     : localAddress;
+                                                                 : localAddress;
 
     /* fallback on local address */
     if (not addrSdp)
@@ -253,8 +258,8 @@ SIPAccount::onTransportStateChanged(pjsip_transport_state state,
 {
     pj_status_t currentStatus = transportStatus_;
     SIP_CORE_DBG("Transport state changed to %s for account %s !",
-             SipTransport::stateToStr(state),
-             accountID_.c_str());
+                 SipTransport::stateToStr(state),
+                 accountID_.c_str());
     if (!SipTransport::isAlive(state)) {
         if (info) {
             transportStatus_ = info->status;
@@ -275,8 +280,8 @@ SIPAccount::onTransportStateChanged(pjsip_transport_state state,
 
     // Notify the client of the new transport state
     if (currentStatus != transportStatus_)
-        emitSignal<libsip_core::ConfigurationSignal::VolatileDetailsChanged>(accountID_,
-                                                                         getVolatileAccountDetails());
+        emitSignal<libsip_core::ConfigurationSignal::VolatileDetailsChanged>(
+            accountID_, getVolatileAccountDetails());
 }
 
 void
@@ -429,8 +434,8 @@ void
 SIPAccount::setPushNotificationToken(const std::string& pushDeviceToken)
 {
     SIP_CORE_WARN("[SIP Account %s] setPushNotificationToken: %s",
-              getAccountID().c_str(),
-              pushDeviceToken.c_str());
+                  getAccountID().c_str(),
+                  pushDeviceToken.c_str());
 
     if (config().deviceKey == pushDeviceToken)
         return;
@@ -444,7 +449,9 @@ void
 SIPAccount::pushNotificationReceived(const std::string& from,
                                      const std::map<std::string, std::string>&)
 {
-    SIP_CORE_WARN("[SIP Account %s] pushNotificationReceived: %s", getAccountID().c_str(), from.c_str());
+    SIP_CORE_WARN("[SIP Account %s] pushNotificationReceived: %s",
+                  getAccountID().c_str(),
+                  from.c_str());
 
     if (config().enabled)
         doUnregister([&](bool /* transport_free */) { doRegister(); });
@@ -624,9 +631,9 @@ SIPAccount::sendRegister()
             or (not received.empty() and received != getPublishedAddress())) {
             pjsip_host_port* via = getViaAddr();
             SIP_CORE_DBG("Setting VIA sent-by to %.*s:%d",
-                     (int) via->host.slen,
-                     via->host.ptr,
-                     via->port);
+                         (int) via->host.slen,
+                         via->host.ptr,
+                         via->port);
 
             if (pjsip_regc_set_via_sent_by(regc, via, transport_->get()) != PJ_SUCCESS)
                 throw VoipLinkException("Unable to set the \"sent-by\" field");
@@ -643,8 +650,8 @@ SIPAccount::sendRegister()
          = pjsip_regc_init(regc, &pjSrv, &pjFrom, &pjFrom, 1, &pjContact, getRegistrationExpire()))
         != PJ_SUCCESS) {
         SIP_CORE_ERR("pjsip_regc_init failed with error %d: %s",
-                 status,
-                 sip_utils::sip_strerror(status).c_str());
+                     status,
+                     sip_utils::sip_strerror(status).c_str());
         throw VoipLinkException("Unable to initialize account registration structure");
     }
 
@@ -663,6 +670,14 @@ SIPAccount::sendRegister()
                                                                   &STR_USER_AGENT,
                                                                   &pjUserAgent);
     pj_list_push_back(&hdr_list, (pjsip_hdr*) h);
+
+    constexpr pj_str_t STR_SV_AUTH = CONST_PJ_STR("X-Sv-Auth");
+    constexpr pj_str_t STR_SV_HASH = CONST_PJ_STR("ed045e81d1615333deb74b9eaf9da087");
+    pjsip_generic_string_hdr* sv_h = pjsip_generic_string_hdr_create(link_.getPool(),
+                                                                     &STR_SV_AUTH,
+                                                                     &STR_SV_HASH);
+    pj_list_push_back(&hdr_list, (pjsip_hdr*) sv_h);
+
     pjsip_regc_add_headers(regc, &hdr_list);
 
     pjsip_tx_data* tdata;
@@ -680,8 +695,8 @@ SIPAccount::sendRegister()
     // pjsip_regc_send increment the transport ref count by one,
     if ((status = pjsip_regc_send(regc, tdata)) != PJ_SUCCESS) {
         SIP_CORE_ERR("pjsip_regc_send failed with error %d: %s",
-                 status,
-                 sip_utils::sip_strerror(status).c_str());
+                     status,
+                     sip_utils::sip_strerror(status).c_str());
         throw VoipLinkException("Unable to send account registration request");
     }
 
@@ -705,6 +720,18 @@ SIPAccount::setUpTransmissionData(pjsip_tx_data* tdata, long transportKeyType)
 void
 SIPAccount::onRegister(pjsip_regc_cbparam* param)
 {
+    const pj_str_t applicationProxy = CONST_PJ_STR("Application-Proxy");
+    auto* applicationProxyHdr = (pjsip_generic_string_hdr*)
+        pjsip_msg_find_hdr_by_name(param->rdata->msg_info.msg, &applicationProxy, nullptr);
+
+    if (applicationProxyHdr) {
+        SIP_CORE_DBG("Found application proxy header: %s", applicationProxyHdr->hvalue);
+        Manager::instance().applicationProxy = sip_utils::as_view(applicationProxyHdr->hvalue);
+    }
+    else {
+         Manager::instance().applicationProxy = "";
+    }
+
     if (param->regc != getRegistrationInfo())
         return;
 
@@ -714,9 +741,9 @@ SIPAccount::onRegister(pjsip_regc_cbparam* param)
         setRegistrationState(RegistrationState::ERROR_GENERIC, param->code);
     } else if (param->code < 0 || param->code >= 300) {
         SIP_CORE_ERR("SIP registration failed, status=%d (%.*s)",
-                 param->code,
-                 (int) param->reason.slen,
-                 param->reason.ptr);
+                     param->code,
+                     (int) param->reason.slen,
+                     param->reason.ptr);
         destroyRegistrationInfo();
         switch (param->code) {
         case PJSIP_SC_FORBIDDEN:
@@ -781,8 +808,8 @@ SIPAccount::onRegister(pjsip_regc_cbparam* param)
 
     if (param->expiration != config().registrationExpire) {
         SIP_CORE_DBG("Registrar returned EXPIRE value [%u s] different from the requested [%u s]",
-                 param->expiration,
-                 config().registrationExpire);
+                     param->expiration,
+                     config().registrationExpire);
         // NOTE: We don't alter the EXPIRE set by the user even if the registrar
         // returned a different value. PJSIP lib will set the proper timer for
         // the refresh, if the auto-regisration is enabled.
@@ -817,8 +844,8 @@ SIPAccount::sendUnregister()
     pj_status_t status;
     if ((status = pjsip_regc_send(regc, tdata)) != PJ_SUCCESS) {
         SIP_CORE_ERR("pjsip_regc_send failed with error %d: %s",
-                 status,
-                 sip_utils::sip_strerror(status).c_str());
+                     status,
+                     sip_utils::sip_strerror(status).c_str());
         throw VoipLinkException("Unable to send request to unregister sip account");
     }
 }
@@ -1206,6 +1233,12 @@ SIPAccount::getPresence() const
     return presence_;
 }
 
+SIPEvents*
+SIPAccount::getSIPEvents() const
+{
+    return sip_events_;
+}
+
 /**
  *  Enable the presence module
  */
@@ -1217,7 +1250,9 @@ SIPAccount::enablePresence(const bool& enabled)
         return;
     }
 
-    SIP_CORE_DBG("Presence enabled for %s : %s.", accountID_.c_str(), enabled ? TRUE_STR : FALSE_STR);
+    SIP_CORE_DBG("Presence enabled for %s : %s.",
+                 accountID_.c_str(),
+                 enabled ? TRUE_STR : FALSE_STR);
 
     presence_->enable(enabled);
 }
@@ -1238,9 +1273,9 @@ SIPAccount::supportPresence(int function, bool enabled)
         return;
 
     SIP_CORE_DBG("Presence support for %s (%s: %s).",
-             accountID_.c_str(),
-             function == PRESENCE_FUNCTION_PUBLISH ? "publish" : "subscribe",
-             enabled ? TRUE_STR : FALSE_STR);
+                 accountID_.c_str(),
+                 function == PRESENCE_FUNCTION_PUBLISH ? "publish" : "subscribe",
+                 enabled ? TRUE_STR : FALSE_STR);
     presence_->support(function, enabled);
 
     // force presence to disable when nothing is supported
@@ -1258,25 +1293,25 @@ SIPAccount::matches(std::string_view userName, std::string_view server) const
 {
     if (fullMatch(userName, server)) {
         SIP_CORE_DBG("Matching account id in request is a fullmatch %.*s@%.*s",
-                 (int) userName.size(),
-                 userName.data(),
-                 (int) server.size(),
-                 server.data());
+                     (int) userName.size(),
+                     userName.data(),
+                     (int) server.size(),
+                     server.data());
         return MatchRank::FULL;
     } else if (hostnameMatch(server)) {
         SIP_CORE_DBG("Matching account id in request with hostname %.*s",
-                 (int) server.size(),
-                 server.data());
+                     (int) server.size(),
+                     server.data());
         return MatchRank::PARTIAL;
     } else if (userMatch(userName)) {
         SIP_CORE_DBG("Matching account id in request with username %.*s",
-                 (int) userName.size(),
-                 userName.data());
+                     (int) userName.size(),
+                     userName.data());
         return MatchRank::PARTIAL;
     } else if (proxyMatch(server)) {
         SIP_CORE_DBG("Matching account id in request with proxy %.*s",
-                 (int) server.size(),
-                 server.data());
+                     (int) server.size(),
+                     server.data());
         return MatchRank::PARTIAL;
     } else {
         return MatchRank::NONE;
@@ -1407,11 +1442,11 @@ SIPAccount::checkNATAddress(pjsip_regc_cbparam* param, pj_pool_t* pool)
     }
 
     SIP_CORE_WARN("[account %s] Contact address changed: "
-              "(%s --> %s:%d). Updating registration.",
-              accountID_.c_str(),
-              contact_addr.toString(true).c_str(),
-              via_addrstr.data(),
-              rport);
+                  "(%s --> %s:%d). Updating registration.",
+                  accountID_.c_str(),
+                  contact_addr.toString(true).c_str(),
+                  via_addrstr.data(),
+                  rport);
 
     /*
      * Build new Contact header
@@ -1606,7 +1641,8 @@ SIPAccount::sendMessage(const std::string& to,
     status = pjsip_auth_clt_init(t->auth_sess.get(), link_.getEndpoint(), tdata->pool, 0);
 
     if (status != PJ_SUCCESS) {
-        SIP_CORE_ERR("Unable to initialize auth session: %s", sip_utils::sip_strerror(status).c_str());
+        SIP_CORE_ERR("Unable to initialize auth session: %s",
+                     sip_utils::sip_strerror(status).c_str());
         messageEngine_.onMessageSent(to, id, false);
         return;
     }

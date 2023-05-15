@@ -622,6 +622,12 @@ setAccountsOrder(const std::string& order)
 }
 
 std::string
+applicationProxy()
+{
+    return sip_core::Manager::instance().applicationProxy;
+}
+
+std::string
 getAddrFromInterfaceName(const std::string& interface)
 {
     return sip_core::ip_utils::getInterfaceAddr(interface, AF_INET);

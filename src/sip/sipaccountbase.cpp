@@ -248,6 +248,9 @@ SIPAccountBase::onTextMessage(const std::string& id,
                               const std::map<std::string, std::string>& payloads)
 {
     SIP_CORE_DBG("Text message received from %s, %zu part(s)", from.c_str(), payloads.size());
+
+    emitSignal<libsip_core::ConfigurationSignal::IncomingAccountMessage>(accountID_, from, id, payloads);
+
     for (const auto& m : payloads) {
         if (!utf8_validate(m.first))
             return;
@@ -258,8 +261,6 @@ SIPAccountBase::onTextMessage(const std::string& id,
         if (handleMessage(from, m))
             return;
     }
-
-    emitSignal<libsip_core::ConfigurationSignal::IncomingAccountMessage>(accountID_, from, id, payloads);
 
     libsip_core::Message message;
     message.from = from;

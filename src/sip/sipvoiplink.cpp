@@ -633,22 +633,6 @@ SIPVoIPLink::SIPVoIPLink()
                 dns_ports[i] = ns[i].getPort();
             }
         }
-        // pj_dns_resolver* resv;
-        // if (auto ret = pjsip_endpt_create_resolver(endpt_, &resv)) {
-        //     SIP_CORE_WARN("Error creating SIP DNS resolver: %s", sip_utils::sip_strerror(ret).c_str());
-        // } else {
-        //     if (auto ret = pj_dns_resolver_set_ns(resv,
-        //                                           dns_nameservers.size(),
-        //                                           dns_nameservers.data(),
-        //                                           dns_ports.data())) {
-        //         SIP_CORE_WARN("Error setting SIP DNS servers: %s", sip_utils::sip_strerror(ret).c_str());
-        //     } else {
-        //         if (auto ret = pjsip_endpt_set_resolver(endpt_, resv)) {
-        //             SIP_CORE_WARN("Error setting pjsip DNS resolver: %s",
-        //                       sip_utils::sip_strerror(ret).c_str());
-        //         }
-        //     }
-        // }
     }
 
     sipTransportBroker.reset(new SipTransportBroker(endpt_));

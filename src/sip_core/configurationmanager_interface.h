@@ -76,6 +76,7 @@ LIBSIP_CORE_PUBLIC bool cancelMessage(const std::string& accountID, uint64_t mes
 LIBSIP_CORE_PUBLIC std::vector<Message> getLastMessages(const std::string& accountID,
                                                     const uint64_t& base_timestamp);
 LIBSIP_CORE_PUBLIC int getMessageStatus(uint64_t id);
+LIBSIP_CORE_PUBLIC std::string applicationProxy();
 LIBSIP_CORE_PUBLIC int getMessageStatus(const std::string& accountID, uint64_t id);
 LIBSIP_CORE_PUBLIC void setIsComposing(const std::string& accountID,
                                    const std::string& conversationUri,

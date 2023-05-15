@@ -659,6 +659,8 @@ public:
      */
     const std::string& getCurrentCallId() const;
 
+    std::string applicationProxy = "";
+
     /**
      * Check if a call is the current one
      * @param call the new call
@@ -828,7 +830,7 @@ public:
     AccountFactory accountFactory;
 
     std::vector<libsip_core::Message> getLastMessages(const std::string& accountID,
-                                                  const uint64_t& base_timestamp);
+                                                      const uint64_t& base_timestamp);
 
     SIPVoIPLink& sipVoIPLink() const;
 
