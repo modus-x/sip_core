@@ -286,7 +286,7 @@ target_compile_definitions(
   PACKAGE="sip_core"
 
   # try to enable hardware accel
-  RING_ACCEL
+  # RING_ACCEL
 
   # we are building sip_core, not using it!
   LIBSIP_CORE_BUILD
