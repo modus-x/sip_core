@@ -624,7 +624,8 @@ SIPVoIPLink::getCachingPool() noexcept
     return &cp_;
 }
 
-SIPVoIPLink::SIPVoIPLink()
+SIPVoIPLink::
+SIPVoIPLink()
     : pool_(nullptr, pj_pool_release)
 {
 #define TRY(ret) \
@@ -736,7 +737,9 @@ SIPVoIPLink::SIPVoIPLink()
     SIP_CORE_DBG("SIPVoIPLink@%p", this);
 }
 
-SIPVoIPLink::~SIPVoIPLink() {}
+SIPVoIPLink::~
+SIPVoIPLink()
+{}
 
 void
 SIPVoIPLink::shutdown()
@@ -749,15 +752,15 @@ SIPVoIPLink::shutdown()
         SIP_CORE_ERR("%zu SIP calls remains!",
                      Manager::instance().callFactory.callCount(Call::LinkType::SIP));
 
+    running_ = false;
+    sipThread_.join();
+
     sipTransportBroker->shutdown();
 
     SIP_CORE_DBG("sipTransportBroker was shutdown");
     pjsip_tpmgr_set_state_cb(pjsip_endpt_get_tpmgr(endpt_), nullptr);
 
-    running_ = false;
-    sipThread_.join();
     pjsip_endpt_destroy(endpt_);
-
 
     SIP_CORE_DBG("endpoint was destroyed");
     pool_.reset();
