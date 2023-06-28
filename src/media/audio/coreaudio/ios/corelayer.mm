@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2004-2022 Savoir-faire Linux Inc.
+ *  Copyright (C) 2004-2023 Savoir-faire Linux Inc.
  *
  *  Author: Philippe Groarke <philippe.groarke@savoirfairelinux.com>
  *  Author: Andreas Traczyk <andreas.traczyk@savoirfairelinux.com>
@@ -44,7 +44,7 @@ CoreLayer::CoreLayer(const AudioPreference &pref)
     , indexRing_(pref.getAlsaCardRingtone())
     , playbackBuff_(0, audioFormat_)
 {
-     audioConfigurationQueue = dispatch_queue_create("com.savoirfairelinux.audioConfigurationQueueIOS", DISPATCH_QUEUE_SERIAL);
+     audioConfigurationQueue = dispatch_queue_create("ru.svetets.audioConfigurationQueueIOS", DISPATCH_QUEUE_SERIAL);
 }
 
 CoreLayer::~CoreLayer()
@@ -226,11 +226,11 @@ CoreLayer::setupInputBus() {
                                   &inputASBD,
                                   &size));
 
-    Float64 inSampleRate;
-    size = sizeof(Float64);
-    AudioSessionGetProperty(kAudioSessionProperty_CurrentHardwareSampleRate,
-                            &size,
-                            &inSampleRate);
+    AVAudioSession *session = [AVAudioSession sharedInstance];
+    // Replace AudioSessionGetProperty with AVAudioSession
+    Float64 inSampleRate = session.sampleRate;
+    Float32 bufferDuration = session.IOBufferDuration;
+
     inputASBD.mSampleRate = inSampleRate;
     inputASBD.mFormatID = kAudioFormatLinearPCM;
     inputASBD.mFormatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked;
@@ -270,11 +270,6 @@ CoreLayer::setupInputBus() {
                          &flag,
                          sizeof(flag));
 
-    Float32 bufferDuration;
-    size = sizeof(UInt32);
-    AudioSessionGetProperty(kAudioSessionProperty_CurrentHardwareIOBufferDuration,
-                            &size,
-                            &bufferDuration);
     UInt32 bufferSizeFrames = std::round(inSampleRate_ * bufferDuration);
     UInt32 bufferSizeBytes = bufferSizeFrames * sizeof(Float32);
     size = offsetof(AudioBufferList, mBuffers[0]) + (sizeof(AudioBuffer) * inputASBD.mChannelsPerFrame);
@@ -434,6 +429,31 @@ CoreLayer::read(AudioUnitRenderActionFlags* ioActionFlags,
     if (inNumberFrames <= 0) {
         SIP_CORE_WARN("No frames for input.");
         return;
+    }
+
+    // Check if buffer is large enough for inNumberFrames
+    UInt32 bufferSizeFrames = captureBuff_->mBuffers[0].mDataByteSize / sizeof(Float32);
+
+    if (inNumberFrames > bufferSizeFrames) {
+        // Buffer is too small, need to reallocate
+        SIP_CORE_DBG("Reallocating capture buffer...");
+
+        UInt32 bufferSizeBytes = inNumberFrames * sizeof(Float32);
+        UInt32 size = offsetof(AudioBufferList, mBuffers[0]) + (sizeof(AudioBuffer) * inChannelsPerFrame_);
+
+        rawBuff_.reset(new Byte[size + bufferSizeBytes * inChannelsPerFrame_]);
+        captureBuff_ = reinterpret_cast<::AudioBufferList*>(rawBuff_.get());
+        captureBuff_->mNumberBuffers = inChannelsPerFrame_;
+
+        auto bufferBasePtr = rawBuff_.get() + size;
+        for (UInt32 i = 0; i < captureBuff_->mNumberBuffers; ++i) {
+            captureBuff_->mBuffers[i].mNumberChannels = 1;
+            captureBuff_->mBuffers[i].mDataByteSize = bufferSizeBytes;
+            captureBuff_->mBuffers[i].mData =  bufferBasePtr + bufferSizeBytes * i;
+        }
+
+        // Update bufferSizeFrames
+        bufferSizeFrames = inNumberFrames;
     }
 
     // Write the mic samples in our buffer

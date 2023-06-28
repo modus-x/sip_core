@@ -113,6 +113,8 @@ public:
                                   bool isRemote = false) override;
     void hangup(int reason) override;
     void refuse() override;
+
+    void controlRTPReceiver(bool active, const std::string& label) override;
     void transfer(const std::string& to) override;
     bool attendedTransfer(const std::string& to) override;
     bool onhold(OnReadyCb&& cb) override;

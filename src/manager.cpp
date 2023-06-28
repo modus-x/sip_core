@@ -28,6 +28,7 @@
  *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301 USA.
  */
 
+
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
@@ -431,7 +432,9 @@ Manager::ManagerPimpl::processRemainingParticipants(Conference& conf)
     const std::string current_callId(base_.getCurrentCallId());
     ParticipantSet participants(conf.getParticipantList());
     const size_t n = participants.size();
-    SIP_CORE_DBG("Process remaining %zu participant(s) from conference %s", n, conf.getConfId().c_str());
+    SIP_CORE_DBG("Process remaining %zu participant(s) from conference %s",
+                 n,
+                 conf.getConfId().c_str());
 
     if (n > 1) {
         // Reset ringbuffer's readpointers
@@ -555,8 +558,8 @@ Manager::ManagerPimpl::sendTextMessageToConference(const Conference& conf,
             call->sendTextMessage(messages, from);
         } catch (const std::exception& e) {
             SIP_CORE_ERR("Failed to send message to conference participant %s: %s",
-                     callId.c_str(),
-                     e.what());
+                         callId.c_str(),
+                         e.what());
         }
     }
 }
@@ -573,9 +576,9 @@ Manager::ManagerPimpl::bindCallToConference(Call& call, Conference& conf)
         base_.detachParticipant(callId);
 
     SIP_CORE_DBG("[call:%s] bind to conference %s (callState=%s)",
-             callId.c_str(),
-             confId.c_str(),
-             state.c_str());
+                 callId.c_str(),
+                 confId.c_str(),
+                 state.c_str());
 
     base_.getRingBufferPool().unBindAll(callId);
 
@@ -594,8 +597,8 @@ Manager::ManagerPimpl::bindCallToConference(Call& call, Conference& conf)
         base_.answerCall(call);
     } else
         SIP_CORE_WARN("[call:%s] call state %s not recognized for conference",
-                  callId.c_str(),
-                  state.c_str());
+                      callId.c_str(),
+                      state.c_str());
 }
 
 //==============================================================================
@@ -615,7 +618,7 @@ Manager::instance()
 }
 
 Manager::Manager()
-    : rand_{std::random_device{}()}
+    : rand_ {std::random_device {}()}
     , preferences()
     , voipPreferences()
     , audioPreference()
@@ -674,7 +677,8 @@ Manager::init(const std::string& config_file, const std::string& data_path)
     // So only create the SipLink once
     pimpl_->sipLink_ = std::make_unique<SIPVoIPLink>();
 
-    pimpl_->path_ = config_file.empty() ? pimpl_->retrieveConfigPath() : config_file;
+    pimpl_->path_ = config_file.empty() ? pimpl_->retrieveConfigPath()
+                                        : config_file + DIR_SEPARATOR_STR + "sip.yaml";
     SIP_CORE_DBG("Configuration file path: %s", pimpl_->path_.c_str());
 
     pimpl_->data_path_ = data_path;
@@ -809,7 +813,6 @@ Manager::getConfigPath() const
     return pimpl_->path_;
 }
 
-
 bool
 Manager::isCurrentCall(const Call& call) const
 {
@@ -859,7 +862,7 @@ Manager::outgoingCall(const std::string& account_id,
                       const std::vector<libsip_core::MediaMap>& mediaList)
 {
     SIP_CORE_DBG() << "try outgoing call to '" << to << "'"
-               << " with account '" << account_id << "'";
+                   << " with account '" << account_id << "'";
 
     std::shared_ptr<Call> call;
 
@@ -892,6 +895,20 @@ Manager::answerCall(const std::string& accountId,
         }
     }
     return false;
+}
+
+void
+Manager::controlRTPReceiver(const std::string& accountId,
+                            const std::string& callId,
+                            const std::string& labelId,
+                            bool active)
+{
+    if (auto account = getAccount(accountId)) {
+        if (auto call = account->getCall(callId)) {
+            call->controlRTPReceiver(active, labelId);
+            return;
+        }
+    }
 }
 
 #ifdef ENABLE_VIDEO
@@ -941,7 +958,8 @@ Manager::answerCall(Call& call, const std::vector<libsip_core::MediaMap>& mediaL
     // Start recording if set in preference
     if (audioPreference.getIsAlwaysRecording()) {
         auto recResult = call.toggleRecording();
-        emitSignal<libsip_core::CallSignal::RecordPlaybackFilepath>(call.getCallId(), call.getPath());
+        emitSignal<libsip_core::CallSignal::RecordPlaybackFilepath>(call.getCallId(),
+                                                                    call.getPath());
         emitSignal<libsip_core::CallSignal::RecordingStateChanged>(call.getCallId(), recResult);
     }
     return true;
@@ -1131,8 +1149,8 @@ Manager::holdConference(const std::string& accountId, const std::string& confId)
         if (auto conf = account->getConference(confId)) {
             conf->detachLocalParticipant();
             emitSignal<libsip_core::CallSignal::ConferenceChanged>(accountId,
-                                                               conf->getConfId(),
-                                                               conf->getStateStr());
+                                                                   conf->getConfId(),
+                                                                   conf->getStateStr());
             return true;
         }
     }
@@ -1155,8 +1173,8 @@ Manager::unHoldConference(const std::string& accountId, const std::string& confI
                 pimpl_->switchCall(confId);
                 conf->setState(Conference::State::ACTIVE_ATTACHED);
                 emitSignal<libsip_core::CallSignal::ConferenceChanged>(accountId,
-                                                                   conf->getConfId(),
-                                                                   conf->getStateStr());
+                                                                       conf->getConfId(),
+                                                                       conf->getStateStr());
                 return true;
             } else if (conf->getState() == Conference::State::ACTIVE_DETACHED) {
                 pimpl_->addMainParticipant(*conf);
@@ -1196,8 +1214,8 @@ Manager::addParticipant(Call& call, Conference& conference)
     }*/
 
     SIP_CORE_DBG("Add participant %s to conference %s",
-             call.getCallId().c_str(),
-             conference.getConfId().c_str());
+                 call.getCallId().c_str(),
+                 conference.getConfId().c_str());
 
     // store the current call id (it will change in offHoldCall or in answerCall)
     pimpl_->bindCallToConference(call, conference);
@@ -1222,8 +1240,8 @@ Manager::ManagerPimpl::addMainParticipant(Conference& conf)
 {
     conf.attachLocalParticipant();
     emitSignal<libsip_core::CallSignal::ConferenceChanged>(conf.getAccountId(),
-                                                       conf.getConfId(),
-                                                       conf.getStateStr());
+                                                           conf.getConfId(),
+                                                           conf.getStateStr());
     switchCall(conf.getConfId());
 }
 
@@ -1248,7 +1266,8 @@ Manager::addMainParticipant(const std::string& accountId, const std::string& con
     if (auto account = getAccount(accountId)) {
         if (auto conf = account->getConference(conferenceId)) {
             pimpl_->addMainParticipant(*conf);
-            SIP_CORE_DBG("Successfully added main participant to conference %s", conferenceId.c_str());
+            SIP_CORE_DBG("Successfully added main participant to conference %s",
+                         conferenceId.c_str());
             return true;
         } else
             SIP_CORE_WARN("Failed to add main participant to conference %s", conferenceId.c_str());
@@ -1277,9 +1296,9 @@ Manager::joinParticipant(const std::string& accountId,
     }
 
     SIP_CORE_INFO("Creating conference for participants %s and %s. Attach host [%s]",
-              callId1.c_str(),
-              callId2.c_str(),
-              attached ? "YES" : "NO");
+                  callId1.c_str(),
+                  callId2.c_str(),
+                  attached ? "YES" : "NO");
 
     if (callId1 == callId2) {
         SIP_CORE_ERR("Cannot join participant %s to itself", callId1.c_str());
@@ -1302,7 +1321,8 @@ Manager::joinParticipant(const std::string& accountId,
 
     auto conf = std::make_shared<Conference>(account);
     account->attach(conf);
-    emitSignal<libsip_core::CallSignal::ConferenceCreated>(account->getAccountID(), conf->getConfId());
+    emitSignal<libsip_core::CallSignal::ConferenceCreated>(account->getAccountID(),
+                                                           conf->getConfId());
 
     // Bind calls according to their state
     pimpl_->bindCallToConference(*call1, *conf);
@@ -1316,8 +1336,8 @@ Manager::joinParticipant(const std::string& accountId,
         conf->detachLocalParticipant();
     }
     emitSignal<libsip_core::CallSignal::ConferenceChanged>(account->getAccountID(),
-                                                       conf->getConfId(),
-                                                       conf->getStateStr());
+                                                           conf->getConfId(),
+                                                           conf->getStateStr());
 
     return true;
 }
@@ -1373,8 +1393,8 @@ Manager::detachLocalParticipant(const std::shared_ptr<Conference>& conf)
     SIP_CORE_INFO("Detach local participant from conference %s", conf->getConfId().c_str());
     conf->detachLocalParticipant();
     emitSignal<libsip_core::CallSignal::ConferenceChanged>(conf->getAccountId(),
-                                                       conf->getConfId(),
-                                                       conf->getStateStr());
+                                                           conf->getConfId(),
+                                                           conf->getStateStr());
     pimpl_->unsetCurrentCall();
     return true;
 }
@@ -1414,8 +1434,8 @@ Manager::removeParticipant(Call& call)
     removeAudio(call);
 
     emitSignal<libsip_core::CallSignal::ConferenceChanged>(conf->getAccountId(),
-                                                       conf->getConfId(),
-                                                       conf->getStateStr());
+                                                           conf->getConfId(),
+                                                           conf->getStateStr());
 
     pimpl_->processRemainingParticipants(*conf);
 }
@@ -1673,8 +1693,8 @@ Manager::incomingCall(const std::string& accountId, Call& call)
     auto const& account = getAccount(accountId);
     if (not account) {
         SIP_CORE_ERR("Incoming call %s on unknown account %s",
-                 call.getCallId().c_str(),
-                 accountId.c_str());
+                     call.getCallId().c_str(),
+                     accountId.c_str());
         return;
     }
 
@@ -1710,9 +1730,9 @@ Manager::incomingMessage(const std::string& accountId,
 
                 // in case of a conference we must notify client using conference id
                 emitSignal<libsip_core::CallSignal::IncomingMessage>(accountId,
-                                                                 conf->getConfId(),
-                                                                 from,
-                                                                 messages);
+                                                                     conf->getConfId(),
+                                                                     from,
+                                                                     messages);
             } else {
                 SIP_CORE_ERR("no conference associated to ID %s", callId.c_str());
             }
@@ -1740,7 +1760,8 @@ Manager::sendCallTextMessage(const std::string& accountId,
     } else if (auto call = account->getCall(callID)) {
         if (call->isConferenceParticipant()) {
             if (auto conf = call->getConference()) {
-                SIP_CORE_DBG("Call is participant in a conference, send instant message to everyone");
+                SIP_CORE_DBG(
+                    "Call is participant in a conference, send instant message to everyone");
                 pimpl_->sendTextMessageToConference(*conf, messages, from);
             } else {
                 SIP_CORE_ERR("no conference associated to call ID %s", callID.c_str());
@@ -1750,8 +1771,8 @@ Manager::sendCallTextMessage(const std::string& accountId,
                 call->sendTextMessage(messages, from);
             } catch (const im::InstantMessageException& e) {
                 SIP_CORE_ERR("Failed to send message to call %s: %s",
-                         call->getCallId().c_str(),
-                         e.what());
+                             call->getCallId().c_str(),
+                             e.what());
             }
         }
     } else {
@@ -1838,8 +1859,8 @@ void
 Manager::callFailure(Call& call)
 {
     SIP_CORE_DBG("[call:%s] %s failed",
-             call.getCallId().c_str(),
-             call.isSubcall() ? "Sub-call" : "Parent call");
+                 call.getCallId().c_str(),
+                 call.isSubcall() ? "Sub-call" : "Parent call");
 
     if (isCurrentCall(call)) {
         pimpl_->unsetCurrentCall();
@@ -2326,14 +2347,14 @@ Manager::ManagerPimpl::processIncomingCall(const std::string& accountId, Call& i
         SIP_CORE_WARN("Incoming call %s has an empty media list", incomCallId.c_str());
 
     SIP_CORE_INFO("Incoming call %s on account %s with %lu media",
-              incomCallId.c_str(),
-              accountId.c_str(),
-              mediaList.size());
+                  incomCallId.c_str(),
+                  accountId.c_str(),
+                  mediaList.size());
 
     emitSignal<libsip_core::CallSignal::IncomingCallWithMedia>(accountId,
-                                                           incomCallId,
-                                                           incomCall.getPeerNumber(),
-                                                           mediaList);
+                                                               incomCallId,
+                                                               incomCall.getPeerNumber(),
+                                                               mediaList);
 
     if (not base_.hasCurrentCall()) {
         incomCall.setState(Call::ConnectionState::RINGING);
@@ -2394,8 +2415,8 @@ Manager::audioFormatUsed(AudioFormat format)
         return format;
 
     SIP_CORE_DBG("Audio format changed: %s -> %s",
-             currentFormat.toString().c_str(),
-             format.toString().c_str());
+                 currentFormat.toString().c_str(),
+                 format.toString().c_str());
 
     pimpl_->ringbufferpool_->setInternalAudioFormat(format);
     pimpl_->toneCtrl_.setSampleRate(format.sample_rate);
@@ -2438,7 +2459,8 @@ Manager::getAccountDetails(const std::string& accountID) const
     if (account) {
         return account->getAccountDetails();
     } else {
-        SIP_CORE_ERR("Could not get account details on a non-existing accountID %s", accountID.c_str());
+        SIP_CORE_ERR("Could not get account details on a non-existing accountID %s",
+                     accountID.c_str());
         // return an empty map since we can't throw an exception to D-Bus
         return std::map<std::string, std::string>();
     }
@@ -2453,7 +2475,7 @@ Manager::getVolatileAccountDetails(const std::string& accountID) const
         return account->getVolatileAccountDetails();
     } else {
         SIP_CORE_ERR("Could not get volatile account details on a non-existing accountID %s",
-                 accountID.c_str());
+                     accountID.c_str());
         return {};
     }
 }
@@ -2517,8 +2539,8 @@ Manager::addAccount(const std::map<std::string, std::string>& details, const std
     auto newAccount = accountFactory.createAccount(accountType, newAccountID);
     if (!newAccount) {
         SIP_CORE_ERROR("Unknown {:s} param when calling addAccount(): {:s}",
-                   Conf::CONFIG_ACCOUNT_TYPE,
-                   accountType);
+                       Conf::CONFIG_ACCOUNT_TYPE,
+                       accountType);
         return "";
     }
 

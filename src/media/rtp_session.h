@@ -52,6 +52,7 @@ public:
     virtual void start() = 0;
     virtual void restartSender() = 0;
     virtual void stop() = 0;
+    virtual void controlReceiver(bool active) = 0;
     void setMediaSource(const std::string& resource) { input_ = resource; }
     const std::string& getInput() const { return input_; }
     MediaType getMediaType() const { return mediaType_; };

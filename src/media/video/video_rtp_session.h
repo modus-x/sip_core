@@ -70,7 +70,9 @@ class VideoRtpSession : public RtpSession
 public:
     using BaseType = RtpSession;
 
-    VideoRtpSession(const std::string& callId, const std::string& streamId, const DeviceParams& localVideoParams);
+    VideoRtpSession(const std::string& callId,
+                    const std::string& streamId,
+                    const DeviceParams& localVideoParams);
     ~VideoRtpSession();
 
     void setRequestKeyFrameCallback(std::function<void(void)> cb);
@@ -81,6 +83,14 @@ public:
     void restartSender() override;
     void stop() override;
     void setMuted(bool mute, Direction dir = Direction::SEND) override;
+    void controlReceiver(bool active) override
+    {
+        if (active) {
+            startReceiver();
+        } else {
+            stopReceiver();
+        }
+    };
     void generateEmptyVideoFrame();
 
     /**
@@ -113,7 +123,7 @@ public:
 
     std::shared_ptr<VideoMixer> videoMixer_;
     std::shared_ptr<VideoInput> videoLocal_;
-    void startSender(bool empty=false);
+    void startSender(bool empty = false);
     void stopSender();
 
 private:

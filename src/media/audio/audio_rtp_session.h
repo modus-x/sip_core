@@ -56,6 +56,7 @@ public:
     void restartSender() override;
     void stop() override;
     void setMuted(bool muted, Direction dir = Direction::SEND) override;
+    void controlReceiver(bool active) override;
 
     void initRecorder(std::shared_ptr<MediaRecorder>& rec) override;
     void deinitRecorder(std::shared_ptr<MediaRecorder>& rec) override;
@@ -81,6 +82,7 @@ private:
     std::shared_ptr<RingBuffer> ringbuffer_;
     uint16_t initSeqVal_ {0};
     bool muteState_ {false};
+    bool receiverActive_ {true};
     unsigned packetLoss_ {10};
     DeviceParams localAudioParams_;
 

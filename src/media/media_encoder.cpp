@@ -1271,7 +1271,7 @@ MediaEncoder::getHWFrame(const std::shared_ptr<VideoFrame>& input,
                 output = input;
             }
         } else {
-            output = getScaledSWFrame(*input.get());
+        output = getScaledSWFrame(*input.get());
         }
 #elif !defined(__APPLE__) && defined(RING_ACCEL)
         // Other Platforms

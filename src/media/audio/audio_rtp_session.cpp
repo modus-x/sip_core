@@ -69,8 +69,8 @@ AudioRtpSession::startSender()
 {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     SIP_CORE_DBG("Start audio RTP sender: input [%s] - muted [%s]",
-             input_.c_str(),
-             muteState_ ? "YES" : "NO");
+                 input_.c_str(),
+                 muteState_ ? "YES" : "NO");
 
     if (not send_.enabled or send_.onHold) {
         SIP_CORE_WARN("Audio sending disabled");
@@ -143,6 +143,7 @@ AudioRtpSession::startSender()
 void
 AudioRtpSession::generateEmptyAudioFrame()
 {
+    SIP_CORE_WARN("[iosdbgr] generating empty audio frame");
     auto codec = std::static_pointer_cast<AccountAudioCodecInfo>(send_.codec);
     auto silence = std::make_shared<AudioFrame>(codec->audioformat, 1);
     libav_utils::fillWithSilence(silence->pointer());
@@ -197,7 +198,6 @@ AudioRtpSession::start()
     }
 
     try {
-
         socketPair_.reset(new SocketPair(getRemoteRtpUri().c_str(), receive_.addr.getPort()));
 
         if (send_.crypto and receive_.crypto) {
@@ -242,6 +242,20 @@ AudioRtpSession::stop()
     sender_.reset();
     socketPair_.reset();
     audioInput_.reset();
+}
+
+void
+AudioRtpSession::controlReceiver(bool active)
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    if (active != receiverActive_ && receiveThread_) {
+        if (active) {
+            startReceiver();
+        } else {
+            receiveThread_->stopReceiver();
+        }
+        receiverActive_ = active;
+    }
 }
 
 void

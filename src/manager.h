@@ -445,6 +445,8 @@ public:
 
     void removeAccounts();
 
+    void controlRTPReceiver(const std::string& accountId, const std::string& callId, const std::string& labelId, bool active);
+
     /**
      * Set input audio plugin
      * @param audioPlugin The audio plugin
