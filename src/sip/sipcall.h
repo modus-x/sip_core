@@ -307,6 +307,40 @@ private:
     void setupNegotiatedMedia();
 
     void setCallMediaLocal();
+#ifdef ENABLE_PLUGIN
+    /**
+     * Call Streams and some typedefs
+     */
+    using AVMediaStream = Observable<std::shared_ptr<MediaFrame>>;
+    using MediaStreamSubject = PublishMapSubject<std::shared_ptr<MediaFrame>, AVFrame*>;
+
+    /**
+     * @brief createCallAVStream
+     * Creates a call AV stream like video input, video receive, audio input or audio receive
+     * @param StreamData The type of the stream (audio/video, input/output,
+     * @param streamSource
+     * @param mediaStreamSubject
+     */
+    void createCallAVStream(const StreamData& StreamData,
+                            AVMediaStream& streamSource,
+                            const std::shared_ptr<MediaStreamSubject>& mediaStreamSubject);
+    /**
+     * @brief createCallAVStreams
+     * Creates all Call AV Streams (2 if audio, 4 if audio video)
+     */
+    void createCallAVStreams();
+
+    /**
+     * @brief Detach all plugins from call streams;
+     */
+    void clearCallAVStreams();
+
+    std::mutex avStreamsMtx_ {};
+    std::map<std::string, std::shared_ptr<MediaStreamSubject>> callAVStreams;
+#endif // ENABLE_PLUGIN
+
+    void startIceMedia();
+    void onIceNegoSucceed();
     void startAllMedia();
     void stopAllMedia();
     void updateRemoteMedia();
