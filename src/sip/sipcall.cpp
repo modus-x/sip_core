@@ -1723,14 +1723,6 @@ SIPCall::setupNegotiatedMedia()
         const auto& local = slot.first;
         const auto& remote = slot.second;
 
-        // Skip disabled media
-        if (not local.enabled) {
-            SIP_CORE_DBG("[call:%s] [SDP:slot#%u] The media is disabled, skipping",
-                         getCallId().c_str(),
-                         streamIdx);
-            continue;
-        }
-
         if (static_cast<size_t>(streamIdx) >= rtpStreams_.size()) {
             throw std::runtime_error("Stream index is out-of-range");
         }
@@ -1741,8 +1733,16 @@ SIPCall::setupNegotiatedMedia()
             throw std::runtime_error("Missing media attribute");
         }
 
-        // To enable a media, it must be enabled on both sides.
+        // To enable a media, it must be enabled on both sides. Should be done before all other operations
         rtpStream.mediaAttribute_->enabled_ = local.enabled and remote.enabled;
+
+        // Skip disabled media
+        if (not local.enabled) {
+            SIP_CORE_DBG("[call:%s] [SDP:slot#%u] The media is disabled, skipping",
+                         getCallId().c_str(),
+                         streamIdx);
+            continue;
+        }
 
         if (not rtpStream.rtpSession_)
             throw std::runtime_error("Must have a valid RTP Session");
@@ -1859,8 +1859,6 @@ SIPCall::startAllMedia()
         }
         remainingRequest_ = Request::NoRequest;
     }
-
-    mediaRestartRequired_ = false;
 }
 
 void
@@ -2101,6 +2099,11 @@ SIPCall::isReinviteRequired(const std::vector<MediaAttribute>& mediaAttrList)
 
         // Changing the source needs a re-invite
         if (newAttr.sourceUri_ != rtpStreams_[streamIdx].mediaAttribute_->sourceUri_) {
+            return true;
+        }
+
+        // Also check if 'enabled' has changed
+        if (newAttr.enabled_ != rtpStreams_[streamIdx].mediaAttribute_->enabled_) {
             return true;
         }
 
