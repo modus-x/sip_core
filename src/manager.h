@@ -48,9 +48,6 @@
 
 #include "trace-tools.h"
 
-namespace asio {
-class io_context;
-}
 
 namespace sip_core {
 namespace video {
@@ -775,8 +772,6 @@ public:
     CallFactory callFactory;
 
     ScheduledExecutor& scheduler();
-
-    std::shared_ptr<asio::io_context> ioContext() const;
 
     std::shared_ptr<Task> scheduleTask(std::function<void()>&& task,
                                        std::chrono::steady_clock::time_point when,

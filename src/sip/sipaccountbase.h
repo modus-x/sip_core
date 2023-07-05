@@ -28,7 +28,6 @@
 
 #include "connectivity/sip_utils.h"
 #include "connectivity/ip_utils.h"
-#include "connectivity/turn_cache.h"
 #include "noncopyable.h"
 #include "im/message_engine.h"
 #include "sipaccountbase_config.h"
@@ -265,8 +264,6 @@ protected:
     std::chrono::steady_clock::time_point composingTime_ {
         std::chrono::steady_clock::time_point::min()};
     std::shared_ptr<Task> composingTimeout_;
-
-    std::shared_ptr<TurnCache> turnCache_;
 
 private:
     NON_COPYABLE(SIPAccountBase);

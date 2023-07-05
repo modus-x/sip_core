@@ -1262,17 +1262,17 @@ MediaEncoder::getHWFrame(const std::shared_ptr<VideoFrame>& input,
     try {
 #if defined(TARGET_OS_IOS) && TARGET_OS_IOS
         // iOS
-        if (accel_) {
-            auto pix = accel_->getSoftwareFormat();
-            if (input->format() != pix) {
-                output = scaler_.convertFormat(*input.get(), pix);
-            } else {
-                // Fully accelerated pipeline, skip main memory
-                output = input;
-            }
-        } else {
+        // if (accel_) {
+        //     auto pix = accel_->getSoftwareFormat();
+        //     if (input->format() != pix) {
+        //         output = scaler_.convertFormat(*input.get(), pix);
+        //     } else {
+        //         // Fully accelerated pipeline, skip main memory
+        //         output = input;
+        //     }
+        // } else {
         output = getScaledSWFrame(*input.get());
-        }
+        // }
 #elif !defined(__APPLE__) && defined(RING_ACCEL)
         // Other Platforms
         auto desc = av_pix_fmt_desc_get(static_cast<AVPixelFormat>(input->format()));

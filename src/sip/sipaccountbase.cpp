@@ -138,19 +138,6 @@ SIPAccountBase::loadConfig()
     IpAddr publishedIp {conf.publishedIp};
     if (not conf.publishedSameasLocal and publishedIp)
         setPublishedAddress(publishedIp);
-    TurnTransportParams turnParams;
-    turnParams.domain = conf.turnServer;
-    turnParams.username = conf.turnServerUserName;
-    turnParams.password = conf.turnServerPwd;
-    turnParams.realm = conf.turnServerRealm;
-    if (!turnCache_) {
-        auto cachePath = fileutils::get_cache_dir() + DIR_SEPARATOR_STR + getAccountID();
-        turnCache_ = std::make_shared<TurnCache>(getAccountID(),
-                                                 cachePath,
-                                                 turnParams,
-                                                 conf.turnEnabled);
-    }
-    turnCache_->reconfigure(turnParams, conf.turnEnabled);
 }
 
 std::map<std::string, std::string>
