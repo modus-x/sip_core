@@ -77,15 +77,7 @@ public:
      */
     void handleEvents();
 
-    /**
-     * Register a new keepalive registration timer to this endpoint
-     */
-    void registerKeepAliveTimer(pj_timer_entry& timer, pj_time_val& delay);
 
-    /**
-     * Abort currently registered timer
-     */
-    void cancelKeepAliveTimer(pj_timer_entry& timer);
 
     /**
      * Get the memory pool factory since each calls has its own memory pool

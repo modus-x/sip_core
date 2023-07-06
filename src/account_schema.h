@@ -44,12 +44,12 @@ static const char* const CONFIG_ACCOUNT_DTMF_TYPE = "Account.dtmfType";
 static const char* const CONFIG_RINGTONE_PATH = "Account.ringtonePath";
 static const char* const CONFIG_RINGTONE_ENABLED = "Account.ringtoneEnabled";
 static const char* const CONFIG_VIDEO_ENABLED = "Account.videoEnabled";
-static const char* const CONFIG_KEEP_ALIVE_ENABLED = "Account.keepAliveEnabled";
 static const char* const CONFIG_PRESENCE_ENABLED = "Account.presenceEnabled";
 static const char* const CONFIG_PRESENCE_PUBLISH_SUPPORTED = "Account.presencePublishSupported";
 static const char* const CONFIG_PRESENCE_SUBSCRIBE_SUPPORTED = "Account.presenceSubscribeSupported";
 static const char* const CONFIG_PRESENCE_STATUS = "Account.presenceStatus";
 static const char* const CONFIG_PRESENCE_NOTE = "Account.presenceNote";
+static const char* const CONFIG_KEEP_ALIVE_INTERVAL = "Account.keepAliveInterval";
 
 static const char* const CONFIG_ACCOUNT_HOSTNAME = "Account.hostname";
 static const char* const CONFIG_ACCOUNT_USERNAME = "Account.username";

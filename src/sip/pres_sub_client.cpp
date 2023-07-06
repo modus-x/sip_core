@@ -56,7 +56,7 @@ void
 PresSubClient::pres_client_timer_cb(pj_timer_heap_t* /*th*/, pj_timer_entry* entry)
 {
     PresSubClient* c = (PresSubClient*) entry->user_data;
-    SIP_CORE_DBG("timeout for %.*s", (int)c->getURI().size(), c->getURI().data());
+    SIP_CORE_DBG("timeout for %.*s", (int) c->getURI().size(), c->getURI().data());
 }
 
 /* Callback called when *client* subscription state has changed. */
@@ -74,8 +74,9 @@ PresSubClient::pres_client_evsub_on_state(pjsip_evsub* sub, pjsip_event* event)
     }
 
     SIP_CORE_DBG("Subscription for pres_client '%.*s' is '%s'",
-             (int)pres_client->getURI().size(), pres_client->getURI().data(),
-             pjsip_evsub_get_state_name(sub) ? pjsip_evsub_get_state_name(sub) : "null");
+                 (int) pres_client->getURI().size(),
+                 pres_client->getURI().data(),
+                 pjsip_evsub_get_state_name(sub) ? pjsip_evsub_get_state_name(sub) : "null");
 
     pjsip_evsub_state state = pjsip_evsub_get_state(sub);
 
@@ -83,10 +84,8 @@ PresSubClient::pres_client_evsub_on_state(pjsip_evsub* sub, pjsip_event* event)
 
     if (state == PJSIP_EVSUB_STATE_ACCEPTED) {
         pres_client->enable(true);
-        emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(pres->getAccount()
-                                                                        ->getAccountID(),
-                                                                    std::string(pres_client->getURI()),
-                                                                    PJ_TRUE);
+        emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(
+            pres->getAccount()->getAccountID(), std::string(pres_client->getURI()), PJ_TRUE);
 
         pres->getAccount()->supportPresence(PRESENCE_FUNCTION_SUBSCRIBE, true);
 
@@ -96,10 +95,8 @@ PresSubClient::pres_client_evsub_on_state(pjsip_evsub* sub, pjsip_event* event)
                             &pres_client->term_reason_,
                             pjsip_evsub_get_termination_reason(sub));
 
-        emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(pres->getAccount()
-                                                                        ->getAccountID(),
-                                                                    std::string(pres_client->getURI()),
-                                                                    PJ_FALSE);
+        emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(
+            pres->getAccount()->getAccountID(), std::string(pres_client->getURI()), PJ_FALSE);
 
         pres_client->term_code_ = 200;
 
@@ -364,7 +361,7 @@ PresSubClient::isSubscribed()
 std::string_view
 PresSubClient::getURI()
 {
-    return {uri_.ptr, (size_t)uri_.slen};
+    return {uri_.ptr, (size_t) uri_.slen};
 }
 
 SIPPresence*
@@ -382,13 +379,13 @@ PresSubClient::isPresent()
 std::string_view
 PresSubClient::getLineStatus()
 {
-    return {status_.info[0].rpid.note.ptr, (size_t)status_.info[0].rpid.note.slen};
+    return {status_.info[0].rpid.note.ptr, (size_t) status_.info[0].rpid.note.slen};
 }
 
 bool
 PresSubClient::isTermReason(const std::string& reason)
 {
-    const std::string_view myReason(term_reason_.ptr, (size_t)term_reason_.slen);
+    const std::string_view myReason(term_reason_.ptr, (size_t) term_reason_.slen);
     return not myReason.compare(reason);
 }
 
@@ -404,11 +401,11 @@ PresSubClient::rescheduleTimer(bool reschedule, unsigned msec)
         pj_time_val delay;
 
         SIP_CORE_WARN("pres_client  %.*s will resubscribe in %u ms (reason: %.*s)",
-                  (int) uri_.slen,
-                  uri_.ptr,
-                  msec,
-                  (int) term_reason_.slen,
-                  term_reason_.ptr);
+                      (int) uri_.slen,
+                      uri_.ptr,
+                      msec,
+                      (int) term_reason_.slen,
+                      term_reason_.ptr);
         pj_timer_entry_init(&timer_, 0, this, &pres_client_timer_cb);
         delay.sec = 0;
         delay.msec = msec;
@@ -426,7 +423,10 @@ PresSubClient::rescheduleTimer(bool reschedule, unsigned msec)
 void
 PresSubClient::enable(bool flag)
 {
-    SIP_CORE_DBG("pres_client %.*s is %s monitored.", (int)getURI().size(), getURI().data(), flag ? "" : "NOT");
+    SIP_CORE_DBG("pres_client %.*s is %s monitored.",
+                 (int) getURI().size(),
+                 getURI().data(),
+                 flag ? "" : "NOT");
     if (flag and not monitored_)
         pres_->addPresSubClient(this);
     monitored_ = flag;
@@ -538,7 +538,9 @@ PresSubClient::subscribe()
 {
     if (sub_ and dlg_) { // do not bother if already subscribed
         pjsip_evsub_terminate(sub_, PJ_FALSE);
-        SIP_CORE_DBG("PreseSubClient %.*s: already subscribed. Refresh it.", (int) uri_.slen, uri_.ptr);
+        SIP_CORE_DBG("PreseSubClient %.*s: already subscribed. Refresh it.",
+                     (int) uri_.slen,
+                     uri_.ptr);
     }
 
     // subscribe
@@ -551,8 +553,6 @@ PresSubClient::subscribe()
     pres_callback.on_evsub_state = &pres_client_evsub_on_state;
     pres_callback.on_tsx_state = &pres_client_evsub_on_tsx_state;
     pres_callback.on_rx_notify = &pres_client_evsub_on_rx_notify;
-
-
 
     SIPAccount* acc = pres_->getAccount();
     SIP_CORE_DBG("PresSubClient %.*s: subscribing ", (int) uri_.slen, uri_.ptr);
@@ -603,6 +603,9 @@ PresSubClient::subscribe()
                                            acc->getCredInfo())
                 != PJ_SUCCESS) {
         SIP_CORE_ERR("Could not initialize credentials for invite session authentication");
+        if (dlg_) {
+            pjsip_dlg_dec_lock(dlg_);
+        }
         return false;
     }
 
@@ -651,4 +654,4 @@ PresSubClient::match(PresSubClient* b)
     return (b->getURI() == getURI());
 }
 
-} // namespac
+} // namespace sip_core

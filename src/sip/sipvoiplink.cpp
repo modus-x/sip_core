@@ -202,7 +202,7 @@ try_respond_stateless(pjsip_endpoint* endpt,
         return pjsip_endpt_respond_stateless(endpt, rdata, st_code, st_text, hdr_list, body);
     else
         SIP_CORE_ERR("Transaction has been created for this request, send response "
-                 "statefully instead");
+                     "statefully instead");
 
     return !PJ_SUCCESS;
 }
@@ -314,9 +314,9 @@ transaction_request_cb(pjsip_rx_data* rdata)
                     // urgent messages are optional
                     if (ret >= 2)
                         emitSignal<libsip_core::CallSignal::VoiceMailNotify>(account->getAccountID(),
-                                                                         newCount,
-                                                                         oldCount,
-                                                                         urgentCount);
+                                                                             newCount,
+                                                                             oldCount,
+                                                                             urgentCount);
                 }
             }
         } else if (request.find(sip_utils::SIP_METHODS::MESSAGE) != std::string_view::npos) {
@@ -720,7 +720,7 @@ SIPVoIPLink::shutdown()
 
     if (not Manager::instance().callFactory.empty(Call::LinkType::SIP))
         SIP_CORE_ERR("%zu SIP calls remains!",
-                 Manager::instance().callFactory.callCount(Call::LinkType::SIP));
+                     Manager::instance().callFactory.callCount(Call::LinkType::SIP));
 
     sipTransportBroker->shutdown();
     pjsip_tpmgr_set_state_cb(pjsip_endpt_get_tpmgr(endpt_), nullptr);
@@ -741,12 +741,12 @@ SIPVoIPLink::guessAccount(std::string_view userName,
                           std::string_view fromUri) const
 {
     SIP_CORE_DBG("username = %.*s, server = %.*s, from = %.*s",
-             (int) userName.size(),
-             userName.data(),
-             (int) server.size(),
-             server.data(),
-             (int) fromUri.size(),
-             fromUri.data());
+                 (int) userName.size(),
+                 userName.data(),
+                 (int) server.size(),
+                 server.data(),
+                 (int) fromUri.size(),
+                 fromUri.data());
     // Try to find the account id from username and server name by full match
 
     std::shared_ptr<SIPAccountBase> result;
@@ -779,39 +779,7 @@ SIPVoIPLink::handleEvents()
     const pj_time_val timeout = {1, 0};
     if (auto ret = pjsip_endpt_handle_events(endpt_, &timeout))
         SIP_CORE_ERR("pjsip_endpt_handle_events failed with error %s",
-                 sip_utils::sip_strerror(ret).c_str());
-}
-
-void
-SIPVoIPLink::registerKeepAliveTimer(pj_timer_entry& timer, pj_time_val& delay)
-{
-    SIP_CORE_DEBUG("Register new keep alive timer {:d} with delay {:d}", timer.id, delay.sec);
-
-    if (timer.id == -1)
-        SIP_CORE_WARN("Timer already scheduled");
-
-    switch (pjsip_endpt_schedule_timer(endpt_, &timer, &delay)) {
-    case PJ_SUCCESS:
-        break;
-
-    default:
-        SIP_CORE_ERR("Could not schedule new timer in pjsip endpoint");
-
-        /* fallthrough */
-    case PJ_EINVAL:
-        SIP_CORE_ERR("Invalid timer or delay entry");
-        break;
-
-    case PJ_EINVALIDOP:
-        SIP_CORE_ERR("Invalid timer entry, maybe already scheduled");
-        break;
-    }
-}
-
-void
-SIPVoIPLink::cancelKeepAliveTimer(pj_timer_entry& timer)
-{
-    pjsip_endpt_cancel_timer(endpt_, &timer);
+                     sip_utils::sip_strerror(ret).c_str());
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -840,11 +808,11 @@ invite_session_state_changed_cb(pjsip_inv_session* inv, pjsip_event* ev)
     if (ev->type != PJSIP_EVENT_TSX_STATE and ev->type != PJSIP_EVENT_TX_MSG
         and ev->type != PJSIP_EVENT_RX_MSG) {
         SIP_CORE_WARN("[call:%s] INVITE@%p state changed to %d (%s): unexpected event type %d",
-                  call->getCallId().c_str(),
-                  inv,
-                  inv->state,
-                  pjsip_inv_state_name(inv->state),
-                  ev->type);
+                      call->getCallId().c_str(),
+                      inv,
+                      inv->state,
+                      pjsip_inv_state_name(inv->state),
+                      ev->type);
         return;
     }
 
@@ -855,23 +823,24 @@ invite_session_state_changed_cb(pjsip_inv_session* inv, pjsip_event* ev)
         status_code = tsx ? tsx->status_code : PJSIP_SC_NOT_FOUND;
         const pj_str_t* description = pjsip_get_status_text(status_code);
 
-        SIP_CORE_DBG("[call:%s] INVITE@%p state changed to %d (%s): cause=%d, tsx@%p status %d (%.*s)",
-                 call->getCallId().c_str(),
-                 inv,
-                 inv->state,
-                 pjsip_inv_state_name(inv->state),
-                 inv->cause,
-                 tsx,
-                 status_code,
-                 (int) description->slen,
-                 description->ptr);
+        SIP_CORE_DBG(
+            "[call:%s] INVITE@%p state changed to %d (%s): cause=%d, tsx@%p status %d (%.*s)",
+            call->getCallId().c_str(),
+            inv,
+            inv->state,
+            pjsip_inv_state_name(inv->state),
+            inv->cause,
+            tsx,
+            status_code,
+            (int) description->slen,
+            description->ptr);
     } else if (ev->type == PJSIP_EVENT_TX_MSG) {
         SIP_CORE_DBG("[call:%s] INVITE@%p state changed to %d (%s): cause=%d (TX_MSG)",
-                 call->getCallId().c_str(),
-                 inv,
-                 inv->state,
-                 pjsip_inv_state_name(inv->state),
-                 inv->cause);
+                     call->getCallId().c_str(),
+                     inv,
+                     inv->state,
+                     pjsip_inv_state_name(inv->state),
+                     inv->cause);
     }
     pjsip_rx_data* rdata {nullptr};
     if (ev->type == PJSIP_EVENT_RX_MSG) {
@@ -1007,7 +976,8 @@ sdp_create_offer_cb(pjsip_inv_session* inv, pjmedia_sdp_session** p_offer)
     }
     auto ifaceAddr = ip_utils::getInterfaceAddr(account->getLocalInterface(), family);
 
-    IpAddr address = account->getPublishedSameasLocal() ? ifaceAddr : account->getPublishedIpAddress();
+    IpAddr address = account->getPublishedSameasLocal() ? ifaceAddr
+                                                        : account->getPublishedIpAddress();
 
     /* fallback on local address */
     if (not address)
@@ -1077,7 +1047,10 @@ sdp_media_update_cb(pjsip_inv_session* inv, pj_status_t status)
     if (not call)
         return;
 
-    SIP_CORE_DBG("[call:%s] INVITE@%p media update: status %d", call->getCallId().c_str(), inv, status);
+    SIP_CORE_DBG("[call:%s] INVITE@%p media update: status %d",
+                 call->getCallId().c_str(),
+                 inv,
+                 status);
 
     if (status != PJ_SUCCESS) {
         const int reason = inv->state != PJSIP_INV_STATE_NULL
@@ -1292,11 +1265,11 @@ onRequestNotify(pjsip_inv_session* /*inv*/, pjsip_rx_data* /*rdata*/, pjsip_msg*
 
     const std::string bodyText {static_cast<char*>(msg->body->data), msg->body->len};
     SIP_CORE_DBG("[call:%s] NOTIFY body start - %p\n%s\n[call:%s] NOTIFY body end - %p",
-             call.getCallId().c_str(),
-             msg->body,
-             bodyText.c_str(),
-             call.getCallId().c_str(),
-             msg->body);
+                 call.getCallId().c_str(),
+                 msg->body,
+                 bodyText.c_str(),
+                 call.getCallId().c_str(),
+                 msg->body);
 
     // TODO
 }
@@ -1333,10 +1306,10 @@ transaction_state_changed_cb(pjsip_inv_session* inv, pjsip_transaction* tsx, pjs
     // Using method name to dispatch
     auto methodName = sip_utils::as_view(msg->line.req.method.name);
     SIP_CORE_DBG("[INVITE:%p] RX SIP method %d (%.*s)",
-             inv,
-             msg->line.req.method.id,
-             (int) methodName.size(),
-             methodName.data());
+                 inv,
+                 msg->line.req.method.id,
+                 (int) methodName.size(),
+                 methodName.data());
 
 #ifdef DEBUG_SIP_REQUEST_MSG
     char msgbuf[1000];
@@ -1390,10 +1363,10 @@ processInviteResponseHelper(pjsip_inv_session* inv, pjsip_event* event)
     }
 
     SIP_CORE_INFO("[INVITE:%p] SIP RX response: reason %.*s, status code %i",
-              inv,
-              (int) msg->line.status.reason.slen,
-              msg->line.status.reason.ptr,
-              msg->line.status.code);
+                  inv,
+                  (int) msg->line.status.reason.slen,
+                  msg->line.status.reason.ptr,
+                  msg->line.status.code);
 
     sip_utils::logMessageHeaders(&msg->hdr);
 }
@@ -1495,8 +1468,9 @@ SIPVoIPLink::resolveSrvName(const std::string& name,
         token, [=, cb = std::move(cb)](pj_status_t s, const pjsip_server_addresses* r) {
             try {
                 if (s != PJ_SUCCESS || !r) {
-                    SIP_CORE_WARN("Can't resolve \"%s\" using pjsip_endpt_resolve, trying getaddrinfo.",
-                              name.c_str());
+                    SIP_CORE_WARN(
+                        "Can't resolve \"%s\" using pjsip_endpt_resolve, trying getaddrinfo.",
+                        name.c_str());
                     auto ips = ip_utils::getAddrList(name.c_str());
                     runOnMainThread(std::bind(cb, std::move(ips)));
                 } else {
@@ -1560,8 +1534,8 @@ SIPVoIPLink::findLocalAddressFromTransport(pjsip_transport* transport,
         = {transportType, &tp_sel, pjstring, PJ_FALSE, {nullptr, 0}, 0, nullptr};
     if (pjsip_tpmgr_find_local_addr2(tpmgr, pool_.get(), &param) != PJ_SUCCESS) {
         SIP_CORE_WARN("Could not retrieve local address and port from transport, using %s :%d",
-                  addr.c_str(),
-                  port);
+                      addr.c_str(),
+                      port);
         return;
     }
 
@@ -1616,8 +1590,8 @@ SIPVoIPLink::findLocalAddressFromSTUN(pjsip_transport* transport,
     switch (stunStatus) {
     case PJLIB_UTIL_ESTUNNOTRESPOND:
         SIP_CORE_ERR("No response from STUN server %.*s",
-                 (int) stunServerName->slen,
-                 stunServerName->ptr);
+                     (int) stunServerName->slen,
+                     stunServerName->ptr);
         return false;
 
     case PJLIB_UTIL_ESTUNSYMMETRIC:
@@ -1628,16 +1602,16 @@ SIPVoIPLink::findLocalAddressFromSTUN(pjsip_transport* transport,
         port = pj_sockaddr_in_get_port(&mapped_addr);
         addr = IpAddr((const sockaddr_in&) mapped_addr).toString();
         SIP_CORE_DBG("STUN server %.*s replied '%s:%u'",
-                 (int) stunServerName->slen,
-                 stunServerName->ptr,
-                 addr.c_str(),
-                 port);
+                     (int) stunServerName->slen,
+                     stunServerName->ptr,
+                     addr.c_str(),
+                     port);
         return true;
 
     default: // use given address, silent any not handled error
         SIP_CORE_WARN("Error from STUN server %.*s, using source address",
-                  (int) stunServerName->slen,
-                  stunServerName->ptr);
+                      (int) stunServerName->slen,
+                      stunServerName->ptr);
         return false;
     }
 }

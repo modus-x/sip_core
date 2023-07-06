@@ -94,6 +94,84 @@ static constexpr std::string_view VALID_TLS_PROTOS[] = {"Default"sv,
 static constexpr std::string_view PN_FCM = "fcm"sv;
 static constexpr std::string_view PN_APNS = "apns"sv;
 
+const pj_str_t KA_DATA = CONST_PJ_STR("ping!");
+
+/* Keep alive timer callback */
+static void
+keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
+{
+    SIPAccount* acc;
+    pjsip_tpselector tp_sel;
+    pj_time_val delay;
+    char addrtxt[PJ_INET6_ADDRSTRLEN];
+    pj_status_t status;
+    unsigned ka_timer;
+    unsigned lower_bound;
+
+    PJ_UNUSED_ARG(th);
+
+    te->id = PJ_FALSE;
+
+    acc = (SIPAccount*) te->user_data;
+
+    pjsip_transport* transport = acc->getTransport()->get();
+
+    /* Check if the account is still active. It might have just been deleted
+     * while the keep-alive timer was about to be called (race condition).
+     */
+    if (acc->getTransport() == NULL)
+        return;
+
+    /* Select the transport to send the packet */
+    pj_bzero(&tp_sel, sizeof(tp_sel));
+    tp_sel.type = PJSIP_TPSELECTOR_TRANSPORT;
+    tp_sel.u.transport = transport;
+
+    SIP_CORE_DEBUG("Sending {:d} bytes keep-alive packet for acc {:s} to {:s}",
+                   KA_DATA.slen,
+                   acc->getContactHeader(),
+                   pj_sockaddr_print(&acc->ka_target, addrtxt, sizeof(addrtxt), 3));
+
+    /* Send raw packet */
+    status = pjsip_tpmgr_send_raw(pjsip_endpt_get_tpmgr(acc->getVoipLink().getEndpoint()),
+                                  static_cast<pjsip_transport_type_e>(transport->key.type),
+                                  &tp_sel,
+                                  NULL,
+                                  KA_DATA.ptr,
+                                  KA_DATA.slen,
+                                  &acc->ka_target,
+                                  acc->ka_target_len,
+                                  NULL,
+                                  NULL);
+
+    if (status != PJ_SUCCESS && status != PJ_EPENDING) {
+        SIP_CORE_ERROR("Error sending keep-alive packet: {:d}", status);
+    }
+
+    /* Check just in case keep-alive has been disabled. This shouldn't happen
+     * though as when ka_interval is changed this timer should have been
+     * cancelled.
+     *
+     * Also check if Flow Timer (rfc5626) is not set.
+     */
+    if (acc->config().keepAliveInterval == 0 && acc->rfc5626_flowtmr == 0)
+        return;
+
+    ka_timer = acc->rfc5626_flowtmr ? acc->rfc5626_flowtmr : acc->config().keepAliveInterval;
+
+    lower_bound = (unsigned) ((float) ka_timer * 0.8f);
+    delay.sec = pj_rand() % (ka_timer - lower_bound) + lower_bound;
+    delay.msec = 0;
+
+    /* Reschedule next timer */
+    status = pjsip_endpt_schedule_timer(acc->getVoipLink().getEndpoint(), te, &delay);
+    if (status == PJ_SUCCESS) {
+        te->id = PJ_TRUE;
+    } else {
+        SIP_CORE_ERROR("Error starting keep-alive timer from callback: {:d}", status);
+    }
+}
+
 struct ctx
 {
     ctx(pjsip_auth_clt_sess* auth)
@@ -140,6 +218,126 @@ SIPAccount::~SIPAccount() noexcept
     setTransport();
 
     delete presence_;
+}
+
+void
+SIPAccount::registerKeepAliveTimer(bool start, struct pjsip_regc_cbparam* param)
+{
+    uint32_t seconds = config().keepAliveInterval;
+    SIP_CORE_DEBUG("Register new keep-alive timer with delay {:d}", seconds);
+
+    pjsip_transport* transport = nullptr;
+
+    if (transport_) {
+        transport = transport_->get();
+    }
+
+    /* In all cases, stop keep-alive timer if it's running. */
+    if (ka_timer.id != PJ_FALSE) {
+        cancelKeepAliveTimer();
+        ka_timer.id = PJ_FALSE;
+
+        if (transport) {
+            pjsip_transport_dec_ref(transport);
+        }
+    }
+
+    if (start) {
+        pj_time_val delay;
+        pj_status_t status;
+        pjsip_generic_string_hdr* hsr = NULL;
+        unsigned delay_initial;
+        unsigned lower_bound;
+
+        static const pj_str_t STR_FLOW_TIMER = {"Flow-Timer", 10};
+
+        hsr = (pjsip_generic_string_hdr*) pjsip_msg_find_hdr_by_name(param->rdata->msg_info.msg,
+                                                                     &STR_FLOW_TIMER,
+                                                                     hsr);
+        if (hsr != 0) {
+            rfc5626_flowtmr = pj_strtoul(&hsr->hvalue);
+        }
+        /* Only do keep-alive if:
+         *  - REGISTER response contain Flow-Timer header, otherwise
+         *  - keepAliveInterval of SipAccountConfig is not zero, and
+         *  - transport is UDP.
+         *
+         * Note that this applies only for UDP. For TCP/TLS, the keep-alive
+         * is done by the transport layer.
+         */
+        if (/*pjsua_var.stun_srv.ipv4.sin_family == 0 ||*/
+            ((seconds == 0) && (rfc5626_flowtmr == 0))
+            || (!hsr
+                && ((param->rdata->tp_info.transport->key.type & ~PJSIP_TRANSPORT_IPV6)
+                    != PJSIP_TRANSPORT_UDP))) {
+            /* Keep alive is not necessary */
+            return;
+        }
+
+        /* Save transport and destination address. */
+        pjsip_transport_add_ref(transport);
+
+        /* https://github.com/pjsip/pjproject/issues/1607:
+         * Calculate the destination address from the original request. Some
+         * (broken) servers send the response using different source address
+         * than the one that receives the request, which is forbidden by RFC
+         * 3581.
+         */
+        {
+            pjsip_transaction* tsx;
+            pjsip_tx_data* req;
+
+            tsx = pjsip_rdata_get_tsx(param->rdata);
+            PJ_ASSERT_ON_FAIL(tsx, return);
+
+            req = tsx->last_tx;
+
+            pj_memcpy(&ka_target, &req->tp_info.dst_addr, req->tp_info.dst_addr_len);
+            ka_target_len = req->tp_info.dst_addr_len;
+        }
+
+        /* Setup and start the timer */
+        ka_timer.cb = &keep_alive_timer_cb;
+        ka_timer.user_data = (void*) this;
+
+        delay_initial = rfc5626_flowtmr != 0 ? rfc5626_flowtmr : seconds;
+
+        lower_bound = (unsigned) ((float) delay_initial * 0.8f);
+        delay.sec = pj_rand() % (delay_initial - lower_bound) + lower_bound;
+        delay.msec = 0;
+        status = pjsip_endpt_schedule_timer(link_.getEndpoint(), &ka_timer, &delay);
+        SIP_CORE_DEBUG(
+            "Keep-alive rfc5626_flowtmr is {:d}, delay_initial is {:d}, lower_bound is {:d}",
+            rfc5626_flowtmr,
+            delay_initial,
+            lower_bound);
+        if (status == PJ_SUCCESS) {
+            char addr[PJ_INET6_ADDRSTRLEN + 10];
+            pj_str_t input_str = pj_str(param->rdata->pkt_info.src_name);
+            ka_timer.id = PJ_TRUE;
+
+            pj_addr_str_print(&input_str, param->rdata->pkt_info.src_port, addr, sizeof(addr), 1);
+            SIP_CORE_DEBUG("Keep-alive timer started for acc {:s}, "
+                           "destination:{:s}, interval:{:d}s",
+                           getContactHeader(),
+                           addr,
+                           delay.sec);
+        } else {
+            ka_timer.id = PJ_FALSE;
+            pjsip_transport_dec_ref(transport);
+            SIP_CORE_ERR("Error starting keep-alive timer: {:d}", status);
+        }
+    }
+}
+
+void
+SIPAccount::cancelKeepAliveTimer()
+{
+    if (ka_timer.id != PJ_FALSE) {
+        pjsip_endpt_cancel_timer(link_.getEndpoint(), &ka_timer);
+        rfc5626_flowtmr = 0;
+        ka_target_len = 0;
+    }
 }
 
 std::shared_ptr<SIPCall>
@@ -553,10 +751,6 @@ SIPAccount::doRegister2_()
         return;
     }
 
-    if (presence_ and presence_->isEnabled()) {
-        presence_->subscribeClient(getFromUri(), true); // self presence subscription
-        presence_->sendPresence(true, "");              // try to publish whatever the status is.
-    }
 }
 
 void
@@ -573,10 +767,6 @@ SIPAccount::doUnregister(std::function<void(bool)> released_cb)
             SIP_CORE_ERR("doUnregister %s", e.what());
         }
     }
-
-    if (transport_)
-        setTransport();
-    resetAutoRegistration();
 
     lock.unlock();
     if (released_cb)
@@ -727,9 +917,8 @@ SIPAccount::onRegister(pjsip_regc_cbparam* param)
     if (applicationProxyHdr) {
         SIP_CORE_DBG("Found application proxy header: %s", applicationProxyHdr->hvalue);
         Manager::instance().applicationProxy = sip_utils::as_view(applicationProxyHdr->hvalue);
-    }
-    else {
-         Manager::instance().applicationProxy = "";
+    } else {
+        Manager::instance().applicationProxy = "";
     }
 
     if (param->regc != getRegistrationInfo())
@@ -739,11 +928,13 @@ SIPAccount::onRegister(pjsip_regc_cbparam* param)
         SIP_CORE_ERR("SIP registration error %d", param->status);
         destroyRegistrationInfo();
         setRegistrationState(RegistrationState::ERROR_GENERIC, param->code);
+        registerKeepAliveTimer(false, param);
     } else if (param->code < 0 || param->code >= 300) {
         SIP_CORE_ERR("SIP registration failed, status=%d (%.*s)",
                      param->code,
                      (int) param->reason.slen,
                      param->reason.ptr);
+        registerKeepAliveTimer(false, param);
         destroyRegistrationInfo();
         switch (param->code) {
         case PJSIP_SC_FORBIDDEN:
@@ -769,6 +960,7 @@ SIPAccount::onRegister(pjsip_regc_cbparam* param)
             destroyRegistrationInfo();
             SIP_CORE_DBG("Unregistration success");
             setRegistrationState(RegistrationState::UNREGISTERED, param->code);
+            registerKeepAliveTimer(false, param);
         } else {
             /* TODO Check and update SIP outbound status first, since the result
              * will determine if we should update re-registration
@@ -782,6 +974,8 @@ SIPAccount::onRegister(pjsip_regc_cbparam* param)
                                                                    link_.getPool()));
 
             setRegistrationState(RegistrationState::REGISTERED, param->code);
+
+            registerKeepAliveTimer(true, param);
         }
     }
     if (config().allowIPAutoRewrite and checkNATAddress(param, link_.getPool()))

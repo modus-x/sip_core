@@ -181,17 +181,18 @@ static constexpr const char* SIPLOGLEVEL = "SIPLOGLEVEL";
 static void
 setSipLogLevel()
 {
-    int level = 5;
+    int level = 6;
 
     pj_log_set_level(level);
-    pj_log_set_log_func([](int level, const char* data, int /*len*/) {
-        if (level < 2)
-            SIP_CORE_ERR() << data;
-        else if (level < 4)
-            SIP_CORE_WARN() << data;
-        else
-            SIP_CORE_DBG() << data;
-    });
+    // TODO: Gete rid off duplicate messages
+    // pj_log_set_log_func([](int level, const char* data, int /*len*/) {
+    //     if (level < 2)
+    //         SIP_CORE_ERR() << data;
+    //     else if (level < 4)
+    //         SIP_CORE_WARN() << data;
+    //     else
+    //         SIP_CORE_DBG() << data;
+    // });
 }
 
 struct Manager::ManagerPimpl
@@ -2709,8 +2710,6 @@ Manager::setAccountActive(const std::string& accountID, bool active, bool shutdo
             acc->doUnregister();
         }
     }
-    emitSignal<libsip_core::ConfigurationSignal::VolatileDetailsChanged>(
-        accountID, acc->getVolatileAccountDetails());
 }
 
 std::shared_ptr<AudioLayer>

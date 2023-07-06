@@ -348,9 +348,21 @@ public:
 
     void setTransport(const std::shared_ptr<SipTransport>& = nullptr);
 
+    /**
+     * Try to register a new keepalive registration timer (only for UDP!)
+     */
+    void registerKeepAliveTimer(bool start, struct pjsip_regc_cbparam* param);
+
+    /**
+     * Abort currently registered timer if any
+     */
+    void cancelKeepAliveTimer();
+
     virtual inline std::shared_ptr<SipTransport> getTransport() { return transport_; }
 
     inline pjsip_transport_type_e getTransportType() const { return transportType_; }
+
+    inline SIPVoIPLink& getVoipLink() const { return link_; }
 
     /**
      * Shortcut for SipTransport::getTransportSelector(account.getTransport()).
@@ -365,13 +377,10 @@ public:
      */
     SIPPresence* getPresence() const;
 
-
     /**
      * SIP events management
      */
     SIPEvents* getSIPEvents() const;
-
-
 
     /**
      * Activate the module.
@@ -437,6 +446,11 @@ public:
      */
     void pushNotificationReceived(const std::string& from,
                                   const std::map<std::string, std::string>& data);
+
+    pj_sockaddr ka_target;       /**< Destination address for K-A, this will be filled before first usage */
+    pj_timer_entry ka_timer {};  /**<  Timer for K-A  */
+    unsigned rfc5626_flowtmr {}; /**< SIP outbound flow timer.      */
+    unsigned ka_target_len {};   /**< Length of ka_target.           */
 
 private:
     void doRegister1_();

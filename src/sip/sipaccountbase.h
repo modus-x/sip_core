@@ -77,6 +77,7 @@ public:
     constexpr static unsigned MAX_PORT {65536};
     constexpr static unsigned HALF_MAX_PORT {MAX_PORT / 2};
 
+
     /**
      * Constructor
      * @param accountID The account identifier
@@ -99,9 +100,10 @@ public:
      * @param sipTr: SIP Transport
      * @return A shared pointer on the created call.
      */
-    virtual std::shared_ptr<SIPCall> newIncomingCall(const std::string& from,
-                                                     const std::vector<libsip_core::MediaMap>& mediaList,
-                                                     const std::shared_ptr<SipTransport>& sipTr = {})
+    virtual std::shared_ptr<SIPCall> newIncomingCall(
+        const std::string& from,
+        const std::vector<libsip_core::MediaMap>& mediaList,
+        const std::shared_ptr<SipTransport>& sipTr = {})
         = 0;
 
     virtual bool isStunEnabled() const { return false; }
@@ -192,10 +194,7 @@ public:
         return messageEngine_.getStatus(id);
     }
 
-    bool cancelMessage(uint64_t id) override
-    {
-        return messageEngine_.cancel(id);
-    }
+    bool cancelMessage(uint64_t id) override { return messageEngine_.cancel(id); }
 
     virtual void onTextMessage(const std::string& id,
                                const std::string& from,

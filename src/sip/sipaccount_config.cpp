@@ -43,7 +43,7 @@ constexpr const char* PRESENCE_SUBSCRIBE_SUPPORTED_KEY = "presenceSubscribeSuppo
 constexpr const char* PRESENCE_STATUS_KEY = "presenceStatus";
 constexpr const char* PRESENCE_NOTE_KEY = "presenceNote";
 constexpr const char* PRESENCE_MODULE_ENABLED_KEY = "presenceModuleEnabled";
-constexpr const char* KEEP_ALIVE_ENABLED = "keepAlive";
+constexpr const char* KEEP_ALIVE_INTERVAL = "keepAliveInterval";
 
 constexpr const char* const TLS_KEY = "tls";
 constexpr const char* CERTIFICATE_KEY = "certificate";
@@ -71,7 +71,7 @@ constexpr const char* RTP_FALLBACK_KEY = "rtpFallback";
 } // namespace Conf
 
 static const SipAccountConfig DEFAULT_CONFIG {};
-static constexpr unsigned MIN_REGISTRATION_TIME = 60;                  // seconds
+static constexpr unsigned MIN_REGISTRATION_TIME = 60; // seconds
 
 using yaml_utils::parseValueOptional;
 using yaml_utils::parseVectorMap;
@@ -87,15 +87,15 @@ SipAccountConfig::serialize(YAML::Emitter& out) const
     out << YAML::Key << Conf::PORT_KEY << YAML::Value << localPort;
     out << YAML::Key << Conf::PUBLISH_PORT_KEY << YAML::Value << publishedPort;
 
+    out << YAML::Key << Conf::KEEP_ALIVE_INTERVAL << YAML::Value << keepAliveInterval;
+
     out << YAML::Key << Conf::USERNAME_KEY << YAML::Value << username;
 
     // each credential is a map, and we can have multiple credentials
     out << YAML::Key << Conf::CRED_KEY << YAML::Value << getCredentials();
 
-    out << YAML::Key << Conf::KEEP_ALIVE_ENABLED << YAML::Value << registrationRefreshEnabled;
-
-    //out << YAML::Key << PRESENCE_MODULE_ENABLED_KEY << YAML::Value
-    //    << (presence_ and presence_->isEnabled());
+    // out << YAML::Key << PRESENCE_MODULE_ENABLED_KEY << YAML::Value
+    //     << (presence_ and presence_->isEnabled());
 
     out << YAML::Key << Conf::CONFIG_ACCOUNT_REGISTRATION_EXPIRE << YAML::Value
         << registrationExpire;
@@ -140,9 +140,10 @@ SipAccountConfig::unserialize(const YAML::Node& node)
     parseValueOptional(node, Conf::BIND_ADDRESS_KEY, bindAddress);
     parseValueOptional(node, Conf::PORT_KEY, localPort);
     parseValueOptional(node, Conf::PUBLISH_PORT_KEY, publishedPort);
+    parseValueOptional(node, Conf::KEEP_ALIVE_INTERVAL, keepAliveInterval);
+
     parseValueOptional(node, Conf::CONFIG_ACCOUNT_REGISTRATION_EXPIRE, registrationExpire);
     registrationExpire = std::max(MIN_REGISTRATION_TIME, registrationExpire);
-    parseValueOptional(node, Conf::KEEP_ALIVE_ENABLED, registrationRefreshEnabled);
     parseValueOptional(node, Conf::SERVICE_ROUTE_KEY, serviceRoute);
     parseValueOptional(node, Conf::ALLOW_IP_AUTO_REWRITE, allowIPAutoRewrite);
 
@@ -177,7 +178,8 @@ SipAccountConfig::unserialize(const YAML::Node& node)
         parseValueOptional(tlsMap, Conf::VERIFY_SERVER_KEY, tlsVerifyServer);
         parseValueOptional(tlsMap, Conf::DISABLE_SECURE_DLG_CHECK, tlsDisableSecureDlgCheck);
         parseValueOptional(tlsMap, Conf::TIMEOUT_KEY, tlsNegotiationTimeout);
-    } catch (...) {}
+    } catch (...) {
+    }
 
     // get srtp submap
     const auto& srtpMap = node[Conf::SRTP_KEY];
@@ -200,6 +202,7 @@ SipAccountConfig::toMap() const
     a.emplace(Conf::CONFIG_PUBLISHED_ADDRESS, publishedIp);
     a.emplace(Conf::CONFIG_STUN_ENABLE, stunEnabled ? TRUE_STR : FALSE_STR);
     a.emplace(Conf::CONFIG_STUN_SERVER, stunServer);
+    a.emplace(Conf::CONFIG_KEEP_ALIVE_INTERVAL, std::to_string(keepAliveInterval));
 
     std::string password {};
     if (not credentials.empty()) {
@@ -222,9 +225,11 @@ SipAccountConfig::toMap() const
     a.emplace(Conf::CONFIG_TLS_SERVER_NAME, tlsServerName);
     a.emplace(Conf::CONFIG_TLS_VERIFY_SERVER, tlsVerifyServer ? TRUE_STR : FALSE_STR);
     a.emplace(Conf::CONFIG_TLS_VERIFY_CLIENT, tlsVerifyClient ? TRUE_STR : FALSE_STR);
-    a.emplace(Conf::CONFIG_TLS_REQUIRE_CLIENT_CERTIFICATE, tlsRequireClientCertificate ? TRUE_STR : FALSE_STR);
+    a.emplace(Conf::CONFIG_TLS_REQUIRE_CLIENT_CERTIFICATE,
+              tlsRequireClientCertificate ? TRUE_STR : FALSE_STR);
     a.emplace(Conf::CONFIG_TLS_NEGOTIATION_TIMEOUT_SEC, std::to_string(tlsNegotiationTimeout));
-    a.emplace(Conf::CONFIG_TLS_DISABLE_SECURE_DLG_CHECK, tlsDisableSecureDlgCheck ? TRUE_STR : FALSE_STR);
+    a.emplace(Conf::CONFIG_TLS_DISABLE_SECURE_DLG_CHECK,
+              tlsDisableSecureDlgCheck ? TRUE_STR : FALSE_STR);
     return a;
 }
 
@@ -245,6 +250,7 @@ SipAccountConfig::fromMap(const std::map<std::string, std::string>& details)
     parseInt(details, Conf::CONFIG_PUBLISHED_PORT, publishedPort);
     parseBool(details, Conf::CONFIG_PRESENCE_ENABLED, presenceEnabled);
     parseString(details, Conf::CONFIG_ACCOUNT_DTMF_TYPE, dtmfType);
+    parseInt(details, Conf::CONFIG_KEEP_ALIVE_INTERVAL, keepAliveInterval);
 
     // srtp settings
     parseBool(details, Conf::CONFIG_SRTP_RTP_FALLBACK, srtpFallback);
@@ -302,7 +308,8 @@ SipAccountConfig::Credentials::toMap() const
 }
 
 void
-SipAccountConfig::Credentials::computePasswordHash() {
+SipAccountConfig::Credentials::computePasswordHash()
+{
     pj_md5_context pms;
 
     /* Compute md5 hash = MD5(username ":" realm ":" password) */
@@ -344,4 +351,4 @@ SipAccountConfig::setCredentials(const std::vector<std::map<std::string, std::st
         credentials.emplace_back(cred);
 }
 
-}
+} // namespace sip_core
