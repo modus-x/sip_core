@@ -1574,17 +1574,6 @@ SIPCall::setPeerUaVersion(std::string_view ua)
         return;
     }
 
-    // Check if peer's version is at least 10.0.2 to enable multi-stream.
-    peerSupportMultiStream_ = Account::meetMinimumRequiredVersion(peerVersion,
-                                                                  MULTISTREAM_REQUIRED_VERSION);
-    if (not peerSupportMultiStream_) {
-        SIP_CORE_DBG(
-            "Peer's version [%.*s] does not support multi-stream. Min required version: [%.*s]",
-            (int) version.size(),
-            version.data(),
-            (int) MULTISTREAM_REQUIRED_VERSION_STR.size(),
-            MULTISTREAM_REQUIRED_VERSION_STR.data());
-    }
 }
 
 void
@@ -2145,15 +2134,6 @@ SIPCall::requestMediaChange(const std::vector<libsip_core::MediaMap>& mediaList)
         }
     }
 
-    // If the peer does not support multi-stream and the size of the new
-    // media list is different from the current media list, the media
-    // change request will be ignored.
-    if (not peerSupportMultiStream_ and rtpStreams_.size() != mediaAttrList.size()) {
-        SIP_CORE_WARN("[call:%s] Peer does not support multi-stream. Media change request ignored",
-                      getCallId().c_str());
-        return false;
-    }
-
     // If peer doesn't support multiple ice, keep only the last audio/video
     // This keep the old behaviour (if sharing both camera + sharing a file, will keep the shared file)
     if (mediaList.size() > 2)
@@ -2687,7 +2667,6 @@ SIPCall::merge(Call& call)
     localAudioPort_ = subcall.localAudioPort_;
     localVideoPort_ = subcall.localVideoPort_;
     peerUserAgent_ = subcall.peerUserAgent_;
-    peerSupportMultiStream_ = subcall.peerSupportMultiStream_;
     peerAllowedMethods_ = subcall.peerAllowedMethods_;
     Call::merge(subcall);
 }
