@@ -373,8 +373,6 @@ if(MSVC)
     "${CMAKE_CURRENT_SOURCE_DIR}/compat/msvc;"
     "${CMAKE_CURRENT_SOURCE_DIR}/contrib/msvc;"
     "${CMAKE_CURRENT_SOURCE_DIR}/contrib/msvc/include;"
-    "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/asio/asio/include;"
-    "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/restinio/dev;"
     "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/fmt/include;"
     "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/http_parser;"
     "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/jsoncpp/include;"
@@ -398,7 +396,7 @@ if(MSVC)
   if("${CMAKE_VS_PLATFORM_NAME}" STREQUAL "x64")
     target_compile_definitions(
       ${PROJECT_NAME}
-      PRIVATE "_WIN32_WINNT=0x0A00;"
+      PRIVATE "_WIN32_WINNT=0x0601"
       "_USE_MATH_DEFINES;"
       "_SCL_SECURE_NO_WARNINGS;"
       "_CRT_SECURE_NO_WARNINGS;"
@@ -460,7 +458,6 @@ if(MSVC)
     ws2_32.lib
     advapi32.lib
     Ole32.lib
-    d3d11.lib
     Kernel32.lib
     Gdi32.lib
     User32.lib
@@ -491,12 +488,11 @@ if(MSVC)
     ${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/speexdsp/lib/libspeexdsp.lib
     ${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/webrtc-audio-processing/build/Release/webrtc-audio-processing.lib
     ${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/portaudio/build/Release/portaudio_static_x64.lib
-    PUBLIC
 
     # this is for dependencies to work with frames emmitted by our library
+    PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/ffmpeg/Build/win32/x64/lib/libavutil.lib
     ${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/ffmpeg/Build/win32/x64/lib/libswscale.lib
-    ${CMAKE_CURRENT_SOURCE_DIR}/contrib/msvc/lib/x64/libmfx.lib
     Secur32.lib
     bcrypt.lib
   )

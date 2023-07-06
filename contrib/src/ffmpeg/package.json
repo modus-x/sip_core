@@ -3,20 +3,13 @@
     "version": "n5.0",
     "url": "https://git.ffmpeg.org/gitweb/ffmpeg.git/snapshot/__VERSION__.tar.gz",
     "deps": [
-        "x264",
-        "opus",
-        "ffnvcodec",
-        "media-sdk"
     ],
     "patches": [
         "change-RTCP-ratio.patch",
         "rtp_ext_abs_send_time.patch",
         "libopusenc-reload-packet-loss-at-encode.patch",
         "libopusdec-enable-FEC.patch",
-        "windows-configure.patch",
-        "windows-configure-ffnvcodec.patch",
-        "windows-configure-libmfx.patch",
-        "windows-dxgi-support.patch"
+        "windows-configure.patch"
     ],
     "win_patches": [
     ],

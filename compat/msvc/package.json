@@ -1,14 +1,15 @@
 {
     "name": "sip_core",
     "deps": [
-        "asio",
+        "speexdsp",
+        "opus",
         "ffmpeg",
         "pjproject",
         "portaudio",
-        "speexdsp",
-        "speex",
         "yaml-cpp",
         "jsoncpp",
+        "http_parser",
+        "fmt",
         "webrtc-audio-processing"
     ],
     "configuration": "ReleaseLib_win32",

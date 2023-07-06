@@ -94,7 +94,9 @@ static constexpr std::string_view VALID_TLS_PROTOS[] = {"Default"sv,
 static constexpr std::string_view PN_FCM = "fcm"sv;
 static constexpr std::string_view PN_APNS = "apns"sv;
 
+// keep-alive const values
 const pj_str_t KA_DATA = CONST_PJ_STR("ping!");
+const pj_str_t FLOW_HEADER = CONST_PJ_STR("Flow-Timer");
 
 /* Keep alive timer callback */
 static void
@@ -249,10 +251,8 @@ SIPAccount::registerKeepAliveTimer(bool start, struct pjsip_regc_cbparam* param)
         unsigned delay_initial;
         unsigned lower_bound;
 
-        static const pj_str_t STR_FLOW_TIMER = {"Flow-Timer", 10};
-
         hsr = (pjsip_generic_string_hdr*) pjsip_msg_find_hdr_by_name(param->rdata->msg_info.msg,
-                                                                     &STR_FLOW_TIMER,
+                                                                     &FLOW_HEADER,
                                                                      hsr);
         if (hsr != 0) {
             rfc5626_flowtmr = pj_strtoul(&hsr->hvalue);

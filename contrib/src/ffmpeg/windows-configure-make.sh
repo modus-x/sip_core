@@ -32,10 +32,7 @@ FFMPEGCONF+='
 
 #enable parsers
 FFMPEGCONF+='
-            --enable-parser=h263
             --enable-parser=h264
-            --enable-parser=hevc
-            --enable-parser=mpeg4video
             --enable-parser=opus'
 
 #encoders/decoders
@@ -43,8 +40,6 @@ FFMPEGCONF+='
             --enable-libopus
             --enable-encoder=libopus
             --enable-decoder=libopus
-            --enable-encoder=adpcm_g722
-            --enable-decoder=adpcm_g722
             --enable-encoder=pcm_alaw
             --enable-decoder=pcm_alaw
             --enable-encoder=pcm_mulaw
@@ -53,21 +48,11 @@ FFMPEGCONF+='
             --enable-encoder=libx264
             --enable-decoder=h264
             --enable-encoder=rawvideo
-            --enable-decoder=rawvideo
-            --enable-encoder=mpeg4
-            --enable-decoder=mpeg4
-            --enable-encoder=h263
-            --enable-encoder=h263p
-            --enable-decoder=h263
-            --enable-encoder=mjpeg
-            --enable-decoder=mjpeg
-            --enable-decoder=mjpegb'
+            --enable-decoder=rawvideo'
 
 # decoders for ringtones and audio streaming
 FFMPEGCONF+='
-            --enable-decoder=flac
             --enable-decoder=vorbis
-            --enable-decoder=aac
             --enable-decoder=ac3
             --enable-decoder=eac3
             --enable-decoder=mp3
@@ -99,21 +84,6 @@ FFMPEGCONF+='
             --enable-decoder=pcm_u16be
             --enable-decoder=pcm_u16le'
 
-#encoders/decoders for images
-FFMPEGCONF+='
-            --enable-encoder=gif
-            --enable-decoder=gif
-            --enable-encoder=jpegls
-            --enable-decoder=jpegls
-            --enable-encoder=ljpeg
-            --enable-decoder=jpeg2000
-            --enable-encoder=png
-            --enable-decoder=png
-            --enable-encoder=bmp
-            --enable-decoder=bmp
-            --enable-encoder=tiff
-            --enable-decoder=tiff'
-
 #filters
 FFMPEGCONF+='
             --enable-filter=scale
@@ -128,7 +98,7 @@ FFMPEGCONF+='
             --enable-filter=pad'
 
 if [ "$1" == "uwp" ]; then
-    EXTRACFLAGS='-MD -DWINAPI_FAMILY=WINAPI_FAMILY_APP -D_WIN32_WINNT=0x0A00 -I../../../../../msvc/include -I../../../../../msvc/include/opus'
+    EXTRACFLAGS='-MD -DWINAPI_FAMILY=WINAPI_FAMILY_APP -D_WIN32_WINNT=0x0601 -I../../../../../msvc/include -I../../../../../msvc/include/opus'
     if [ "$2" == "x64" ]; then
         echo "configure and make ffmpeg for UWP-x64..."
             EXTRALDFLAGS='-APPCONTAINER WindowsApp.lib libopus.lib libx264.lib -LIBPATH:../../../../../msvc/lib/x64'
@@ -143,41 +113,19 @@ if [ "$1" == "uwp" ]; then
             OUTDIR=Output/Windows10/x86
     fi
 elif [ "$1" == "win32" ]; then
-    EXTRACFLAGS='-MD -D_WINDLL -I../../../../../msvc/include -I../../../../../msvc/include/opus -I../../../../../msvc/include/ffnvcodec -I../../../../../msvc/include/mfx  -D_WIN32_WINNT=0x0A00'
+    EXTRACFLAGS='-MD -D_WINDLL -I../../../../../msvc/include -I../../../../../msvc/include/opus -I../../../../../msvc/include/ffnvcodec -I../../../../../msvc/include/mfx -D_WIN32_WINNT=0x0601'
     FFMPEGCONF+='
                 --enable-indev=dshow
-                --enable-indev=gdigrab
-                --enable-dxva2
-                --enable-indev=dxgigrab'
-    FFMPEGCONF+='
-                --enable-ffnvcodec
-                --enable-cuvid
-                --enable-nvdec
-                --enable-nvenc
-                --enable-hwaccel=h264_nvdec
-                --enable-hwaccel=hevc_nvdec
-                --enable-hwaccel=mjpeg_nvdec
-                --enable-encoder=h264_nvenc
-                --enable-encoder=hevc_nvenc'
-    FFMPEGCONF+='
-                --enable-libmfx
-                --enable-encoder=h264_qsv
-                --enable-encoder=hevc_qsv
-                --enable-encoder=mjpeg_qsv
-                --enable-decoder=h264_qsv
-                --enable-decoder=hevc_qsv
-                --enable-decoder=mjpeg_qsv
-                --enable-filter=scale_qsv
-                --enable-filter=overlay_qsv'
+                --enable-indev=gdigrab'
     if [ "$2" == "x64" ]; then
-        echo "configure and make ffmpeg for win32-x64..."
-        EXTRALDFLAGS='-APPCONTAINER:NO -MACHINE:x64 Ole32.lib Kernel32.lib Gdi32.lib User32.lib Strmiids.lib Advapi32.lib OleAut32.lib Shlwapi.lib Vfw32.lib Secur32.lib Advapi32.lib libopus.lib libx264.lib libmfx.lib -LIBPATH:../../../../../msvc/lib/x64'
+        echo "configure and make ffmpeg for win32-x64... in $(pwd)"
+        EXTRALDFLAGS='-APPCONTAINER:NO -MACHINE:x64 Ole32.lib Kernel32.lib Gdi32.lib User32.lib Strmiids.lib Advapi32.lib OleAut32.lib Shlwapi.lib Vfw32.lib Secur32.lib Advapi32.lib libopus.lib libx264.lib  -LIBPATH:../../../../../msvc/lib/x64'
         FFMPEGCONF+=' --arch=x86_64'
         PREFIX=../../../Build/win32/x64
         OUTDIR=Output/win32/x64
     elif [ "$2" == "x86" ]; then
         echo "configure and make ffmpeg for win32-x86..."
-        EXTRALDFLAGS='-APPCONTAINER:NO -MACHINE:x86 Ole32.lib Kernel32.lib Gdi32.lib User32.lib Strmiids.lib OleAut32.lib Shlwapi.lib Vfw32.lib Secur32.lib Advapi32.lib libopus.lib libx264.lib libmfx.lib -LIBPATH:../../../../../msvc/lib/x86'
+        EXTRALDFLAGS='-APPCONTAINER:NO -MACHINE:x86 Ole32.lib Kernel32.lib Gdi32.lib User32.lib Strmiids.lib OleAut32.lib Shlwapi.lib Vfw32.lib Secur32.lib Advapi32.lib libopus.lib libx264.lib -LIBPATH:../../../../../msvc/lib/x86'
         FFMPEGCONF+=' --arch=x86'
         PREFIX=../../../Build/win32/x86
         OUTDIR=Output/win32/x86

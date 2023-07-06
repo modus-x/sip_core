@@ -1,6 +1,6 @@
 """
 This tool is designed to facilitate downloading, patching, and building
-of library dependencies for the sip_core daemon project on windows. MSBuild
+of library dependencies for the sip_core sip_core_deps project on windows. MSBuild
 toolset and sdk versions can be supplied as parameters and will be sedded
 into vcxproj files accordingly.
 
@@ -47,14 +47,14 @@ root_logger = logging.getLogger(__name__)
 log = None
 
 # project paths
-daemon_msvc_dir = os.path.dirname(os.path.realpath(__file__))
-daemon_dir = os.path.dirname(os.path.dirname(daemon_msvc_dir))
-daemon_build_dir = daemon_dir + r'\build'
-contrib_src_dir = daemon_dir + r'\contrib\src'
-contrib_build_dir = daemon_dir + r'\contrib\build'
-contrib_tmp_dir = daemon_dir + r'\contrib\tarballs'
-plugins_bin_dir = daemon_dir + r'\..\plugins\build'
-plugins_dir = daemon_dir + r'\..\plugins'
+sip_core_deps_msvc_dir = os.path.dirname(os.path.realpath(__file__))
+sip_core_deps_dir = os.path.dirname(os.path.dirname(sip_core_deps_msvc_dir))
+sip_core_deps_build_dir = sip_core_deps_dir + r'\build'
+contrib_src_dir = sip_core_deps_dir + r'\contrib\src'
+contrib_build_dir = sip_core_deps_dir + r'\contrib\build'
+contrib_tmp_dir = sip_core_deps_dir + r'\contrib\tarballs'
+plugins_bin_dir = sip_core_deps_dir + r'\..\plugins\build'
+plugins_dir = sip_core_deps_dir + r'\..\plugins'
 
 # SCM
 wget_args = [
@@ -149,6 +149,7 @@ def getVSEnv(arch='x64', platform='', version=''):
                          stdout=subprocess.PIPE)
     stdout, _ = p.communicate()
     out = stdout.decode('utf-8', errors='ignore').split("\r\n")[5:-1]
+    print(env_cmd)
     return dict(s.split('=', 1) for s in out)
 
 
@@ -228,7 +229,7 @@ def make_plugin(pkg_info, force, sdk_version, toolset):
         track_build(pkg_name, version, True)
 
 
-def make_daemon(pkg_info, force, sdk_version, toolset):
+def make_sip_core_deps(pkg_info, force, sdk_version, toolset):
     cmake_script = 'cmake -DCMAKE_CONFIGURATION_TYPES="ReleaseLib_win32" -DCMAKE_SYSTEM_VERSION=' + sdk_version + \
         ' -DCMAKE_VS_PLATFORM_NAME="x64" -G ' + getCMakeGenerator(getLatestVSVersion(
         )) + ' -T $(DefaultPlatformToolset) -S ../../ -B ../../build'
@@ -239,24 +240,12 @@ def make_daemon(pkg_info, force, sdk_version, toolset):
 
     for dep in pkg_info.get('deps', []):
         resolve(dep, False, sdk_version, toolset)
-    root_logger.warning(
-        "Building daemon with preferred sdk version %s and toolset %s", sdk_version, toolset)
-    env_set = 'false' if pkg_info.get('with_env', '') == '' else 'true'
-    sdk_to_use = sdk_version if env_set == 'false' else pkg_info.get(
-        'with_env', '')
-    build('daemon', daemon_build_dir,
-          pkg_info.get('project_paths', []),
-          pkg_info.get('custom_scripts', {}),
-          env_set,
-          sdk_to_use,
-          toolset,
-          conf=pkg_info.get('configuration', 'Release'))
 
 
 def make(pkg_info, force, sdk_version, toolset, isPlugin):
     pkg_name = pkg_info.get('name')
-    if pkg_name == 'daemon':
-        return make_daemon(pkg_info, force, sdk_version, toolset)
+    if pkg_name == 'sip_core_deps':
+        return make_sip_core_deps(pkg_info, force, sdk_version, toolset)
     if isPlugin:
         return make_plugin(pkg_info, force, sdk_version, toolset)
     md5 = getMd5ForDirectory(contrib_src_dir + r'\\' + pkg_name)
@@ -432,7 +421,7 @@ def apply(pkg_name, patches, win_patches):
     tmp_dir = os.getcwd()
     pkg_build_path = contrib_build_dir + '\\' + pkg_name
     if not os.path.exists(pkg_build_path):
-        os.makedirs(pkg_build_path)
+        os.makedirs(pkg_bild_path)
     os.chdir(pkg_build_path)
     base_sh_src_path = get_sh_path(contrib_src_dir)
     # 1. git patches (LF)
@@ -455,12 +444,12 @@ def apply(pkg_name, patches, win_patches):
 
 
 def get_pkg_file(pkg_name, isPlugin = False):
-    if pkg_name == 'daemon':
-        pkg_location = daemon_msvc_dir
+    if pkg_name == 'sip_core_deps':
+        pkg_location = sip_core_deps_msvc_dir
     elif (isPlugin):
         pkg_location = plugins_dir + r'\\' + pkg_name
     else:
-        pkg_location = daemon_dir + r'\contrib\src\\' + pkg_name
+        pkg_location = sip_core_deps_dir + r'\contrib\src\\' + pkg_name
     pkg_json_file = pkg_location + r"\\package.json"
     if not os.path.exists(pkg_json_file):
         log.error("No package info for " + pkg_name)
@@ -477,6 +466,7 @@ def resolve(pkg_name, force=False, sdk_version='', toolset='', isPlugin=False):
             return make(pkg_info, force, sdk_version, toolset, isPlugin)
         except Exception as e:
             print(e)
+            print(repr(traceback.format_exception(e)))
             log.error('Make ' + pkg_name + ' failed!')
             sys.exit(1)
 
@@ -608,7 +598,7 @@ class SHrunner():
                 log.debug('Using alternate bash found at ' + self.sh_path)
 
         self.project_env_vars = {
-            'DAEMON_DIR': daemon_dir,
+            'sip_core_deps_DIR': sip_core_deps_dir,
             'CONTRIB_SRC_DIR': contrib_src_dir,
             'CONTRIB_BUILD_DIR': contrib_build_dir,
             'VCVARSALL_CMD': getVSEnvCmd(),
@@ -854,7 +844,7 @@ def main():
 
 def get_sh_path(path):
     driveless_path = path.replace(os.path.sep, '/')[3:]
-    drive_letter = os.path.splitdrive(daemon_dir)[0][0].lower()
+    drive_letter = os.path.splitdrive(sip_core_deps_dir)[0][0].lower()
     wsl_drive_path = '/mnt/' + drive_letter + '/'
     no_echo = ' &> /dev/null'
     result = getSHrunner().exec_sh('pwd | grep ' + wsl_drive_path + no_echo)
