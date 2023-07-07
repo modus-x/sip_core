@@ -416,7 +416,6 @@ if(MSVC)
       ${PROJECT_NAME}
       PRIVATE /Oi;
       ${DEFAULT_CXX_RUNTIME_LIBRARY};
-      /Gy;
       /MP;
       /Oy-;
       /sdl-;
@@ -439,13 +438,14 @@ if(MSVC)
       ${PROJECT_NAME}
       PRIVATE
       /MACHINE:X64
-      /OPT:REF
-      /OPT:ICF
       /VERBOSE:LIB
+
+      # all dependencies are build with /MD
       /NODEFAULTLIB:libcmtd
       /NODEFAULTLIB:libcmt
-      /OPT:NOLBR
-      /LTCG
+
+      # Always generate PDB
+      /DEBUG
       /ignore:4006)
   endif()
 
