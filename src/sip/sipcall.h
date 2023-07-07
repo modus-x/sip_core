@@ -359,7 +359,6 @@ private:
     // Peer's User-Agent.
     std::string peerUserAgent_ {};
     // Flag to indicate if the peer's Daemon version supports multi-stream.
-    bool peerSupportMultiStream_ {false};
 
     // Peer's allowed methods.
     std::vector<std::string> peerAllowedMethods_;
