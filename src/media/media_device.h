@@ -37,12 +37,12 @@ constexpr static auto NEWPARAMS_TIMEOUT = std::chrono::milliseconds(1000);
  */
 struct DeviceParams
 {
-    std::string name = "empty"; // friendly name (e.g. Logitech BRIO)
-    std::string input {};       // Device path (e.g. /dev/video0)
-    std::string unique_id {};   // unique id (e.g. 046d082d8A8B667F)
+    std::string name {};      // friendly name (e.g. Logitech BRIO)
+    std::string input {};     // Device path (e.g. /dev/video0)
+    std::string unique_id {}; // unique id (e.g. 046d082d8A8B667F)
     std::string format {};
-    unsigned width = 640, height = 480;
-    rational<double> framerate = 30.0;
+    unsigned width {}, height {};
+    rational<double> framerate {};
     std::string pixel_format {};
     std::string channel_name {};
     unsigned channel {}; // Channel number

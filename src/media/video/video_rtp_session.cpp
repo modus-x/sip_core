@@ -184,16 +184,9 @@ VideoRtpSession::startSender(bool empty)
                 getRemoteRtpUri(), ms, send_, *socketPair_, initSeqVal_ + 1, mtu_, allowHwAccel));
 
             if (empty) {
-                std::shared_ptr<VideoFrame> writableFrame_ = nullptr;
-                writableFrame_.reset(new VideoFrame());
-                VideoFrame& output = *writableFrame_.get();
-                output.reserve(AV_PIX_FMT_YUV420P, 640, 480);
-                libav_utils::fillWithBlack(output.pointer());
-                for (int i = 0; i < 10; ++i) {
-                    SIP_CORE_DBG("Sending empty keyframe");
-                    sender_->forceKeyFrame();
-                    sender_->update(nullptr, writableFrame_);
-                }
+                for (int i = 0; i < 10; ++i)
+                    // TODO: Make media ping instead of this shit
+                    // generateEmptyVideoFrame();
                 stopSender();
                 return;
             }
@@ -218,7 +211,14 @@ VideoRtpSession::startSender(bool empty)
 
 void
 VideoRtpSession::generateEmptyVideoFrame()
-{}
+{
+    std::shared_ptr<VideoFrame> writableFrame_ = nullptr;
+    writableFrame_.reset(new VideoFrame());
+    VideoFrame& output = *writableFrame_.get();
+    output.reserve(AV_PIX_FMT_YUV420P, localVideoParams_.width, localVideoParams_.height);
+    libav_utils::fillWithBlack(output.pointer());
+    sender_->update(nullptr, writableFrame_);
+}
 
 void
 VideoRtpSession::restartSender()
@@ -340,6 +340,11 @@ VideoRtpSession::start()
 {
     SIP_CORE_WARN("[%p] Starting video rtp session", this);
     std::lock_guard<std::recursive_mutex> lock(mutex_);
+
+    if (not send_.enabled and not receive_.enabled) {
+        stop();
+        return;
+    }
 
     try {
         socketPair_.reset(new SocketPair(getRemoteRtpUri().c_str(), receive_.addr.getPort()));

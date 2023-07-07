@@ -816,13 +816,13 @@ MediaEncoder::initCodec(AVMediaType mediaType, AVCodecID avcodecId, uint64_t br)
     if (mediaType == AVMEDIA_TYPE_VIDEO && br > 0) {
         if (br < SystemCodecInfo::DEFAULT_MIN_BITRATE) {
             SIP_CORE_WARNING("Requested bitrate {:d} too low, setting to {:d}",
-                             br,
-                             SystemCodecInfo::DEFAULT_MIN_BITRATE);
+                      br,
+                      SystemCodecInfo::DEFAULT_MIN_BITRATE);
             br = SystemCodecInfo::DEFAULT_MIN_BITRATE;
         } else if (br > SystemCodecInfo::DEFAULT_MAX_BITRATE) {
             SIP_CORE_WARNING("Requested bitrate {:d} too high, setting to {:d}",
-                             br,
-                             SystemCodecInfo::DEFAULT_MAX_BITRATE);
+                      br,
+                      SystemCodecInfo::DEFAULT_MAX_BITRATE);
             br = SystemCodecInfo::DEFAULT_MAX_BITRATE;
         }
     }
