@@ -1,4 +1,4 @@
-/*
+﻿/*
  *  Copyright (C) 2004-2022 Savoir-faire Linux Inc.
  *
  *  Author: Emmanuel Milou <emmanuel.milou@savoirfairelinux.com>
@@ -2093,11 +2093,7 @@ SIPCall::isReinviteRequired(const std::vector<MediaAttribute>& mediaAttrList)
 
 #ifdef ENABLE_VIDEO
         if (newAttr.type_ == MediaType::MEDIA_VIDEO) {
-            // For now, only video mute triggers a re-invite.
-            // Might be done for audio as well if required.
-            if (newAttr.muted_ != rtpStreams_[streamIdx].mediaAttribute_->muted_) {
-                return true;
-            }
+            return true;
         }
 #endif
     }
