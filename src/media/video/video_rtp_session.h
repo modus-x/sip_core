@@ -91,7 +91,6 @@ public:
             stopReceiver();
         }
     };
-    void generateEmptyVideoFrame();
 
     /**
      * Set video orientation
@@ -123,7 +122,7 @@ public:
 
     std::shared_ptr<VideoMixer> videoMixer_;
     std::shared_ptr<VideoInput> videoLocal_;
-    void startSender(bool empty = false);
+    void startSender();
     void stopSender();
     void attachLocalVideo(bool attach);
 

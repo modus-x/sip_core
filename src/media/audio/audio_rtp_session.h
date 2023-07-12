@@ -65,7 +65,6 @@ public:
     std::unique_ptr<AudioReceiveThread>& getAudioReceive() { return receiveThread_; }
 
     void setVoiceCallback(std::function<void(bool)> cb);
-    void generateEmptyAudioFrame();
 
 private:
     void startSender();

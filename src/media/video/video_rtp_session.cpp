@@ -95,14 +95,14 @@ VideoRtpSession::setRequestKeyFrameCallback(std::function<void(void)> cb)
 }
 
 void
-VideoRtpSession::startSender(bool empty)
+VideoRtpSession::startSender()
 {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
 
     SIP_CORE_DBG("[%p] Start video RTP sender: input [%s] - muted [%s]",
-             this,
-             conference_ ? "Video Mixer" : input_.c_str(),
-             send_.onHold ? "YES" : "NO");
+                 this,
+                 conference_ ? "Video Mixer" : input_.c_str(),
+                 send_.onHold ? "YES" : "NO");
 
     if (not socketPair_) {
         // Ignore if the transport is not set yet
@@ -183,13 +183,6 @@ VideoRtpSession::startSender(bool empty)
             sender_.reset(new VideoSender(
                 getRemoteRtpUri(), ms, send_, *socketPair_, initSeqVal_ + 1, mtu_, allowHwAccel));
 
-            if (empty) {
-                for (int i = 0; i < 10; ++i)
-                    // TODO: Make media ping instead of this shit
-                    // generateEmptyVideoFrame();
-                stopSender();
-                return;
-            }
             if (changeOrientationCallback_)
                 sender_->setChangeOrientationCallback(changeOrientationCallback_);
             if (socketPair_)
@@ -207,17 +200,6 @@ VideoRtpSession::startSender(bool empty)
         else if (not autoQuality and rtcpCheckerThread_.isRunning())
             rtcpCheckerThread_.join();
     }
-}
-
-void
-VideoRtpSession::generateEmptyVideoFrame()
-{
-    std::shared_ptr<VideoFrame> writableFrame_ = nullptr;
-    writableFrame_.reset(new VideoFrame());
-    VideoFrame& output = *writableFrame_.get();
-    output.reserve(AV_PIX_FMT_YUV420P, localVideoParams_.width, localVideoParams_.height);
-    libav_utils::fillWithBlack(output.pointer());
-    sender_->update(nullptr, writableFrame_);
 }
 
 void
@@ -244,9 +226,9 @@ VideoRtpSession::stopSender()
     // Concurrency protection must be done by caller.
 
     SIP_CORE_DBG("[%p] Stop video RTP sender: input [%s] - muted [%s]",
-             this,
-             conference_ ? "Video Mixer" : input_.c_str(),
-             send_.onHold ? "YES" : "NO");
+                 this,
+                 conference_ ? "Video Mixer" : input_.c_str(),
+                 send_.onHold ? "YES" : "NO");
 
     if (sender_) {
         if (videoLocal_)
@@ -341,11 +323,6 @@ VideoRtpSession::start()
 {
     SIP_CORE_WARN("[%p] Starting video rtp session", this);
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-
-    if (not send_.enabled and not receive_.enabled) {
-        stop();
-        return;
-    }
 
     try {
         socketPair_.reset(new SocketPair(getRemoteRtpUri().c_str(), receive_.addr.getPort()));
@@ -479,8 +456,8 @@ VideoRtpSession::attachLocalVideo(bool attach)
     if (sender_) {
         if (videoLocal_) {
             if (attach) {
-            SIP_CORE_DBG("[%p] Setup video pipeline on local capture device", this);
-            videoLocal_->attach(sender_.get());
+                SIP_CORE_DBG("[%p] Setup video pipeline on local capture device", this);
+                videoLocal_->attach(sender_.get());
 
             } else {
                 videoLocal_->detach(sender_.get());
@@ -496,9 +473,9 @@ VideoRtpSession::setupConferenceVideoPipeline(Conference& conference, Direction 
 {
     if (dir == Direction::SEND) {
         SIP_CORE_DBG("[%p] Setup video sender pipeline on conference %s for call %s",
-                 this,
-                 conference.getConfId().c_str(),
-                 callId_.c_str());
+                     this,
+                     conference.getConfId().c_str(),
+                     callId_.c_str());
         videoMixer_ = conference.getVideoMixer();
         if (sender_) {
             // Swap sender from local video to conference video mixer
@@ -511,9 +488,9 @@ VideoRtpSession::setupConferenceVideoPipeline(Conference& conference, Direction 
         }
     } else {
         SIP_CORE_DBG("[%p] Setup video receiver pipeline on conference %s for call %s",
-                 this,
-                 conference.getConfId().c_str(),
-                 callId_.c_str());
+                     this,
+                     conference.getConfId().c_str(),
+                     callId_.c_str());
         if (receiveThread_) {
             receiveThread_->stopSink();
             if (videoMixer_)
@@ -701,7 +678,7 @@ VideoRtpSession::setNewBitrate(unsigned int newBR)
 #if __ANDROID__
         if (auto input_device = std::dynamic_pointer_cast<VideoInput>(videoLocal_))
             emitSignal<libsip_core::VideoSignal::SetBitrate>(input_device->getConfig().name,
-                                                         (int) newBR);
+                                                             (int) newBR);
 #endif
 
         if (sender_) {

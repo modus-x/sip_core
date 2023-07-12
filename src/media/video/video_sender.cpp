@@ -62,6 +62,12 @@ VideoSender::VideoSender(const std::string& dest,
     videoEncoder_->addStream(args.codec->systemCodecInfo);
     videoEncoder_->setInitSeqVal(seqVal);
     videoEncoder_->setIOContext(muxContext_->getContext());
+
+    // for (size_t i = 0; i < 50; i++)
+    // {
+    //     videoEncoder_->encodeEmpty();
+    // }
+
 }
 
 void
