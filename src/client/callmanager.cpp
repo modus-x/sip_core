@@ -138,9 +138,9 @@ hold(const std::string& accountId, const std::string& callId)
 }
 
 void
-muteEncoder(const std::string& accountId, const std::string& callId, bool mute)
+attachLocalVideo(const std::string& accountId, const std::string& callId, bool attach)
 {
-    return sip_core::Manager::instance().muteEncoder(accountId, callId, mute);
+    return sip_core::Manager::instance().attachLocalVideo(accountId, callId, attach);
 }
 
 void

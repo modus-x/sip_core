@@ -48,7 +48,6 @@
 
 #include "trace-tools.h"
 
-
 namespace sip_core {
 namespace video {
 class SinkClient;
@@ -442,7 +441,10 @@ public:
 
     void removeAccounts();
 
-    void controlRTPReceiver(const std::string& accountId, const std::string& callId, const std::string& labelId, bool active);
+    void controlRTPReceiver(const std::string& accountId,
+                            const std::string& callId,
+                            const std::string& labelId,
+                            bool active);
 
     /**
      * Set input audio plugin
@@ -785,7 +787,7 @@ public:
 
 #ifdef ENABLE_VIDEO
 
-    void muteEncoder(const std::string& accountId, const std::string& callId, bool mute);
+    void attachLocalVideo(const std::string& accountId, const std::string& callId, bool attach);
 
     /**
      * Create a new SinkClient instance, store it in an internal cache as a weak_ptr

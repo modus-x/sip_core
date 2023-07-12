@@ -1,4 +1,4 @@
-﻿/*
+/*
  *  Copyright (C) 2004-2022 Savoir-faire Linux Inc.
  *
  *  Author: Emmanuel Milou <emmanuel.milou@savoirfairelinux.com>
@@ -195,23 +195,18 @@ SIPCall::createRtpSession(RtpStream& stream)
 #ifdef ENABLE_VIDEO
 
 void
-SIPCall::muteEncoder(bool mute)
+SIPCall::attachLocalVideo(bool attach)
 {
     for (const auto& videoRtp : getRtpSessionList(MediaType::MEDIA_VIDEO)) {
-        if (mute) {
-            std::static_pointer_cast<video::VideoRtpSession>(videoRtp)->stopSender();
-
-        } else {
-            std::static_pointer_cast<video::VideoRtpSession>(videoRtp)->restartSender();
-        }
+        std::static_pointer_cast<video::VideoRtpSession>(videoRtp)->attachLocalVideo(attach);
     }
 
     std::map<std::string, std::string> messages;
     Json::StreamWriterBuilder wbuilder;
     wbuilder["commentStyle"] = "None";
     wbuilder["indentation"] = "";
-    messages["application/encoderStatus+json"] = std::string("{\"state\":\"")
-                                                 + (mute ? "stopped\"}" : "active\"}");
+    messages["application/localVideoStatus+json"] = std::string("{\"state\":\"")
+                                                    + (attach ? "stopped\"}" : "active\"}");
 
     auto w = getAccount();
     auto account = w.lock();

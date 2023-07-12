@@ -233,8 +233,9 @@ VideoRtpSession::restartSender()
 
     if (conference_)
         setupConferenceVideoPipeline(*conference_, Direction::SEND);
-    else
-        setupVideoPipeline();
+    else {
+        attachLocalVideo(true);
+    }
 }
 
 void
@@ -384,7 +385,7 @@ VideoRtpSession::start()
             setupConferenceVideoPipeline(*conference_, Direction::RECV);
         }
     } else {
-        setupVideoPipeline();
+        attachLocalVideo(true);
     }
 }
 
@@ -473,12 +474,17 @@ VideoRtpSession::setRotation(int rotation)
 }
 
 void
-VideoRtpSession::setupVideoPipeline()
+VideoRtpSession::attachLocalVideo(bool attach)
 {
     if (sender_) {
         if (videoLocal_) {
+            if (attach) {
             SIP_CORE_DBG("[%p] Setup video pipeline on local capture device", this);
             videoLocal_->attach(sender_.get());
+
+            } else {
+                videoLocal_->detach(sender_.get());
+            }
         }
     } else {
         videoLocal_.reset();

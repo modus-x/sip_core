@@ -893,11 +893,11 @@ Manager::controlRTPReceiver(const std::string& accountId,
 #ifdef ENABLE_VIDEO
 
 void
-Manager::muteEncoder(const std::string& accountId, const std::string& callId, bool mute)
+Manager::attachLocalVideo(const std::string& accountId, const std::string& callId, bool attach)
 {
     if (auto account = getAccount(accountId)) {
         if (auto call = account->getCall(callId)) {
-            call->muteEncoder(mute);
+            call->attachLocalVideo(attach);
             return;
         }
     }

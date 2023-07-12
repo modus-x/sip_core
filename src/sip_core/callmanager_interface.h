@@ -46,7 +46,7 @@ LIBSIP_CORE_PUBLIC std::string placeCallWithMedia(
     const std::string& to,
     const std::vector<std::map<std::string, std::string>>& mediaList);
 LIBSIP_CORE_PUBLIC bool refuse(const std::string& accountId, const std::string& callId);
-LIBSIP_CORE_PUBLIC void muteEncoder(const std::string& accountId, const std::string& callId, bool mute);
+LIBSIP_CORE_PUBLIC void attachLocalVideo(const std::string& accountId, const std::string& callId, bool attach);
 LIBSIP_CORE_PUBLIC void controlRTPReceiver(const std::string& accountId, const std::string& callId, const std::string& labelId, bool active);
 LIBSIP_CORE_PUBLIC bool accept(const std::string& accountId, const std::string& callId);
 LIBSIP_CORE_PUBLIC bool hangUp(const std::string& accountId, const std::string& callId);

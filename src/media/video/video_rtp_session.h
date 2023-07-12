@@ -125,10 +125,10 @@ public:
     std::shared_ptr<VideoInput> videoLocal_;
     void startSender(bool empty = false);
     void stopSender();
+    void attachLocalVideo(bool attach);
 
 private:
     void setupConferenceVideoPipeline(Conference& conference, Direction dir);
-    void setupVideoPipeline();
     void startReceiver();
     void stopReceiver();
     using clock = std::chrono::steady_clock;
