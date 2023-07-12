@@ -600,8 +600,8 @@ Sdp::processIncomingOffer(const std::vector<MediaAttribute>& mediaList)
         return false;
 
     SIP_CORE_DEBUG("Processing received offer for [{:s}] with {:d} media",
-               sessionName_,
-               mediaList.size());
+                   sessionName_,
+                   mediaList.size());
 
     printSession(remoteSession_, "Remote session:", SdpDirection::OFFER);
 
@@ -773,6 +773,7 @@ Sdp::getMediaDescriptions(const pjmedia_sdp_session* session, bool remote) const
     static constexpr pj_str_t STR_RTPMAP {sip_utils::CONST_PJ_STR("rtpmap")};
     static constexpr pj_str_t STR_FMTP {sip_utils::CONST_PJ_STR("fmtp")};
     static constexpr pj_str_t PCMA_PAYLOAD {sip_utils::CONST_PJ_STR("8")};
+    static constexpr pj_str_t PCMU_PAYLOAD {sip_utils::CONST_PJ_STR("0")};
 
     std::vector<MediaDescription> ret;
     for (unsigned i = 0; i < session->media_count; i++) {
@@ -832,15 +833,30 @@ Sdp::getMediaDescriptions(const pjmedia_sdp_session* session, bool remote) const
                                                                      &media->desc.fmt[j]);
             if (!rtpMapAttribute) {
                 descr.enabled = false;
-                SIP_CORE_ERR("Could not find rtpmap attribute for %s, trying to guess by payload type",
-                         media->desc.fmt[j].ptr);
+                SIP_CORE_ERR(
+                    "Could not find rtpmap attribute for %s, trying to guess by payload type",
+                    media->desc.fmt[j].ptr);
                 if (!pj_strcmp(&media->desc.fmt[j], &PCMA_PAYLOAD)) {
                     SIP_CORE_WARN("Found that payload %s can be PCMA 8000", media->desc.fmt[j].ptr);
                     descr.codec = findCodecBySpec("PCMA", 8000);
                     if (not descr.codec) {
                         SIP_CORE_ERR("Could not find codec for %s", media->desc.fmt[j].ptr);
                     } else {
+                        // for now, just keep the first codec only
+                        descr.enabled = true;
+                        descr.payload_type = 8;
+                        descr.rtp_clockrate = 8000;
+                        SIP_CORE_INFO("Found codec for %s", media->desc.fmt[j].ptr);
+                        break;
+                    }
+                }
 
+                if (!pj_strcmp(&media->desc.fmt[j], &PCMU_PAYLOAD)) {
+                    SIP_CORE_WARN("Found that payload %s can be PCMU 8000", media->desc.fmt[j].ptr);
+                    descr.codec = findCodecBySpec("PCMU", 8000);
+                    if (not descr.codec) {
+                        SIP_CORE_ERR("Could not find codec for %s", media->desc.fmt[j].ptr);
+                    } else {
                         // for now, just keep the first codec only
                         descr.enabled = true;
                         descr.payload_type = 8;
@@ -856,8 +872,8 @@ Sdp::getMediaDescriptions(const pjmedia_sdp_session* session, bool remote) const
             if (pjmedia_sdp_attr_get_rtpmap(rtpMapAttribute, &rtpmap) != PJ_SUCCESS
                 || rtpmap.enc_name.slen == 0) {
                 SIP_CORE_ERR("Could not find payload type %.*s in SDP",
-                         (int) media->desc.fmt[j].slen,
-                         media->desc.fmt[j].ptr);
+                             (int) media->desc.fmt[j].slen,
+                             media->desc.fmt[j].ptr);
                 descr.enabled = false;
                 continue;
             }
