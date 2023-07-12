@@ -42,64 +42,28 @@ FFMPEGCONF += \
 	--disable-demuxers \
 	--disable-muxers \
 	--enable-muxer=rtp \
-	--enable-muxer=g722 \
-	--enable-muxer=g723_1 \
-	--enable-muxer=g726 \
-	--enable-muxer=g726le \
-	--enable-muxer=h263 \
 	--enable-muxer=h264 \
-	--enable-muxer=hevc \
-	--enable-muxer=matroska \
 	--enable-muxer=webm \
 	--enable-muxer=ogg \
 	--enable-muxer=pcm_s16be \
 	--enable-muxer=pcm_s16le \
 	--enable-demuxer=rtp \
-	--enable-demuxer=mjpeg \
-	--enable-demuxer=mjpeg_2000 \
-	--enable-demuxer=mpegvideo \
-	--enable-demuxer=gif \
-	--enable-demuxer=image_jpeg_pipe \
-	--enable-demuxer=image_png_pipe \
-	--enable-demuxer=image_webp_pipe \
-	--enable-demuxer=matroska \
-	--enable-demuxer=m4v \
 	--enable-demuxer=mp3 \
 	--enable-demuxer=ogg \
-	--enable-demuxer=flac \
 	--enable-demuxer=wav \
-	--enable-demuxer=ac3 \
-	--enable-demuxer=g722 \
-	--enable-demuxer=g723_1 \
-	--enable-demuxer=g726 \
-	--enable-demuxer=g726le \
 	--enable-demuxer=pcm_mulaw \
 	--enable-demuxer=pcm_alaw \
 	--enable-demuxer=pcm_s16be \
 	--enable-demuxer=pcm_s16le \
-	--enable-demuxer=h263 \
-	--enable-demuxer=h264 \
-	--enable-demuxer=hevc
+	--enable-demuxer=h264
 
 #enable parsers
 FFMPEGCONF += \
-	--enable-parser=h263 \
 	--enable-parser=h264 \
-	--enable-parser=hevc \
-	--enable-parser=mpeg4video \
 	--enable-parser=opus
 
 #encoders/decoders
 FFMPEGCONF += \
-	--enable-encoder=adpcm_g722 \
-	--enable-decoder=adpcm_g722 \
-	--enable-encoder=adpcm_g726 \
-	--enable-decoder=adpcm_g726 \
-	--enable-encoder=adpcm_g726le \
-	--enable-decoder=adpcm_g726le \
-	--enable-decoder=g729 \
-	--enable-encoder=g723_1 \
-	--enable-decoder=g723_1 \
 	--enable-encoder=rawvideo \
 	--enable-decoder=rawvideo \
 	--enable-encoder=libx264 \
@@ -108,14 +72,6 @@ FFMPEGCONF += \
 	--enable-decoder=pcm_alaw \
 	--enable-encoder=pcm_mulaw \
 	--enable-decoder=pcm_mulaw \
-	--enable-encoder=mpeg4 \
-	--enable-decoder=mpeg4 \
-	--enable-encoder=h263 \
-	--enable-encoder=h263p \
-	--enable-decoder=h263 \
-	--enable-encoder=mjpeg \
-	--enable-decoder=mjpeg \
-	--enable-decoder=mjpegb \
 	--enable-libspeex \
 	--enable-libopus \
 	--enable-libx264 \
@@ -126,11 +82,7 @@ FFMPEGCONF += \
 
 # decoders for ringtones and audio streaming
 FFMPEGCONF += \
-	--enable-decoder=flac \
 	--enable-decoder=vorbis \
-	--enable-decoder=aac \
-	--enable-decoder=ac3 \
-	--enable-decoder=eac3 \
 	--enable-decoder=mp3 \
 	--enable-decoder=pcm_u24be \
 	--enable-decoder=pcm_u24le \
@@ -160,22 +112,7 @@ FFMPEGCONF += \
 	--enable-decoder=pcm_u16be \
 	--enable-decoder=pcm_u16le
 
-#encoders/decoders for images
-FFMPEGCONF += \
-	--enable-encoder=gif \
-	--enable-decoder=gif \
-	--enable-encoder=jpegls \
-	--enable-decoder=jpegls \
-	--enable-encoder=ljpeg \
-	--enable-decoder=jpeg2000 \
-	--enable-encoder=png \
-	--enable-decoder=png \
-	--enable-encoder=bmp \
-	--enable-decoder=bmp \
-	--enable-encoder=tiff \
-	--enable-decoder=tiff
-
-#filters
+# filters
 FFMPEGCONF += \
 	--enable-filter=scale \
 	--enable-filter=overlay \
@@ -188,14 +125,7 @@ FFMPEGCONF += \
 	--enable-filter=transpose \
 	--enable-filter=pad
 
-#platform specific options
-
-ifdef HAVE_WIN32
-FFMPEGCONF += \
-	--enable-indev=dshow \
-	--enable-indev=gdigrab \
-	--enable-dxva2
-endif
+# platform specific options (LINUX / MAC)
 
 ifdef HAVE_LINUX
 FFMPEGCONF += --enable-pic
@@ -333,23 +263,6 @@ ifeq ($(ARCH),armv7a)
 FFMPEGCONF += --arch=arm --enable-neon --enable-armv6 --enable-vfpv3
 endif
 
-# Windows
-ifdef HAVE_WIN32
-DEPS_ffmpeg += ffnvcodec
-FFMPEGCONF += --target-os=mingw32 \
-    --enable-w32threads \
-    --disable-decoder=dca \
-	--enable-cuvid \
-	--enable-ffnvcodec \
-	--enable-nvdec \
-	--enable-nvenc \
-	--enable-hwaccel=h264_nvdec \
-	--enable-hwaccel=hevc_nvdec \
-	--enable-hwaccel=mjpeg_nvdec \
-	--enable-encoder=h264_nvenc \
-	--enable-encoder=hevc_nvenc
-endif
-
 $(TARBALLS)/ffmpeg-$(FFMPEG_HASH).tar.gz:
 	$(call download,$(FFMPEG_URL))
 
@@ -362,6 +275,7 @@ ffmpeg: ffmpeg-$(FFMPEG_HASH).tar.gz
 	$(APPLY) $(SRC)/ffmpeg/remove-mjpeg-log.patch
 	$(APPLY) $(SRC)/ffmpeg/change-RTCP-ratio.patch
 	$(APPLY) $(SRC)/ffmpeg/rtp_ext_abs_send_time.patch
+	$(APPLY) $(SRC)/ffmpeg/rtp_marker.patch
 	$(APPLY) $(SRC)/ffmpeg/libopusdec-enable-FEC.patch
 	$(APPLY) $(SRC)/ffmpeg/libopusenc-reload-packet-loss-at-encode.patch
 	$(APPLY) $(SRC)/ffmpeg/ios-disable-b-frames.patch
