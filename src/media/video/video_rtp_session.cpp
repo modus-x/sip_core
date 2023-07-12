@@ -344,7 +344,7 @@ VideoRtpSession::start()
         return;
     }
 
-    startSender(true);
+    startSender();
 
     if (not send_.enabled and not receive_.enabled) {
         SIP_CORE_WARN("[%p] Video rtp session stopped, because send is not enabled", this);
