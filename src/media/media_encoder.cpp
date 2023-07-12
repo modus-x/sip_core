@@ -163,9 +163,9 @@ MediaEncoder::openOutput(const std::string& filename, const std::string& format)
 {
     avformat_free_context(outputCtx_);
     int result = avformat_alloc_output_context2(&outputCtx_,
-                                                nullptr,
-                                                format.empty() ? nullptr : format.c_str(),
-                                                filename.c_str());
+                                                 nullptr,
+                                                 format.empty() ? nullptr : format.c_str(),
+                                                 filename.c_str());
     if (result < 0)
         SIP_CORE_ERR() << "Cannot open " << filename << ": " << libav_utils::getError(-result);
 }
@@ -816,13 +816,13 @@ MediaEncoder::initCodec(AVMediaType mediaType, AVCodecID avcodecId, uint64_t br)
     if (mediaType == AVMEDIA_TYPE_VIDEO && br > 0) {
         if (br < SystemCodecInfo::DEFAULT_MIN_BITRATE) {
             SIP_CORE_WARNING("Requested bitrate {:d} too low, setting to {:d}",
-                      br,
-                      SystemCodecInfo::DEFAULT_MIN_BITRATE);
+                             br,
+                             SystemCodecInfo::DEFAULT_MIN_BITRATE);
             br = SystemCodecInfo::DEFAULT_MIN_BITRATE;
         } else if (br > SystemCodecInfo::DEFAULT_MAX_BITRATE) {
             SIP_CORE_WARNING("Requested bitrate {:d} too high, setting to {:d}",
-                      br,
-                      SystemCodecInfo::DEFAULT_MAX_BITRATE);
+                             br,
+                             SystemCodecInfo::DEFAULT_MAX_BITRATE);
             br = SystemCodecInfo::DEFAULT_MAX_BITRATE;
         }
     }
@@ -1056,6 +1056,8 @@ MediaEncoder::initOpus(AVCodecContext* encoderCtx)
     // Enable FEC support by default with 10% packet loss
     av_opt_set_int(encoderCtx, "fec", fecEnabled_ ? 1 : 0, AV_OPT_SEARCH_CHILDREN);
     av_opt_set_int(encoderCtx, "packet_loss", 10, AV_OPT_SEARCH_CHILDREN);
+    av_opt_set(encoderCtx, "application", "voip", AV_OPT_SEARCH_CHILDREN);
+    encoderCtx->compression_level = 10;
 }
 
 void
