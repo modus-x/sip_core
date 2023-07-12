@@ -251,7 +251,7 @@ private:
     int width_;
     int height_;
 
-    bool fecEnabled_ {false};
+    bool fecEnabled_ {true};
 
 protected:
     AVDictionary* options_ = nullptr;
