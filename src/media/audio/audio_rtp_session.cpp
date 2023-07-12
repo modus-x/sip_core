@@ -368,16 +368,16 @@ AudioRtpSession::initRecorder(std::shared_ptr<MediaRecorder>& rec)
 void
 AudioRtpSession::deinitRecorder(std::shared_ptr<MediaRecorder>& rec)
 {
-    if (receiveThread_) {
-        if (auto ob = rec->getStream(receiveThread_->getInfo().name)) {
-            receiveThread_->detach(ob);
-        }
-    }
-    if (auto input = sip_core::getAudioInput(callId_)) {
-        if (auto ob = rec->getStream(input->getInfo().name)) {
-            input->detach(ob);
-        }
-    }
+    // if (receiveThread_) {
+    //     if (auto ob = rec->getStream(receiveThread_->getInfo().name)) {
+    //         receiveThread_->detach(ob);
+    //     }
+    // }
+    // if (auto input = sip_core::getAudioInput(callId_)) {
+    //     if (auto ob = rec->getStream(input->getInfo().name)) {
+    //         input->detach(ob);
+    //     }
+    // }
 }
 
 } // namespace sip_core
