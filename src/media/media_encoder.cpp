@@ -43,12 +43,14 @@ extern "C" {
 #include <string_view>
 #include <cmath>
 
-// Define following line if you need to debug libav SDP
-// #define DEBUG_SDP 1
+
+#define DEBUG_SDP 1
 
 using namespace std::literals;
 
 namespace sip_core {
+
+
 
 constexpr double LOGREG_PARAM_A {101};
 constexpr double LOGREG_PARAM_B {-5.};
@@ -163,9 +165,9 @@ MediaEncoder::openOutput(const std::string& filename, const std::string& format)
 {
     avformat_free_context(outputCtx_);
     int result = avformat_alloc_output_context2(&outputCtx_,
-                                                 nullptr,
-                                                 format.empty() ? nullptr : format.c_str(),
-                                                 filename.c_str());
+                                                nullptr,
+                                                format.empty() ? nullptr : format.c_str(),
+                                                filename.c_str());
     if (result < 0)
         SIP_CORE_ERR() << "Cannot open " << filename << ": " << libav_utils::getError(-result);
 }
@@ -621,6 +623,8 @@ MediaEncoder::prepareEncoderContext(const AVCodec* outputCodec, bool is_video)
 
         // emit one intra frame every gop_size frames
         encoderCtx->max_b_frames = 0;
+
+        // pixel format of our used video formats is always yuv420p
         encoderCtx->pix_fmt = AV_PIX_FMT_YUV420P;
         // Keep YUV format for macOS
 #ifdef RING_ACCEL
