@@ -48,7 +48,7 @@
 namespace sip_core {
 
 AudioRtpSession::AudioRtpSession(const std::string& callId, const std::string& streamId)
-    : RtpSession(callId, streamId, MediaType::MEDIA_AUDIO)
+    : RtpSession(callId, streamId, MediaType::MEDIA_AUDIO, nullptr)
     , rtcpCheckerThread_([] { return true; }, [this] { processRtcpChecker(); }, [] {})
 
 {

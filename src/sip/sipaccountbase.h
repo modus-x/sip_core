@@ -210,6 +210,8 @@ public:
 
     std::vector<libsip_core::Message> getLastMessages(const uint64_t& base_timestamp) override;
 
+    inline SIPVoIPLink& getVoipLink() const { return link_; }
+
     // Build the list of medias to be included in the SDP (offer/answer)
     std::vector<MediaAttribute> createDefaultMediaList(bool addVideo, bool onHold = false);
 

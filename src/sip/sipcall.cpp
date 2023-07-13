@@ -179,7 +179,8 @@ SIPCall::createRtpSession(RtpStream& stream)
     else if (stream.mediaAttribute_->type_ == MediaType::MEDIA_VIDEO) {
         stream.rtpSession_ = std::make_shared<video::VideoRtpSession>(id_,
                                                                       streamId,
-                                                                      getVideoSettings());
+                                                                      getVideoSettings(), 
+                                                                      getSIPAccount());
         std::static_pointer_cast<video::VideoRtpSession>(stream.rtpSession_)->setRotation(rotation_);
     }
 #endif

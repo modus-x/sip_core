@@ -362,7 +362,6 @@ public:
 
     inline pjsip_transport_type_e getTransportType() const { return transportType_; }
 
-    inline SIPVoIPLink& getVoipLink() const { return link_; }
 
     /**
      * Shortcut for SipTransport::getTransportSelector(account.getTransport()).

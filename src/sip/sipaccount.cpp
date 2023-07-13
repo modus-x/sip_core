@@ -87,12 +87,6 @@ using sip_utils::CONST_PJ_STR;
 
 static constexpr unsigned REGISTRATION_FIRST_RETRY_INTERVAL = 60; // seconds
 static constexpr unsigned REGISTRATION_RETRY_INTERVAL = 300;      // seconds
-static constexpr std::string_view VALID_TLS_PROTOS[] = {"Default"sv,
-                                                        "TLSv1.2"sv,
-                                                        "TLSv1.1"sv,
-                                                        "TLSv1"sv};
-static constexpr std::string_view PN_FCM = "fcm"sv;
-static constexpr std::string_view PN_APNS = "apns"sv;
 
 // keep-alive const values
 const pj_str_t KA_DATA = CONST_PJ_STR("ping!");

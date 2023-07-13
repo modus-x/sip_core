@@ -45,6 +45,48 @@
 namespace sip_core {
 namespace video {
 
+static void
+keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
+{
+    VideoRtpSession* rtp_session;
+    pj_time_val delay;
+    pj_status_t status;
+    unsigned lower_bound;
+
+    PJ_UNUSED_ARG(th);
+
+    te->id = PJ_FALSE;
+
+    rtp_session = (VideoRtpSession*) te->user_data;
+
+    SIP_CORE_DEBUG("Sending keep-alive rtp packet to session {:s}", rtp_session->getRemoteRtpUri());
+
+    /* Send some empty rtp packet with correct params */
+    rtp_session->generateEmptyVideoFrame();
+
+    /* Check just in case keep-alive has been disabled. This shouldn't happen
+     * though as when ka_interval is changed this timer should have been
+     * cancelled.
+     */
+    int interval = rtp_session->getKaInterval();
+    if (interval == 0)
+        return;
+
+    lower_bound = (unsigned) ((float) interval * 0.8f);
+    delay.sec = pj_rand() % (interval - lower_bound) + lower_bound;
+    delay.msec = 0;
+
+    /* Reschedule next timer */
+    status = pjsip_endpt_schedule_timer(rtp_session->getAccount()->getVoipLink().getEndpoint(),
+                                        te,
+                                        &delay);
+    if (status == PJ_SUCCESS) {
+        te->id = PJ_TRUE;
+    } else {
+        SIP_CORE_ERROR("Error starting keep-alive rtp timer from callback: {:d}", status);
+    }
+}
+
 using std::string;
 
 static constexpr unsigned MAX_REMB_DEC {1};
@@ -56,14 +98,16 @@ constexpr auto DELAY_AFTER_REMB_DEC = std::chrono::milliseconds(500);
 
 VideoRtpSession::VideoRtpSession(const string& callId,
                                  const string& streamId,
-                                 const DeviceParams& localVideoParams)
-    : RtpSession(callId, streamId, MediaType::MEDIA_VIDEO)
+                                 const DeviceParams& localVideoParams,
+                                 std::shared_ptr<SIPAccountBase> account)
+    : RtpSession(callId, streamId, MediaType::MEDIA_VIDEO, account)
     , localVideoParams_(localVideoParams)
     , videoBitrateInfo_ {}
     , rtcpCheckerThread_([] { return true; }, [this] { processRtcpChecker(); }, [] {})
 {
     setupVideoBitrateInfo(); // reset bitrate
     cc = std::make_unique<CongestionControl>();
+    setupKaTimer();
     SIP_CORE_DBG("[%p] Video RTP session created for call %s", this, callId_.c_str());
 }
 
@@ -103,6 +147,8 @@ VideoRtpSession::startSender()
                  this,
                  conference_ ? "Video Mixer" : input_.c_str(),
                  send_.onHold ? "YES" : "NO");
+
+    cancelKeepAliveTimer();
 
     if (not socketPair_) {
         // Ignore if the transport is not set yet
@@ -203,6 +249,36 @@ VideoRtpSession::startSender()
 }
 
 void
+VideoRtpSession::setupKaTimer()
+{
+    /* Setup and start the timer */
+    pj_time_val delay;
+    pj_status_t status;
+    unsigned delay_initial;
+    unsigned lower_bound;
+    ka_timer_.cb = &keep_alive_timer_cb;
+    ka_timer_.user_data = (void*) this;
+
+    delay_initial = ka_inverval_;
+
+    lower_bound = (unsigned) ((float) delay_initial * 0.8f);
+    delay.sec = pj_rand() % (delay_initial - lower_bound) + lower_bound;
+    delay.msec = 0;
+    status = pjsip_endpt_schedule_timer(account_->getVoipLink().getEndpoint(), &ka_timer_, &delay);
+    SIP_CORE_DEBUG("Video rtp keep-alive delay_initial is {:d}, lower_bound is {:d}",
+                   delay_initial,
+                   lower_bound);
+    if (status == PJ_SUCCESS) {
+        ka_timer_.id = PJ_TRUE;
+        SIP_CORE_DEBUG("Keep-alive timer started for video rtp session {:s}, interval: {:d}s",
+                       getRemoteRtpUri(),
+                       delay.sec);
+    } else {
+        ka_timer_.id = PJ_FALSE;
+    }
+}
+
+void
 VideoRtpSession::restartSender()
 {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
@@ -215,20 +291,19 @@ VideoRtpSession::restartSender()
 
     if (conference_)
         setupConferenceVideoPipeline(*conference_, Direction::SEND);
-    else {
-        attachLocalVideo(true);
-    }
 }
 
 void
 VideoRtpSession::stopSender()
 {
     // Concurrency protection must be done by caller.
-
     SIP_CORE_DBG("[%p] Stop video RTP sender: input [%s] - muted [%s]",
                  this,
                  conference_ ? "Video Mixer" : input_.c_str(),
+
                  send_.onHold ? "YES" : "NO");
+
+    cancelKeepAliveTimer();
 
     if (sender_) {
         if (videoLocal_)
@@ -319,6 +394,20 @@ VideoRtpSession::stopReceiver()
 }
 
 void
+VideoRtpSession::generateEmptyVideoFrame()
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    if (sender_) {
+        std::shared_ptr<VideoFrame> writableFrame_ = nullptr;
+        writableFrame_.reset(new VideoFrame());
+        VideoFrame& output = *writableFrame_.get();
+        output.reserve(AV_PIX_FMT_YUV420P, localVideoParams_.width, localVideoParams_.height);
+        libav_utils::fillWithBlack(output.pointer());
+        sender_->update(nullptr, writableFrame_);
+    }
+}
+
+void
 VideoRtpSession::start()
 {
     SIP_CORE_WARN("[%p] Starting video rtp session", this);
@@ -361,8 +450,6 @@ VideoRtpSession::start()
         if (receive_.enabled and not receive_.onHold) {
             setupConferenceVideoPipeline(*conference_, Direction::RECV);
         }
-    } else {
-        attachLocalVideo(true);
     }
 }
 
@@ -455,12 +542,17 @@ VideoRtpSession::attachLocalVideo(bool attach)
 {
     if (sender_) {
         if (videoLocal_) {
+            SIP_CORE_DBG("[%p] Setup video pipeline on local capture device", this);
             if (attach) {
-                SIP_CORE_DBG("[%p] Setup video pipeline on local capture device", this);
+                cancelKeepAliveTimer();
                 videoLocal_->attach(sender_.get());
-
             } else {
                 videoLocal_->detach(sender_.get());
+                // send frame immediately
+                for (size_t i = 0; i < 2; i++) {
+                    generateEmptyVideoFrame();
+                }
+                setupKaTimer();
             }
         }
     } else {

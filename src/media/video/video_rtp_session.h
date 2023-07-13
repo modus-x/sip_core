@@ -26,6 +26,7 @@
 
 #include "video_base.h"
 #include "threadloop.h"
+#include "sip/sipvoiplink.h"
 
 #include <string>
 #include <memory>
@@ -72,7 +73,8 @@ public:
 
     VideoRtpSession(const std::string& callId,
                     const std::string& streamId,
-                    const DeviceParams& localVideoParams);
+                    const DeviceParams& localVideoParams,
+                    std::shared_ptr<SIPAccountBase> account);
     ~VideoRtpSession();
 
     void setRequestKeyFrameCallback(std::function<void(void)> cb);
@@ -89,6 +91,13 @@ public:
             startReceiver();
         } else {
             stopReceiver();
+        }
+    };
+
+    void cancelKeepAliveTimer()
+    {
+        if (ka_timer_.id != PJ_FALSE) {
+            pjsip_endpt_cancel_timer(account_->getVoipLink().getEndpoint(), &ka_timer_);
         }
     };
 
@@ -122,9 +131,13 @@ public:
 
     std::shared_ptr<VideoMixer> videoMixer_;
     std::shared_ptr<VideoInput> videoLocal_;
+
+    int getKaInterval() { return ka_inverval_; }
     void startSender();
     void stopSender();
     void attachLocalVideo(bool attach);
+
+    void generateEmptyVideoFrame();
 
 private:
     void setupConferenceVideoPipeline(Conference& conference, Direction dir);
@@ -132,6 +145,8 @@ private:
     void stopReceiver();
     using clock = std::chrono::steady_clock;
     using time_point = clock::time_point;
+
+    void setupKaTimer();
 
     DeviceParams localVideoParams_;
 
@@ -187,6 +202,10 @@ private:
     std::function<void(void)> cbKeyFrameRequest_;
 
     std::atomic<int> rotation_ {0};
+
+    int64_t ka_inverval_ {5};
+
+    pj_timer_entry ka_timer_ {};
 };
 
 } // namespace video

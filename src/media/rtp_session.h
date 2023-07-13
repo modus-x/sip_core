@@ -25,6 +25,8 @@
 #include "socket_pair.h"
 #include "connectivity/sip_utils.h"
 #include "media/media_codec.h"
+#include "media/media_codec.h"
+#include "sip/sipaccount.h"
 
 #include <functional>
 #include <string>
@@ -42,10 +44,16 @@ public:
     enum class Direction { SEND, RECV };
 
     // Note: callId is used for ring buffers and smarttools
-    RtpSession(const std::string& callId, const std::string& streamId, MediaType type)
+    // Note: account is used for getting reference to voip link for nat ping
+    RtpSession(const std::string& callId,
+               const std::string& streamId,
+               MediaType type,
+               std::shared_ptr<SIPAccountBase> account)
         : callId_(callId)
         , streamId_(streamId)
         , mediaType_(type)
+        // we are sure that account will be SIPAccount
+        , account_(std::static_pointer_cast<SIPAccount>(account))
     {}
     virtual ~RtpSession() {};
 
@@ -55,6 +63,7 @@ public:
     virtual void controlReceiver(bool active) = 0;
     void setMediaSource(const std::string& resource) { input_ = resource; }
     const std::string& getInput() const { return input_; }
+    std::shared_ptr<SIPAccountBase> getAccount() const { return account_; }
     MediaType getMediaType() const { return mediaType_; };
     virtual void setMuted(bool mute, Direction dir = Direction::SEND) = 0;
 
@@ -79,11 +88,16 @@ public:
 
     inline std::string streamId() const { return streamId_; }
 
+    inline std::string callId() const { return callId_; }
+
+    std::string getRemoteRtpUri() const { return "rtp://" + send_.addr.toString(true); }
+
 protected:
     std::recursive_mutex mutex_;
     const std::string callId_;
     const std::string streamId_;
     MediaType mediaType_;
+    const std::shared_ptr<SIPAccount> account_;
     std::unique_ptr<SocketPair> socketPair_;
     std::string input_ {};
     MediaDescription send_;
@@ -91,8 +105,6 @@ protected:
     uint16_t mtu_;
 
     std::function<void(MediaType, bool)> onSuccessfulSetup_;
-
-    std::string getRemoteRtpUri() const { return "rtp://" + send_.addr.toString(true); }
 };
 
 } // namespace sip_core
