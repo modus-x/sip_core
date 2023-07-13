@@ -144,7 +144,10 @@ attachLocalVideo(const std::string& accountId, const std::string& callId, bool a
 }
 
 void
-controlRTPReceiver(const std::string& accountId, const std::string& callId, const std::string& labelId, bool active)
+controlRTPReceiver(const std::string& accountId,
+                   const std::string& callId,
+                   const std::string& labelId,
+                   bool active)
 {
     return sip_core::Manager::instance().controlRTPReceiver(accountId, callId, labelId, active);
 }
@@ -167,7 +170,9 @@ muteLocalMedia(const std::string& accountId,
             call->muteMedia(mediaType, mute);
             return true;
         } else if (auto conf = account->getConference(callId)) {
-            SIP_CORE_DBG("Muting local host [%s] for conference %s", mediaType.c_str(), callId.c_str());
+            SIP_CORE_DBG("Muting local host [%s] for conference %s",
+                         mediaType.c_str(),
+                         callId.c_str());
             conf->muteLocalHost(mute, mediaType);
             return true;
         } else {
@@ -198,9 +203,14 @@ bool
 joinParticipant(const std::string& accountId,
                 const std::string& sel_callId,
                 const std::string& account2Id,
-                const std::string& drag_callId)
+                const std::string& drag_callId,
+                bool attached)
 {
-    return sip_core::Manager::instance().joinParticipant(accountId, sel_callId, account2Id, drag_callId);
+    return sip_core::Manager::instance().joinParticipant(accountId,
+                                                         sel_callId,
+                                                         account2Id,
+                                                         drag_callId,
+                                                         attached);
 }
 
 void
@@ -278,7 +288,10 @@ joinConference(const std::string& accountId,
                const std::string& account2Id,
                const std::string& drag_confId)
 {
-    return sip_core::Manager::instance().joinConference(accountId, sel_confId, account2Id, drag_confId);
+    return sip_core::Manager::instance().joinConference(accountId,
+                                                        sel_confId,
+                                                        account2Id,
+                                                        drag_confId);
 }
 
 bool
@@ -508,8 +521,8 @@ setModerator(const std::string& accountId,
             conf->setModerator(peerId, state);
         } else {
             SIP_CORE_WARN("Fail to change moderator %s, conference %s not found",
-                      peerId.c_str(),
-                      confId.c_str());
+                          peerId.c_str(),
+                          confId.c_str());
         }
     }
 }
@@ -595,7 +608,8 @@ setActiveStream(const std::string& accountId,
                 const std::string& streamId,
                 const bool& state)
 {
-    if (const auto account = sip_core::Manager::instance().getAccount<sip_core::SIPAccount>(accountId)) {
+    if (const auto account = sip_core::Manager::instance().getAccount<sip_core::SIPAccount>(
+            accountId)) {
         if (auto conf = account->getConference(confId)) {
             conf->setActiveStream(streamId, state);
         } else if (auto call = account->getCall(confId)) {
@@ -632,7 +646,8 @@ hangupParticipant(const std::string& accountId,
     if (const auto account = sip_core::Manager::instance().getAccount(accountId)) {
         if (auto conf = account->getConference(confId)) {
             conf->hangupParticipant(accountUri, deviceId);
-        } else if (auto call = std::static_pointer_cast<sip_core::SIPCall>(account->getCall(confId))) {
+        } else if (auto call = std::static_pointer_cast<sip_core::SIPCall>(
+                       account->getCall(confId))) {
             if (call->conferenceProtocolVersion() == 1) {
                 Json::Value deviceVal;
                 deviceVal["hangup"] = sip_core::TRUE_STR;
@@ -683,11 +698,13 @@ raiseHand(const std::string& accountId,
           const std::string& deviceId,
           const bool& state)
 {
-    if (const auto account = sip_core::Manager::instance().getAccount<sip_core::SIPAccount>(accountId)) {
+    if (const auto account = sip_core::Manager::instance().getAccount<sip_core::SIPAccount>(
+            accountId)) {
         if (auto conf = account->getConference(confId)) {
             auto device = deviceId;
             conf->setHandRaised(device, state);
-        } else if (auto call = std::static_pointer_cast<sip_core::SIPCall>(account->getCall(confId))) {
+        } else if (auto call = std::static_pointer_cast<sip_core::SIPCall>(
+                       account->getCall(confId))) {
             if (call->conferenceProtocolVersion() == 1) {
                 Json::Value deviceVal;
                 deviceVal["raiseHand"] = state;
