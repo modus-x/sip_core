@@ -138,8 +138,9 @@ public:
     void exitConference() override;
 #ifdef ENABLE_VIDEO
     std::mutex sinksMtx_;
-    void createSinks(const ConfInfo& infos) override;
+    void createSinks(ConfInfo& infos) override;
     std::map<std::string, std::shared_ptr<video::SinkClient>> callSinksMap_ {};
+    std::map<std::string, std::string> local2RemoteSinks_ {};
 #endif
     bool hasVideo() const override;
 
@@ -157,7 +158,7 @@ public:
 
     // Override PeerRecorder
     void peerRecording(bool state) override;
-    void peerMuted(bool state) override;
+    void peerMuted(bool state, int streamIdx) override;
     void peerVoice(bool state) override;
     // end override PeerRecorder
 
@@ -254,6 +255,10 @@ public:
     std::vector<std::shared_ptr<RtpSession>> getRtpSessionList(
         MediaType type = MediaType::MEDIA_ALL) const;
     static size_t getActiveMediaStreamCount(const std::vector<MediaAttribute>& mediaAttrList);
+    void setActiveMediaStream(const std::string& accountUri,
+                              const std::string& deviceId,
+                              const std::string& streamId,
+                              const bool& state);
 
     void setPeerRegisteredName(const std::string& name)
     {
@@ -264,6 +269,12 @@ public:
     {
         peerUri_ = peerUri;
     }
+
+    std::string_view peerUri() const {
+        return peerUri_;
+    }
+
+    std::vector<std::string> getLocalIceCandidates(unsigned compId) const;
 
     void setInviteSession(pjsip_inv_session* inviteSession = nullptr);
 
@@ -287,7 +298,7 @@ private:
 
     void deinitRecorder();
 
-    void rtpSetupSuccess(MediaType type, bool isRemote);
+    void rtpSetupSuccess();
 
     void setupVoiceCallback(const std::shared_ptr<RtpSession>& rtpSession);
 
@@ -406,12 +417,8 @@ private:
     OnReadyCb holdCb_ {};
     OnReadyCb offHoldCb_ {};
 
-    std::map<const std::string, bool> mediaReady_ {{"a:local", false},
-                                                   {"a:remote", false},
-                                                   {"v:local", false},
-                                                   {"v:remote", false}};
+    std::atomic_bool waitForIceInit_ {false};
 
-    void resetMediaReady();
     void detachAudioFromConference();
 
     std::mutex setupSuccessMutex_;

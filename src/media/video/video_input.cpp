@@ -122,7 +122,7 @@ VideoInput::getWidth() const
     if (videoManagedByClient()) {
         return decOpts_.width;
     }
-    return decoder_->getWidth();
+    return decoder_ ? decoder_->getWidth() : 0;
 }
 
 int
@@ -131,7 +131,7 @@ VideoInput::getHeight() const
     if (videoManagedByClient()) {
         return decOpts_.height;
     }
-    return decoder_->getHeight();
+    return decoder_ ? decoder_->getHeight() : 0;
 }
 
 AVPixelFormat
@@ -286,6 +286,18 @@ EnumWindowsProcMy(HWND hwnd, LPARAM lParam)
 #endif
 
 void
+VideoInput::setRecorderCallback(
+    const std::function<void(const MediaStream& ms)>& cb)
+{
+    recorderCallback_ = cb;
+    if (decoder_)
+        decoder_->setContextCallback([this]() {
+            if (recorderCallback_)
+                recorderCallback_(getInfo());
+        });
+}
+
+void
 VideoInput::createDecoder()
 {
     deleteDecoder();
@@ -387,10 +399,16 @@ VideoInput::createDecoder()
         onSuccessfulSetup_(MEDIA_VIDEO, 0);
 
     decoder_ = std::move(decoder);
+
     foundDecOpts(decOpts_);
 
     /* Signal the client about readable sink */
     sink_->setFrameSize(decoder_->getWidth(), decoder_->getHeight());
+
+    decoder_->setContextCallback([this]() {
+        if (recorderCallback_)
+            recorderCallback_(getInfo());
+    });
 }
 
 void

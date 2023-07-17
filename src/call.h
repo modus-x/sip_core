@@ -367,7 +367,7 @@ public:
     virtual std::vector<MediaAttribute> getMediaAttributeList() const = 0;
 
 #ifdef ENABLE_VIDEO
-    virtual void createSinks(const ConfInfo& infos) = 0;
+    virtual void createSinks(ConfInfo& infos) = 0;
 #endif
 
     virtual void switchInput(const std::string& = {}) {};
@@ -420,15 +420,6 @@ public:
     }
 
     virtual void restartMediaSender() = 0;
-
-    /**
-     * Update call details after creation.
-     * @param details to update
-     *
-     * \note No warranty to update any details, only some details can be modified.
-     *       See the implementation for more ... details :-).
-     */
-    void updateDetails(const std::map<std::string, std::string>& details);
 
     // Media status methods
     virtual bool hasVideo() const = 0;

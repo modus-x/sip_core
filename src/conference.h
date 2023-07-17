@@ -196,7 +196,8 @@ public:
      */
     explicit Conference(const std::shared_ptr<Account>&,
                         const std::string& confId = "",
-                        bool attachHost = true);
+                        bool attachHost = true,
+                        const std::vector<MediaAttribute>& hostAttr = {});
 
     /**
      * Destructor for this class, decrement static counter

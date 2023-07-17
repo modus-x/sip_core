@@ -314,9 +314,9 @@ MediaEncoder::initStream(const SystemCodecInfo& systemCodecInfo, AVBufferRef* fr
             } else {
                 // Succeed to open codec
                 SIP_CORE_WARN("Using hardware encoding for %s with %s ",
-                              avcodec_get_name(static_cast<AVCodecID>(systemCodecInfo.avcodecId)),
-                              it.getName().c_str());
-                encoders_.push_back(encoderCtx);
+                          avcodec_get_name(static_cast<AVCodecID>(systemCodecInfo.avcodecId)),
+                          it.getName().c_str());
+                encoders_.emplace_back(encoderCtx);
                 break;
             }
         }
@@ -330,7 +330,7 @@ MediaEncoder::initStream(const SystemCodecInfo& systemCodecInfo, AVBufferRef* fr
                                static_cast<AVCodecID>(systemCodecInfo.avcodecId),
                                videoOpts_.bitrate);
         readConfig(encoderCtx);
-        encoders_.push_back(encoderCtx);
+        encoders_.emplace_back(encoderCtx);
         if (avcodec_open2(encoderCtx, outputCodec_, &options_) < 0)
             throw MediaEncoderException("Could not open encoder");
     }
@@ -499,6 +499,8 @@ MediaEncoder::encode(AVFrame* frame, int streamIdx)
         }
     }
     int ret = 0;
+    if (streamIdx >= encoders_.size())
+        return -1;
     AVCodecContext* encoderCtx = encoders_[streamIdx];
     AVPacket pkt;
     av_init_packet(&pkt);

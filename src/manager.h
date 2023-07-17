@@ -808,11 +808,11 @@ public:
      * @param videoStream the the VideoFrameActiveWriter to which the sinks should be attached
      * @param sinksMap A map between sink ids and the respective shared pointer.
      */
-    void createSinkClients(
-        const std::string& callId,
-        const ConfInfo& infos,
-        const std::vector<std::shared_ptr<video::VideoFrameActiveWriter>>& videoStreams,
-        std::map<std::string, std::shared_ptr<video::SinkClient>>& sinksMap);
+    void createSinkClients(const std::string& callId,
+                           const ConfInfo& infos,
+                           const std::vector<std::shared_ptr<video::VideoFrameActiveWriter>>& videoStreams,
+                           std::map<std::string, std::shared_ptr<video::SinkClient>>& sinksMap,
+                           const std::string& accountId = "");
 
     /**
      * Return an existing SinkClient instance as a shared_ptr associated to the given identifier.

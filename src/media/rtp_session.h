@@ -80,8 +80,8 @@ public:
         onSuccessfulSetup_ = cb;
     }
 
-    virtual void initRecorder(std::shared_ptr<MediaRecorder>& rec) = 0;
-    virtual void deinitRecorder(std::shared_ptr<MediaRecorder>& rec) = 0;
+    virtual void initRecorder() = 0;
+    virtual void deinitRecorder() = 0;
     std::shared_ptr<AccountCodecInfo> getCodec() const { return send_.codec; }
     const IpAddr& getSendAddr() const { return send_.addr; };
     const IpAddr& getRecvAddr() const { return receive_.addr; };
@@ -97,13 +97,13 @@ protected:
     const std::string callId_;
     const std::string streamId_;
     MediaType mediaType_;
-    const std::shared_ptr<SIPAccount> account_;
+    const std::shared_ptr<SIPAccountBase> account_;
     std::unique_ptr<SocketPair> socketPair_;
     std::string input_ {};
     MediaDescription send_;
     MediaDescription receive_;
     uint16_t mtu_;
-
+    std::shared_ptr<MediaRecorder> recorder_;
     std::function<void(MediaType, bool)> onSuccessfulSetup_;
 };
 

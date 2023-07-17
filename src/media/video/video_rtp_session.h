@@ -74,7 +74,8 @@ public:
     VideoRtpSession(const std::string& callId,
                     const std::string& streamId,
                     const DeviceParams& localVideoParams,
-                    std::shared_ptr<SIPAccountBase> account);
+                    std::shared_ptr<SIPAccountBase> account,
+                    const std::shared_ptr<MediaRecorder>& rec);
     ~VideoRtpSession();
 
     void setRequestKeyFrameCallback(std::function<void(void)> cb);
@@ -116,8 +117,8 @@ public:
     void exitConference();
 
     void setChangeOrientationCallback(std::function<void(int)> cb);
-    void initRecorder(std::shared_ptr<MediaRecorder>& rec) override;
-    void deinitRecorder(std::shared_ptr<MediaRecorder>& rec) override;
+    void initRecorder() override;
+    void deinitRecorder() override;
 
     const VideoBitrateInfo& getVideoBitrateInfo();
 
@@ -207,6 +208,8 @@ private:
     int64_t ka_inverval_ {5};
 
     pj_timer_entry ka_timer_ {};
+    void attachRemoteRecorder(const MediaStream& ms);
+    void attachLocalRecorder(const MediaStream& ms);
 };
 
 } // namespace video

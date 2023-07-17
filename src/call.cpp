@@ -79,8 +79,6 @@ Call::Call(const std::shared_ptr<Account>& account,
     , type_(type)
     , account_(account)
 {
-    updateDetails(details);
-
     addStateListener([this](Call::CallState call_state,
                             Call::ConnectionState cnx_state,
                             UNUSED int code) {
@@ -347,14 +345,6 @@ Call::toggleRecording()
 {
     const bool startRecording = Recordable::toggleRecording();
     return startRecording;
-}
-
-void
-Call::updateDetails(const std::map<std::string, std::string>& details)
-{
-    const auto& iter = details.find(libsip_core::Call::Details::AUDIO_ONLY);
-    if (iter != std::end(details))
-        isAudioOnly_ = iter->second == TRUE_STR;
 }
 
 std::map<std::string, std::string>

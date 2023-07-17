@@ -49,7 +49,7 @@ init(enum InitFlag flags) noexcept
     sip_core::Logger::setSysLog(true);
     sip_core::Logger::setConsoleLog(LIBSIP_CORE_FLAG_CONSOLE_LOG == (flags & LIBSIP_CORE_FLAG_CONSOLE_LOG));
 
-    const char* log_file = getenv("SIP_CORE_LOG_FILE");
+    const char* log_file = getenv("SIP_CORE_INFO_FILE");
 
     if (log_file) {
         sip_core::Logger::setFileLog(log_file);
