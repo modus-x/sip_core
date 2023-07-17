@@ -47,9 +47,12 @@ VideoSender::VideoSender(const std::string& dest,
                          SocketPair& socketPair,
                          const uint16_t seqVal,
                          uint16_t mtu,
+                         const string& callId,
                          bool enableHwAccel)
     : muxContext_(socketPair.createIOContext(mtu))
     , videoEncoder_(new MediaEncoder)
+    , stream_(opts)
+    , callId_(callId)
 {
     keyFrameFreq_ = opts.frameRate.numerator() * KEY_FRAME_PERIOD;
     videoEncoder_->openOutput(dest, "rtp");
@@ -62,12 +65,27 @@ VideoSender::VideoSender(const std::string& dest,
     videoEncoder_->addStream(args.codec->systemCodecInfo);
     videoEncoder_->setInitSeqVal(seqVal);
     videoEncoder_->setIOContext(muxContext_->getContext());
+}
 
-    // for (size_t i = 0; i < 50; i++)
-    // {
-    //     videoEncoder_->encodeEmpty();
+void
+VideoSender::blackFrame()
+{
+    // will be auto-deleted from memory when function returns
+    std::unique_ptr<VideoFrame> frame = std::make_unique<VideoFrame>();
+    VideoFrame& output = *frame.get();
+    output.reserve(AV_PIX_FMT_YUV420P, stream_.width, stream_.height);
+    libav_utils::fillWithBlack(output.pointer());
+    encodeAndSendVideo(std::move(frame));
+}
+
+void
+VideoSender::natPing()
+{
+    videoEncoder_->sendDummyPacket();
+    // if (!natResolved_) {
+    //     natResolved_ = true;
+        // emitSignal<libsip_core::CallSignal::VideoSenderNatResolved>(callId_);
     // }
-
 }
 
 void

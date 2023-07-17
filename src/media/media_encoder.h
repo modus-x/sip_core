@@ -117,6 +117,7 @@ public:
 
     unsigned getStreamCount() const;
     MediaStream getStream(const std::string& name, int streamIdx = -1) const;
+    void sendDummyPacket();
 
 private:
     NON_COPYABLE(MediaEncoder);
@@ -127,6 +128,7 @@ private:
     int initStream(const SystemCodecInfo& systemCodecInfo, AVBufferRef* framesCtx = {});
     void openIOContext();
     void startIO();
+
     AVCodecContext* getCurrentVideoAVCtx();
     AVCodecContext* getCurrentAudioAVCtx();
     void stopEncoder();

@@ -49,6 +49,7 @@ public:
                 SocketPair& socketPair,
                 const uint16_t seqVal,
                 uint16_t mtu,
+                const std::string& callId,
                 bool allowHwAccel = true);
 
     ~VideoSender() {};
@@ -64,6 +65,9 @@ public:
     void setChangeOrientationCallback(std::function<void(int)> cb);
     int setBitrate(uint64_t br);
 
+    void blackFrame();
+    void natPing();
+
 private:
     static constexpr int KEYFRAMES_AT_START {1}; // Number of keyframes to enforce at stream startup
     static constexpr unsigned KEY_FRAME_PERIOD {0}; // seconds before forcing a keyframe
@@ -76,12 +80,18 @@ private:
     std::unique_ptr<MediaIOHandle> muxContext_ = nullptr;
     std::unique_ptr<MediaEncoder> videoEncoder_ = nullptr;
 
+    MediaStream stream_;
+
+    const std::string callId_;
+
     std::atomic<int> forceKeyFrame_ {KEYFRAMES_AT_START};
     int keyFrameFreq_ {0}; // Set keyframe rate, 0 to disable auto-keyframe. Computed in constructor
     int64_t frameNumber_ = 0;
 
     int rotation_ = -1;
     std::function<void(int)> changeOrientationCallback_;
+
+    bool natResolved_ = false;
 };
 } // namespace video
 } // namespace sip_core

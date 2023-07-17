@@ -1261,6 +1261,18 @@ MediaEncoder::testH265Accel()
 }
 
 #ifdef ENABLE_VIDEO
+
+// make everything null
+void
+MediaEncoder::sendDummyPacket()
+{
+    AVPacket pkt;
+    av_init_packet(&pkt);
+    pkt.data = nullptr;
+    pkt.size = 0;
+    send(pkt, -1);
+}
+
 int
 MediaEncoder::getHWFrame(const std::shared_ptr<VideoFrame>& input,
                          std::shared_ptr<VideoFrame>& output)

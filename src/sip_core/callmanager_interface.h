@@ -46,33 +46,38 @@ LIBSIP_CORE_PUBLIC std::string placeCallWithMedia(
     const std::string& to,
     const std::vector<std::map<std::string, std::string>>& mediaList);
 LIBSIP_CORE_PUBLIC bool refuse(const std::string& accountId, const std::string& callId);
-LIBSIP_CORE_PUBLIC void attachLocalVideo(const std::string& accountId, const std::string& callId, bool attach);
-LIBSIP_CORE_PUBLIC void controlRTPReceiver(const std::string& accountId, const std::string& callId, const std::string& labelId, bool active);
+LIBSIP_CORE_PUBLIC void attachLocalVideo(const std::string& accountId,
+                                         const std::string& callId,
+                                         bool attach);
+LIBSIP_CORE_PUBLIC void controlRTPReceiver(const std::string& accountId,
+                                           const std::string& callId,
+                                           const std::string& labelId,
+                                           bool active);
 LIBSIP_CORE_PUBLIC bool accept(const std::string& accountId, const std::string& callId);
 LIBSIP_CORE_PUBLIC bool hangUp(const std::string& accountId, const std::string& callId);
 LIBSIP_CORE_PUBLIC bool hold(const std::string& accountId, const std::string& callId);
 LIBSIP_CORE_PUBLIC bool unhold(const std::string& accountId, const std::string& callId);
 LIBSIP_CORE_PUBLIC bool muteLocalMedia(const std::string& accountId,
-                                 const std::string& callId,
-                                 const std::string& mediaType,
-                                 bool mute);
+                                       const std::string& callId,
+                                       const std::string& mediaType,
+                                       bool mute);
 LIBSIP_CORE_PUBLIC bool transfer(const std::string& accountId,
-                           const std::string& callId,
-                           const std::string& to);
+                                 const std::string& callId,
+                                 const std::string& to);
 LIBSIP_CORE_PUBLIC bool attendedTransfer(const std::string& accountId,
-                                   const std::string& callId,
-                                   const std::string& targetID);
+                                         const std::string& callId,
+                                         const std::string& targetID);
 LIBSIP_CORE_PUBLIC std::map<std::string, std::string> getCallDetails(const std::string& accountId,
-                                                               const std::string& callId);
+                                                                     const std::string& callId);
 LIBSIP_CORE_PUBLIC std::vector<std::string> getCallList(const std::string& accountId);
 
 /* APIs that supports an arbitrary number of media */
 LIBSIP_CORE_PUBLIC bool acceptWithMedia(const std::string& accountId,
-                                  const std::string& callId,
-                                  const std::vector<libsip_core::MediaMap>& mediaList);
+                                        const std::string& callId,
+                                        const std::vector<libsip_core::MediaMap>& mediaList);
 LIBSIP_CORE_PUBLIC bool requestMediaChange(const std::string& accountId,
-                                     const std::string& callId,
-                                     const std::vector<libsip_core::MediaMap>& mediaList);
+                                           const std::string& callId,
+                                           const std::vector<libsip_core::MediaMap>& mediaList);
 
 /**
  * Answer a media change request
@@ -85,85 +90,87 @@ LIBSIP_CORE_PUBLIC bool requestMediaChange(const std::string& accountId,
  * method, or calling it with an empty media list.
  */
 LIBSIP_CORE_PUBLIC bool answerMediaChangeRequest(const std::string& accountId,
-                                           const std::string& callId,
-                                           const std::vector<libsip_core::MediaMap>& mediaList);
+                                                 const std::string& callId,
+                                                 const std::vector<libsip_core::MediaMap>& mediaList);
 
 /* Conference related methods */
 LIBSIP_CORE_PUBLIC bool joinParticipant(const std::string& accountId,
-                                  const std::string& sel_callId,
-                                  const std::string& account2Id,
-                                  const std::string& drag_callId,
-                                  bool attached);
+                                        const std::string& sel_callId,
+                                        const std::string& account2Id,
+                                        const std::string& drag_callId,
+                                        bool attached);
 LIBSIP_CORE_PUBLIC void createConfFromParticipantList(const std::string& accountId,
-                                                const std::vector<std::string>& participants);
+                                                      const std::vector<std::string>& participants);
 LIBSIP_CORE_PUBLIC void setConferenceLayout(const std::string& accountId,
-                                      const std::string& confId,
-                                      uint32_t layout);
-LIBSIP_CORE_PUBLIC bool isConferenceParticipant(const std::string& accountId, const std::string& callId);
+                                            const std::string& confId,
+                                            uint32_t layout);
+LIBSIP_CORE_PUBLIC bool isConferenceParticipant(const std::string& accountId,
+                                                const std::string& callId);
 LIBSIP_CORE_PUBLIC bool addParticipant(const std::string& accountId,
-                                 const std::string& callId,
-                                 const std::string& account2Id,
-                                 const std::string& confId);
+                                       const std::string& callId,
+                                       const std::string& account2Id,
+                                       const std::string& confId);
 LIBSIP_CORE_PUBLIC bool addMainParticipant(const std::string& accountId, const std::string& confId);
 LIBSIP_CORE_PUBLIC bool detachLocalParticipant();
 LIBSIP_CORE_PUBLIC bool detachParticipant(const std::string& accountId, const std::string& callId);
 LIBSIP_CORE_PUBLIC bool joinConference(const std::string& accountId,
-                                 const std::string& sel_confId,
-                                 const std::string& account2Id,
-                                 const std::string& drag_confId);
+                                       const std::string& sel_confId,
+                                       const std::string& account2Id,
+                                       const std::string& drag_confId);
 LIBSIP_CORE_PUBLIC bool hangUpConference(const std::string& accountId, const std::string& confId);
 LIBSIP_CORE_PUBLIC bool holdConference(const std::string& accountId, const std::string& confId);
 LIBSIP_CORE_PUBLIC bool unholdConference(const std::string& accountId, const std::string& confId);
 LIBSIP_CORE_PUBLIC std::vector<std::string> getConferenceList(const std::string& accountId);
 LIBSIP_CORE_PUBLIC std::vector<std::string> getParticipantList(const std::string& accountId,
-                                                         const std::string& confId);
-LIBSIP_CORE_PUBLIC std::string getConferenceId(const std::string& accountId, const std::string& callId);
-LIBSIP_CORE_PUBLIC std::map<std::string, std::string> getConferenceDetails(const std::string& accountId,
-                                                                     const std::string& callId);
+                                                               const std::string& confId);
+LIBSIP_CORE_PUBLIC std::string getConferenceId(const std::string& accountId,
+                                               const std::string& callId);
+LIBSIP_CORE_PUBLIC std::map<std::string, std::string> getConferenceDetails(
+    const std::string& accountId, const std::string& callId);
 LIBSIP_CORE_PUBLIC std::vector<libsip_core::MediaMap> currentMediaList(const std::string& accountId,
-                                                           const std::string& callId);
+                                                                       const std::string& callId);
 LIBSIP_CORE_PUBLIC std::vector<std::map<std::string, std::string>> getConferenceInfos(
     const std::string& accountId, const std::string& confId);
 LIBSIP_CORE_PUBLIC void setModerator(const std::string& accountId,
-                               const std::string& confId,
-                               const std::string& accountUri,
-                               const bool& state);
+                                     const std::string& confId,
+                                     const std::string& accountUri,
+                                     const bool& state);
 /// DEPRECATED USE muteStream
 LIBSIP_CORE_PUBLIC void muteParticipant(const std::string& accountId,
-                                  const std::string& confId,
-                                  const std::string& accountUri,
-                                  const bool& state);
+                                        const std::string& confId,
+                                        const std::string& accountUri,
+                                        const bool& state);
 // Note: muting Audio not supported yet
 LIBSIP_CORE_PUBLIC void muteStream(const std::string& accountId,
-                             const std::string& confId,
-                             const std::string& accountUri,
-                             const std::string& deviceId,
-                             const std::string& streamId,
-                             const bool& state);
+                                   const std::string& confId,
+                                   const std::string& accountUri,
+                                   const std::string& deviceId,
+                                   const std::string& streamId,
+                                   const bool& state);
 /// DEPRECATED, USE setActiveStream
 LIBSIP_CORE_PUBLIC void setActiveParticipant(const std::string& accountId,
-                                       const std::string& confId,
-                                       const std::string& callId);
+                                             const std::string& confId,
+                                             const std::string& callId);
 LIBSIP_CORE_PUBLIC void setActiveStream(const std::string& accountId,
+                                        const std::string& confId,
+                                        const std::string& accountUri,
+                                        const std::string& deviceId,
+                                        const std::string& streamId,
+                                        const bool& state);
+LIBSIP_CORE_PUBLIC void hangupParticipant(const std::string& accountId,
+                                          const std::string& confId,
+                                          const std::string& accountUri,
+                                          const std::string& deviceId);
+/// DEPRECATED, use raiseHand
+LIBSIP_CORE_PUBLIC void raiseParticipantHand(const std::string& accountId,
+                                             const std::string& confId,
+                                             const std::string& peerId,
+                                             const bool& state);
+LIBSIP_CORE_PUBLIC void raiseHand(const std::string& accountId,
                                   const std::string& confId,
                                   const std::string& accountUri,
                                   const std::string& deviceId,
-                                  const std::string& streamId,
                                   const bool& state);
-LIBSIP_CORE_PUBLIC void hangupParticipant(const std::string& accountId,
-                                    const std::string& confId,
-                                    const std::string& accountUri,
-                                    const std::string& deviceId);
-/// DEPRECATED, use raiseHand
-LIBSIP_CORE_PUBLIC void raiseParticipantHand(const std::string& accountId,
-                                       const std::string& confId,
-                                       const std::string& peerId,
-                                       const bool& state);
-LIBSIP_CORE_PUBLIC void raiseHand(const std::string& accountId,
-                            const std::string& confId,
-                            const std::string& accountUri,
-                            const std::string& deviceId,
-                            const bool& state);
 
 /* Statistic related methods */
 LIBSIP_CORE_PUBLIC void startSmartInfo(uint32_t refreshTimeMs);
@@ -184,22 +191,27 @@ LIBSIP_CORE_PUBLIC void playDTMF(const std::string& key);
 LIBSIP_CORE_PUBLIC void startTone(int32_t start, int32_t type);
 
 LIBSIP_CORE_PUBLIC bool switchInput(const std::string& accountId,
-                              const std::string& callId,
-                              const std::string& resource);
+                                    const std::string& callId,
+                                    const std::string& resource);
 LIBSIP_CORE_PUBLIC bool switchSecondaryInput(const std::string& accountId,
-                                       const std::string& confId,
-                                       const std::string& resource);
+                                             const std::string& confId,
+                                             const std::string& resource);
 
 /* Instant messaging */
 LIBSIP_CORE_PUBLIC void sendTextMessage(const std::string& accountId,
-                                  const std::string& callId,
-                                  const std::map<std::string, std::string>& messages,
-                                  const std::string& from,
-                                  bool isMixed);
+                                        const std::string& callId,
+                                        const std::map<std::string, std::string>& messages,
+                                        const std::string& from,
+                                        bool isMixed);
 
 // Call signal type definitions
 struct LIBSIP_CORE_PUBLIC CallSignal
 {
+    struct LIBSIP_CORE_PUBLIC VideoSenderNatResolved
+    {
+        constexpr static const char* name = "VideoSenderNatResolved";
+        using cb_type = void(const std::string&);
+    };
     struct LIBSIP_CORE_PUBLIC StateChange
     {
         constexpr static const char* name = "StateChange";

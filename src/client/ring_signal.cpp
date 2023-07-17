@@ -33,6 +33,7 @@ getSignalHandlers()
         exported_callback<libsip_core::CallSignal::TransferFailed>(),
         exported_callback<libsip_core::CallSignal::TransferSucceeded>(),
         exported_callback<libsip_core::CallSignal::RecordPlaybackStopped>(),
+        exported_callback<libsip_core::CallSignal::VideoSenderNatResolved>(),
         exported_callback<libsip_core::CallSignal::VoiceMailNotify>(),
         exported_callback<libsip_core::CallSignal::IncomingMessage>(),
         exported_callback<libsip_core::CallSignal::IncomingCall>(),

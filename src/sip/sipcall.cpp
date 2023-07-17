@@ -2094,7 +2094,7 @@ SIPCall::isReinviteRequired(const std::vector<MediaAttribute>& mediaAttrList)
 
 #ifdef ENABLE_VIDEO
         if (newAttr.type_ == MediaType::MEDIA_VIDEO) {
-            return true;
+            return false;
         }
 #endif
     }

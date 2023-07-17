@@ -137,7 +137,8 @@ public:
     void stopSender();
     void attachLocalVideo(bool attach);
 
-    void generateEmptyVideoFrame();
+    void natPing();
+
 
 private:
     void setupConferenceVideoPipeline(Conference& conference, Direction dir);

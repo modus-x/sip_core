@@ -449,7 +449,6 @@ MediaDecoder::MediaDecoder(MediaObserver o)
 
 MediaDecoder::~MediaDecoder()
 {
-    SIP_CORE_WARNING("MediaDecoder::~MediaDecoder %s", getDecoderName().c_str());
 #ifdef RING_ACCEL
     if (decoderCtx_ && decoderCtx_->hw_device_ctx)
         av_buffer_unref(&decoderCtx_->hw_device_ctx);

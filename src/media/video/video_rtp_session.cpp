@@ -59,10 +59,9 @@ keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
 
     rtp_session = (VideoRtpSession*) te->user_data;
 
-    SIP_CORE_DEBUG("Sending keep-alive rtp packet to session {:s}", rtp_session->getRemoteRtpUri());
 
     /* Send some empty rtp packet with correct params */
-    rtp_session->generateEmptyVideoFrame();
+    rtp_session->natPing();
 
     /* Check just in case keep-alive has been disabled. This shouldn't happen
      * though as when ka_interval is changed this timer should have been
@@ -83,7 +82,7 @@ keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
     if (status == PJ_SUCCESS) {
         te->id = PJ_TRUE;
     } else {
-        SIP_CORE_ERROR("Error starting keep-alive rtp timer from callback: {:d}", status);
+        SIP_CORE_ERROR("VideoRtpSession Error starting keep-alive rtp timer from callback: {:d}", status);
     }
 }
 
@@ -107,14 +106,13 @@ VideoRtpSession::VideoRtpSession(const string& callId,
 {
     setupVideoBitrateInfo(); // reset bitrate
     cc = std::make_unique<CongestionControl>();
-    setupKaTimer();
-    SIP_CORE_DBG("[%p] Video RTP session created for call %s", this, callId_.c_str());
+    SIP_CORE_DBG("VideoRtpSession [%p] Video RTP session created for call %s", this, callId_.c_str());
 }
 
 VideoRtpSession::~VideoRtpSession()
 {
     stop();
-    SIP_CORE_DBG("[%p] Video RTP session destroyed", this);
+    SIP_CORE_DBG("VideoRtpSession [%p] Video RTP session destroyed", this);
 }
 
 const VideoBitrateInfo&
@@ -133,6 +131,13 @@ VideoRtpSession::updateMedia(const MediaDescription& send, const MediaDescriptio
 }
 
 void
+VideoRtpSession::natPing()
+{
+    SIP_CORE_DEBUG("VideoRtpSession Sending keep-alive rtp packet to session {:s}", getRemoteRtpUri());
+    sender_->natPing();
+}
+
+void
 VideoRtpSession::setRequestKeyFrameCallback(std::function<void(void)> cb)
 {
     cbKeyFrameRequest_ = std::move(cb);
@@ -143,12 +148,10 @@ VideoRtpSession::startSender()
 {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
 
-    SIP_CORE_DBG("[%p] Start video RTP sender: input [%s] - muted [%s]",
+    SIP_CORE_DBG("VideoRtpSession [%p] Start video RTP sender: input [%s] - muted [%s]",
                  this,
                  conference_ ? "Video Mixer" : input_.c_str(),
                  send_.onHold ? "YES" : "NO");
-
-    cancelKeepAliveTimer();
 
     if (not socketPair_) {
         // Ignore if the transport is not set yet
@@ -162,7 +165,7 @@ VideoRtpSession::startSender()
                 videoLocal_->detach(sender_.get());
             if (videoMixer_)
                 videoMixer_->detach(sender_.get());
-            SIP_CORE_WARN("[%p] Restarting video sender", this);
+            SIP_CORE_WARN("VideoRtpSession [%p] Restarting video sender", this);
         }
 
         if (not conference_) {
@@ -175,15 +178,15 @@ VideoRtpSession::startSender()
                         && newParams.wait_for(NEWPARAMS_TIMEOUT) == std::future_status::ready) {
                         localVideoParams_ = newParams.get();
                     } else {
-                        SIP_CORE_ERR("[%p] No valid new video parameters", this);
+                        SIP_CORE_ERR("VideoRtpSession [%p] No valid new video parameters", this);
                         return;
                     }
                 } catch (const std::exception& e) {
-                    SIP_CORE_ERR("Exception during retrieving video parameters: %s", e.what());
+                    SIP_CORE_ERR("VideoRtpSession Exception during retrieving video parameters: %s", e.what());
                     return;
                 }
             } else {
-                SIP_CORE_WARN("Can't lock video input");
+                SIP_CORE_WARN("VideoRtpSession Can't lock video input");
                 return;
             }
 
@@ -226,13 +229,27 @@ VideoRtpSession::startSender()
                                     send_.bitrate,
                                     static_cast<rational<int>>(localVideoParams_.framerate))
                       : videoMixer_->getStream("Video Sender");
-            sender_.reset(new VideoSender(
-                getRemoteRtpUri(), ms, send_, *socketPair_, initSeqVal_ + 1, mtu_, allowHwAccel));
+            sender_.reset(new VideoSender(getRemoteRtpUri(),
+                                          ms,
+                                          send_,
+                                          *socketPair_,
+                                          initSeqVal_ + 1,
+                                          mtu_,
+                                          callId_,
+                                          allowHwAccel));
 
             if (changeOrientationCallback_)
                 sender_->setChangeOrientationCallback(changeOrientationCallback_);
             if (socketPair_)
                 socketPair_->setPacketLossCallback([this]() { cbKeyFrameRequest_(); });
+
+            // make hole and wait for turning video on / immediate attaching to video conference
+            if (!videoMixer_) {
+                natPing();
+                emitSignal<libsip_core::CallSignal::VideoSenderNatResolved>(callId_);
+
+                setupKaTimer();
+            }
 
         } catch (const MediaEncoderException& e) {
             SIP_CORE_ERR("%s", e.what());
@@ -297,7 +314,7 @@ void
 VideoRtpSession::stopSender()
 {
     // Concurrency protection must be done by caller.
-    SIP_CORE_DBG("[%p] Stop video RTP sender: input [%s] - muted [%s]",
+    SIP_CORE_DBG("VideoRtpSession [%p] Stop video RTP sender: input [%s] - muted [%s]",
                  this,
                  conference_ ? "Video Mixer" : input_.c_str(),
 
@@ -322,7 +339,7 @@ VideoRtpSession::startReceiver()
 {
     // Concurrency protection must be done by caller.
 
-    SIP_CORE_DBG("[%p] Starting receiver", this);
+    SIP_CORE_DBG("VideoRtpSession [%p] Starting receiver", this);
 
     if (receive_.enabled and not receive_.onHold) {
         if (receiveThread_)
@@ -347,7 +364,7 @@ VideoRtpSession::startReceiver()
         }
 
     } else {
-        SIP_CORE_DBG("[%p] Video receiver disabled", this);
+        SIP_CORE_DBG("VideoRtpSession [%p] Video receiver disabled", this);
         if (receiveThread_ and videoMixer_ and conference_) {
             // Note, this should be managed differently, this is a bit hacky
             auto audioId_ = streamId_;
@@ -368,7 +385,7 @@ VideoRtpSession::stopReceiver()
 {
     // Concurrency protection must be done by caller.
 
-    SIP_CORE_DBG("[%p] Stopping receiver", this);
+    SIP_CORE_DBG("VideoRtpSession [%p] Stopping receiver", this);
 
     if (not receiveThread_)
         return;
@@ -394,23 +411,9 @@ VideoRtpSession::stopReceiver()
 }
 
 void
-VideoRtpSession::generateEmptyVideoFrame()
-{
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
-    if (sender_) {
-        std::shared_ptr<VideoFrame> writableFrame_ = nullptr;
-        writableFrame_.reset(new VideoFrame());
-        VideoFrame& output = *writableFrame_.get();
-        output.reserve(AV_PIX_FMT_YUV420P, localVideoParams_.width, localVideoParams_.height);
-        libav_utils::fillWithBlack(output.pointer());
-        sender_->update(nullptr, writableFrame_);
-    }
-}
-
-void
 VideoRtpSession::start()
 {
-    SIP_CORE_WARN("[%p] Starting video rtp session", this);
+    SIP_CORE_WARN("VideoRtpSession [%p] Starting video rtp session", this);
     std::lock_guard<std::recursive_mutex> lock(mutex_);
 
     try {
@@ -429,14 +432,14 @@ VideoRtpSession::start()
                                     send_.crypto.getSrtpKeyInfo().c_str());
         }
     } catch (const std::runtime_error& e) {
-        SIP_CORE_ERR("[%p] Socket creation failed: %s", this, e.what());
+        SIP_CORE_ERR("VideoRtpSession [%p] Socket creation failed: %s", this, e.what());
         return;
     }
 
     startSender();
 
     if (not send_.enabled and not receive_.enabled) {
-        SIP_CORE_WARN("[%p] Video rtp session stopped, because send is not enabled", this);
+        SIP_CORE_WARN("VideoRtpSession [%p] Video rtp session stopped, because send is not enabled", this);
         stop();
         return;
     }
@@ -479,6 +482,7 @@ VideoRtpSession::stop()
 void
 VideoRtpSession::setMuted(bool mute, Direction dir)
 {
+    SIP_CORE_DBG("[%p] VideoRtpSession change to %s", this, mute ? "muted" : "un-muted");
     std::lock_guard<std::recursive_mutex> lock(mutex_);
 
     // ensure that start has been called before setmuted
@@ -542,15 +546,16 @@ VideoRtpSession::attachLocalVideo(bool attach)
 {
     if (sender_) {
         if (videoLocal_) {
-            SIP_CORE_DBG("[%p] Setup video pipeline on local capture device", this);
+            SIP_CORE_DBG("VideoRtpSession [%p] Attach local video - %d", this, attach);
             if (attach) {
                 cancelKeepAliveTimer();
                 videoLocal_->attach(sender_.get());
             } else {
-                videoLocal_->detach(sender_.get());
-                // send frame immediately
-                for (size_t i = 0; i < 2; i++) {
-                    generateEmptyVideoFrame();
+                auto sender = sender_.get();
+                videoLocal_->detach(sender);
+                // send some frames immediately
+                for (size_t i = 0; i < 5; i++) {
+                    sender->blackFrame();
                 }
                 setupKaTimer();
             }
@@ -564,7 +569,7 @@ void
 VideoRtpSession::setupConferenceVideoPipeline(Conference& conference, Direction dir)
 {
     if (dir == Direction::SEND) {
-        SIP_CORE_DBG("[%p] Setup video sender pipeline on conference %s for call %s",
+        SIP_CORE_DBG("VideoRtpSession [%p] Setup video sender pipeline on conference %s for call %s",
                      this,
                      conference.getConfId().c_str(),
                      callId_.c_str());
@@ -579,7 +584,7 @@ VideoRtpSession::setupConferenceVideoPipeline(Conference& conference, Direction 
             SIP_CORE_WARN("[%p] no sender", this);
         }
     } else {
-        SIP_CORE_DBG("[%p] Setup video receiver pipeline on conference %s for call %s",
+        SIP_CORE_DBG("VideoRtpSession [%p] Setup video receiver pipeline on conference %s for call %s",
                      this,
                      conference.getConfId().c_str(),
                      callId_.c_str());
@@ -602,7 +607,7 @@ VideoRtpSession::enterConference(Conference& conference)
 
     conference_ = &conference;
     videoMixer_ = conference.getVideoMixer();
-    SIP_CORE_DBG("[%p] enterConference (conf: %s)", this, conference.getConfId().c_str());
+    SIP_CORE_DBG("VideoRtpSession [%p] enterConference (conf: %s)", this, conference.getConfId().c_str());
 
     if (send_.enabled or receiveThread_) {
         // Restart encoder with conference parameter ON in order to unlink HW encoder
@@ -622,7 +627,7 @@ VideoRtpSession::exitConference()
     if (!conference_)
         return;
 
-    SIP_CORE_DBG("[%p] exitConference (conf: %s)", this, conference_->getConfId().c_str());
+    SIP_CORE_DBG("VideoRtpSession [%p] exitConference (conf: %s)", this, conference_->getConfId().c_str());
 
     if (videoMixer_) {
         if (sender_)
@@ -920,7 +925,7 @@ VideoRtpSession::delayMonitor(int gradient, int deltaT)
         // Limit REMB decrease to MAX_REMB_DEC every DELAY_AFTER_REMB_DEC ms
         if (remb_dec_cnt_ < MAX_REMB_DEC && remb_timer_dec < DELAY_AFTER_REMB_DEC) {
             remb_dec_cnt_++;
-            SIP_CORE_WARN("[BandwidthAdapt] Detected reception bandwidth overuse");
+            SIP_CORE_WARN("VideoRtpSession [BandwidthAdapt] Detected reception bandwidth overuse");
             uint8_t* buf = nullptr;
             uint64_t br = 0x6803; // Decrease 3
             auto v = cc->createREMB(br);
