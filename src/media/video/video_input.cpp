@@ -321,24 +321,7 @@ VideoInput::createDecoder()
         [](void* data) -> int { return not static_cast<VideoInput*>(data)->isCapturing(); }, this);
 
     bool ready = false, restartSink = false;
-    if ((decOpts_.format == "x11grab" || decOpts_.format == "dxgigrab") && !decOpts_.is_area) {
-#ifdef WIN32
-        // if window is not find, it might have changed its name
-        // in that case we must search for the parent process window
-        auto hwnd = FindWindow(NULL, to_wstring(decOpts_.name.substr(6)).c_str());
-        if (!hwnd) {
-            std::pair<DWORD, std::string> idName(wProcessId, {});
-            LPARAM lParam = reinterpret_cast<LPARAM>(&idName);
-            EnumWindows(EnumWindowsProcMy, lParam);
-            if (!idName.second.empty()) {
-                auto newTitle = "title=" + idName.second;
-                if (decOpts_.name != newTitle || decOpts_.input != newTitle) {
-                    decOpts_.name = newTitle;
-                    decOpts_.input = newTitle;
-                }
-            }
-        }
-#endif
+    if (decOpts_.format == "x11grab" && !decOpts_.is_area) {
         decOpts_.width = 0;
         decOpts_.height = 0;
     }
@@ -476,7 +459,8 @@ VideoInput::initX11(const std::string& display)
         p.input = display.substr(1, space);
         if (p.window_id.empty()) {
             p.input = display.substr(0, space);
-            auto splits = sip_core::split_string_to_unsigned(display.substr(space + 1), 'x');
+            JAMI_INFO() << "p.window_id.empty()";
+            auto splits = jami::split_string_to_unsigned(display.substr(space + 1), 'x');
             // round to 8 pixel block
             p.width = round2pow(splits[0], 3);
             p.height = round2pow(splits[1], 3);
@@ -527,67 +511,31 @@ VideoInput::initAVFoundation(const std::string& display)
     return true;
 }
 
-#ifdef WIN32
 bool
-VideoInput::initWindowsGrab(const std::string& display)
+VideoInput::initGdiGrab(const std::string& params)
 {
-    // Patterns
-    // full screen sharing : :1+0,0 2560x1440 - SCREEN 1, POSITION 0X0, RESOLUTION 2560X1440
-    // area sharing : :1+882,211 1532x779 - SCREEN 1, POSITION 882x211, RESOLUTION 1532x779
-    // window sharing : :+1,0 0x0 window-id:TITLE - POSITION 0X0
-    size_t space = display.find(' ');
-    std::string windowIdStr = "window-id:";
-    size_t winIdPos = display.find(windowIdStr);
-
-    DeviceParams p = sip_core::getVideoDeviceMonitor().getDeviceParams(DEVICE_DESKTOP);
-    if (winIdPos != std::string::npos) {
-        p.input = display.substr(winIdPos + windowIdStr.size()); // "TITLE";
-        p.name  = display.substr(winIdPos + windowIdStr.size()); // "TITLE";
-
-        auto hwnd = FindWindow(NULL, to_wstring(p.name.substr(6)).c_str());
-        if (auto parent = GetWindow(hwnd, GW_OWNER))
-            GetWindowThreadProcessId(parent, &wProcessId);
-        else
-            GetWindowThreadProcessId(hwnd, &wProcessId);
-        p.is_area = 0;
-    } else {
-        p.input = display.substr(1);
-        p.name = display.substr(1);
-        p.is_area = 1;
-        if (space != std::string::npos) {
-            auto splits = sip_core::split_string_to_unsigned(display.substr(space + 1), 'x');
-            if (splits.size() != 2)
-                return false;
-
-            // round to 8 pixel block
-            p.width = splits[0];
-            p.height = splits[1];
-
-            size_t plus = display.find('+');
-            auto position = display.substr(plus + 1, space - plus - 1);
-            splits = sip_core::split_string_to_unsigned(position, ',');
-            if (splits.size() != 2)
-                return false;
-            p.offset_x = splits[0];
-            p.offset_y = splits[1];
-        } else {
-            p.width = default_grab_width;
-            p.height = default_grab_height;
-        }
-    }
-
-    auto dec = std::make_unique<MediaDecoder>();
-    if (dec->openInput(p) < 0 || dec->setupVideo() < 0)
-        return initCamera(sip_core::getVideoDeviceMonitor().getDefaultDevice());
-
+    size_t space = params.find(' ');
     clearOptions();
-    decOpts_ = p;
-    decOpts_.width = dec->getStream().width;
-    decOpts_.height = dec->getStream().height;
+    decOpts_ = jami::getVideoDeviceMonitor().getDeviceParams(DEVICE_DESKTOP);
+
+    if (space != std::string::npos) {
+        std::istringstream iss(params.substr(space + 1));
+        char sep;
+        unsigned w, h;
+        iss >> w >> sep >> h;
+        decOpts_.width = round2pow(w, 3);
+        decOpts_.height = round2pow(h, 3);
+
+        size_t plus = params.find('+');
+        std::istringstream dss(params.substr(plus + 1, space - plus));
+        dss >> decOpts_.offset_x >> sep >> decOpts_.offset_y;
+    } else {
+        decOpts_.width = default_grab_width;
+        decOpts_.height = default_grab_height;
+    }
 
     return true;
 }
-#endif
 
 bool
 VideoInput::initFile(std::string path)
@@ -682,8 +630,8 @@ VideoInput::switchInput(const std::string& resource)
         /* X11 display name */
 #ifdef __APPLE__
         ready = initAVFoundation(suffix);
-#elif defined(WIN32)
-        ready = initWindowsGrab(suffix);
+#elif defined(_WIN32)
+        ready = initGdiGrab(suffix);
 #else
         ready = initX11(suffix);
 #endif

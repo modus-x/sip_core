@@ -281,7 +281,7 @@ VideoDeviceImpl::getDeviceParams() const
     params.unique_id = id;
     params.input = id;
     if (id == DEVICE_DESKTOP) {
-        params.format = "dxgigrab";
+        params.format = "gdigrab";
         params.framerate = desktopFrameRate_;
         return params;
     }
