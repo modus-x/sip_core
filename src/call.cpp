@@ -56,7 +56,7 @@ hangupCallsIf(Call::SubcallSet&& calls, int errcode, T pred)
     for (auto& call : calls) {
         if (not pred(call.get()))
             continue;
-       call->hangup(errcode);
+        call->hangup(errcode);
     }
 }
 
@@ -79,46 +79,45 @@ Call::Call(const std::shared_ptr<Account>& account,
     , type_(type)
     , account_(account)
 {
-    addStateListener([this](Call::CallState call_state,
-                            Call::ConnectionState cnx_state,
-                            UNUSED int code) {
-        checkPendingIM();
-        runOnMainThread([callWkPtr = weak()] {
-            if (auto call = callWkPtr.lock())
-                call->checkAudio();
-        });
+    addStateListener(
+        [this](Call::CallState call_state, Call::ConnectionState cnx_state, UNUSED int code) {
+            checkPendingIM();
+            runOnMainThread([callWkPtr = weak()] {
+                if (auto call = callWkPtr.lock())
+                    call->checkAudio();
+            });
 
-        // if call just started ringing, schedule call timeout
-        if (type_ == CallType::INCOMING and cnx_state == ConnectionState::RINGING) {
-            auto timeout = Manager::instance().getRingingTimeout();
-            SIP_CORE_DBG("Scheduling call timeout in %d seconds", timeout);
+            // if call just started ringing, schedule call timeout
+            if (type_ == CallType::INCOMING and cnx_state == ConnectionState::RINGING) {
+                auto timeout = Manager::instance().getRingingTimeout();
+                SIP_CORE_DBG("Scheduling call timeout in %d seconds", timeout);
 
-            Manager::instance().scheduler().scheduleIn(
-                [callWkPtr = weak()] {
-                    if (auto callShPtr = callWkPtr.lock()) {
-                        if (callShPtr->getConnectionState() == Call::ConnectionState::RINGING) {
-                            SIP_CORE_DBG(
-                                "Call %s is still ringing after timeout, setting state to BUSY",
-                                callShPtr->getCallId().c_str());
-                            callShPtr->hangup(PJSIP_SC_BUSY_HERE);
-                            Manager::instance().callFailure(*callShPtr);
+                Manager::instance().scheduler().scheduleIn(
+                    [callWkPtr = weak()] {
+                        if (auto callShPtr = callWkPtr.lock()) {
+                            if (callShPtr->getConnectionState() == Call::ConnectionState::RINGING) {
+                                SIP_CORE_DBG(
+                                    "Call %s is still ringing after timeout, setting state to BUSY",
+                                    callShPtr->getCallId().c_str());
+                                callShPtr->hangup(PJSIP_SC_BUSY_HERE);
+                                Manager::instance().callFailure(*callShPtr);
+                            }
                         }
-                    }
-                },
-                std::chrono::seconds(timeout));
-        }
+                    },
+                    std::chrono::seconds(timeout));
+            }
 
-        if (!isSubcall()) {
-            if (cnx_state == ConnectionState::CONNECTED && duration_start_ == time_point::min())
-                duration_start_ = clock::now();
-        }
+            if (!isSubcall()) {
+                if (cnx_state == ConnectionState::CONNECTED && duration_start_ == time_point::min())
+                    duration_start_ = clock::now();
+            }
 
-        // kill pending subcalls at disconnect
-        if (call_state == CallState::OVER)
-            hangupCalls(safePopSubcalls(), 0);
+            // kill pending subcalls at disconnect
+            if (call_state == CallState::OVER)
+                hangupCalls(safePopSubcalls(), 0);
 
-        return true;
-    });
+            return true;
+        });
 
     time(&timestamp_start_);
 }
@@ -221,19 +220,19 @@ Call::setState(CallState call_state, ConnectionState cnx_state, signed code)
 {
     std::unique_lock<std::recursive_mutex> lock(callMutex_);
     SIP_CORE_DBG("[call:%s] state change %u/%u, cnx %u/%u, code %d",
-             id_.c_str(),
-             (unsigned) callState_,
-             (unsigned) call_state,
-             (unsigned) connectionState_,
-             (unsigned) cnx_state,
-             code);
+                 id_.c_str(),
+                 (unsigned) callState_,
+                 (unsigned) call_state,
+                 (unsigned) connectionState_,
+                 (unsigned) cnx_state,
+                 code);
 
     if (callState_ != call_state) {
         if (not validStateTransition(call_state)) {
             SIP_CORE_ERR("[call:%s] invalid call state transition from %u to %u",
-                     id_.c_str(),
-                     (unsigned) callState_,
-                     (unsigned) call_state);
+                         id_.c_str(),
+                         (unsigned) callState_,
+                         (unsigned) call_state);
             return false;
         }
     } else if (connectionState_ == cnx_state)
@@ -255,14 +254,14 @@ Call::setState(CallState call_state, ConnectionState cnx_state, signed code)
     if (old_client_state != new_client_state) {
         if (not parent_) {
             SIP_CORE_DBG("[call:%s] emit client call state change %s, code %d",
-                     id_.c_str(),
-                     new_client_state.c_str(),
-                     code);
+                         id_.c_str(),
+                         new_client_state.c_str(),
+                         code);
             lock.unlock();
             emitSignal<libsip_core::CallSignal::StateChange>(getAccountId(),
-                                                         id_,
-                                                         new_client_state,
-                                                         code);
+                                                             id_,
+                                                             new_client_state,
+                                                             code);
         }
     }
 
@@ -416,7 +415,9 @@ Call::addSubCall(Call& subcall)
     }
 
     if (not subcalls_.emplace(getPtr(subcall)).second) {
-        SIP_CORE_ERR("[call:%s] add twice subcall %s", getCallId().c_str(), subcall.getCallId().c_str());
+        SIP_CORE_ERR("[call:%s] add twice subcall %s",
+                     getCallId().c_str(),
+                     subcall.getCallId().c_str());
         return;
     }
 
@@ -463,8 +464,8 @@ Call::subcallStateChanged(Call& subcall, Call::CallState new_state, Call::Connec
     // We found a responding device: hangup all other subcalls and merge
     if (new_state == CallState::ACTIVE and new_cstate == ConnectionState::CONNECTED) {
         SIP_CORE_DBG("[call:%s] subcall %s answered by peer",
-                 getCallId().c_str(),
-                 subcall.getCallId().c_str());
+                     getCallId().c_str(),
+                     subcall.getCallId().c_str());
 
         hangupCallsIf(safePopSubcalls(), 0, [&](const Call* call) { return call != &subcall; });
         merge(subcall);
@@ -476,8 +477,8 @@ Call::subcallStateChanged(Call& subcall, Call::CallState new_state, Call::Connec
     if ((new_state == CallState::ACTIVE or new_state == CallState::PEER_BUSY)
         and new_cstate == ConnectionState::DISCONNECTED) {
         SIP_CORE_WARN("[call:%s] subcall %s hangup by peer",
-                  getCallId().c_str(),
-                  subcall.getCallId().c_str());
+                      getCallId().c_str(),
+                      subcall.getCallId().c_str());
 
         hangupCalls(safePopSubcalls(), 0);
         Manager::instance().peerHungupCall(*this);
@@ -488,11 +489,13 @@ Call::subcallStateChanged(Call& subcall, Call::CallState new_state, Call::Connec
     // Subcall is busy or failed
     if (new_state >= CallState::BUSY) {
         if (new_state == CallState::BUSY || new_state == CallState::PEER_BUSY)
-            SIP_CORE_WARN("[call:%s] subcall %s busy", getCallId().c_str(), subcall.getCallId().c_str());
+            SIP_CORE_WARN("[call:%s] subcall %s busy",
+                          getCallId().c_str(),
+                          subcall.getCallId().c_str());
         else
             SIP_CORE_WARN("[call:%s] subcall %s failed",
-                      getCallId().c_str(),
-                      subcall.getCallId().c_str());
+                          getCallId().c_str(),
+                          subcall.getCallId().c_str());
         std::lock_guard<std::recursive_mutex> lk {callMutex_};
         subcalls_.erase(getPtr(subcall));
 
@@ -689,6 +692,21 @@ Call::sendConfInfo(const std::string& json)
     wbuilder["commentStyle"] = "None";
     wbuilder["indentation"] = "";
     messages["application/confInfo+json"] = json;
+
+    auto w = getAccount();
+    auto account = w.lock();
+    if (account)
+        sendTextMessage(messages, account->getFromUri());
+}
+
+void
+Call::sendActionMessage(const std::string& object, const std::string& action)
+{
+    std::map<std::string, std::string> messages;
+    Json::StreamWriterBuilder wbuilder;
+    wbuilder["commentStyle"] = "None";
+    wbuilder["indentation"] = "";
+    messages["application/" + object + "Action+json"] = action;
 
     auto w = getAccount();
     auto account = w.lock();

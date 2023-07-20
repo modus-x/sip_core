@@ -1569,7 +1569,6 @@ SIPCall::setPeerUaVersion(std::string_view ua)
         SIP_CORE_WARN("[call:%s] Could not parse peer's version", getCallId().c_str());
         return;
     }
-
 }
 
 void
@@ -1666,8 +1665,7 @@ SIPCall::hasVideo() const
 {
 #ifdef ENABLE_VIDEO
     std::function<bool(const RtpStream& stream)> videoCheck = [](auto const& stream) {
-        bool validVideo = stream.mediaAttribute_
-                          && stream.mediaAttribute_->hasValidVideo();
+        bool validVideo = stream.mediaAttribute_ && stream.mediaAttribute_->hasValidVideo();
         bool validRemoteVideo = stream.remoteMediaAttribute_
                                 && stream.remoteMediaAttribute_->hasValidVideo();
         return validVideo || validRemoteVideo;
@@ -1902,9 +1900,9 @@ SIPCall::updateRemoteMedia()
         if (remoteMedia->type_ == MediaType::MEDIA_VIDEO) {
             rtpStream.rtpSession_->setMuted(remoteMedia->muted_, RtpSession::Direction::RECV);
             SIP_CORE_DEBUG("[call:{:s}] Remote media @ {:d}: {:s}",
-                       getCallId(),
-                       idx,
-                       remoteMedia->toString());
+                           getCallId(),
+                           idx,
+                           remoteMedia->toString());
             // Request a key-frame if we are un-muting the video
             if (not remoteMedia->muted_)
                 requestKeyframe(findRtpStreamIndex(remoteMedia->label_));
@@ -2227,6 +2225,8 @@ SIPCall::onMediaNegotiationComplete()
 
             this_->updateRemoteMedia();
             this_->reportMediaNegotiationStatus();
+            // dump replace of reinvite
+            this_->sendActionMessage("videoReceiver", "restart");
         }
     });
 }
@@ -2443,6 +2443,33 @@ SIPCall::onReceiveOfferIn200OK(const pjmedia_sdp_session* offer)
     }
 }
 
+void
+SIPCall::onTextMessage(std::map<std::string, std::string>&& messages)
+{
+    for (const auto& pair : messages) {
+        const std::string& key = pair.first;
+        if (key.find("Action") != std::string::npos) {
+            if (key.find("videoReceiver") != std::string::npos) {
+                for (auto const& stream : rtpStreams_) {
+                    if (stream.mediaAttribute_->type_ == MediaType::MEDIA_VIDEO
+                        && stream.rtpSession_) {
+                        const std::string& value = messages[key];
+                        const auto& curvideoRtpSession = std::static_pointer_cast<video::VideoRtpSession>(
+                            stream.rtpSession_);
+                        if (value == "restart") {
+                            curvideoRtpSession->stopReceiver();
+                            curvideoRtpSession->startReceiver();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // call base class
+    Call::onTextMessage(std::move(messages));
+}
+
 std::map<std::string, std::string>
 SIPCall::getDetails() const
 {
@@ -2537,9 +2564,9 @@ SIPCall::exitConference()
 
 void
 SIPCall::setActiveMediaStream(const std::string& accountUri,
-    const std::string& deviceId,
-    const std::string& streamId,
-    const bool& state)
+                              const std::string& deviceId,
+                              const std::string& streamId,
+                              const bool& state)
 {
     auto remoteStreamId = streamId;
 #ifdef ENABLE_VIDEO
@@ -2595,7 +2622,6 @@ SIPCall::setRotation(int streamIdx, int rotation)
     //         }
     //     }
     // });
-
 }
 
 void
@@ -2609,13 +2635,17 @@ SIPCall::createSinks(ConfInfo& infos)
     for (auto& participant : infos) {
         if (string_remove_suffix(participant.uri, '@') == account_.lock()->getUsername()
             && participant.device
-                == Manager::instance().getVideoManager().videoDeviceMonitor.getMRLForDefaultDevice()) {
+                   == Manager::instance()
+                          .getVideoManager()
+                          .videoDeviceMonitor.getMRLForDefaultDevice()) {
             for (auto iter = rtpStreams_.begin(); iter != rtpStreams_.end(); iter++) {
-                if (!iter->mediaAttribute_ || iter->mediaAttribute_->type_ == MediaType::MEDIA_AUDIO) {
+                if (!iter->mediaAttribute_
+                    || iter->mediaAttribute_->type_ == MediaType::MEDIA_AUDIO) {
                     continue;
                 }
                 auto localVideo = std::static_pointer_cast<video::VideoRtpSession>(iter->rtpSession_)
-                                    ->getVideoLocal().get();
+                                      ->getVideoLocal()
+                                      .get();
                 auto size = std::make_pair(10, 10);
                 if (localVideo) {
                     size = std::make_pair(localVideo->getWidth(), localVideo->getHeight());
@@ -2827,4 +2857,4 @@ SIPCall::peerVoice(bool voice)
     }
 }
 
-} // namespace jami
+} // namespace sip_core

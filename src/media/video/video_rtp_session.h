@@ -139,12 +139,12 @@ public:
     void attachLocalVideo(bool attach);
 
     void natPing();
-
+    void startReceiver();
+    void stopReceiver();
 
 private:
     void setupConferenceVideoPipeline(Conference& conference, Direction dir);
-    void startReceiver();
-    void stopReceiver();
+
     using clock = std::chrono::steady_clock;
     using time_point = clock::time_point;
 

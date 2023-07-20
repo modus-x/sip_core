@@ -125,7 +125,9 @@ public:
     bool requestMediaChange(const std::vector<libsip_core::MediaMap>& mediaList) override;
     std::vector<libsip_core::MediaMap> currentMediaList() const override;
     void sendTextMessage(const std::map<std::string, std::string>& messages,
+
                          const std::string& from) override;
+    void onTextMessage(std::map<std::string, std::string>&& messages) override;
     void removeCall() override;
     void muteMedia(const std::string& mediaType, bool isMuted) override;
     std::vector<MediaAttribute> getMediaAttributeList() const override;
@@ -146,10 +148,7 @@ public:
 
     // TODO: cleanup this (used by conference + Call::getDetails() (and clients can use this))
     bool isCaptureDeviceMuted(const MediaType& mediaType) const override;
-    bool isSrtpEnabled() const
-    {
-        return srtpEnabled_;
-    }
+    bool isSrtpEnabled() const { return srtpEnabled_; }
     // End of override of Call class
 
     // Override of Recordable class
@@ -182,10 +181,7 @@ public:
     /**
      * Return the SDP's manager of this call
      */
-    Sdp& getSDP()
-    {
-        return *sdp_;
-    }
+    Sdp& getSDP() { return *sdp_; }
 
     // Implementation of events reported by SipVoipLink.
     /**
@@ -225,10 +221,7 @@ public:
     void setSipTransport(const std::shared_ptr<SipTransport>& transport,
                          const std::string& contactHdr = {});
 
-    SipTransport* getTransport()
-    {
-        return sipTransport_.get();
-    }
+    SipTransport* getTransport() { return sipTransport_.get(); }
 
     void sendSIPInfo(std::string_view body, std::string_view subtype);
 
@@ -260,19 +253,11 @@ public:
                               const std::string& streamId,
                               const bool& state);
 
-    void setPeerRegisteredName(const std::string& name)
-    {
-        peerRegisteredName_ = name;
-    }
+    void setPeerRegisteredName(const std::string& name) { peerRegisteredName_ = name; }
 
-    void setPeerUri(const std::string& peerUri)
-    {
-        peerUri_ = peerUri;
-    }
+    void setPeerUri(const std::string& peerUri) { peerUri_ = peerUri; }
 
-    std::string_view peerUri() const {
-        return peerUri_;
-    }
+    std::string_view peerUri() const { return peerUri_; }
 
     std::vector<std::string> getLocalIceCandidates(unsigned compId) const;
 
@@ -284,10 +269,7 @@ public:
     {
         return std::weak_ptr<const SIPCall>(shared());
     }
-    inline std::weak_ptr<SIPCall> weak()
-    {
-        return std::weak_ptr<SIPCall>(shared());
-    }
+    inline std::weak_ptr<SIPCall> weak() { return std::weak_ptr<SIPCall>(shared()); }
     /**
      * Announce to the client that medias are successfully negotiated
      */
@@ -313,7 +295,6 @@ private:
     void setVideoOrientation(int streamIdx, int rotation);
 
     mutable std::mutex transportMtx_ {};
-
 
     void setupNegotiatedMedia();
 
@@ -405,7 +386,6 @@ private:
     bool mediaRestartRequired_ {true};
     bool srtpEnabled_ {false};
     bool rtcpMuxEnabled_ {false};
-
 
     std::string peerUri_ {};
 

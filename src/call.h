@@ -253,14 +253,16 @@ public:
      * @param the new media list from the remote
      * @return true if the new media differs from the current media
      **/
-    virtual bool checkMediaChangeRequest(const std::vector<libsip_core::MediaMap>& remoteMediaList) = 0;
+    virtual bool checkMediaChangeRequest(const std::vector<libsip_core::MediaMap>& remoteMediaList)
+        = 0;
 
     /**
      * Process incoming media change request.
      *
      * @param the new media list from the remote
      */
-    virtual void handleMediaChangeRequest(const std::vector<libsip_core::MediaMap>& remoteMediaList) = 0;
+    virtual void handleMediaChangeRequest(const std::vector<libsip_core::MediaMap>& remoteMediaList)
+        = 0;
 
     /**
      * Answer to a media update request.
@@ -408,16 +410,10 @@ public:
                                  const std::string& from)
         = 0;
 
-    void onTextMessage(std::map<std::string, std::string>&& messages);
+    virtual void onTextMessage(std::map<std::string, std::string>&& messages);
 
-    virtual std::shared_ptr<AccountCodecInfo> getAudioCodec() const
-    {
-        return {};
-    }
-    virtual std::shared_ptr<AccountCodecInfo> getVideoCodec() const
-    {
-        return {};
-    }
+    virtual std::shared_ptr<AccountCodecInfo> getAudioCodec() const { return {}; }
+    virtual std::shared_ptr<AccountCodecInfo> getVideoCodec() const { return {}; }
 
     virtual void restartMediaSender() = 0;
 
@@ -446,14 +442,12 @@ public:
     std::unique_ptr<AudioDeviceGuard> audioGuard;
     void sendConfOrder(const Json::Value& root);
     void sendConfInfo(const std::string& json);
+    void sendActionMessage(const std::string& object, const std::string& action);
     void resetConfInfo();
 
     virtual void monitor() const = 0;
 
-    int conferenceProtocolVersion() const
-    {
-        return peerConfProtocol_;
-    }
+    int conferenceProtocolVersion() const { return peerConfProtocol_; }
 
 protected:
     using clock = std::chrono::steady_clock;
