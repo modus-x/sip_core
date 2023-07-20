@@ -459,8 +459,8 @@ VideoInput::initX11(const std::string& display)
         p.input = display.substr(1, space);
         if (p.window_id.empty()) {
             p.input = display.substr(0, space);
-            JAMI_INFO() << "p.window_id.empty()";
-            auto splits = jami::split_string_to_unsigned(display.substr(space + 1), 'x');
+            SIP_CORE_INFO() << "p.window_id.empty()";
+            auto splits = sip_core::split_string_to_unsigned(display.substr(space + 1), 'x');
             // round to 8 pixel block
             p.width = round2pow(splits[0], 3);
             p.height = round2pow(splits[1], 3);
@@ -516,7 +516,7 @@ VideoInput::initGdiGrab(const std::string& params)
 {
     size_t space = params.find(' ');
     clearOptions();
-    decOpts_ = jami::getVideoDeviceMonitor().getDeviceParams(DEVICE_DESKTOP);
+    decOpts_ = sip_core::getVideoDeviceMonitor().getDeviceParams(DEVICE_DESKTOP);
 
     if (space != std::string::npos) {
         std::istringstream iss(params.substr(space + 1));
