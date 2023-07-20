@@ -141,6 +141,7 @@ MediaDemuxer::openInput(const DeviceParams& params)
         av_dict_set(&options_, "window_id", params.window_id.c_str(), 0);
     }
     av_dict_set(&options_, "is_area", std::to_string(params.is_area).c_str(), 0);
+    av_dict_set(&options_, "show_region", std::to_string(1).c_str(), 0);
 
 #if defined(__APPLE__) && TARGET_OS_MAC
     std::string input = params.name;
@@ -149,12 +150,12 @@ MediaDemuxer::openInput(const DeviceParams& params)
 #endif
 
     SIP_CORE_DBG("Trying to open device %s with format %s, pixel format %s, size %dx%d, rate %lf",
-             input.c_str(),
-             params.format.c_str(),
-             params.pixel_format.c_str(),
-             params.width,
-             params.height,
-             params.framerate.real());
+                 input.c_str(),
+                 params.format.c_str(),
+                 params.pixel_format.c_str(),
+                 params.width,
+                 params.height,
+                 params.framerate.real());
 
     av_opt_set_int(
         inputCtx_,
@@ -169,9 +170,9 @@ MediaDemuxer::openInput(const DeviceParams& params)
         baseWidth_ = inputCtx_->streams[0]->codecpar->width;
         baseHeight_ = inputCtx_->streams[0]->codecpar->height;
         SIP_CORE_DBG("Using format %s and resolution %dx%d",
-                 params.format.c_str(),
-                 baseWidth_,
-                 baseHeight_);
+                     params.format.c_str(),
+                     baseWidth_,
+                     baseHeight_);
     }
 
     return ret;
@@ -533,8 +534,8 @@ MediaDecoder::setupStream()
             if (avcodec_open2(decoderCtx_, inputDecoder_, &options_) < 0) {
                 // Failed to open codec
                 SIP_CORE_WARN("Fail to open hardware decoder for %s with %s",
-                          avcodec_get_name(decoderCtx_->codec_id),
-                          it.getName().c_str());
+                              avcodec_get_name(decoderCtx_->codec_id),
+                              it.getName().c_str());
                 avcodec_free_context(&decoderCtx_);
                 decoderCtx_ = nullptr;
                 accel_.reset();
@@ -542,8 +543,8 @@ MediaDecoder::setupStream()
             } else {
                 // Succeed to open codec
                 SIP_CORE_WARN("Using hardware decoding for %s with %s",
-                          avcodec_get_name(decoderCtx_->codec_id),
-                          it.getName().c_str());
+                              avcodec_get_name(decoderCtx_->codec_id),
+                              it.getName().c_str());
                 break;
             }
         }
@@ -551,7 +552,7 @@ MediaDecoder::setupStream()
 #endif
 
     SIP_CORE_DBG() << "Decoding " << av_get_media_type_string(avStream_->codecpar->codec_type)
-               << " using " << inputDecoder_->long_name << " (" << inputDecoder_->name << ")";
+                   << " using " << inputDecoder_->long_name << " (" << inputDecoder_->name << ")";
 
     decoderCtx_->thread_count = std::max(1u, std::min(8u, std::thread::hardware_concurrency() / 2));
     if (emulateRate_)
@@ -648,10 +649,10 @@ MediaDecoder::decode(AVPacket& packet)
     if (resolutionChangedCallback_) {
         if (decoderCtx_->width != width_ or decoderCtx_->height != height_) {
             SIP_CORE_DBG("Resolution changed from %dx%d to %dx%d",
-                     width_,
-                     height_,
-                     decoderCtx_->width,
-                     decoderCtx_->height);
+                         width_,
+                         height_,
+                         decoderCtx_->width,
+                         decoderCtx_->height);
             width_ = decoderCtx_->width;
             height_ = decoderCtx_->height;
             resolutionChangedCallback_(width_, height_);
