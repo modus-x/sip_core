@@ -23,6 +23,9 @@
 
 #include "rational.h"
 
+#include "sip_core.h"
+#include <json/json.h>
+
 #include <string>
 #include <chrono>
 
@@ -37,6 +40,17 @@ constexpr static auto NEWPARAMS_TIMEOUT = std::chrono::milliseconds(1000);
  */
 struct DeviceParams
 {
+    static libsip_core::DeviceMap toDeviceMap(const DeviceParams& mediaAttr);
+
+    DeviceParams(const libsip_core::DeviceMap& deviceMap);
+
+    DeviceParams() = default;
+
+    std::pair<bool, int> getIntValue(const libsip_core::DeviceMap& map, const std::string& key);
+
+    std::string toJson() const;
+    DeviceParams(const std::string& msg);
+
     std::string name {};      // friendly name (e.g. Logitech BRIO)
     std::string input {};     // Device path (e.g. /dev/video0)
     std::string unique_id {}; // unique id (e.g. 046d082d8A8B667F)

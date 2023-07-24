@@ -86,6 +86,10 @@ public:
         onSuccessfulSetup_ = cb;
     }
 
+    void setDeviceParams(const DeviceParams& params) {
+        args_ = params;
+    }
+
     void setRecorderCallback(const std::function<void(const MediaStream& ms)>& cb);
 
     void setResolutionChangedCallback(const std::function<void(void)>& cb);

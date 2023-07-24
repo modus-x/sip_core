@@ -448,6 +448,13 @@ MediaDecoder::MediaDecoder(MediaObserver o)
     , callback_(std::move(o))
 {}
 
+MediaDecoder::MediaDecoder(MediaObserver o, int width, int height)
+    : demuxer_(new MediaDemuxer)
+    , callback_(std::move(o))
+    , width_(width)
+    , height_(height)
+{}
+
 MediaDecoder::~MediaDecoder()
 {
 #ifdef RING_ACCEL
@@ -495,6 +502,16 @@ MediaDecoder::setup(AVMediaType type)
     if (avStream_ == nullptr) {
         SIP_CORE_ERR("No stream found at index %i", stream);
         return -1;
+    }
+
+    if (width_ != 0 && height_ != 0) {
+        if (avStream_->codecpar->height != height_ || avStream_->codecpar->width != width_) {
+            SIP_CORE_ERR("Received packet with wrong dimensions %dx%d, stream %i",
+                         avStream_->codecpar->width,
+                         avStream_->codecpar->height,
+                         stream);
+            return -1;
+        }
     }
     demuxer_->setStreamCallback(stream, [this](AVPacket& packet) { return decode(packet); });
     return setupStream();

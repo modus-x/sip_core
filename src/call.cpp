@@ -700,13 +700,13 @@ Call::sendConfInfo(const std::string& json)
 }
 
 void
-Call::sendActionMessage(const std::string& object, const std::string& action)
+Call::sendObjectJson(const std::string& objectName, const std::string& objectJson)
 {
     std::map<std::string, std::string> messages;
     Json::StreamWriterBuilder wbuilder;
     wbuilder["commentStyle"] = "None";
     wbuilder["indentation"] = "";
-    messages["application/" + object + "Action+json"] = action;
+    messages["application/" + objectName + "+json"] = objectJson;
 
     auto w = getAccount();
     auto account = w.lock();

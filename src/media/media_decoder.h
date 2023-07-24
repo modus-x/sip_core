@@ -169,6 +169,7 @@ class MediaDecoder
 public:
     MediaDecoder();
     MediaDecoder(MediaObserver observer);
+    MediaDecoder(MediaObserver observer, int width, int height);
     MediaDecoder(const std::shared_ptr<MediaDemuxer>& demuxer, int index);
     MediaDecoder(const std::shared_ptr<MediaDemuxer>& demuxer, int index, MediaObserver observer);
     MediaDecoder(const std::shared_ptr<MediaDemuxer>& demuxer, AVMediaType type)

@@ -152,6 +152,7 @@ VideoRtpSession::setRequestKeyFrameCallback(std::function<void(void)> cb)
 void
 VideoRtpSession::startSender()
 {
+    bool restart = false;
     std::lock_guard<std::recursive_mutex> lock(mutex_);
 
     SIP_CORE_DBG("VideoRtpSession [%p] Start video RTP sender: input [%s] - muted [%s]",
@@ -167,6 +168,7 @@ VideoRtpSession::startSender()
 
     if (send_.enabled and not send_.onHold) {
         if (sender_) {
+            restart = true;
             if (videoLocal_)
                 videoLocal_->detach(sender_.get());
             if (videoMixer_)
@@ -257,6 +259,10 @@ VideoRtpSession::startSender()
                 emitSignal<libsip_core::CallSignal::VideoSenderNatResolved>(callId_);
 
                 setupKaTimer();
+            }
+
+            if (restart) {
+                localDeviceParamsChangedCallback_(localVideoParams_);
             }
 
         } catch (const MediaEncoderException& e) {
@@ -364,10 +370,7 @@ VideoRtpSession::startReceiver()
         // XXX keyframe requests can timeout if unanswered
         receiveThread_->addIOContext(*socketPair_);
         receiveThread_->setSuccessfulSetupCb(onSuccessfulSetup_);
-        receiveThread_->setResolutionChangedCallback([this]() {
-            stopReceiver();
-            startReceiver();
-        });
+        receiveThread_->setDeviceParams(remoteVideoParams_);
         receiveThread_->startLoop();
         receiveThread_->setRequestKeyFrameCallback([this]() { cbKeyFrameRequest_(); });
         receiveThread_->setRotation(rotation_.load());
@@ -911,8 +914,8 @@ VideoRtpSession::initRecorder()
 void
 VideoRtpSession::deinitRecorder()
 {
-	if (!recorder_)
-		return;
+    if (!recorder_)
+        return;
     if (receiveThread_) {
         auto ms = receiveThread_->getInfo();
         if (auto ob = recorder_->getStream(ms.name)) {
@@ -935,6 +938,12 @@ VideoRtpSession::setChangeOrientationCallback(std::function<void(int)> cb)
     changeOrientationCallback_ = std::move(cb);
     if (sender_)
         sender_->setChangeOrientationCallback(changeOrientationCallback_);
+}
+
+void
+VideoRtpSession::setLocalDeviceParamsChangedCallback(std::function<void(DeviceParams&)> cb)
+{
+    localDeviceParamsChangedCallback_ = std::move(cb);
 }
 
 float

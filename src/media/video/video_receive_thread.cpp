@@ -90,28 +90,30 @@ VideoReceiveThread::setup()
 {
     SIP_CORE_DBG("[%p] Setup video receiver", this);
 
-    videoDecoder_.reset(new MediaDecoder([this](const std::shared_ptr<MediaFrame>& frame) mutable {
-        libav_utils::AVBufferPtr displayMatrix;
-        {
-            std::lock_guard<std::mutex> l(rotationMtx_);
-            if (displayMatrix_)
-                displayMatrix.reset(av_buffer_ref(displayMatrix_.get()));
-        }
-        if (displayMatrix)
-            av_frame_new_side_data_from_buf(frame->pointer(),
-                                            AV_FRAME_DATA_DISPLAYMATRIX,
-                                            displayMatrix.release());
-        publishFrame(std::static_pointer_cast<VideoFrame>(frame));
-    }));
+    videoDecoder_.reset(new MediaDecoder(
+                            [this](const std::shared_ptr<MediaFrame>& frame) mutable {
+                                libav_utils::AVBufferPtr displayMatrix;
+                                {
+                                    std::lock_guard<std::mutex> l(rotationMtx_);
+                                    if (displayMatrix_)
+                                        displayMatrix.reset(av_buffer_ref(displayMatrix_.get()));
+                                }
+                                if (displayMatrix)
+                                    av_frame_new_side_data_from_buf(frame->pointer(),
+                                                                    AV_FRAME_DATA_DISPLAYMATRIX,
+                                                                    displayMatrix.release());
+                                publishFrame(std::static_pointer_cast<VideoFrame>(frame));
+                            },
+                            args_.width,
+                            args_.height));
     videoDecoder_->setContextCallback([this]() {
         if (recorderCallback_)
             recorderCallback_(getInfo());
     });
     videoDecoder_->setResolutionChangedCallback([this](int width, int height) {
-        // dstWidth_ = width;
-        // dstHeight_ = height;
-        // sink_->setFrameSize(dstWidth_, dstHeight_);
-        resolutionChangedCallback_();
+        dstWidth_ = width;
+        dstHeight_ = height;
+        sink_->setFrameSize(dstWidth_, dstHeight_);
     });
 
     dstWidth_ = args_.width;
@@ -194,8 +196,7 @@ VideoReceiveThread::addIOContext(SocketPair& socketPair)
 }
 
 void
-VideoReceiveThread::setRecorderCallback(
-    const std::function<void(const MediaStream& ms)>& cb)
+VideoReceiveThread::setRecorderCallback(const std::function<void(const MediaStream& ms)>& cb)
 {
     recorderCallback_ = cb;
     if (videoDecoder_)
@@ -205,11 +206,11 @@ VideoReceiveThread::setRecorderCallback(
         });
 }
 
-void 
-VideoReceiveThread::setResolutionChangedCallback(const std::function<void(void)>& cb) {
+void
+VideoReceiveThread::setResolutionChangedCallback(const std::function<void(void)>& cb)
+{
     resolutionChangedCallback_ = cb;
 }
-
 
 void
 VideoReceiveThread::decodeFrame()

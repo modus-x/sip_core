@@ -273,6 +273,10 @@ SIPCall::configureRtpSession(const std::shared_ptr<RtpSession>& rtpSession,
                     thisPtr->setVideoOrientation(streamIdx, angle);
             });
         });
+        videoRtp->setLocalDeviceParamsChangedCallback([w = weak()](DeviceParams& newParams) {
+            if (auto thisPtr = w.lock())
+                thisPtr->sendObjectJson("videoDeviceParams", newParams.toJson());
+        });
     }
 #endif
 }
@@ -1313,15 +1317,6 @@ SIPCall::switchInput(const std::string& source)
             }
         }
     }
-
-    // Check if the call is being recorded in order to continue
-    // ... the recording after the switch
-    // bool isRec = Call::isRecording();
-
-    // SIPSessionReinvite(getMediaAttributeList());
-    // if (isRec) {
-    //     readyToRecord_ = false;
-    //     pendingRecord_ = true;
 }
 
 void
@@ -2235,8 +2230,6 @@ SIPCall::onMediaNegotiationComplete()
 
             this_->updateRemoteMedia();
             this_->reportMediaNegotiationStatus();
-            // dump replace of reinvite
-            // this_->sendActionMessage("videoReceiver", "restart");
         }
     });
 }
@@ -2456,26 +2449,24 @@ SIPCall::onReceiveOfferIn200OK(const pjmedia_sdp_session* offer)
 void
 SIPCall::onTextMessage(std::map<std::string, std::string>&& messages)
 {
-    // for (const auto& pair : messages) {
-    //     const std::string& key = pair.first;
-    //     if (key.find("Action") != std::string::npos) {
-    //         if (key.find("videoReceiver") != std::string::npos) {
-    //             for (auto const& stream : rtpStreams_) {
-    //                 if (stream.mediaAttribute_->type_ == MediaType::MEDIA_VIDEO
-    //                     && stream.rtpSession_) {
-    //                     const std::string& value = messages[key];
-    //                     const auto& curvideoRtpSession =
-    //                     std::static_pointer_cast<video::VideoRtpSession>(
-    //                         stream.rtpSession_);
-    //                     if (value == "restart") {
-    //                         curvideoRtpSession->stopReceiver();
-    //                         curvideoRtpSession->startReceiver();
-    //                     }
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
+    for (const auto& pair : messages) {
+        const std::string& key = pair.first;
+
+        // device changed, we should stop local decoder and wait for new packets
+        if (key.find("videoDeviceParams") != std::string::npos) {
+            for (auto const& stream : rtpStreams_) {
+                if (stream.mediaAttribute_->type_ == MediaType::MEDIA_VIDEO && stream.rtpSession_) {
+                    const std::string& value = messages[key];
+                    const auto& rtpSession
+                        = std::static_pointer_cast<video::VideoRtpSession>(stream.rtpSession_);
+                    DeviceParams params = DeviceParams(value);
+                    rtpSession->stopReceiver();
+                    rtpSession->setRemoteDeviceParams(params);
+                    rtpSession->startReceiver();
+                }
+            }
+        }
+    }
 
     // call base class
     Call::onTextMessage(std::move(messages));

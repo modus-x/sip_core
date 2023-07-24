@@ -25,6 +25,7 @@ list(
   "${CMAKE_CURRENT_SOURCE_DIR}/media_codec.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/media_decoder.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/media_decoder.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/media_device.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/media_device.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/media_encoder.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/media_encoder.h"

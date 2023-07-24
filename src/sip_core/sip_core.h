@@ -178,6 +178,7 @@ LIBSIP_CORE_PUBLIC void registerSignalHandlers(
 LIBSIP_CORE_PUBLIC void unregisterSignalHandlers();
 
 using MediaMap = std::map<std::string, std::string>;
+using DeviceMap = std::map<std::string, std::string>;
 
 } // namespace libsip_core
 

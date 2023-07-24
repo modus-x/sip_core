@@ -442,7 +442,7 @@ public:
     std::unique_ptr<AudioDeviceGuard> audioGuard;
     void sendConfOrder(const Json::Value& root);
     void sendConfInfo(const std::string& json);
-    void sendActionMessage(const std::string& object, const std::string& action);
+    void sendObjectJson(const std::string& objectName, const std::string& objectJson);
     void resetConfInfo();
 
     virtual void monitor() const = 0;

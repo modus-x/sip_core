@@ -117,6 +117,7 @@ public:
     void exitConference();
 
     void setChangeOrientationCallback(std::function<void(int)> cb);
+    void setLocalDeviceParamsChangedCallback(std::function<void(DeviceParams&)> cb);
     void initRecorder() override;
     void deinitRecorder() override;
 
@@ -139,6 +140,9 @@ public:
     void attachLocalVideo(bool attach);
 
     void natPing();
+
+    void setRemoteDeviceParams(const DeviceParams& params) { remoteVideoParams_ = params; }
+
     void startReceiver();
     void stopReceiver();
 
@@ -151,6 +155,7 @@ private:
     void setupKaTimer();
 
     DeviceParams localVideoParams_;
+    DeviceParams remoteVideoParams_;
 
     std::unique_ptr<VideoSender> sender_;
     std::shared_ptr<VideoReceiveThread> receiveThread_;
@@ -189,6 +194,8 @@ private:
     std::function<void(int)> changeOrientationCallback_;
 
     std::function<void(bool)> recordingStateCallback_;
+
+    std::function<void(DeviceParams&)> localDeviceParamsChangedCallback_;
 
     // interval in seconds between RTCP checkings
     std::chrono::seconds rtcp_checking_interval {4};
