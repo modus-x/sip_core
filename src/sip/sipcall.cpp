@@ -1298,9 +1298,20 @@ SIPCall::switchInput(const std::string& source)
 {
     SIP_CORE_DBG("[call:%s] Set selected source to %s", getCallId().c_str(), source.c_str());
 
+    size_t streamIdx = -1;
+
     for (auto const& stream : rtpStreams_) {
+        streamIdx++;
         auto mediaAttr = stream.mediaAttribute_;
         mediaAttr->sourceUri_ = source;
+        if (mediaAttr->type_ == MEDIA_VIDEO) {
+            for (const auto& rtpSession : getRtpSessionList(MediaType::MEDIA_VIDEO)) {
+                auto videoRtp = std::static_pointer_cast<video::VideoRtpSession>(rtpSession);
+                videoRtp->setMediaSource(source);
+                videoRtp->restartSender();
+                videoRtp->attachLocalVideo(true);
+            }
+        }
     }
 
     // Check if the call is being recorded in order to continue
@@ -1311,9 +1322,6 @@ SIPCall::switchInput(const std::string& source)
     // if (isRec) {
     //     readyToRecord_ = false;
     //     pendingRecord_ = true;
-
-    for (const auto& videoRtp : getRtpSessionList(MediaType::MEDIA_VIDEO))
-        std::static_pointer_cast<video::VideoRtpSession>(videoRtp)->restartSender();
 }
 
 void
