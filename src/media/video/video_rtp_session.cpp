@@ -257,9 +257,9 @@ VideoRtpSession::startSender()
             if (!videoMixer_) {
                 natPing();
                 emitSignal<libsip_core::CallSignal::VideoSenderNatResolved>(callId_);
-
-                setupKaTimer();
             }
+
+            setupKaTimer();
 
             if (restart) {
                 localDeviceParamsChangedCallback_(localVideoParams_);
@@ -282,11 +282,16 @@ VideoRtpSession::startSender()
 void
 VideoRtpSession::setupKaTimer()
 {
+
+    if (ka_timer_.id != PJ_FALSE) {
+        return;
+    }
     /* Setup and start the timer */
     pj_time_val delay;
     pj_status_t status;
     unsigned delay_initial;
     unsigned lower_bound;
+
     ka_timer_.cb = &keep_alive_timer_cb;
     ka_timer_.user_data = (void*) this;
 
@@ -590,7 +595,7 @@ VideoRtpSession::attachLocalVideo(bool attach)
         if (videoLocal_) {
             SIP_CORE_DBG("VideoRtpSession [%p] Attach local video - %d", this, attach);
             if (attach) {
-                // cancelKeepAliveTimer();
+                cancelKeepAliveTimer();
                 videoLocal_->attach(sender_.get());
             } else {
                 auto sender = sender_.get();
@@ -599,7 +604,7 @@ VideoRtpSession::attachLocalVideo(bool attach)
                 for (size_t i = 0; i < 5; i++) {
                     sender->blackFrame();
                 }
-                // setupKaTimer();
+                setupKaTimer();
             }
         }
     } else {
@@ -611,6 +616,7 @@ void
 VideoRtpSession::setupConferenceVideoPipeline(Conference& conference, Direction dir)
 {
     if (dir == Direction::SEND) {
+        cancelKeepAliveTimer();
         SIP_CORE_DBG(
             "VideoRtpSession [%p] Setup video sender pipeline on conference %s for call %s",
             this,
@@ -691,6 +697,8 @@ VideoRtpSession::exitConference()
 
         videoMixer_.reset();
     }
+
+    setupKaTimer();
 
     conference_ = nullptr;
 }

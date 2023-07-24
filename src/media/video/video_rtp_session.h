@@ -99,6 +99,7 @@ public:
     {
         if (ka_timer_.id != PJ_FALSE) {
             pjsip_endpt_cancel_timer(account_->getVoipLink().getEndpoint(), &ka_timer_);
+            ka_timer_.id = PJ_FALSE;
         }
     };
 

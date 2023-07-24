@@ -2454,6 +2454,7 @@ SIPCall::onTextMessage(std::map<std::string, std::string>&& messages)
 
         // device changed, we should stop local decoder and wait for new packets
         if (key.find("videoDeviceParams") != std::string::npos) {
+            SIP_CORE_WARN() << "onTextMessage videoDeviceParams";
             for (auto const& stream : rtpStreams_) {
                 if (stream.mediaAttribute_->type_ == MediaType::MEDIA_VIDEO && stream.rtpSession_) {
                     const std::string& value = messages[key];

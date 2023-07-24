@@ -1264,7 +1264,7 @@ MediaEncoder::testH265Accel()
 
 #ifdef ENABLE_VIDEO
 
-// make everything null
+// make everything null and send it as dummy packet
 void
 MediaEncoder::sendDummyPacket()
 {

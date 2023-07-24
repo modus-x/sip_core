@@ -82,10 +82,6 @@ void
 VideoSender::natPing()
 {
     videoEncoder_->sendDummyPacket();
-    // if (!natResolved_) {
-    //     natResolved_ = true;
-        // emitSignal<libsip_core::CallSignal::VideoSenderNatResolved>(callId_);
-    // }
 }
 
 void
