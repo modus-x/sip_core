@@ -364,6 +364,10 @@ VideoRtpSession::startReceiver()
         // XXX keyframe requests can timeout if unanswered
         receiveThread_->addIOContext(*socketPair_);
         receiveThread_->setSuccessfulSetupCb(onSuccessfulSetup_);
+        receiveThread_->setResolutionChangedCallback([this]() {
+            stopReceiver();
+            startReceiver();
+        });
         receiveThread_->startLoop();
         receiveThread_->setRequestKeyFrameCallback([this]() { cbKeyFrameRequest_(); });
         receiveThread_->setRotation(rotation_.load());
@@ -583,7 +587,7 @@ VideoRtpSession::attachLocalVideo(bool attach)
         if (videoLocal_) {
             SIP_CORE_DBG("VideoRtpSession [%p] Attach local video - %d", this, attach);
             if (attach) {
-                cancelKeepAliveTimer();
+                // cancelKeepAliveTimer();
                 videoLocal_->attach(sender_.get());
             } else {
                 auto sender = sender_.get();
@@ -592,7 +596,7 @@ VideoRtpSession::attachLocalVideo(bool attach)
                 for (size_t i = 0; i < 5; i++) {
                     sender->blackFrame();
                 }
-                setupKaTimer();
+                // setupKaTimer();
             }
         }
     } else {

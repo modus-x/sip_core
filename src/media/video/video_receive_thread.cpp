@@ -88,7 +88,7 @@ VideoReceiveThread::stopLoop()
 bool
 VideoReceiveThread::setup()
 {
-    SIP_CORE_DBG("[%p] Setupping video receiver", this);
+    SIP_CORE_DBG("[%p] Setup video receiver", this);
 
     videoDecoder_.reset(new MediaDecoder([this](const std::shared_ptr<MediaFrame>& frame) mutable {
         libav_utils::AVBufferPtr displayMatrix;
@@ -108,9 +108,10 @@ VideoReceiveThread::setup()
             recorderCallback_(getInfo());
     });
     videoDecoder_->setResolutionChangedCallback([this](int width, int height) {
-        dstWidth_ = width;
-        dstHeight_ = height;
-        sink_->setFrameSize(dstWidth_, dstHeight_);
+        // dstWidth_ = width;
+        // dstHeight_ = height;
+        // sink_->setFrameSize(dstWidth_, dstHeight_);
+        resolutionChangedCallback_();
     });
 
     dstWidth_ = args_.width;
@@ -203,6 +204,12 @@ VideoReceiveThread::setRecorderCallback(
                 recorderCallback_(getInfo());
         });
 }
+
+void 
+VideoReceiveThread::setResolutionChangedCallback(const std::function<void(void)>& cb) {
+    resolutionChangedCallback_ = cb;
+}
+
 
 void
 VideoReceiveThread::decodeFrame()

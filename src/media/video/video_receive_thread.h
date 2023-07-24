@@ -86,8 +86,9 @@ public:
         onSuccessfulSetup_ = cb;
     }
 
-    void setRecorderCallback(
-        const std::function<void(const MediaStream& ms)>& cb);
+    void setRecorderCallback(const std::function<void(const MediaStream& ms)>& cb);
+
+    void setResolutionChangedCallback(const std::function<void(void)>& cb);
 
 private:
     NON_COPYABLE(VideoReceiveThread);
@@ -127,6 +128,7 @@ private:
     std::function<void(void)> keyFrameRequestCallback_;
     std::function<void(MediaType, bool)> onSuccessfulSetup_;
     std::function<void(const MediaStream& ms)> recorderCallback_;
+    std::function<void(void)> resolutionChangedCallback_;
 };
 
 } // namespace video
