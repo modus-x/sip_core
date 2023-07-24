@@ -504,7 +504,10 @@ MediaDecoder::setup(AVMediaType type)
         return -1;
     }
 
-    if (width_ != 0 && height_ != 0) {
+    // only if it is video decoder and decoder params are predefined, ignore
+    // this setup if something is not as expected (currently only width and
+    // height) useful when we need to accept resolution change of incoming video
+    if (avStream_->codecpar->codec_type == AVMEDIA_TYPE_VIDEO && width_ != 0 && height_ != 0) {
         if (avStream_->codecpar->height != height_ || avStream_->codecpar->width != width_) {
             SIP_CORE_ERR("Received packet with wrong dimensions %dx%d, stream %i",
                          avStream_->codecpar->width,

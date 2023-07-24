@@ -255,8 +255,8 @@ private:
     void resetSeekTime() { seekTime_ = -1; }
     std::function<void(int, int)> resolutionChangedCallback_;
 
-    int width_;
-    int height_;
+    int width_ {0};
+    int height_ {0};
 
     bool fecEnabled_ {true};
 
