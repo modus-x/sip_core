@@ -86,7 +86,7 @@ public:
     void restartSender() override;
     void stop() override;
 
-    void reloadInputDevice();
+    void reloadInputDevice(const std::string& input);
     void setMuted(bool mute, Direction dir = Direction::SEND) override;
     void controlReceiver(bool active) override
     {
@@ -141,6 +141,10 @@ public:
     void startSender();
     void stopSender();
     void attachLocalVideo(bool attach);
+
+    void attachVideoInput();
+
+    void detachVideoInput();
 
     void natPing();
 
@@ -220,6 +224,8 @@ private:
     pj_timer_entry ka_timer_ {};
     void attachRemoteRecorder(const MediaStream& ms);
     void attachLocalRecorder(const MediaStream& ms);
+
+    bool videoInputAttached_ {false};
 };
 
 } // namespace video

@@ -66,12 +66,8 @@ public:
     int getHeight() const;
     AVPixelFormat getPixelFormat() const;
 
-    const DeviceParams& getConfig() const {
-        return decOpts_;
-    }
-    std::shared_future<DeviceParams> getParams() const {
-        return futureDecOpts_;
-    }
+    const DeviceParams& getConfig() const { return decOpts_; }
+    std::shared_future<DeviceParams> getParams() const { return futureDecOpts_; }
 
     MediaStream getInfo() const;
 
@@ -99,6 +95,7 @@ public:
     void releaseFrame(void* frame);
 #else
     void stopInput();
+    void startInput();
 #endif
 
     void setSuccessfulSetupCb(const std::function<void(MediaType, bool)>& cb)
@@ -113,10 +110,11 @@ public:
      */
     void restart();
 
+    std::shared_future<DeviceParams> switchInput(const std::string& resource);
+
+
 private:
     NON_COPYABLE(VideoInput);
-
-    std::shared_future<DeviceParams> switchInput(const std::string& resource);
 
     std::string id_;
     std::string currentResource_;
@@ -141,7 +139,6 @@ private:
     bool initGdiGrab(const std::string& params);
 
     bool isCapturing() const noexcept;
-    void startLoop();
 
     void switchDevice();
     bool capturing_ {false};
@@ -155,6 +152,8 @@ private:
     bool setup();
     void process();
     void cleanup();
+
+    void startLoop();
 
     bool captureFrame();
 

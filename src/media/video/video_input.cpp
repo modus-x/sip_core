@@ -411,6 +411,14 @@ VideoInput::stopInput()
 }
 
 void
+VideoInput::startInput() {
+    // start input only if we already found decOpts_
+    if (decOptsFound_) {
+        startLoop();
+    }
+}
+
+void
 VideoInput::clearOptions()
 {
     decOpts_ = {};
@@ -649,7 +657,9 @@ VideoInput::switchInput(const std::string& resource)
         foundDecOpts(decOpts_);
     }
     futureDecOpts_ = foundDecOpts_.get_future().share();
-    startLoop();
+
+    // do not start loop immediately
+    // startLoop();
     return futureDecOpts_;
 }
 

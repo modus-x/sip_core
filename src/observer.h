@@ -61,7 +61,6 @@ public:
     virtual ~Observable()
     {
 
-        SIP_CORE_WARN("Streamobserver destroying %p", this);
         std::lock_guard<std::mutex> lk(mutex_);
 
         for (auto& pobs : priority_observers_) {

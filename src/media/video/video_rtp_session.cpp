@@ -282,7 +282,6 @@ VideoRtpSession::startSender()
 void
 VideoRtpSession::setupKaTimer()
 {
-
     if (ka_timer_.id != PJ_FALSE) {
         return;
     }
@@ -329,13 +328,31 @@ VideoRtpSession::restartSender()
         setupConferenceVideoPipeline(*conference_, Direction::SEND);
 }
 
+// change only input device without changing anything in media encoder. video
+// codecs should handle video frame parameters change on the fly both on local
+// and remote
 void
-VideoRtpSession::reloadInputDevice()
+VideoRtpSession::reloadInputDevice(const std::string& input)
 {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
+    if (input == input_) {
+        // TODO: this will destroy videoInput decoder and change resolution for
+        // all calls who use this video input. May be it's ok?
+        videoLocal_->switchInput(input);
+    } else {
+        setMediaSource(input);
 
-    // stop generating frames and create new decoder, then videoInput will generate new frames which will be passed further
-    // videoLocal_->switchInput(input_);
+        // close input if no call users left
+        videoLocal_.reset();
+
+        // get new input
+        videoLocal_ = getVideoInput(input);
+
+        // if video was attached, then attach it too
+        if (videoInputAttached_) {
+            attachVideoInput();
+        }
+    }
 }
 
 void
@@ -384,6 +401,9 @@ VideoRtpSession::startReceiver()
         // XXX keyframe requests can timeout if unanswered
         receiveThread_->addIOContext(*socketPair_);
         receiveThread_->setSuccessfulSetupCb(onSuccessfulSetup_);
+        receiveThread_->setResolutionChangedCallback([this]() {
+            restartSender();
+        });
         receiveThread_->setDeviceParams(remoteVideoParams_);
         receiveThread_->startLoop();
         receiveThread_->setRequestKeyFrameCallback([this]() { cbKeyFrameRequest_(); });
@@ -604,21 +624,42 @@ VideoRtpSession::attachLocalVideo(bool attach)
         if (videoLocal_) {
             SIP_CORE_DBG("VideoRtpSession [%p] Attach local video - %d", this, attach);
             if (attach) {
-                cancelKeepAliveTimer();
-                videoLocal_->attach(sender_.get());
+                attachVideoInput();
             } else {
-                auto sender = sender_.get();
-                videoLocal_->detach(sender);
-                // send some frames immediately
-                for (size_t i = 0; i < 5; i++) {
-                    sender->blackFrame();
-                }
-                setupKaTimer();
+                detachVideoInput();
             }
         }
     } else {
         videoLocal_.reset();
     }
+}
+
+void
+VideoRtpSession::attachVideoInput()
+{
+    cancelKeepAliveTimer();
+    videoLocal_->attach(sender_.get());
+    videoLocal_->switchInput(input_);
+    videoInputAttached_ = true;
+
+    // start input if not already started
+    videoLocal_->startInput();
+}
+
+void VideoRtpSession::detachVideoInput()
+{
+    auto sender = sender_.get();
+    videoLocal_->detach(sender);
+    // send some black frames immediately to remote party as we cannot change
+    // our stream mode to sendonly
+    for (size_t i = 0; i < 5; i++) {
+        sender->blackFrame();
+    }
+    videoInputAttached_ = false;
+    setupKaTimer();
+
+    // TODO: do not stop loop here, as other calls my already use it - fix it! input will be closed only when no references to it are left
+    // videoLocal_->stopInput();
 }
 
 void
