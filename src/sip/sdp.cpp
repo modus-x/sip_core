@@ -339,7 +339,7 @@ Sdp::addMediaDescription(const MediaAttribute& mediaAttr)
             const auto accountVideoCodec = std::static_pointer_cast<AccountVideoCodecInfo>(
                 video_codec_list_[i]);
             const auto& profileLevelID = accountVideoCodec->parameters.empty()
-                                             ? libav_utils::DEFAULT_H264_PROFILE_LEVEL_ID
+                                             ? libav_utils::MAX_H264_PROFILE_LEVEL_ID
                                              : accountVideoCodec->parameters;
             auto value = fmt::format("fmtp:{} {}", payload, profileLevelID);
             med->attr[med->attr_count++] = pjmedia_sdp_attr_create(memPool_.get(),
