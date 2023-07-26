@@ -119,9 +119,8 @@ VideoMixer::switchInputs(const std::vector<std::string>& inputs)
     decltype(localInputs_) newInputs;
     for (auto i = 0u; i != inputs.size(); ++i) {
         auto videoInput = getVideoInput(inputs[i]);
-        // Note, video can be a previously stopped device (eg. restart a screen sharing)
-        // in this case, the videoInput will be found and must be restarted
-        videoInput->restart();
+        // Start input if it not already started
+        videoInput->startInput();
         auto onlyDetach = false;
         auto it = std::find(localInputs_.cbegin(), localInputs_.cend(), videoInput);
         onlyDetach = it != localInputs_.cend();

@@ -265,7 +265,8 @@ VideoInput::configureFilePlayback(const std::string&,
 BOOL CALLBACK
 EnumWindowsProcMy(HWND hwnd, LPARAM lParam)
 {
-    std::pair<DWORD, std::string>* dataPair = reinterpret_cast<std::pair<DWORD, std::string>*>(lParam);
+    std::pair<DWORD, std::string>* dataPair = reinterpret_cast<std::pair<DWORD, std::string>*>(
+        lParam);
     DWORD lpdwProcessId;
     if (auto parent = GetWindow(hwnd, GW_OWNER))
         GetWindowThreadProcessId(parent, &lpdwProcessId);
@@ -286,8 +287,7 @@ EnumWindowsProcMy(HWND hwnd, LPARAM lParam)
 #endif
 
 void
-VideoInput::setRecorderCallback(
-    const std::function<void(const MediaStream& ms)>& cb)
+VideoInput::setRecorderCallback(const std::function<void(const MediaStream& ms)>& cb)
 {
     recorderCallback_ = cb;
     if (decoder_)
@@ -374,10 +374,10 @@ VideoInput::createDecoder()
     }
 
     SIP_CORE_DBG("created decoder with video params : size=%dX%d, fps=%lf pix=%s",
-             decOpts_.width,
-             decOpts_.height,
-             decOpts_.framerate.real(),
-             decOpts_.pixel_format.c_str());
+                 decOpts_.width,
+                 decOpts_.height,
+                 decOpts_.framerate.real(),
+                 decOpts_.pixel_format.c_str());
     if (onSuccessfulSetup_)
         onSuccessfulSetup_(MEDIA_VIDEO, 0);
 
@@ -411,11 +411,10 @@ VideoInput::stopInput()
 }
 
 void
-VideoInput::startInput() {
-    // start input only if we already found decOpts_
-    if (decOptsFound_) {
-        startLoop();
-    }
+VideoInput::startInput()
+{
+    // start input even if no depOpts are found, which can be found later!
+    startLoop();
 }
 
 void
@@ -531,17 +530,17 @@ VideoInput::initGdiGrab(const std::string& params)
         char sep;
         unsigned w, h;
         iss >> w >> sep >> h;
-        SIP_CORE_DBG() << "gdigrab before: " << w  << "x" << h;
+        SIP_CORE_DBG() << "gdigrab before: " << w << "x" << h;
         decOpts_.width = round2pow(w, 3);
         decOpts_.height = round2pow(h, 3);
 
-        SIP_CORE_DBG() << "gdigrab after: " << decOpts_.width  << "x" << decOpts_.height;
+        SIP_CORE_DBG() << "gdigrab after: " << decOpts_.width << "x" << decOpts_.height;
 
         size_t plus = params.find('+');
         std::istringstream dss(params.substr(plus + 1, space - plus));
         dss >> decOpts_.offset_x >> sep >> decOpts_.offset_y;
 
-        SIP_CORE_DBG() << "gdigrab offset: " << decOpts_.offset_x  << "x" << decOpts_.offset_y;
+        SIP_CORE_DBG() << "gdigrab offset: " << decOpts_.offset_x << "x" << decOpts_.offset_y;
     } else {
         decOpts_.width = default_grab_width;
         decOpts_.height = default_grab_height;
@@ -593,8 +592,7 @@ VideoInput::initFile(std::string path)
 void
 VideoInput::restart()
 {
-    if (loop_.isStopping())
-        switchInput(currentResource_);
+    switchInput(currentResource_);
 }
 
 std::shared_future<DeviceParams>

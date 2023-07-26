@@ -261,10 +261,6 @@ VideoRtpSession::startSender()
 
             setupKaTimer();
 
-            if (restart) {
-                localDeviceParamsChangedCallback_(localVideoParams_);
-            }
-
         } catch (const MediaEncoderException& e) {
             SIP_CORE_ERR("%s", e.what());
             send_.enabled = false;
@@ -336,9 +332,9 @@ VideoRtpSession::reloadInputDevice(const std::string& input)
 {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (input == input_) {
-        // TODO: this will destroy videoInput decoder and change resolution for
+        // TODO: this will recreate videoInput decoder and change resolution for
         // all calls who use this video input. May be it's ok?
-        videoLocal_->switchInput(input);
+        videoLocal_->restart();
     } else {
         setMediaSource(input);
 
@@ -639,7 +635,6 @@ VideoRtpSession::attachVideoInput()
 {
     cancelKeepAliveTimer();
     videoLocal_->attach(sender_.get());
-    videoLocal_->switchInput(input_);
     videoInputAttached_ = true;
 
     // start input if not already started

@@ -2452,26 +2452,6 @@ SIPCall::onReceiveOfferIn200OK(const pjmedia_sdp_session* offer)
 void
 SIPCall::onTextMessage(std::map<std::string, std::string>&& messages)
 {
-    for (const auto& pair : messages) {
-        const std::string& key = pair.first;
-
-        // device changed, we should stop local decoder and wait for new packets
-        if (key.find("videoDeviceParams") != std::string::npos) {
-            SIP_CORE_WARN() << "onTextMessage videoDeviceParams";
-            for (auto const& stream : rtpStreams_) {
-                if (stream.mediaAttribute_->type_ == MediaType::MEDIA_VIDEO && stream.rtpSession_) {
-                    const std::string& value = messages[key];
-                    const auto& rtpSession
-                        = std::static_pointer_cast<video::VideoRtpSession>(stream.rtpSession_);
-                    DeviceParams params = DeviceParams(value);
-                    rtpSession->stopReceiver();
-                    rtpSession->setRemoteDeviceParams(params);
-                    rtpSession->startReceiver();
-                }
-            }
-        }
-    }
-
     // call base class
     Call::onTextMessage(std::move(messages));
 }
