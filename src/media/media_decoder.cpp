@@ -94,7 +94,7 @@ MediaDemuxer::openInput(const DeviceParams& params)
     auto iformat = av_find_input_format(params.format.c_str());
 
     if (!iformat && !params.format.empty())
-        SIP_CORE_WARN("Cannot find format \"%s\"", params.format.c_str());
+        SIP_CORE_WARN("MediaDecoder Cannot find format \"%s\"", params.format.c_str());
 
     if (params.width and params.height) {
         auto sizeStr = fmt::format("{}x{}", params.width, params.height);
@@ -149,7 +149,8 @@ MediaDemuxer::openInput(const DeviceParams& params)
     std::string input = params.input;
 #endif
 
-    SIP_CORE_DBG("Trying to open device %s with format %s, pixel format %s, size %dx%d, rate %lf",
+    SIP_CORE_DBG("MediaDecoder Trying to open device %s with format %s, pixel format %s, size "
+                 "%dx%d, rate %lf",
                  input.c_str(),
                  params.format.c_str(),
                  params.pixel_format.c_str(),
@@ -165,11 +166,12 @@ MediaDemuxer::openInput(const DeviceParams& params)
     int ret = avformat_open_input(&inputCtx_, input.c_str(), iformat, options_ ? &options_ : NULL);
 
     if (ret) {
-        SIP_CORE_ERR("avformat_open_input failed: %s", libav_utils::getError(ret).c_str());
+        SIP_CORE_ERR("MediaDecoder avformat_open_input failed: %s",
+                     libav_utils::getError(ret).c_str());
     } else {
         baseWidth_ = inputCtx_->streams[0]->codecpar->width;
         baseHeight_ = inputCtx_->streams[0]->codecpar->height;
-        SIP_CORE_DBG("Using format %s and resolution %dx%d",
+        SIP_CORE_DBG("MediaDecoder Using format %s and resolution %dx%d",
                      params.format.c_str(),
                      baseWidth_,
                      baseHeight_);
@@ -354,7 +356,8 @@ MediaDemuxer::decode()
     if (inputParams_.format == "x11grab") {
         auto ret = inputCtx_->iformat->read_header(inputCtx_);
         if (ret == AVERROR_EXTERNAL) {
-            SIP_CORE_ERR("Couldn't read frame: %s\n", libav_utils::getError(ret).c_str());
+            SIP_CORE_ERR("MediaDecoder Couldn't read frame: %s\n",
+                         libav_utils::getError(ret).c_str());
             return Status::ReadError;
         }
         auto codecpar = inputCtx_->streams[0]->codecpar;
@@ -394,7 +397,9 @@ MediaDemuxer::decode()
         const auto type = media == AVMediaType::AVMEDIA_TYPE_AUDIO
                               ? "AUDIO"
                               : (media == AVMediaType::AVMEDIA_TYPE_VIDEO ? "VIDEO" : "UNSUPPORTED");
-        SIP_CORE_ERR("Couldn't read [%s] frame: %s\n", type, libav_utils::getError(ret).c_str());
+        SIP_CORE_ERR("MediaDecoder Couldn't read [%s] frame: %s\n",
+                     type,
+                     libav_utils::getError(ret).c_str());
         return Status::ReadError;
     }
 
@@ -495,12 +500,12 @@ MediaDecoder::setup(AVMediaType type)
     demuxer_->findStreamInfo();
     auto stream = demuxer_->selectStream(type);
     if (stream < 0) {
-        SIP_CORE_ERR("No stream found for type %i", static_cast<int>(type));
+        SIP_CORE_ERR("MediaDecoder No stream found for type %i", static_cast<int>(type));
         return -1;
     }
     avStream_ = demuxer_->getStream(stream);
     if (avStream_ == nullptr) {
-        SIP_CORE_ERR("No stream found at index %i", stream);
+        SIP_CORE_ERR("MediaDecoder No stream found at index %i", stream);
         return -1;
     }
 
@@ -509,7 +514,7 @@ MediaDecoder::setup(AVMediaType type)
     // height) useful when we need to accept resolution change of incoming video
     if (avStream_->codecpar->codec_type == AVMEDIA_TYPE_VIDEO && width_ != 0 && height_ != 0) {
         if (avStream_->codecpar->height != height_ || avStream_->codecpar->width != width_) {
-            SIP_CORE_ERR("Received packet with wrong dimensions %dx%d, stream %i",
+            SIP_CORE_ERR("MediaDecoder Received packet with wrong dimensions %dx%d, stream %i",
                          avStream_->codecpar->width,
                          avStream_->codecpar->height,
                          stream);
@@ -553,7 +558,7 @@ MediaDecoder::setupStream()
             decoderCtx_->pix_fmt = accel_->getFormat();
             if (avcodec_open2(decoderCtx_, inputDecoder_, &options_) < 0) {
                 // Failed to open codec
-                SIP_CORE_WARN("Fail to open hardware decoder for %s with %s",
+                SIP_CORE_WARN("MediaDecoder Fail to open hardware decoder for %s with %s",
                               avcodec_get_name(decoderCtx_->codec_id),
                               it.getName().c_str());
                 avcodec_free_context(&decoderCtx_);
@@ -562,7 +567,7 @@ MediaDecoder::setupStream()
                 continue;
             } else {
                 // Succeed to open codec
-                SIP_CORE_WARN("Using hardware decoding for %s with %s",
+                SIP_CORE_WARN("MediaDecoder Using hardware decoding for %s with %s",
                               avcodec_get_name(decoderCtx_->codec_id),
                               it.getName().c_str());
                 break;
@@ -571,24 +576,26 @@ MediaDecoder::setupStream()
     }
 #endif
 
-    SIP_CORE_DBG() << "Decoding " << av_get_media_type_string(avStream_->codecpar->codec_type)
-                   << " using " << inputDecoder_->long_name << " (" << inputDecoder_->name << ")";
+    SIP_CORE_DBG() << "MediaDecoder Decoding "
+                   << av_get_media_type_string(avStream_->codecpar->codec_type) << " using "
+                   << inputDecoder_->long_name << " (" << inputDecoder_->name << ")";
 
     decoderCtx_->thread_count = std::max(1u, std::min(8u, std::thread::hardware_concurrency() / 2));
     if (emulateRate_)
-        SIP_CORE_DBG() << "Using framerate emulation";
+        SIP_CORE_DBG() << "MediaDecoder Using framerate emulation";
     startTime_ = av_gettime(); // used to set pts after decoding, and for rate emulation
 
 #ifdef RING_ACCEL
     if (!accel_) {
-        SIP_CORE_WARN("Not using hardware decoding for %s", avcodec_get_name(decoderCtx_->codec_id));
+        SIP_CORE_WARN("MediaDecoder Not using hardware decoding for %s",
+                      avcodec_get_name(decoderCtx_->codec_id));
         ret = avcodec_open2(decoderCtx_, inputDecoder_, nullptr);
     }
 #else
     ret = avcodec_open2(decoderCtx_, inputDecoder_, nullptr);
 #endif
     if (ret < 0) {
-        SIP_CORE_ERR() << "Could not open codec: " << libav_utils::getError(ret);
+        SIP_CORE_ERR() << "MediaDecoder Could not open codec: " << libav_utils::getError(ret);
         return -1;
     }
 
@@ -600,13 +607,13 @@ MediaDecoder::prepareDecoderContext()
 {
     inputDecoder_ = findDecoder(avStream_->codecpar->codec_id);
     if (!inputDecoder_) {
-        SIP_CORE_ERR() << "Unsupported codec";
+        SIP_CORE_ERR() << "MediaDecoder Unsupported codec";
         return -1;
     }
 
     decoderCtx_ = avcodec_alloc_context3(inputDecoder_);
     if (!decoderCtx_) {
-        SIP_CORE_ERR() << "Failed to create decoder context";
+        SIP_CORE_ERR() << "MediaDecoder Failed to create decoder context";
         return -1;
     }
     avcodec_parameters_to_context(decoderCtx_, avStream_->codecpar);
@@ -638,12 +645,17 @@ MediaDecoder::updateStartTime(int64_t startTime)
 DecodeStatus
 MediaDecoder::decode(AVPacket& packet)
 {
+    auto begin = steady_clock::now();
+    if (inputDecoder_->type == AVMEDIA_TYPE_VIDEO && frameCount_ % 100 == 0) {
+        
+        SIP_CORE_DBG() << "[" << demuxer_->getInputName() << "] MediaDecoder decodeFrame started";
+    }
     int frameFinished = 0;
     auto ret = avcodec_send_packet(decoderCtx_, &packet);
     if (ret < 0 && ret != AVERROR(EAGAIN)) {
 #ifdef RING_ACCEL
         if (accel_) {
-            SIP_CORE_WARN("Decoding error falling back to software");
+            SIP_CORE_WARN("MediaDecoder Decoding error falling back to software");
             fallback_ = true;
             accel_.reset();
             avcodec_flush_buffers(decoderCtx_);
@@ -668,7 +680,7 @@ MediaDecoder::decode(AVPacket& packet)
     frame->time_base = decoderCtx_->time_base;
     if (resolutionChangedCallback_) {
         if (decoderCtx_->width != width_ or decoderCtx_->height != height_) {
-            SIP_CORE_DBG("Resolution changed from %dx%d to %dx%d",
+            SIP_CORE_DBG("MediaDecoder Resolution changed from %dx%d to %dx%d",
                          width_,
                          height_,
                          decoderCtx_->width,
@@ -723,8 +735,23 @@ MediaDecoder::decode(AVPacket& packet)
             firstDecode_.exchange(false);
             contextCallback_();
         }
+        auto end = steady_clock::now();
+        if (inputDecoder_->type == AVMEDIA_TYPE_VIDEO && frameCount_ % 100 == 0) {
+            SIP_CORE_DBG() << "[" << demuxer_->getInputName()
+                           << "] MediaDecoder decodeFrame completed in "
+                           << duration_cast<milliseconds>(end - begin).count();
+        }
+        frameCount_++;
         return DecodeStatus::FrameFinished;
     }
+    auto end = steady_clock::now();
+    if (inputDecoder_->type == AVMEDIA_TYPE_VIDEO && frameCount_ % 100 == 0) {
+        SIP_CORE_DBG() << "[" << demuxer_->getInputName()
+                       << "] MediaDecoder decodeFrame completed in "
+                       << duration_cast<milliseconds>(end - begin).count();
+    }
+
+    frameCount_++;
     return DecodeStatus::Success;
 }
 

@@ -63,6 +63,8 @@ class AudioFrame;
 
 namespace sip_core {
 
+using namespace std::chrono;
+
 using AudioFrame = libsip_core::AudioFrame;
 #ifdef ENABLE_VIDEO
 using VideoFrame = libsip_core::VideoFrame;
@@ -140,6 +142,8 @@ public:
     bool seekFrame(int stream_index, int64_t timestamp);
     void setNeedFrameCb(std::function<void()> cb);
     void emitFrame(bool isAudio);
+
+    const char* getInputName() const { return inputCtx_->iformat->long_name; }
 
 private:
     bool streamInfoFound_ {false};
@@ -236,6 +240,8 @@ private:
     bool emulateRate_ = false;
     int64_t startTime_;
     int64_t lastTimestamp_ {0};
+
+    int frameCount_ {0};
 
     DeviceParams inputParams_;
 

@@ -330,6 +330,15 @@ VideoRtpSession::restartSender()
 }
 
 void
+VideoRtpSession::reloadInputDevice()
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+
+    // stop generating frames and create new decoder, then videoInput will generate new frames which will be passed further
+    // videoLocal_->switchInput(input_);
+}
+
+void
 VideoRtpSession::stopSender()
 {
     // Concurrency protection must be done by caller.

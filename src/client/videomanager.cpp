@@ -458,11 +458,14 @@ openVideoInput(const std::string& path)
     auto& vm = sip_core::Manager::instance().getVideoManager();
 
     auto id = path.empty() ? vm.videoDeviceMonitor.getMRLForDefaultDevice() : path;
-    auto& input = vm.clientVideoInputs[id];
-    if (not input) {
-        input = sip_core::getVideoInput(id);
+
+    auto input = vm.getVideoInput(path);
+    if (input) {
+        input->restart();
+        return id;
     }
-    return id;
+
+    return "";
 }
 
 bool
@@ -472,16 +475,16 @@ closeVideoInput(const std::string& id)
     std::lock_guard<std::mutex> lk(vm.videoMutex);
     auto path = id.empty() ? vm.videoDeviceMonitor.getMRLForDefaultDevice() : id;
 
-    auto& clientInput = vm.clientVideoInputs[path];
-    if (clientInput) {
-        clientInput->stopInput();
-        return vm.clientVideoInputs.erase(path) > 0;
-    }
+    // auto& clientInput = vm.clientVideoInputs[path];
+    // if (clientInput) {
+    //     clientInput->stopInput();
+    //     return vm.clientVideoInputs.erase(path) > 0;
+    // }
 
     auto input = vm.getVideoInput(path);
     if (input) {
         input->stopInput();
-        return vm.videoInputs.erase(path) > 0;
+        return true;
     }
     return false;
 }

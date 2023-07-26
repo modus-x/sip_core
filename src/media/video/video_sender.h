@@ -70,7 +70,7 @@ public:
 
 private:
     static constexpr int KEYFRAMES_AT_START {1}; // Number of keyframes to enforce at stream startup
-    static constexpr unsigned KEY_FRAME_PERIOD {0}; // seconds before forcing a keyframe
+    static constexpr unsigned KEY_FRAME_PERIOD {2}; // seconds before forcing a keyframe
 
     NON_COPYABLE(VideoSender);
 

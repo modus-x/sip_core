@@ -57,18 +57,18 @@ VideoReceiveThread::VideoReceiveThread(const std::string& id,
             std::bind(&VideoReceiveThread::decodeFrame, this),
             std::bind(&VideoReceiveThread::cleanup, this))
 {
-    SIP_CORE_DBG("[%p] Instance created", this);
+    SIP_CORE_DBG("VideoReceiveThread [%p] Instance created", this);
 }
 
 VideoReceiveThread::~VideoReceiveThread()
 {
-    SIP_CORE_DBG("[%p] Instance destroyed", this);
+    SIP_CORE_DBG("VideoReceiveThread [%p] Instance destroyed", this);
 }
 
 void
 VideoReceiveThread::startLoop()
 {
-    SIP_CORE_DBG("[%p] Starting receiver's loop", this);
+    SIP_CORE_DBG("VideoReceiveThread [%p] Starting receiver's loop", this);
     loop_.start();
 }
 
@@ -77,10 +77,12 @@ VideoReceiveThread::stopLoop()
 {
     if (loop_.isStopping())
         return;
-    SIP_CORE_DBG("[%p] Stopping receiver's loop and waiting for the thread to exit ...", this);
+    SIP_CORE_DBG(
+        "VideoReceiveThread [%p] Stopping receiver's loop and waiting for the thread to exit ...",
+        this);
     loop_.stop();
     loop_.join();
-    SIP_CORE_DBG("[%p] Receiver's thread exited", this);
+    SIP_CORE_DBG("VideoReceiveThread [%p] Receiver's thread exited", this);
 }
 
 // We do this setup here instead of the constructor because we don't want the
@@ -88,24 +90,24 @@ VideoReceiveThread::stopLoop()
 bool
 VideoReceiveThread::setup()
 {
-    SIP_CORE_DBG("[%p] Setup video receiver", this);
+    SIP_CORE_DBG("VideoReceiveThread [%p] Setup video receiver", this);
 
     videoDecoder_.reset(new MediaDecoder(
-                            [this](const std::shared_ptr<MediaFrame>& frame) mutable {
-                                libav_utils::AVBufferPtr displayMatrix;
-                                {
-                                    std::lock_guard<std::mutex> l(rotationMtx_);
-                                    if (displayMatrix_)
-                                        displayMatrix.reset(av_buffer_ref(displayMatrix_.get()));
-                                }
-                                if (displayMatrix)
-                                    av_frame_new_side_data_from_buf(frame->pointer(),
-                                                                    AV_FRAME_DATA_DISPLAYMATRIX,
-                                                                    displayMatrix.release());
-                                publishFrame(std::static_pointer_cast<VideoFrame>(frame));
-                            },
-                            args_.width,
-                            args_.height));
+        [this](const std::shared_ptr<MediaFrame>& frame) mutable {
+            libav_utils::AVBufferPtr displayMatrix;
+            {
+                std::lock_guard<std::mutex> l(rotationMtx_);
+                if (displayMatrix_)
+                    displayMatrix.reset(av_buffer_ref(displayMatrix_.get()));
+            }
+            if (displayMatrix)
+                av_frame_new_side_data_from_buf(frame->pointer(),
+                                                AV_FRAME_DATA_DISPLAYMATRIX,
+                                                displayMatrix.release());
+            publishFrame(std::static_pointer_cast<VideoFrame>(frame));
+        },
+        args_.width,
+        args_.height));
     videoDecoder_->setContextCallback([this]() {
         if (recorderCallback_)
             recorderCallback_(getInfo());
@@ -138,7 +140,7 @@ VideoReceiveThread::setup()
         args_.sdp_flags = "custom_io";
 
         if (stream_.str().empty()) {
-            SIP_CORE_ERR("No SDP loaded");
+            SIP_CORE_ERR("VideoReceiveThread No SDP loaded");
             return false;
         }
 
@@ -146,7 +148,7 @@ VideoReceiveThread::setup()
     }
 
     if (videoDecoder_->openInput(args_)) {
-        SIP_CORE_ERR("Could not open input \"%s\"", args_.input.c_str());
+        SIP_CORE_ERR("VideoReceiveThread Could not open input \"%s\"", args_.input.c_str());
         return false;
     }
 
@@ -215,25 +217,37 @@ VideoReceiveThread::setResolutionChangedCallback(const std::function<void(void)>
 void
 VideoReceiveThread::decodeFrame()
 {
+    auto begin = steady_clock::now();
+    if (frameCount_ % 100 == 0) {
+        SIP_CORE_DBG() << "VideoReceiveThread decodeFrame started: " << this;
+    }
     if (not loop_.isRunning())
         return;
 
     if (not isVideoConfigured_) {
         if (!configureVideoOutput()) {
-            SIP_CORE_ERR("[%p] Failed to configure video output", this);
+            SIP_CORE_ERR("[%p] VideoReceiveThread failed to configure video output", this);
             return;
         } else {
-            SIP_CORE_DBG("[%p] Decoder configured, starting decoding", this);
+            SIP_CORE_DBG("[%p] VideoReceiveThread decoder configured, starting decoding", this);
         }
     }
     auto status = videoDecoder_->decode();
     if (status == MediaDemuxer::Status::EndOfFile || status == MediaDemuxer::Status::ReadError) {
-        SIP_CORE_ERR("[%p] Decoding error: %s", this, MediaDemuxer::getStatusStr(status));
+        SIP_CORE_ERR("[%p] VideoReceiveThread Decoding error: %s",
+                     this,
+                     MediaDemuxer::getStatusStr(status));
     }
     if (status == MediaDemuxer::Status::FallBack) {
         if (keyFrameRequestCallback_)
             keyFrameRequestCallback_();
     }
+    auto end = steady_clock::now();
+    if (frameCount_ % 100 == 0) {
+        SIP_CORE_DBG() << "VideoReceiveThread decodeFrame completed in "
+                       << duration_cast<milliseconds>(end - begin).count() << " " << this;
+    }
+    frameCount_++;
 }
 
 bool
@@ -241,16 +255,19 @@ VideoReceiveThread::configureVideoOutput()
 {
     assert(not isVideoConfigured_);
 
-    SIP_CORE_DBG("[%p] Configuring video output", this);
+    SIP_CORE_DBG("[%p] VideoReceiveThread Configuring video output", this);
 
     if (not loop_.isRunning()) {
-        SIP_CORE_WARN("[%p] Can not configure video output, the loop is not running!", this);
+        SIP_CORE_WARN(
+            "[%p] VideoReceiveThread Can not configure video output, the loop is not running!",
+            this);
         return false;
     }
 
     if (videoDecoder_->setupVideo() < 0) {
-        SIP_CORE_ERR("decoder IO startup failed");
-        stopLoop();
+        SIP_CORE_ERR("VideoReceiveThread decoder IO startup failed");
+        // do not stop loop here, but try to setup stream correctly
+        // stopLoop();
         return false;
     }
 
@@ -261,7 +278,7 @@ VideoReceiveThread::configureVideoOutput()
     }
 
     if (not sink_->start()) {
-        SIP_CORE_ERR("RX: sink startup failed");
+        SIP_CORE_ERR("VideoReceiveThread RX: sink startup failed");
         stopLoop();
         return false;
     }
@@ -278,7 +295,7 @@ VideoReceiveThread::configureVideoOutput()
 void
 VideoReceiveThread::stopSink()
 {
-    SIP_CORE_DBG("[%p] Stopping sink", this);
+    SIP_CORE_DBG("VideoReceiveThread [%p] Stopping sink", this);
 
     if (!loop_.isRunning())
         return;
@@ -290,7 +307,7 @@ VideoReceiveThread::stopSink()
 void
 VideoReceiveThread::startSink()
 {
-    SIP_CORE_DBG("[%p] Starting sink", this);
+    SIP_CORE_DBG("VideoReceiveThread [%p] Starting sink", this);
 
     if (!loop_.isRunning())
         return;

@@ -492,7 +492,7 @@ VideoInput::initAVFoundation(const std::string& display)
 
     clearOptions();
     decOpts_.format = "avfoundation";
-    decOpts_.pixel_format = "nv12";
+    decOpts_.pixel_format = "bgr0";
     decOpts_.name = "Capture screen 0";
     decOpts_.input = "Capture screen 0";
     decOpts_.framerate = sip_core::getVideoDeviceMonitor().getDeviceParams(DEVICE_DESKTOP).framerate;

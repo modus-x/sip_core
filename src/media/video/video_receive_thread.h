@@ -39,6 +39,7 @@
 #include <climits>
 #include <sstream>
 #include <memory>
+#include <chrono>
 
 namespace sip_core {
 class SocketPair;
@@ -47,6 +48,8 @@ class MediaDecoder;
 
 namespace sip_core {
 namespace video {
+
+using namespace std::chrono;
 
 class SinkClient;
 
@@ -86,9 +89,7 @@ public:
         onSuccessfulSetup_ = cb;
     }
 
-    void setDeviceParams(const DeviceParams& params) {
-        args_ = params;
-    }
+    void setDeviceParams(const DeviceParams& params) { args_ = params; }
 
     void setRecorderCallback(const std::function<void(const MediaStream& ms)>& cb);
 
@@ -123,6 +124,8 @@ private:
     bool configureVideoOutput();
 
     ThreadLoop loop_;
+
+    int frameCount_ {0};
 
     // used by ThreadLoop
     bool setup();

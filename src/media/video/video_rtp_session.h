@@ -85,6 +85,8 @@ public:
     void start() override;
     void restartSender() override;
     void stop() override;
+
+    void reloadInputDevice();
     void setMuted(bool mute, Direction dir = Direction::SEND) override;
     void controlReceiver(bool active) override
     {

@@ -1,4 +1,5 @@
-﻿/*
+﻿
+/*
  *  Copyright (C) 2004-2022 Savoir-faire Linux Inc.
  *
  *  Author: Emmanuel Milou <emmanuel.milou@savoirfairelinux.com>
@@ -1311,9 +1312,7 @@ SIPCall::switchInput(const std::string& source)
         if (mediaAttr->type_ == MEDIA_VIDEO) {
             for (const auto& rtpSession : getRtpSessionList(MediaType::MEDIA_VIDEO)) {
                 auto videoRtp = std::static_pointer_cast<video::VideoRtpSession>(rtpSession);
-                videoRtp->setMediaSource(source);
-                videoRtp->restartSender();
-                videoRtp->attachLocalVideo(true);
+                // videoRtp->changeInputSource("");
             }
         }
     }
