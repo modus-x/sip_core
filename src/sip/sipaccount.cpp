@@ -1380,7 +1380,6 @@ SIPAccount::setCredentials(const std::vector<SipAccountConfig::Credentials>& cre
 {
     cred_.clear();
     cred_.reserve(creds.size());
-    bool md5HashingEnabled = Manager::instance().preferences.getMd5Hash();
 
     for (auto& c : creds) {
         cred_.emplace_back(
@@ -1388,10 +1387,10 @@ SIPAccount::setCredentials(const std::vector<SipAccountConfig::Credentials>& cre
                              /*.scheme    = */ CONST_PJ_STR("digest"),
                              /*.username  = */ CONST_PJ_STR(c.username),
                              /*.data_type = */
-                             (md5HashingEnabled ? PJSIP_CRED_DATA_DIGEST
+                             (c.password_h != "" ? PJSIP_CRED_DATA_DIGEST
                                                 : PJSIP_CRED_DATA_PLAIN_PASSWD),
                              /*.data      = */
-                             CONST_PJ_STR(md5HashingEnabled ? c.password_h : c.password),
+                             CONST_PJ_STR(c.password_h != "" ? c.password_h : c.password),
                              /*.ext       = */ {}});
     }
 }

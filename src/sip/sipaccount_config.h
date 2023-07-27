@@ -123,6 +123,8 @@ struct SipAccountConfig : public SipAccountBaseConfig {
         {}
         Credentials(const std::map<std::string, std::string>& r);
         std::map<std::string, std::string> toMap() const;
+
+        // TODO: broken function. I do not know how, but hash is computed in wrong way
         void computePasswordHash();
     };
     std::vector<Credentials> credentials;

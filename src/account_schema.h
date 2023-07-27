@@ -52,6 +52,7 @@ static const char* const CONFIG_PRESENCE_NOTE = "Account.presenceNote";
 static const char* const CONFIG_KEEP_ALIVE_INTERVAL = "Account.keepAliveInterval";
 
 static const char* const CONFIG_ACCOUNT_HOSTNAME = "Account.hostname";
+static const char* const CONFIG_ACCOUNT_HASH = "Account.hash";
 static const char* const CONFIG_ACCOUNT_USERNAME = "Account.username";
 static const char* const CONFIG_ACCOUNT_ROUTESET = "Account.routeset";
 static const char* const CONFIG_ACCOUNT_IP_AUTO_REWRITE = "Account.allowIPAutoRewrite";

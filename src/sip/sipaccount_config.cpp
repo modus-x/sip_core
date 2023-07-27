@@ -159,7 +159,8 @@ SipAccountConfig::unserialize(const YAML::Node& node)
     setCredentials(parseVectorMap(credsNode,
                                   {Conf::CONFIG_ACCOUNT_REALM,
                                    Conf::CONFIG_ACCOUNT_USERNAME,
-                                   Conf::CONFIG_ACCOUNT_PASSWORD}));
+                                   Conf::CONFIG_ACCOUNT_PASSWORD,
+                                   Conf::CONFIG_ACCOUNT_HASH}));
 
     // get tls submap
     try {
@@ -205,14 +206,17 @@ SipAccountConfig::toMap() const
     a.emplace(Conf::CONFIG_KEEP_ALIVE_INTERVAL, std::to_string(keepAliveInterval));
 
     std::string password {};
+    std::string hash {};
     if (not credentials.empty()) {
         for (const auto& cred : credentials)
             if (cred.username == username) {
                 password = cred.password;
+                hash = cred.password_h;
                 break;
             }
     }
     a.emplace(Conf::CONFIG_ACCOUNT_PASSWORD, std::move(password));
+    a.emplace(Conf::CONFIG_ACCOUNT_HASH, std::move(hash));
 
     a.emplace(Conf::CONFIG_TLS_ENABLE, tlsEnable ? TRUE_STR : FALSE_STR);
     a.emplace(Conf::CONFIG_TLS_LISTENER_PORT, std::to_string(tlsListenerPort));
@@ -263,6 +267,7 @@ SipAccountConfig::fromMap(const std::map<std::string, std::string>& details)
         std::map<std::string, std::string> map;
         map[Conf::CONFIG_ACCOUNT_USERNAME] = username;
         parseString(details, Conf::CONFIG_ACCOUNT_PASSWORD, map[Conf::CONFIG_ACCOUNT_PASSWORD]);
+        parseString(details, Conf::CONFIG_ACCOUNT_HASH, map[Conf::CONFIG_ACCOUNT_HASH]);
         map[Conf::CONFIG_ACCOUNT_REALM] = "*";
         setCredentials({map});
     }
@@ -293,10 +298,11 @@ SipAccountConfig::Credentials::Credentials(const std::map<std::string, std::stri
     auto itrealm = cred.find(Conf::CONFIG_ACCOUNT_REALM);
     auto user = cred.find(Conf::CONFIG_ACCOUNT_USERNAME);
     auto passw = cred.find(Conf::CONFIG_ACCOUNT_PASSWORD);
+    auto hash = cred.find(Conf::CONFIG_ACCOUNT_HASH);
     realm = itrealm != cred.end() ? itrealm->second : "";
     username = user != cred.end() ? user->second : "";
     password = passw != cred.end() ? passw->second : "";
-    computePasswordHash();
+    password_h = hash != cred.end() ? hash->second : "";
 }
 
 std::map<std::string, std::string>
@@ -304,7 +310,8 @@ SipAccountConfig::Credentials::toMap() const
 {
     return {{Conf::CONFIG_ACCOUNT_REALM, realm},
             {Conf::CONFIG_ACCOUNT_USERNAME, username},
-            {Conf::CONFIG_ACCOUNT_PASSWORD, password}};
+            {Conf::CONFIG_ACCOUNT_PASSWORD, password},
+            {Conf::CONFIG_ACCOUNT_HASH, password_h}};
 }
 
 void
