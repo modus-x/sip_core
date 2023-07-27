@@ -288,6 +288,9 @@ target_compile_definitions(
   # try to enable hardware accel
   # RING_ACCEL
 
+  # for now, force video compilation even when compiling standalone sip_core lib
+  ENABLE_VIDEO
+
   # we are building sip_core, not using it!
   LIBSIP_CORE_BUILD
 
