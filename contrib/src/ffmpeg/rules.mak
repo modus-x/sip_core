@@ -137,8 +137,6 @@ FFMPEGCONF += \
 	--enable-mediacodec \
 	--disable-vulkan \
 	--enable-decoder=h264_mediacodec \
-	--enable-decoder=mpeg4_mediacodec \
-	--enable-decoder=hevc_mediacodec \
 	--enable-cross-compile \
 	--ranlib=$(RANLIB) \
 	--strip=$(STRIP) \
@@ -155,35 +153,10 @@ FFMPEGCONF += --disable-asm
 endif
 else
 # Desktop Linux
-DEPS_ffmpeg += ffnvcodec
 FFMPEGCONF += \
 	--target-os=linux \
 	--enable-indev=v4l2 \
-	--enable-indev=xcbgrab \
-	--enable-vdpau \
-	--enable-hwaccel=h264_vdpau \
-	--enable-hwaccel=mpeg4_vdpau \
-	--enable-vaapi \
-	--enable-hwaccel=h264_vaapi \
-	--enable-hwaccel=mpeg4_vaapi \
-	--enable-hwaccel=h263_vaapi \
-	--enable-hwaccel=mjpeg_vaapi \
-	--enable-hwaccel=hevc_vaapi \
-	--enable-encoder=h264_vaapi \
-	--enable-encoder=mjpeg_vaapi \
-	--enable-encoder=hevc_vaapi
-# ffnvcodec is not supported on ARM then we enable it here for i386 and x86_64
-ifeq ($(ARCH),$(filter $(ARCH),i386 x86_64))
-FFMPEGCONF += --enable-cuvid \
-	      --enable-ffnvcodec \
-	      --enable-nvdec \
-	      --enable-nvenc \
-	      --enable-hwaccel=h264_nvdec \
-	      --enable-hwaccel=hevc_nvdec \
-	      --enable-hwaccel=mjpeg_nvdec \
-	      --enable-encoder=h264_nvenc \
-	      --enable-encoder=hevc_nvenc
-endif
+	--enable-indev=xcbgrab 
 # End Desktop Linux:
 endif
 # End HAVE_LINUX:

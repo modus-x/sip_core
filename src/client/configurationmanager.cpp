@@ -350,7 +350,7 @@ setAudioRingtoneDevice(int32_t index)
     return sip_core::Manager::instance().setAudioDevice(index, AudioDeviceType::RINGTONE);
 }
 
-std::vector<std::string>
+std::vector<int>
 getCurrentAudioDevicesIndex()
 {
     return sip_core::Manager::instance().getCurrentAudioDevicesIndex();
@@ -388,6 +388,19 @@ setNoiseSuppressState(const std::string& state)
     sip_core::Manager::instance().setNoiseSuppressState(state);
 }
 
+std::string
+getEchoCancellerState()
+{
+    return sip_core::Manager::instance().getEchoCancellerState();
+}
+
+void
+setEchoCancellerState(const std::string& state)
+{
+    sip_core::Manager::instance().setEchoCancellerState(state);
+}
+
+
 bool
 isAgcEnabled()
 {
@@ -398,6 +411,18 @@ void
 setAgcState(bool enabled)
 {
     sip_core::Manager::instance().setAGCState(enabled);
+}
+
+bool
+isVADEnabled()
+{
+    return sip_core::Manager::instance().isVADEnabled();
+}
+
+void
+setVADState(bool enabled)
+{
+    sip_core::Manager::instance().setVADState(enabled);
 }
 
 std::string

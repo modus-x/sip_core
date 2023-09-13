@@ -24,8 +24,6 @@
 #include "config.h"
 #endif
 
-
-
 #include "callmanager_interface.h"
 #include "configurationmanager_interface.h"
 #include "presencemanager_interface.h"
@@ -59,12 +57,10 @@ extern ScheduledExecutor eventScheduler;
 template<typename Callback>
 static void
 runOnEventThread(Callback&& cb,
-                const char* filename = CURRENT_FILENAME(),
-                uint32_t linum = CURRENT_LINE())
+                 const char* filename = CURRENT_FILENAME(),
+                 uint32_t linum = CURRENT_LINE())
 {
-    eventScheduler.run([cb = std::forward<Callback>(cb)]() mutable { cb(); },
-                                        filename,
-                                        linum);
+    eventScheduler.run([cb = std::forward<Callback>(cb)]() mutable { cb(); }, filename, linum);
 }
 
 /*
@@ -77,18 +73,30 @@ template<typename Ts, typename... Args>
 void
 emitSignal(Args... args)
 {
+    SIP_CORE_DBG("Emit signal request -> %s", Ts::name);
     sip_core_tracepoint_if_enabled(emit_signal, demangle<Ts>().c_str());
 
     const auto& handlers = getSignalHandlers();
     if (auto wrap = libsip_core::CallbackWrapper<typename Ts::cb_type>(handlers.at(Ts::name))) {
         try {
+            SIP_CORE_DBG("Signal scheduling  %s", Ts::name);
+
             sip_core_tracepoint(emit_signal_begin_callback, wrap.file_, wrap.linum_);
             auto cb = *wrap;
-            runOnEventThread([callback = cb, ... arguments = std::forward<Args>(args)] { callback(arguments...); });
+#ifdef __ANDROID__
+            cb(args...);
+#else
+            runOnEventThread([callback = cb, ... arguments = std::forward<Args>(args)] {
+                SIP_CORE_DBG("Running signal on thread %s", Ts::name);
+                callback(arguments...);
+            });
+#endif
             sip_core_tracepoint(emit_signal_end_callback);
         } catch (std::exception& e) {
-            SIP_CORE_ERR("Exception during emit signal %s:\n%s", Ts::name, e.what());
+            SIP_CORE_ERR("Exception during emitting signal %s:\n%s", Ts::name, e.what());
         }
+    } else {
+        SIP_CORE_ERR("Wrap not found for signal %s", Ts::name);
     }
 
     sip_core_tracepoint(emit_signal_end);

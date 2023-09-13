@@ -65,7 +65,6 @@ set(Source_Files
 add_subdirectory(client)
 add_subdirectory(config)
 add_subdirectory(connectivity)
-add_subdirectory(sip_core)
 add_subdirectory(im)
 add_subdirectory(media)
 add_subdirectory(sip)
@@ -78,9 +77,6 @@ set(Source_Files__config
     PARENT_SCOPE)
 set(Source_Files__connectivity
     ${Source_Files__connectivity}
-    PARENT_SCOPE)
-set(Source_Files__sip_core
-    ${Source_Files__sip_core}
     PARENT_SCOPE)
 set(Source_Files__im
     ${Source_Files__im}

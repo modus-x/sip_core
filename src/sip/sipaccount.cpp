@@ -1345,7 +1345,6 @@ SIPAccount::printContactHeader(const std::string& username,
     if (not deviceKey.empty()) {
         contact
 #if defined(__ANDROID__)
-            << ";pn-provider=" << PN_FCM
 #elif defined(__Apple__)
             << ";pn-provider=" << PN_APNS
 #endif

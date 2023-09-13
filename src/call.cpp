@@ -318,6 +318,7 @@ Call::getStateStr() const
     case CallState::INACTIVE:
         switch (getConnectionState()) {
         case ConnectionState::PROGRESSING:
+        case ConnectionState::TRYING:
             return StateEvent::CONNECTING;
 
         case ConnectionState::RINGING:
@@ -718,6 +719,13 @@ void
 Call::resetConfInfo()
 {
     sendConfInfo("{}");
+}
+
+void
+Call::setControlledByRemote()
+{
+    isControlledByRemote_ = true;
+    Manager::instance().addAudio(*this);
 }
 
 } // namespace sip_core

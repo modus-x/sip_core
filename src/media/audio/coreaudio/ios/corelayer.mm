@@ -109,29 +109,29 @@ CoreLayer::initAudioLayerIO(AudioDeviceType stream)
 
     auto comp = AudioComponentFindNext(nullptr, &outputUnitDescription);
     if (comp == nullptr) {
-        SIP_CORE_ERR("Can't find default output audio component.");
+        SIP_CORE_ERR("iOS CoreLayer - Can't find default output audio component.");
         return false;
     }
 
     checkErr(AudioComponentInstanceNew(comp, &ioUnit_));
 
-    bool setUpInput = stream == AudioDeviceType::ALL || stream == AudioDeviceType::CAPTURE;
+    // bool setUpInput = stream == AudioDeviceType::ALL || stream == AudioDeviceType::CAPTURE;
     NSError* error = nil;
-    AVAudioSessionCategory audioCategory = setUpInput ? AVAudioSessionCategoryPlayAndRecord : AVAudioSessionCategoryPlayback;
-    AVAudioSessionMode mode = setUpInput ? AVAudioSessionModeVoiceChat : AVAudioSessionModeMoviePlayback;
-    AVAudioSessionCategoryOptions options = setUpInput ? AVAudioSessionCategoryOptionAllowBluetooth : AVAudioSessionCategoryOptionMixWithOthers;
+    AVAudioSessionCategory audioCategory = AVAudioSessionCategoryPlayAndRecord;
+    AVAudioSessionMode mode = AVAudioSessionModeVoiceChat;
+    AVAudioSessionCategoryOptions options = AVAudioSessionCategoryOptionAllowBluetooth;
     [[AVAudioSession sharedInstance] setCategory:audioCategory mode: mode options:options error:&error];
     if (error) {
-        NSLog(@"Initializing audio session failed, %@",[error localizedDescription]);
+        NSLog(@"iOS CoreLayer - Initializing audio session failed, %@",[error localizedDescription]);
         return false;
     }
     [[AVAudioSession sharedInstance] setActive: true withOptions: AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation error: &error];
     if (error) {
-        NSLog(@"Set active audio session failed, %@",[error localizedDescription]);
+        NSLog(@"iOS CoreLayer - Set active audio session failed, %@",[error localizedDescription]);
         return false;
     }
     auto playBackDeviceList = getPlaybackDeviceList();
-    SIP_CORE_DBG("Setting playback device: %s", playBackDeviceList[indexOut_].c_str());
+    SIP_CORE_DBG("iOS CoreLayer - Setting playback device: %s", playBackDeviceList[indexOut_].c_str());
     switch(indexOut_) {
         case 0:
             [[AVAudioSession sharedInstance] overrideOutputAudioPort:AVAudioSessionPortOverrideSpeaker error:nil];
@@ -146,9 +146,9 @@ CoreLayer::initAudioLayerIO(AudioDeviceType stream)
             break;
     }
     setupOutputBus();
-    if (setUpInput) {
-        setupInputBus();
-    }
+    // if (setUpInput) {
+   setupInputBus();
+    // }
     bindCallbacks();
     return true;
 }
@@ -201,7 +201,7 @@ CoreLayer::setupOutputBus() {
 
 void
 CoreLayer::setupInputBus() {
-    SIP_CORE_DBG("Initializing input bus");
+    SIP_CORE_DBG("iOS CoreLayer - initializing input bus");
 
     AudioUnitScope inputBus = 1;
     UInt32 size;
@@ -320,20 +320,21 @@ void
 CoreLayer::startStream(AudioDeviceType stream)
 {
     dispatch_async(audioConfigurationQueueIOS(), ^{
-        SIP_CORE_DBG("iOS CoreLayer - Start Stream");
+        SIP_CORE_DBG("iOS CoreLayer - Start Stream %d", stream );
         auto currentCategory =  [[AVAudioSession sharedInstance] category];
 
         bool updateStream = currentCategory == AVAudioSessionCategoryPlayback && (stream == AudioDeviceType::CAPTURE || stream == AudioDeviceType::ALL);
         if (status_ == Status::Started) {
-            if (updateStream)
-                destroyAudioLayer();
-            else
-                return;
+if (updateStream)
+        destroyAudioLayer();
+        else
+        return;
         }
         status_ = Status::Started;
 
         dcblocker_.reset();
         if (!initAudioLayerIO(stream) || AudioUnitInitialize(ioUnit_) || AudioOutputUnitStart(ioUnit_)) {
+             SIP_CORE_DBG("iOS CoreLayer - could not load");
             destroyAudioLayer();
             status_ = Status::Idle;
         }
@@ -354,7 +355,7 @@ void
 CoreLayer::stopStream(AudioDeviceType stream)
 {
     dispatch_async(audioConfigurationQueueIOS(), ^{
-        SIP_CORE_DBG("iOS CoreLayer - Stop Stream");
+        SIP_CORE_DBG("iOS CoreLayer - Stop Stream %d", stream);
         auto currentCategory =  [[AVAudioSession sharedInstance] category];
         bool keepCurrentStream = currentCategory == AVAudioSessionCategoryPlayAndRecord && (stream == AudioDeviceType::PLAYBACK);
         if (status_ != Status::Started || keepCurrentStream)
@@ -427,7 +428,7 @@ CoreLayer::read(AudioUnitRenderActionFlags* ioActionFlags,
     (void) ioData;
 
     if (inNumberFrames <= 0) {
-        SIP_CORE_WARN("No frames for input.");
+        SIP_CORE_WARN("iOS CoreLayer - No frames for input.");
         return;
     }
 
@@ -436,7 +437,7 @@ CoreLayer::read(AudioUnitRenderActionFlags* ioActionFlags,
 
     if (inNumberFrames > bufferSizeFrames) {
         // Buffer is too small, need to reallocate
-        SIP_CORE_DBG("Reallocating capture buffer...");
+        SIP_CORE_DBG("iOS CoreLayer - Reallocating capture buffer...");
 
         UInt32 bufferSizeBytes = inNumberFrames * sizeof(Float32);
         UInt32 size = offsetof(AudioBufferList, mBuffers[0]) + (sizeof(AudioBuffer) * inChannelsPerFrame_);

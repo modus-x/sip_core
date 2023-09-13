@@ -25,11 +25,9 @@ ifndef HAVE_ANDROID
 endif
 endif
 
-# android x86_64 has reloc errors related to assembly optimizations
 ifdef HAVE_ANDROID
-ifeq ($(ARCH),x86_64)
+# android x86_64, x86 have reloc errors related to assembly optimizations
 X264CONF += --disable-asm
-endif
 endif
 
 $(TARBALLS)/x264-$(X264_HASH).tar.xz:

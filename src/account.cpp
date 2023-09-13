@@ -94,11 +94,14 @@ Account::setRegistrationState(RegistrationState state,
     if (state != registrationState_) {
         registrationState_ = state;
         // Notify the client
+
+        SIP_CORE_DBG("EMITTING RegistrationStateChanged SIGNAL 1");
         runOnMainThread([accountId = accountID_,
                          state = mapStateNumberToString(registrationState_),
                          detail_code,
                          detail_str,
                          details = getVolatileAccountDetails()] {
+            SIP_CORE_DBG("EMITTING RegistrationStateChanged SIGNAL 2");
             emitSignal<libsip_core::ConfigurationSignal::RegistrationStateChanged>(accountId,
                                                                              state,
                                                                              detail_code,

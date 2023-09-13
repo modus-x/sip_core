@@ -478,7 +478,7 @@ public:
      * Get string array representing integer indexes of output, input, and ringtone device
      * @return std::vector<std::string> A list of the current audio devices
      */
-    std::vector<std::string> getCurrentAudioDevicesIndex();
+    std::vector<int> getCurrentAudioDevicesIndex();
 
     /**
      * Get index of an audio device
@@ -506,8 +506,17 @@ public:
      */
     void setNoiseSuppressState(const std::string& state);
 
+    std::string getEchoCancellerState() const;
+
+    void setEchoCancellerState(const std::string& state);
+
     bool isAGCEnabled() const;
+
     void setAGCState(bool enabled);
+
+    bool isVADEnabled() const;
+
+    void setVADState(bool state);
 
     std::string getDataPath() const;
 

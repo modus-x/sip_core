@@ -718,7 +718,7 @@ Manager::finish() noexcept
 
     try {
         // Forbid call creation
-        callFactory.forbid();
+        // callFactory.forbid();
 
         // Hangup all remaining active calls
         SIP_CORE_DBG("Hangup %zu remaining call(s)", callFactory.callCount());
@@ -740,7 +740,7 @@ Manager::finish() noexcept
         SIP_CORE_DBG("Stopping schedulers and worker threads");
 
         // Flush remaining tasks (free lambda' with capture)
-        pimpl_->scheduler_.stop();
+        // pimpl_->scheduler_.stop();
 
         // NOTE: sipLink_->shutdown() is needed because this will perform
         // sipTransportBroker->shutdown(); which will call Manager::instance().sipVoIPLink()
@@ -1299,12 +1299,8 @@ Manager::joinParticipant(const std::string& accountId,
     std::vector<MediaAttribute> media {};
 
     if (audioOnly) {
-        MediaAttribute audioAttr = {MediaType::MEDIA_AUDIO,
-                         false,
-                         false,
-                         true,
-                         {},
-                         sip_utils::DEFAULT_AUDIO_STREAMID};
+        MediaAttribute audioAttr
+            = {MediaType::MEDIA_AUDIO, false, false, true, {}, sip_utils::DEFAULT_AUDIO_STREAMID};
 
         media.emplace_back(audioAttr);
     }
@@ -1794,9 +1790,9 @@ Manager::peerAnsweredCall(Call& call)
 void
 Manager::peerRingingCall(Call& call)
 {
-    SIP_CORE_DBG("[call:%s] Peer ringing", call.getCallId().c_str());
+    SIP_CORE_DBG("[call:%s] Peer ringing!!!", call.getCallId().c_str());
 
-    if (!hasCurrentCall())
+    if (!hasCurrentCall() && !call.isControlledByRemote())
         ringback();
 }
 
@@ -1917,32 +1913,32 @@ Manager::ringback()
 void
 Manager::playRingtone(const std::string& accountID)
 {
-    const auto account = getAccount(accountID);
-    if (!account) {
-        SIP_CORE_WARN("Invalid account in ringtone");
-        return;
-    }
+    // const auto account = getAccount(accountID);
+    // if (!account) {
+    //     SIP_CORE_WARN("Invalid account in ringtone");
+    //     return;
+    // }
 
-    if (!account->getRingtoneEnabled()) {
-        ringback();
-        return;
-    }
+    // if (!account->getRingtoneEnabled()) {
+    //     ringback();
+    //     return;
+    // }
 
-    {
-        std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
+    // {
+    //     std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
 
-        if (not pimpl_->audiodriver_) {
-            SIP_CORE_ERR("no audio layer in ringtone");
-            return;
-        }
-        // start audio if not started AND flush all buffers (main and urgent)
-        auto oldGuard = std::move(pimpl_->toneDeviceGuard_);
-        pimpl_->toneDeviceGuard_ = startAudioStream(AudioDeviceType::RINGTONE);
-        pimpl_->toneCtrl_.setSampleRate(pimpl_->audiodriver_->getSampleRate());
-    }
+    //     if (not pimpl_->audiodriver_) {
+    //         SIP_CORE_ERR("no audio layer in ringtone");
+    //         return;
+    //     }
+    //     // start audio if not started AND flush all buffers (main and urgent)
+    //     auto oldGuard = std::move(pimpl_->toneDeviceGuard_);
+    //     pimpl_->toneDeviceGuard_ = startAudioStream(AudioDeviceType::RINGTONE);
+    //     pimpl_->toneCtrl_.setSampleRate(pimpl_->audiodriver_->getSampleRate());
+    // }
 
-    if (not pimpl_->toneCtrl_.setAudioFile(account->getRingtonePath()))
-        ringback();
+    // if (not pimpl_->toneCtrl_.setAudioFile(account->getRingtonePath()))
+    //     ringback();
 }
 
 std::shared_ptr<AudioLoop>
@@ -2033,7 +2029,7 @@ Manager::getAudioInputDeviceList()
 /**
  * Get string array representing integer indexes of output and input device
  */
-std::vector<std::string>
+std::vector<int>
 Manager::getCurrentAudioDevicesIndex()
 {
     std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
@@ -2042,9 +2038,9 @@ Manager::getCurrentAudioDevicesIndex()
         return {};
     }
 
-    return {std::to_string(pimpl_->audiodriver_->getIndexPlayback()),
-            std::to_string(pimpl_->audiodriver_->getIndexCapture()),
-            std::to_string(pimpl_->audiodriver_->getIndexRingtone())};
+    return {pimpl_->audiodriver_->getIndexPlayback(),
+            pimpl_->audiodriver_->getIndexCapture(),
+            pimpl_->audiodriver_->getIndexRingtone()};
 }
 
 std::string
@@ -2266,6 +2262,18 @@ Manager::setNoiseSuppressState(const std::string& state)
     audioPreference.setNoiseReduce(state);
 }
 
+std::string
+Manager::getEchoCancellerState() const
+{
+    return audioPreference.getEchoCanceller();
+}
+
+void
+Manager::setEchoCancellerState(const std::string& state)
+{
+    audioPreference.setEchoCancel(state);
+}
+
 bool
 Manager::isAGCEnabled() const
 {
@@ -2276,6 +2284,18 @@ void
 Manager::setAGCState(bool state)
 {
     audioPreference.setAGCState(state);
+}
+
+bool
+Manager::isVADEnabled() const
+{
+    return audioPreference.getVadEnabled();
+}
+
+void
+Manager::setVADState(bool state)
+{
+    audioPreference.setVad(state);
 }
 
 /**

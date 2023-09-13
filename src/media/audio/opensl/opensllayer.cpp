@@ -185,10 +185,11 @@ OpenSLLayer::initAudioEngine()
     SLASSERT((*engineObject_)->GetInterface(engineObject_, SL_IID_ENGINE, &engineInterface_));
 
     size_t bufSize = hardwareBuffSize_ * hardwareFormat_.getBytesPerFrame();
-    SIP_CORE_DBG("OpenSL init: using buffer of %zu bytes to support %s with %zu samples per channel",
-             bufSize,
-             hardwareFormat_.toString().c_str(),
-             hardwareBuffSize_);
+    SIP_CORE_DBG(
+        "OpenSL init: using buffer of %zu bytes to support %s with %zu samples per channel",
+        bufSize,
+        hardwareFormat_.toString().c_str(),
+        hardwareBuffSize_);
     bufs_ = allocateSampleBufs(BUF_COUNT * 3, bufSize);
     for (int i = 0; i < BUF_COUNT; i++)
         freePlayBufQueue_.push(&bufs_[i]);
@@ -245,18 +246,18 @@ OpenSLLayer::dbgEngineGetBufCount()
     count_ringtone += ringBufQueue_.size();
 
     SIP_CORE_ERR("Buf Disrtibutions: PlayerDev=%zu, PlayQ=%u, FreePlayQ=%u",
-             player_->dbgGetDevBufCount(),
-             playBufQueue_.size(),
-             freePlayBufQueue_.size());
+                 player_->dbgGetDevBufCount(),
+                 playBufQueue_.size(),
+                 freePlayBufQueue_.size());
     SIP_CORE_ERR("Buf Disrtibutions: RingDev=%zu, RingQ=%u, FreeRingQ=%u",
-             ringtone_->dbgGetDevBufCount(),
-             ringBufQueue_.size(),
-             freeRingBufQueue_.size());
+                 ringtone_->dbgGetDevBufCount(),
+                 ringBufQueue_.size(),
+                 freeRingBufQueue_.size());
 
     if (count_player != BUF_COUNT) {
         SIP_CORE_ERR("====Lost Bufs among the queue(supposed = %d, found = %u)",
-                 BUF_COUNT,
-                 count_player);
+                     BUF_COUNT,
+                     count_player);
     }
     return count_player;
 }
@@ -275,9 +276,9 @@ OpenSLLayer::engineServicePlay()
             }
             if (not dat->pointer()->data[0] or not buf->buf_) {
                 SIP_CORE_ERR("null bufer %p -> %p %d",
-                         dat->pointer()->data[0],
-                         buf->buf_,
-                         dat->pointer()->nb_samples);
+                             dat->pointer()->data[0],
+                             buf->buf_,
+                             dat->pointer()->nb_samples);
                 break;
             }
             std::copy_n((const AudioSample*) dat->pointer()->data[0],
@@ -308,9 +309,9 @@ OpenSLLayer::engineServiceRing()
             }
             if (not dat->pointer()->data[0] or not buf->buf_) {
                 SIP_CORE_ERR("null bufer %p -> %p %d",
-                         dat->pointer()->data[0],
-                         buf->buf_,
-                         dat->pointer()->nb_samples);
+                             dat->pointer()->data[0],
+                             buf->buf_,
+                             dat->pointer()->nb_samples);
                 break;
             }
             std::copy_n((const AudioSample*) dat->pointer()->data[0],
@@ -357,12 +358,13 @@ OpenSLLayer::startAudioCapture()
                 if (buf->size_ > 0) {
                     auto nb_samples = buf->size_ / hardwareFormat_.getBytesPerFrame();
                     auto out = std::make_shared<AudioFrame>(hardwareFormat_, nb_samples);
-                    if (isCaptureMuted_)
+                    if (isCaptureMuted_) {
                         libav_utils::fillWithSilence(out->pointer());
-                    else
+                    } else {
                         std::copy_n((const AudioSample*) buf->buf_,
                                     nb_samples,
                                     (AudioSample*) out->pointer()->data[0]);
+                    }
                     putRecorded(std::move(out));
                 }
                 buf->size_ = 0;

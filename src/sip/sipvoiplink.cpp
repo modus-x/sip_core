@@ -858,8 +858,13 @@ invite_session_state_changed_cb(pjsip_inv_session* inv, pjsip_event* ev)
 
     switch (inv->state) {
     case PJSIP_INV_STATE_EARLY:
-        if (status_code == PJSIP_SC_RINGING)
+        if (status_code == PJSIP_SC_RINGING || status_code == PJSIP_SC_PROGRESS) {
+            if (status_code == PJSIP_SC_PROGRESS) {
+                call->setControlledByRemote();
+            }
             call->onPeerRinging();
+
+        }
         break;
 
     case PJSIP_INV_STATE_CONFIRMED:

@@ -116,7 +116,7 @@ AudioRecorder::AudioRecorder(sip_core::AudioFormat sampleFormat, size_t bufSize,
                                     &streamType,
                                     sizeof(SLint32));
 
-    bool aec {true}, agc(true), ns(true);
+    bool aec {false}, agc(false), ns(false);
 
     result = (*recObjectItf_)->Realize(recObjectItf_, SL_BOOLEAN_FALSE);
     SLASSERT(result);

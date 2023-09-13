@@ -310,12 +310,12 @@ SIPCall::setupVoiceCallback(const std::shared_ptr<RtpSession>& rtpSession)
                     // updates conference info and sends it to others via ConfInfo
                     // (only if there was a change)
                     // also emits signal with updated conference info
-                    conference->setVoiceActivity(streamId, voice);
+                    // conference->setVoiceActivity(streamId, voice);
                 } else {
                     // we are in a one-to-one call
                     // send voice activity over SIP
                     // TODO: change the streamID once multiple streams are supported
-                    thisPtr->sendVoiceActivity("-1", voice);
+                    // thisPtr->sendVoiceActivity("-1", voice);
 
                     // TODO: maybe emit signal here for local voice activity
                 }

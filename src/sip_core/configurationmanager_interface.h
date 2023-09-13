@@ -105,15 +105,20 @@ LIBSIP_CORE_PUBLIC void startAudio();
 LIBSIP_CORE_PUBLIC void setAudioInputDevice(int32_t index);
 LIBSIP_CORE_PUBLIC void setAudioRingtoneDevice(int32_t index);
 LIBSIP_CORE_PUBLIC std::vector<std::string> getAudioInputDeviceList();
-LIBSIP_CORE_PUBLIC std::vector<std::string> getCurrentAudioDevicesIndex();
+LIBSIP_CORE_PUBLIC std::vector<int> getCurrentAudioDevicesIndex();
 LIBSIP_CORE_PUBLIC int32_t getAudioInputDeviceIndex(const std::string& name);
 LIBSIP_CORE_PUBLIC int32_t getAudioOutputDeviceIndex(const std::string& name);
 LIBSIP_CORE_PUBLIC std::string getCurrentAudioOutputPlugin();
+
 LIBSIP_CORE_PUBLIC std::string getNoiseSuppressState();
 LIBSIP_CORE_PUBLIC void setNoiseSuppressState(const std::string& state);
+LIBSIP_CORE_PUBLIC std::string getEchoCancellerState();
+LIBSIP_CORE_PUBLIC void setEchoCancellerState(const std::string& state);
 
 LIBSIP_CORE_PUBLIC bool isAgcEnabled();
 LIBSIP_CORE_PUBLIC void setAgcState(bool enabled);
+LIBSIP_CORE_PUBLIC bool isVADEnabled();
+LIBSIP_CORE_PUBLIC void setVADState(bool enabled);
 
 LIBSIP_CORE_PUBLIC void muteDtmf(bool mute);
 LIBSIP_CORE_PUBLIC bool isDtmfMuted();

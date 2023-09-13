@@ -124,8 +124,12 @@ registerSignalHandlers(const std::map<std::string, std::shared_ptr<CallbackWrapp
     for (auto& item : handlers) {
         auto iter = handlers_.find(item.first);
         if (iter == handlers_.end()) {
-            SIP_CORE_ERR("Signal %s not supported", item.first.c_str());
+            SIP_CORE_DBG("Signal %s not supported", item.first.c_str());
             continue;
+        }
+        else {
+            SIP_CORE_INFO("Signal %s is registered", item.first.c_str());
+
         }
         iter->second = item.second;
     }
@@ -134,6 +138,7 @@ registerSignalHandlers(const std::map<std::string, std::shared_ptr<CallbackWrapp
 void
 unregisterSignalHandlers()
 {
+    SIP_CORE_DBG("Signals are unregistered");
     auto& handlers_ = sip_core::getSignalHandlers();
     for (auto& item : handlers_) {
         item.second = {};
