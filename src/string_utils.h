@@ -178,6 +178,18 @@ std::set<std::string> string_split_set(std::string& str, std::string_view separa
 // Add string operators crucially missing from standard
 // see https://groups.google.com/a/isocpp.org/forum/#!topic/std-proposals/1RcShRhrmRc
 namespace std {
+inline string 
+lower(const std::string& s)
+{
+    std::string result = s;
+    std::transform(result.begin(), result.end(), result.begin(), 
+                // static_cast<int(*)(int)>(std::tolower)         // wrong
+                // [](int c){ return std::tolower(c); }           // wrong
+                // [](char c){ return std::tolower(c); }          // wrong
+                   [](unsigned char c){ return std::tolower(c); } // correct
+                  );
+    return result;
+}
 inline string
 operator+(const string& s, const string_view& sv)
 {

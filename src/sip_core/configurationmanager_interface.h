@@ -33,6 +33,7 @@
 #include <memory>
 #include <string>
 #include <cstdint>
+#include "account_const.h"
 
 #include "sip_core.h"
 
@@ -53,6 +54,7 @@ struct LIBSIP_CORE_PUBLIC Message
 };
 
 LIBSIP_CORE_PUBLIC std::map<std::string, std::string> getAccountDetails(const std::string& accountID);
+LIBSIP_CORE_PUBLIC bool switchTransport(const std::string& accountID, Account::Transport type);
 LIBSIP_CORE_PUBLIC std::map<std::string, std::string> getVolatileAccountDetails(
     const std::string& accountID);
 LIBSIP_CORE_PUBLIC void setAccountDetails(const std::string& accountID,

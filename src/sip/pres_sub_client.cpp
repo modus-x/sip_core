@@ -467,6 +467,8 @@ PresSubClient::lock()
 
         lock_flag_ = PRESENCE_CLIENT_LOCK_FLAG;
         pres_->unlock();
+
+        break;
     }
 
     if (lock_flag_ == 0) {
@@ -512,6 +514,7 @@ PresSubClient::unsubscribe()
 
     /* Unsubscribe means send a subscribe with timeout=0s*/
     SIP_CORE_WARN("pres_client %.*s: unsubscribing..", (int) uri_.slen, uri_.ptr);
+
     retStatus = pjsip_pres_initiate(sub_, 0, &tdata);
 
     if (retStatus == PJ_SUCCESS) {
@@ -579,6 +582,12 @@ PresSubClient::subscribe()
      * fails the dialog will be destroyed prematurely.
      */
     pjsip_dlg_inc_lock(dlg_);
+
+    const pjsip_tpselector tp_sel = acc->getTransportSelector();
+    if (pjsip_dlg_set_transport(dlg_, &tp_sel) != PJ_SUCCESS) {
+        SIP_CORE_ERR("Unable to associate transport for invite session dialog");
+        return false;
+    }
 
     status = pjsip_pres_create_uac(dlg_, &pres_callback, PJSIP_EVSUB_NO_EVENT_ID, &sub_);
 

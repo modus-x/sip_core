@@ -45,6 +45,7 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include "connectivity/transport.h"
 
 #include "trace-tools.h"
 
@@ -252,7 +253,7 @@ public:
                          const std::string& account2Id,
                          const std::string& callId2,
                          bool attached = true,
-                         bool audioOnly=false);
+                         bool audioOnly = false);
 
     /**
      * Create a conference from a list of participant
@@ -446,6 +447,8 @@ public:
                             const std::string& callId,
                             const std::string& labelId,
                             bool active);
+
+    bool switchTransport(const std::string& accountId, TransportType type);
 
     /**
      * Set input audio plugin
@@ -818,11 +821,12 @@ public:
      * @param videoStream the the VideoFrameActiveWriter to which the sinks should be attached
      * @param sinksMap A map between sink ids and the respective shared pointer.
      */
-    void createSinkClients(const std::string& callId,
-                           const ConfInfo& infos,
-                           const std::vector<std::shared_ptr<video::VideoFrameActiveWriter>>& videoStreams,
-                           std::map<std::string, std::shared_ptr<video::SinkClient>>& sinksMap,
-                           const std::string& accountId = "");
+    void createSinkClients(
+        const std::string& callId,
+        const ConfInfo& infos,
+        const std::vector<std::shared_ptr<video::VideoFrameActiveWriter>>& videoStreams,
+        std::map<std::string, std::shared_ptr<video::SinkClient>>& sinksMap,
+        const std::string& accountId = "");
 
     /**
      * Return an existing SinkClient instance as a shared_ptr associated to the given identifier.

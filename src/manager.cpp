@@ -110,39 +110,11 @@ namespace sip_core {
 /** To store uniquely a list of Call ids */
 using CallIDSet = std::set<std::string>;
 
-static constexpr const char* PACKAGE_OLD = "ring";
-
 std::atomic_bool Manager::initialized = {false};
 
 #if TARGET_OS_IOS
 bool Manager::isIOSExtension = {false};
 #endif
-
-static void
-copy_over(const std::string& srcPath, const std::string& destPath)
-{
-    std::ifstream src = fileutils::ifstream(srcPath.c_str());
-    std::ofstream dest = fileutils::ofstream(destPath.c_str());
-    dest << src.rdbuf();
-    src.close();
-    dest.close();
-}
-
-// Creates a backup of the file at "path" with a .bak suffix appended
-static void
-make_backup(const std::string& path)
-{
-    const std::string backup_path(path + ".bak");
-    copy_over(path, backup_path);
-}
-
-// Restore last backup of the configuration file
-static void
-restore_backup(const std::string& path)
-{
-    const std::string backup_path(path + ".bak");
-    copy_over(backup_path, path);
-}
 
 void
 check_rename(const std::string& old_dir, const std::string& new_dir)
@@ -602,8 +574,7 @@ Manager::instance()
 }
 
 Manager::Manager()
-    : rand_ {std::random_device {}()}
-    , preferences()
+    : preferences()
     , voipPreferences()
     , audioPreference()
 #ifdef ENABLE_VIDEO
@@ -611,6 +582,7 @@ Manager::Manager()
 #endif
     , callFactory()
     , accountFactory()
+    , rand_ {std::random_device {}()}
     , pimpl_(new ManagerPimpl(*this))
 {}
 
@@ -667,10 +639,10 @@ Manager::init(const std::string& config_file, const std::string& data_path)
 
     pimpl_->data_path_ = data_path;
 
-    bool no_errors = true;
-
     // manager can restart without being recreated (Unit tests)
     pimpl_->finished_ = false;
+
+    bool no_errors;
 
     try {
         no_errors = pimpl_->parseConfiguration();
@@ -705,8 +677,6 @@ Manager::init(const std::string& config_file, const std::string& data_path)
             pimpl_->dtmfKey_.reset(new DTMF(getRingBufferPool().getInternalSamplingRate()));
         }
     }
-    // we do not need to register accounts instantly
-    // registerAccounts();
 }
 
 void
@@ -885,6 +855,14 @@ Manager::controlRTPReceiver(const std::string& accountId,
             call->controlRTPReceiver(active, labelId);
             return;
         }
+    }
+}
+
+bool
+Manager::switchTransport(const std::string& accountId, TransportType type)
+{
+    if (auto account = getAccount(accountId)) {
+        account->switchTransport(type);
     }
 }
 

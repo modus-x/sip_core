@@ -17,6 +17,7 @@
 #pragma once
 #include "connectivity/sip_utils.h"
 #include "config/serializable.h"
+#include "account_const.h"
 
 #include <string>
 #include <string_view>
@@ -25,6 +26,7 @@
 using namespace std::literals;
 
 namespace sip_core {
+
 constexpr const char* const DEFAULT_RINGTONE_PATH = "default.opus";
 
 struct AccountConfig: public Serializable {
@@ -56,6 +58,8 @@ struct AccountConfig: public Serializable {
 
     /** SIP hostname (SIP account) or DHT bootstrap nodes (sip_core account) */
     std::string hostname {};
+
+    TransportType transport {TransportType::UDP};
 
     /** True if the account is enabled. */
     bool enabled {true};
@@ -128,6 +132,8 @@ struct AccountConfig: public Serializable {
      * Push notification topic.
      */
     std::string notificationTopic {};
+
+    void setTransport(TransportType newTransport) { transport = newTransport; }
 };
 
 inline void parseString(const std::map<std::string, std::string>& details, const char* key, std::string& s)

@@ -33,6 +33,7 @@ enum class RegistrationState {
     TRYING,
     REGISTERED,
     ERROR_GENERIC,
+    ERROR_FAKE,
     ERROR_AUTH,
     ERROR_NETWORK,
     ERROR_HOST,

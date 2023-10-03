@@ -32,10 +32,21 @@ namespace libsip_core {
 
 namespace Account {
 
+enum class MessageStates : int {
+    UNKNOWN = 0,
+    SENDING,
+    SENT,
+    DISPLAYED,
+    FAILURE,
+    CANCELLED
+};
+
+// binds to enum in connectivity/transport.h
+enum class Transport { TCP, UDP };
+
 namespace ProtocolNames {
 
 constexpr static const char SIP[] = "SIP";
-constexpr static const char IP2IP[] = "IP2IP";
 
 } // namespace ProtocolNames
 
@@ -61,14 +72,7 @@ constexpr static const char INITIALIZING[] = "INITIALIZING";
 
 } // namespace States
 
-enum class MessageStates : int {
-    UNKNOWN = 0,
-    SENDING,
-    SENT,
-    DISPLAYED,
-    FAILURE,
-    CANCELLED
-}; // libsip_core::Account::MessageStates
+
 
 namespace VolatileProperties {
 
@@ -91,12 +95,6 @@ constexpr static const char STATE_CODE[] = "Transport.statusCode";
 constexpr static const char STATE_DESC[] = "Transport.statusDescription";
 
 } // namespace Transport
-
-namespace InstantMessaging {
-
-constexpr static const char OFF_CALL[] = "IM.offCall";
-
-}
 
 } // namespace VolatileProperties
 
@@ -150,6 +148,7 @@ constexpr static const char DEFAULT_MODERATORS[] = "Account.defaultModerators";
 constexpr static const char LOCAL_MODERATORS_ENABLED[] = "Account.localModeratorsEnabled";
 constexpr static const char ALL_MODERATORS_ENABLED[] = "Account.allModeratorsEnabled";
 constexpr static const char ACCOUNT_IP_AUTO_REWRITE[] = "Account.allowIPAutoRewrite";
+constexpr static const char ACCOUNT_TRANSPORT[] = "Account.transport";
 
 namespace Audio {
 
@@ -165,23 +164,6 @@ constexpr static const char PORT_MAX[] = "Account.videoPortMax";
 constexpr static const char PORT_MIN[] = "Account.videoPortMin";
 
 } // namespace Video
-
-namespace STUN {
-
-constexpr static const char SERVER[] = "STUN.server";
-constexpr static const char ENABLED[] = "STUN.enable";
-
-} // namespace STUN
-
-namespace TURN {
-
-constexpr static const char SERVER[] = "TURN.server";
-constexpr static const char ENABLED[] = "TURN.enable";
-constexpr static const char SERVER_UNAME[] = "TURN.username";
-constexpr static const char SERVER_PWD[] = "TURN.password";
-constexpr static const char SERVER_REALM[] = "TURN.realm";
-
-} // namespace TURN
 
 namespace Presence {
 
@@ -213,41 +195,6 @@ constexpr static const char RTP_FALLBACK[] = "SRTP.rtpFallback";
 
 } // namespace SRTP
 
-namespace TLS {
-
-constexpr static const char LISTENER_PORT[] = "TLS.listenerPort";
-constexpr static const char ENABLED[] = "TLS.enable";
-constexpr static const char PORT[] = "TLS.port";
-constexpr static const char CA_LIST_FILE[] = "TLS.certificateListFile";
-constexpr static const char CERTIFICATE_FILE[] = "TLS.certificateFile";
-constexpr static const char PRIVATE_KEY_FILE[] = "TLS.privateKeyFile";
-constexpr static const char PASSWORD[] = "TLS.password";
-constexpr static const char METHOD[] = "TLS.method";
-constexpr static const char CIPHERS[] = "TLS.ciphers";
-constexpr static const char SERVER_NAME[] = "TLS.serverName";
-constexpr static const char VERIFY_SERVER[] = "TLS.verifyServer";
-constexpr static const char VERIFY_CLIENT[] = "TLS.verifyClient";
-constexpr static const char REQUIRE_CLIENT_CERTIFICATE[] = "TLS.requireClientCertificate";
-constexpr static const char DISABLE_SECURE_DLG_CHECK[] = "TLS.disableSecureDlgCheck";
-constexpr static const char NEGOTIATION_TIMEOUT_SEC[] = "TLS.negotiationTimeoutSec";
-
-} // namespace TLS
-
-namespace DHT {
-
-constexpr static const char PORT[] = "DHT.port";
-constexpr static const char PUBLIC_IN_CALLS[] = "DHT.PublicInCalls";
-constexpr static const char ALLOW_FROM_TRUSTED[] = "DHT.AllowFromTrusted";
-
-} // namespace DHT
-
-namespace RingNS {
-
-constexpr static const char URI[] = "RingNS.uri";
-constexpr static const char ACCOUNT[] = "RingNS.account";
-
-} // namespace RingNS
-
 namespace CodecInfo {
 
 constexpr static const char NAME[] = "CodecInfo.name";
@@ -266,15 +213,6 @@ constexpr static const char AUTO_QUALITY_ENABLED[] = "CodecInfo.autoQualityEnabl
 } // namespace CodecInfo
 
 } // namespace ConfProperties
-
-namespace TrustRequest {
-
-constexpr static const char FROM[] = "from";
-constexpr static const char RECEIVED[] = "received";
-constexpr static const char PAYLOAD[] = "payload";
-constexpr static const char CONVERSATIONID[] = "conversationId";
-
-} // namespace TrustRequest
 
 } // namespace Account
 

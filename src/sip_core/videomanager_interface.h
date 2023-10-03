@@ -30,6 +30,7 @@ extern "C" {
 struct AVFrame;
 struct AVPacket;
 void av_frame_free(AVFrame** frame);
+void av_packet_free(AVPacket** frame);
 }
 
 #include "def.h"
@@ -47,6 +48,12 @@ void av_frame_free(AVFrame** frame);
 #import "TargetConditionals.h"
 #endif
 
+#ifdef __ANDROID__
+#include <android/native_window.h>
+#include <android/native_window_jni.h>
+#include <android/log.h>
+#endif
+
 namespace sip_core {
 struct AudioFormat;
 }
@@ -56,11 +63,19 @@ namespace libsip_core {
 [[deprecated("Replaced by registerSignalHandlers")]] LIBSIP_CORE_PUBLIC void registerVideoHandlers(
     const std::map<std::string, std::shared_ptr<CallbackWrapperBase>>&);
 
-struct LIBSIP_CORE_PUBLIC AVFrame_deleter {
+struct LIBSIP_CORE_PUBLIC AVFrame_deleter
+{
     void operator()(AVFrame* frame) const { av_frame_free(&frame); }
 };
 
 typedef std::unique_ptr<AVFrame, AVFrame_deleter> FrameBuffer;
+
+struct LIBSIP_CORE_PUBLIC AVPacket_deleter
+{
+    void operator()(AVPacket* pkt) const { av_packet_free(&pkt); }
+};
+
+typedef std::unique_ptr<AVPacket, AVPacket_deleter> PacketBuffer;
 
 class LIBSIP_CORE_PUBLIC MediaFrame
 {
@@ -81,7 +96,7 @@ public:
 
     // Fill this MediaFrame with data from o
     void copyFrom(const MediaFrame& o);
-    void setPacket(std::unique_ptr<AVPacket, void (*)(AVPacket*)>&& pkt);
+    void setPacket(PacketBuffer&& pkt);
 
     // Reset internal buffers (return to an empty MediaFrame)
     virtual void reset() noexcept;
@@ -90,7 +105,7 @@ public:
 
 protected:
     FrameBuffer frame_;
-    std::unique_ptr<AVPacket, void (*)(AVPacket*)> packet_;
+    PacketBuffer packet_;
 };
 
 class LIBSIP_CORE_PUBLIC AudioFrame : public MediaFrame
@@ -177,7 +192,7 @@ LIBSIP_CORE_PUBLIC std::vector<std::string> getDeviceList();
 LIBSIP_CORE_PUBLIC VideoCapabilities getCapabilities(const std::string& deviceId);
 LIBSIP_CORE_PUBLIC std::map<std::string, std::string> getSettings(const std::string& deviceId);
 LIBSIP_CORE_PUBLIC void applySettings(const std::string& deviceId,
-                                const std::map<std::string, std::string>& settings);
+                                      const std::map<std::string, std::string>& settings);
 LIBSIP_CORE_PUBLIC void setDefaultDevice(const std::string& deviceId);
 LIBSIP_CORE_PUBLIC void setDeviceOrientation(const std::string& deviceId, int angle);
 LIBSIP_CORE_PUBLIC std::map<std::string, std::string> getDeviceParams(const std::string& deviceId);
@@ -202,15 +217,39 @@ LIBSIP_CORE_PUBLIC void startShmSink(const std::string& sinkId, bool value);
 LIBSIP_CORE_PUBLIC std::map<std::string, std::string> getRenderer(const std::string& callId);
 
 LIBSIP_CORE_PUBLIC std::string startLocalMediaRecorder(const std::string& videoInputId,
-                                                 const std::string& filepath);
+                                                       const std::string& filepath);
 LIBSIP_CORE_PUBLIC void stopLocalRecorder(const std::string& filepath);
 
-#if defined(__ANDROID__) || defined(RING_UWP) || (defined(TARGET_OS_IOS) && TARGET_OS_IOS)
+#if defined(__ANDROID__) || (defined(TARGET_OS_IOS) && TARGET_OS_IOS)
 LIBSIP_CORE_PUBLIC void addVideoDevice(
     const std::string& node, const std::vector<std::map<std::string, std::string>>& devInfo = {});
 LIBSIP_CORE_PUBLIC void removeVideoDevice(const std::string& node);
 LIBSIP_CORE_PUBLIC VideoFrame* getNewFrame(std::string_view id);
 LIBSIP_CORE_PUBLIC void publishFrame(std::string_view id);
+LIBSIP_CORE_PUBLIC void publishFrame(std::string_view id);
+#endif
+
+// methods which require android jni
+#if defined(__ANDROID__)
+// unused??
+LIBSIP_CORE_PUBLIC void setVideoFrame(
+    JNIEnv* jenv, jbyteArray frame, int frame_size, long target, int w, int h, int rotation);
+
+LIBSIP_CORE_PUBLIC long acquireNativeWindow(JNIEnv* jenv, jobject javaSurface);
+LIBSIP_CORE_PUBLIC void releaseNativeWindow(long windowId);
+LIBSIP_CORE_PUBLIC void captureVideoFrame(
+    JavaVM* javaVM, JNIEnv* jenv, const std::string& inputId, jobject javaImage, int rotation);
+LIBSIP_CORE_PUBLIC void captureVideoPacket(JNIEnv* jenv,
+                                           const std::string& inputId,
+                                           jobject javaBuffer,
+                                           int size,
+                                           int offset,
+                                           bool keyframe,
+                                           long timestamp,
+                                           int rotation);
+LIBSIP_CORE_PUBLIC void setNativeWindowGeometry(long windowId, int width, int height);
+LIBSIP_CORE_PUBLIC void unregisterVideoCallback(const std::string& sink, long windowId);
+LIBSIP_CORE_PUBLIC bool registerVideoCallback(const std::string& sink, long windowId);
 #endif
 
 LIBSIP_CORE_PUBLIC bool getDecodingAccelerated();
@@ -267,9 +306,9 @@ struct LIBSIP_CORE_PUBLIC VideoSignal
     {
         constexpr static const char* name = "GetCameraInfo";
         using cb_type = void(const std::string& device,
-                             std::vector<int>* formats,
-                             std::vector<unsigned>* sizes,
-                             std::vector<unsigned>* rates);
+                             std::vector<int32_t>& formats,
+                             std::vector<uint32_t>& sizes,
+                             std::vector<uint32_t>& rates);
     };
     struct LIBSIP_CORE_PUBLIC RequestKeyFrame
     {

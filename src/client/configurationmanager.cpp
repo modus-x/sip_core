@@ -32,11 +32,11 @@
 #include "logger.h"
 #include "fileutils.h"
 #include "connectivity/ip_utils.h"
+#include "connectivity/transport.h"
 #include "sip/sipaccount.h"
 #include "sip/sipaccount_config.h"
 #include "audio/audiolayer.h"
 #include "system_codec_container.h"
-#include "account_const.h"
 #include "client/ring_signal.h"
 #include "audio/ringbufferpool.h"
 
@@ -105,6 +105,21 @@ void
 registerAllAccounts()
 {
     sip_core::Manager::instance().registerAccounts();
+}
+
+bool
+switchTransport(const std::string& accountID, Account::Transport type)
+{
+    switch (type) {
+    case Account::Transport::UDP:
+        sip_core::Manager::instance().switchTransport(accountID, sip_core::TransportType::UDP);
+        break;
+    case Account::Transport::TCP:
+        sip_core::Manager::instance().switchTransport(accountID, sip_core::TransportType::TCP);
+        break;
+    default:
+        break;
+    }
 }
 
 uint64_t
@@ -236,11 +251,12 @@ setCodecDetails(const std::string& accountID,
         if (codec->systemCodecInfo.mediaType & sip_core::MEDIA_VIDEO) {
             if (auto foundCodec = std::static_pointer_cast<sip_core::AccountVideoCodecInfo>(codec)) {
                 foundCodec->setCodecSpecifications(details);
-                SIP_CORE_WARN("parameters for %s changed ", foundCodec->systemCodecInfo.name.c_str());
+                SIP_CORE_WARN("parameters for %s changed ",
+                              foundCodec->systemCodecInfo.name.c_str());
                 if (auto call = sip_core::Manager::instance().getCurrentCall()) {
                     if (call->getVideoCodec() == foundCodec) {
                         SIP_CORE_WARN("%s running. Need to restart encoding",
-                                  foundCodec->systemCodecInfo.name.c_str());
+                                      foundCodec->systemCodecInfo.name.c_str());
                         call->restartMediaSender();
                     }
                 }
@@ -399,7 +415,6 @@ setEchoCancellerState(const std::string& state)
 {
     sip_core::Manager::instance().setEchoCancellerState(state);
 }
-
 
 bool
 isAgcEnabled()

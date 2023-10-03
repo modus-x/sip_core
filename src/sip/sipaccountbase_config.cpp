@@ -37,13 +37,6 @@ const char* const PRESENCE_PUBLISH_SUPPORTED_KEY = "presencePublishSupported";
 const char* const PRESENCE_SUBSCRIBE_SUPPORTED_KEY = "presenceSubscribeSupported";
 const char* const PRESENCE_STATUS_KEY = "presenceStatus";
 const char* const PRESENCE_NOTE_KEY = "presenceNote";
-const char* const STUN_ENABLED_KEY = "stunEnabled";
-const char* const STUN_SERVER_KEY = "stunServer";
-const char* const TURN_ENABLED_KEY = "turnEnabled";
-const char* const TURN_SERVER_KEY = "turnServer";
-const char* const TURN_SERVER_UNAME_KEY = "turnServerUserName";
-const char* const TURN_SERVER_PWD_KEY = "turnServerPassword";
-const char* const TURN_SERVER_REALM_KEY = "turnServerRealm";
 const char* const CRED_KEY = "credential";
 const char* const AUDIO_PORT_MIN_KEY = "audioPortMin";
 const char* const AUDIO_PORT_MAX_KEY = "audioPortMax";
@@ -86,11 +79,6 @@ SipAccountBaseConfig::serializeDiff(YAML::Emitter& out, const SipAccountBaseConf
     SERIALIZE_CONFIG(Conf::AUDIO_PORT_MAX_KEY, audioPortRange.first);
     SERIALIZE_CONFIG(Conf::VIDEO_PORT_MAX_KEY, videoPortRange.second);
     SERIALIZE_CONFIG(Conf::VIDEO_PORT_MIN_KEY, videoPortRange.first);
-    SERIALIZE_CONFIG(Conf::TURN_ENABLED_KEY, turnEnabled);
-    SERIALIZE_CONFIG(Conf::TURN_SERVER_KEY, turnServer);
-    SERIALIZE_CONFIG(Conf::TURN_SERVER_UNAME_KEY, turnServerUserName);
-    SERIALIZE_CONFIG(Conf::TURN_SERVER_PWD_KEY, turnServerPwd);
-    SERIALIZE_CONFIG(Conf::TURN_SERVER_REALM_KEY, turnServerRealm);
 }
 
 void
@@ -104,14 +92,6 @@ SipAccountBaseConfig::unserialize(const YAML::Node& node)
     unserializeRange(node, Conf::AUDIO_PORT_MIN_KEY, Conf::AUDIO_PORT_MAX_KEY, audioPortRange);
     unserializeRange(node, Conf::VIDEO_PORT_MIN_KEY, Conf::VIDEO_PORT_MAX_KEY, videoPortRange);
 
-    // ICE - STUN/TURN
-    //parseValueOptional(node, Conf::STUN_ENABLED_KEY, stunEnabled);
-    //parseValueOptional(node, Conf::STUN_SERVER_KEY, stunServer);
-    parseValueOptional(node, Conf::TURN_ENABLED_KEY, turnEnabled);
-    parseValueOptional(node, Conf::TURN_SERVER_KEY, turnServer);
-    parseValueOptional(node, Conf::TURN_SERVER_UNAME_KEY, turnServerUserName);
-    parseValueOptional(node, Conf::TURN_SERVER_PWD_KEY, turnServerPwd);
-    parseValueOptional(node, Conf::TURN_SERVER_REALM_KEY, turnServerRealm);
 }
 
 std::map<std::string, std::string>
@@ -133,11 +113,6 @@ SipAccountBaseConfig::toMap() const
     a.emplace(Conf::CONFIG_PUBLISHED_SAMEAS_LOCAL, publishedSameasLocal ? TRUE_STR : FALSE_STR);
     a.emplace(Conf::CONFIG_PUBLISHED_ADDRESS, publishedIp);
 
-    a.emplace(Conf::CONFIG_TURN_ENABLE, turnEnabled ? TRUE_STR : FALSE_STR);
-    a.emplace(Conf::CONFIG_TURN_SERVER, turnServer);
-    a.emplace(Conf::CONFIG_TURN_SERVER_UNAME, turnServerUserName);
-    a.emplace(Conf::CONFIG_TURN_SERVER_PWD, turnServerPwd);
-    a.emplace(Conf::CONFIG_TURN_SERVER_REALM, turnServerRealm);
     return a;
 }
 
@@ -162,17 +137,6 @@ SipAccountBaseConfig::fromMap(const std::map<std::string, std::string>& details)
     tmpMax = -1;
     parseInt(details, Conf::CONFIG_ACCOUNT_VIDEO_PORT_MAX, tmpMax);
     updateRange(tmpMin, tmpMax, videoPortRange);
-
-    // ICE - STUN
-    //parseBool(details, Conf::CONFIG_STUN_ENABLE, stunEnabled);
-    //parseString(details, Conf::CONFIG_STUN_SERVER, stunServer);
-
-    // ICE - TURN
-    parseBool(details, Conf::CONFIG_TURN_ENABLE, turnEnabled);
-    parseString(details, Conf::CONFIG_TURN_SERVER, turnServer);
-    parseString(details, Conf::CONFIG_TURN_SERVER_UNAME, turnServerUserName);
-    parseString(details, Conf::CONFIG_TURN_SERVER_PWD, turnServerPwd);
-    parseString(details, Conf::CONFIG_TURN_SERVER_REALM, turnServerRealm);
 }
 
 }

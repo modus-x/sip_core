@@ -11,7 +11,6 @@ set(PACKAGE_NAME "sip_core library")
 # ##############################################################################
 option(SIP_CORE_VIDEO "Build with video support" ON)
 option(BUILD_CONTRIB "Build contrib to CONTRIB_PATH" ON)
-option(BUILD_EXTRA_TOOLS "Build extra tools" OFF)
 
 set(original_ldflags "${LDFLAGS}")
 set(original_cflags "${CFLAGS}")
@@ -73,19 +72,6 @@ if(NOT MSVC)
   endif()
 
   set(CONTRIB_PATHS "")
-
-  if(BUILD_EXTRA_TOOLS)
-    set(ENV{PATH}
-        "${CMAKE_CURRENT_SOURCE_DIR}/extras/tools/build/bin:$ENV{PATH}")
-    execute_process(COMMAND ./bootstrap
-                    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/extras/tools)
-    execute_process(COMMAND make
-                    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/extras/tools)
-    execute_process(COMMAND make .pkg-config
-                    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/extras/tools)
-    execute_process(COMMAND make .gas
-                    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/extras/tools)
-  endif()
 
   if(BUILD_CONTRIB)
     if(ANDROID)
@@ -150,7 +136,7 @@ if(NOT MSVC)
       endif()
 
       execute_process(
-        COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/contrib/bootstrap --host=${TARGET}
+        COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/contrib/bootstrap --host=${TARGET} --enable-debug
         WORKING_DIRECTORY ${CONTRIB_BUILD_PATH}
         RESULT_VARIABLE CMD_RESULT)
 

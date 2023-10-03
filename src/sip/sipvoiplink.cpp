@@ -763,9 +763,6 @@ SIPVoIPLink::guessAccount(std::string_view userName,
         } else if (match > best) {
             best = match;
             result = account;
-        } else if (!IP2IPAccount && account->isIP2IP()) {
-            // Allow IP2IP calls if an account exists for this type of calls
-            IP2IPAccount = account;
         }
     }
 
@@ -776,7 +773,8 @@ SIPVoIPLink::guessAccount(std::string_view userName,
 void
 SIPVoIPLink::handleEvents()
 {
-    const pj_time_val timeout = {1, 0};
+    
+    const pj_time_val timeout = {5, 0};
     if (auto ret = pjsip_endpt_handle_events(endpt_, &timeout))
         SIP_CORE_ERR("pjsip_endpt_handle_events failed with error %s",
                      sip_utils::sip_strerror(ret).c_str());

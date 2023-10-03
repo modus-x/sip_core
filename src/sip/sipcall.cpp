@@ -74,24 +74,13 @@ getVideoSettings()
 }
 #endif
 
-static constexpr std::chrono::seconds DEFAULT_ICE_INIT_TIMEOUT {35}; // seconds
-static constexpr std::chrono::milliseconds EXPECTED_ICE_INIT_MAX_TIME {5000};
-static constexpr std::chrono::seconds DEFAULT_ICE_NEGO_TIMEOUT {60}; // seconds
 static constexpr std::chrono::milliseconds MS_BETWEEN_2_KEYFRAME_REQUEST {1000};
-static constexpr int ICE_COMP_ID_RTP {1};
-static constexpr int ICE_COMP_COUNT_PER_STREAM {2};
 static constexpr auto MULTISTREAM_REQUIRED_VERSION_STR = "10.0.2"sv;
 static const std::vector<unsigned> MULTISTREAM_REQUIRED_VERSION
     = split_string_to_unsigned(MULTISTREAM_REQUIRED_VERSION_STR, '.');
-static constexpr auto MULTIICE_REQUIRED_VERSION_STR = "13.3.0"sv;
-static const std::vector<unsigned> MULTIICE_REQUIRED_VERSION
-    = split_string_to_unsigned(MULTIICE_REQUIRED_VERSION_STR, '.');
 static constexpr auto NEW_CONFPROTOCOL_VERSION_STR = "13.1.0"sv;
 static const std::vector<unsigned> NEW_CONFPROTOCOL_VERSION
     = split_string_to_unsigned(NEW_CONFPROTOCOL_VERSION_STR, '.');
-static constexpr auto REUSE_ICE_IN_REINVITE_REQUIRED_VERSION_STR = "11.0.2"sv;
-static const std::vector<unsigned> REUSE_ICE_IN_REINVITE_REQUIRED_VERSION
-    = split_string_to_unsigned(REUSE_ICE_IN_REINVITE_REQUIRED_VERSION_STR, '.');
 
 SIPCall::SIPCall(const std::shared_ptr<SIPAccountBase>& account,
                  const std::string& callId,
@@ -233,7 +222,9 @@ SIPCall::configureRtpSession(const std::shared_ptr<RtpSession>& rtpSession,
         throw std::runtime_error("Must have a valid RTP Session");
 
     // Configure the media stream
-    auto new_mtu = sipTransport_->getTlsMtu();
+
+    auto new_mtu = 1200;
+    // TODO: get MTU from somewhere else
     rtpSession->setMtu(new_mtu);
     rtpSession->updateMedia(remoteMedia, localMedia);
 
@@ -310,12 +301,12 @@ SIPCall::setupVoiceCallback(const std::shared_ptr<RtpSession>& rtpSession)
                     // updates conference info and sends it to others via ConfInfo
                     // (only if there was a change)
                     // also emits signal with updated conference info
-                    // conference->setVoiceActivity(streamId, voice);
+                    conference->setVoiceActivity(streamId, voice);
                 } else {
                     // we are in a one-to-one call
                     // send voice activity over SIP
                     // TODO: change the streamID once multiple streams are supported
-                    // thisPtr->sendVoiceActivity("-1", voice);
+                    thisPtr->sendVoiceActivity("-1", voice);
 
                     // TODO: maybe emit signal here for local voice activity
                 }
@@ -1305,10 +1296,7 @@ SIPCall::switchInput(const std::string& source)
 {
     SIP_CORE_DBG("[call:%s] Set selected source to %s", getCallId().c_str(), source.c_str());
 
-    size_t streamIdx = -1;
-
     for (auto const& stream : rtpStreams_) {
-        streamIdx++;
         auto mediaAttr = stream.mediaAttribute_;
         
         // change source uri for all media types
@@ -2170,7 +2158,7 @@ SIPCall::requestMediaChange(const std::vector<libsip_core::MediaMap>& mediaList)
                      newMediaAttr.toString(true).c_str());
     }
 
-    auto needReinvite = isReinviteRequired(mediaAttrList);
+    auto needReinvite = true;
 
     if (!updateAllMediaStreams(mediaAttrList, false))
         return false;

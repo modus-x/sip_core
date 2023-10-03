@@ -62,6 +62,8 @@ public:
      */
     virtual bool startRecording(const std::string& path);
 
+    virtual bool startRecording();
+
     /**
      * Return the file path for this recording
      */

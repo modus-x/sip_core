@@ -171,10 +171,7 @@ SIPPresence::sendPresence(bool status, const std::string& note)
     // if ((not publish_supported_) or (not enabled_))
     //    return;
 
-    if (acc_->isIP2IP())
-        notifyPresSubServer(); // to each subscribers
-    else
-        publish(this); // to the PBX server
+    publish(this); // to the PBX server
 }
 
 void

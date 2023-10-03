@@ -120,7 +120,7 @@ VideoDeviceImpl::VideoDeviceImpl(const std::string& path)
     formats_.reserve(16);
     sizes.reserve(16);
     rates.reserve(16);
-    emitSignal<libsip_core::VideoSignal::GetCameraInfo>(name, &formats_, &sizes, &rates);
+    emitSignal<libsip_core::VideoSignal::GetCameraInfo>(name, formats_, sizes, rates);
     for (size_t i = 0, n = sizes.size(); i < n; i += 2)
         sizes_.emplace_back(sizes[i], sizes[i + 1]);
     for (const auto& r : rates)

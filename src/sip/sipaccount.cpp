@@ -73,10 +73,13 @@
 #include <ctime>
 #include <charconv>
 
+#include "pj/string.h"
+
 #ifdef _WIN32
 #include <lmcons.h>
 #else
 #include <pwd.h>
+#include "sipaccount.h"
 #endif
 
 namespace sip_core {
@@ -372,31 +375,12 @@ SIPAccount::newOutgoingCall(std::string_view toUrl,
     if (not call)
         throw std::runtime_error("Failed to create the call");
 
-    if (isIP2IP()) {
-        bool ipv6 = IpAddr::isIpv6(toUrl);
-        to = ipv6 ? IpAddr(toUrl).toString(false, true) : toUrl;
-        family = ipv6 ? pj_AF_INET6() : pj_AF_INET();
+    to = toUrl;
+    call->setSipTransport(transport_, getContactHeader());
+    // Use the same address family as the SIP transport
+    family = pjsip_transport_type_get_af(getTransportType());
 
-        // TODO: resolve remote host using SIPVoIPLink::resolveSrvName
-        std::shared_ptr<SipTransport> t
-            = isTlsEnabled()
-                  ? link_.sipTransportBroker->getTlsTransport(tlsListener_,
-                                                              IpAddr(sip_utils::getHostFromUri(to)))
-                  : transport_;
-        setTransport(t);
-        call->setSipTransport(t, getContactHeader());
-
-        SIP_CORE_DBG("New %s IP to IP call to %s", ipv6 ? "IPv6" : "IPv4", to.c_str());
-    } else {
-        to = toUrl;
-        call->setSipTransport(transport_, getContactHeader());
-        // Use the same address family as the SIP transport
-        family = pjsip_transport_type_get_af(getTransportType());
-
-        SIP_CORE_DBG("UserAgent: New registered account call to %.*s",
-                     (int) toUrl.size(),
-                     toUrl.data());
-    }
+    SIP_CORE_DBG("UserAgent: New registered account call to %.*s", (int) toUrl.size(), toUrl.data());
 
     auto toUri = getToUri(to);
 
@@ -506,6 +490,44 @@ SIPAccount::setTransport(const std::shared_ptr<SipTransport>& t)
     }
 }
 
+bool
+SIPAccount::switchTransport(TransportType type)
+{
+    // save value to config immediately
+    editConfig([&](SipAccountConfig& config) { config.transport = type; });
+
+    IpAddr bindAddress = createBindingAddress();
+    if (not bindAddress) {
+        SIP_CORE_ERR("Can't compute address to bind.");
+        return false;
+    }
+
+    transportType_ = type == TransportType::TCP ? PJSIP_TRANSPORT_TCP : PJSIP_TRANSPORT_UDP;
+
+    transport_.reset();
+
+    if (type == TransportType::UDP) {
+        setTransport(link_.sipTransportBroker->getUdpTransport(bindAddress));
+    } else {
+        tcpListener_.reset();
+
+        tcpListener_ = link_.sipTransportBroker->getTcpListener(bindAddress);
+        if (!tcpListener_) {
+            SIP_CORE_ERR("Error creating local TCP listener.");
+            return false;
+        }
+
+        setTransport(
+            link_.sipTransportBroker->getTcpTransport(tcpListener_, hostIp_, config().hostname));
+    }
+    if (transport_ != nullptr) {
+        return true;
+    }
+
+    SIP_CORE_ERR("Creation of transport failed.");
+    return false;
+}
+
 pjsip_tpselector
 SIPAccount::getTransportSelector()
 {
@@ -612,7 +634,6 @@ SIPAccount::getVolatileAccountDetails() const
     a.emplace(Conf::CONFIG_ACCOUNT_REGISTRATION_STATE_CODE,
               std::to_string(registrationStateDetailed_.first));
     a.emplace(Conf::CONFIG_ACCOUNT_REGISTRATION_STATE_DESC, registrationStateDetailed_.second);
-    a.emplace(libsip_core::Account::VolatileProperties::InstantMessaging::OFF_CALL, TRUE_STR);
 
     if (presence_) {
         a.emplace(Conf::CONFIG_PRESENCE_STATUS, presence_->isOnline() ? TRUE_STR : FALSE_STR);
@@ -666,16 +687,8 @@ SIPAccount::doRegister()
 void
 SIPAccount::doRegister1_()
 {
-    {
-        std::lock_guard<std::recursive_mutex> lock(configurationMutex_);
-        if (isIP2IP()) {
-            doRegister2_();
-            return;
-        }
-    }
-
     link_.resolveSrvName(hasServiceRoute() ? getServiceRoute() : config().hostname,
-                         config().tlsEnable ? PJSIP_TRANSPORT_TLS : PJSIP_TRANSPORT_UDP,
+                         PJSIP_TRANSPORT_UDP,
                          [w = weak()](std::vector<IpAddr> host_ips) {
                              if (auto acc = w.lock()) {
                                  std::lock_guard<std::recursive_mutex> lock(
@@ -695,48 +708,20 @@ SIPAccount::doRegister1_()
 void
 SIPAccount::doRegister2_()
 {
-    if (not isIP2IP() and not hostIp_) {
+    if (not hostIp_) {
         setRegistrationState(RegistrationState::ERROR_GENERIC, PJSIP_SC_NOT_FOUND);
         SIP_CORE_ERR("Hostname not resolved.");
         return;
     }
 
-    IpAddr bindAddress = createBindingAddress();
-    if (not bindAddress) {
-        setRegistrationState(RegistrationState::ERROR_GENERIC, PJSIP_SC_NOT_FOUND);
-        SIP_CORE_ERR("Can't compute address to bind.");
-        return;
-    }
-
-    bool ipv6 = bindAddress.isIpv6();
-    transportType_ = config().tlsEnable ? (ipv6 ? PJSIP_TRANSPORT_TLS6 : PJSIP_TRANSPORT_TLS)
-                                        : (ipv6 ? PJSIP_TRANSPORT_UDP6 : PJSIP_TRANSPORT_UDP);
-
-    // In our definition of the ip2ip profile (aka Direct IP Calls),
-    // no registration should be performed
-    if (isIP2IP()) {
-        // If we use Tls for IP2IP, transports will be created on connection.
-        if (!config().tlsEnable) {
-            setTransport(link_.sipTransportBroker->getUdpTransport(bindAddress));
-        }
-        setRegistrationState(RegistrationState::REGISTERED);
-        return;
-    }
-
     try {
+        // always try to create transport. If it gets the same as before, then it will be just ignored
         SIP_CORE_WARN("Creating transport");
-        transport_.reset();
-        if (isTlsEnabled()) {
-            setTransport(link_.sipTransportBroker->getTlsTransport(tlsListener_,
-                                                                   hostIp_,
-                                                                   config().tlsServerName.empty()
-                                                                       ? config().hostname
-                                                                       : config().tlsServerName));
-        } else {
-            setTransport(link_.sipTransportBroker->getUdpTransport(bindAddress));
+        bool result = switchTransport(config().transport);
+        if (!result) {
+            setRegistrationState(RegistrationState::ERROR_GENERIC);
+            return;
         }
-        if (!transport_)
-            throw VoipLinkException("Can't create transport");
 
         sendRegister();
     } catch (const VoipLinkException& e) {
@@ -744,7 +729,6 @@ SIPAccount::doRegister2_()
         setRegistrationState(RegistrationState::ERROR_GENERIC);
         return;
     }
-
 }
 
 void
@@ -752,19 +736,17 @@ SIPAccount::doUnregister(std::function<void(bool)> released_cb)
 {
     std::unique_lock<std::recursive_mutex> lock(configurationMutex_);
 
-    tlsListener_.reset();
+    tcpListener_.reset();
 
-    if (!isIP2IP()) {
-        try {
-            sendUnregister();
-        } catch (const VoipLinkException& e) {
-            SIP_CORE_ERR("doUnregister %s", e.what());
-        }
+    try {
+        sendUnregister();
+    } catch (const VoipLinkException& e) {
+        SIP_CORE_ERR("doUnregister %s", e.what());
     }
 
     lock.unlock();
     if (released_cb)
-        released_cb(not isIP2IP());
+        released_cb(true);
 }
 
 void
@@ -795,6 +777,10 @@ SIPAccount::sendRegister()
     pjsip_endpoint* endpoint = link_.getEndpoint();
     if (pjsip_regc_create(link_.getEndpoint(), (void*) this, &registration_cb, &regc) != PJ_SUCCESS)
         throw VoipLinkException("UserAgent: Unable to create regc structure.");
+
+    /* Set authentication preference */
+    pjsip_auth_clt_pref conf {};
+    pjsip_regc_set_prefs(regc, &conf);
 
     std::string srvUri(getServerUri());
     pj_str_t pjSrv {(char*) srvUri.data(), (pj_ssize_t) srvUri.size()};
@@ -904,17 +890,6 @@ SIPAccount::setUpTransmissionData(pjsip_tx_data* tdata, long transportKeyType)
 void
 SIPAccount::onRegister(pjsip_regc_cbparam* param)
 {
-    const pj_str_t applicationProxy = CONST_PJ_STR("Application-Proxy");
-    auto* applicationProxyHdr = (pjsip_generic_string_hdr*)
-        pjsip_msg_find_hdr_by_name(param->rdata->msg_info.msg, &applicationProxy, nullptr);
-
-    if (applicationProxyHdr) {
-        SIP_CORE_DBG("Found application proxy header: %s", applicationProxyHdr->hvalue);
-        Manager::instance().applicationProxy = sip_utils::as_view(applicationProxyHdr->hvalue);
-    } else {
-        Manager::instance().applicationProxy = "";
-    }
-
     if (param->regc != getRegistrationInfo())
         return;
 
@@ -950,26 +925,45 @@ SIPAccount::onRegister(pjsip_regc_cbparam* param)
         // Update auto registration flag
         resetAutoRegistration();
 
-        if (param->expiration < 1) {
-            destroyRegistrationInfo();
-            SIP_CORE_DBG("Unregistration success");
-            setRegistrationState(RegistrationState::UNREGISTERED, param->code);
-            registerKeepAliveTimer(false, param);
+        auto fakeSubstr = sip_utils::CONST_PJ_STR("fake");
+
+        if (pj_stristr(&param->reason, &fakeSubstr) != NULL) {
+            setRegistrationState(RegistrationState::ERROR_FAKE, 500);
         } else {
-            /* TODO Check and update SIP outbound status first, since the result
-             * will determine if we should update re-registration
-             */
-            // update_rfc5626_status(acc, param->rdata);
+            if (param->expiration < 1) {
+                destroyRegistrationInfo();
+                SIP_CORE_DBG("Unregistration success");
+                setRegistrationState(RegistrationState::UNREGISTERED, param->code);
+                registerKeepAliveTimer(false, param);
+            } else {
+                const pj_str_t applicationProxy = CONST_PJ_STR("Application-Proxy");
+                auto* applicationProxyHdr = (pjsip_generic_string_hdr*)
+                    pjsip_msg_find_hdr_by_name(param->rdata->msg_info.msg,
+                                               &applicationProxy,
+                                               nullptr);
 
-            /* TODO Check and update Service-Route header */
-            if (hasServiceRoute())
-                pjsip_regc_set_route_set(param->regc,
-                                         sip_utils::createRouteSet(getServiceRoute(),
-                                                                   link_.getPool()));
+                if (applicationProxyHdr) {
+                    SIP_CORE_DBG("Found application proxy header: %s", applicationProxyHdr->hvalue);
+                    Manager::instance().applicationProxy = sip_utils::as_view(
+                        applicationProxyHdr->hvalue);
+                } else {
+                    Manager::instance().applicationProxy = "";
+                }
+                /* TODO Check and update SIP outbound status first, since the result
+                 * will determine if we should update re-registration
+                 */
+                // update_rfc5626_status(acc, param->rdata);
 
-            setRegistrationState(RegistrationState::REGISTERED, param->code);
+                /* TODO Check and update Service-Route header */
+                if (hasServiceRoute())
+                    pjsip_regc_set_route_set(param->regc,
+                                             sip_utils::createRouteSet(getServiceRoute(),
+                                                                       link_.getPool()));
 
-            registerKeepAliveTimer(true, param);
+                setRegistrationState(RegistrationState::REGISTERED, param->code);
+
+                registerKeepAliveTimer(true, param);
+            }
         }
     }
     if (config().allowIPAutoRewrite and checkNATAddress(param, link_.getPool()))
@@ -1038,42 +1032,12 @@ SIPAccount::sendUnregister()
     }
 }
 
-pj_uint32_t
-SIPAccount::tlsProtocolFromString(const std::string& method)
-{
-    if (method == "Default")
-        return PJSIP_SSL_DEFAULT_PROTO;
-    if (method == "TLSv1.2")
-        return PJ_SSL_SOCK_PROTO_TLS1_2;
-    if (method == "TLSv1.1")
-        return PJ_SSL_SOCK_PROTO_TLS1_2 | PJ_SSL_SOCK_PROTO_TLS1_1;
-    if (method == "TLSv1")
-        return PJ_SSL_SOCK_PROTO_TLS1_2 | PJ_SSL_SOCK_PROTO_TLS1_1 | PJ_SSL_SOCK_PROTO_TLS1;
-    return PJSIP_SSL_DEFAULT_PROTO;
-}
-
-void
-SIPAccount::initStunConfiguration()
-{
-    std::string_view stunServer(config().stunServer);
-    auto pos = stunServer.find(':');
-    if (pos == std::string_view::npos) {
-        stunServerName_ = sip_utils::CONST_PJ_STR(stunServer);
-        stunPort_ = PJ_STUN_PORT;
-    } else {
-        stunServerName_ = sip_utils::CONST_PJ_STR(stunServer.substr(0, pos));
-        auto serverPort = stunServer.substr(pos + 1);
-        stunPort_ = to_int<uint16_t>(serverPort);
-    }
-}
-
 void
 SIPAccount::loadConfig()
 {
     SIPAccountBase::loadConfig();
     setCredentials(config().credentials);
     enablePresence(config().presenceEnabled);
-    initStunConfiguration();
     transportType_ = PJSIP_TRANSPORT_UDP;
 }
 
@@ -1288,17 +1252,6 @@ SIPAccount::initContactAddress()
         address = getPublishedIpAddress().toString();
         port = config().publishedPort;
         SIP_CORE_DBG("Using published address %s and port %d", address.c_str(), port);
-    } else if (config().stunEnabled) {
-        auto success = link_.findLocalAddressFromSTUN(transport_->get(),
-                                                      &stunServerName_,
-                                                      stunPort_,
-                                                      address,
-                                                      port);
-        if (not success)
-            emitSignal<libsip_core::ConfigurationSignal::StunStatusFailed>(getAccountID());
-        setPublishedAddress({address});
-        publishedPortUsed_ = port;
-        usePublishedAddressPortInVIA();
     } else {
         if (!receivedParameter_.empty()) {
             address = receivedParameter_;
@@ -1387,7 +1340,7 @@ SIPAccount::setCredentials(const std::vector<SipAccountConfig::Credentials>& cre
                              /*.username  = */ CONST_PJ_STR(c.username),
                              /*.data_type = */
                              (c.password_h != "" ? PJSIP_CRED_DATA_DIGEST
-                                                : PJSIP_CRED_DATA_PLAIN_PASSWD),
+                                                 : PJSIP_CRED_DATA_PLAIN_PASSWD),
                              /*.data      = */
                              CONST_PJ_STR(c.password_h != "" ? c.password_h : c.password),
                              /*.ext       = */ {}});
@@ -1405,12 +1358,6 @@ SIPAccount::setRegistrationState(RegistrationState state,
         details_str = sip_utils::as_view(*description);
     setRegistrationStateDetailed({details_code, details_str});
     SIPAccountBase::setRegistrationState(state, details_code, details_str);
-}
-
-bool
-SIPAccount::isIP2IP() const
-{
-    return config().hostname.empty();
 }
 
 SIPPresence*
@@ -1939,7 +1886,7 @@ SIPAccount::createBindingAddress()
                      : IpAddr(conf.bindAddress, family);
 
     if (ret.getPort() == 0) {
-        ret.setPort(conf.tlsEnable ? conf.tlsListenerPort : conf.localPort);
+        ret.setPort(conf.localPort);
     }
 
     return ret;

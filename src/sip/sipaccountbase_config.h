@@ -45,26 +45,6 @@ struct SipAccountBaseConfig: public AccountConfig {
 
     std::string publishedIp;
 
-    /**
-     * Determine if TURN public address resolution is required to register this account. In this
-     * case a TURN server hostname must be specified.
-     */
-    bool turnEnabled {false};
-
-    /**
-     * The TURN server hostname (optional), used to provide the public IP address in case the
-     * softphone stay behind a NAT.
-     */
-    std::string turnServer;
-    std::string turnServerUserName;
-    std::string turnServerPwd;
-    std::string turnServerRealm;
-
-    std::string tlsCaListFile;
-    std::string tlsCertificateFile;
-    std::string tlsPrivateKeyFile;
-    std::string tlsPassword;
-
     std::string dtmfType {OVERRTP_STR};
     /*
      * Port range for audio RTP ports

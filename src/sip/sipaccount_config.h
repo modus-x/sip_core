@@ -51,18 +51,6 @@ struct SipAccountConfig : public SipAccountBaseConfig {
     std::string interface;
 
     /**
-     * Determine if STUN public address resolution is required to register this account. In this
-     * case a STUN server hostname must be specified.
-     */
-    bool stunEnabled {false};
-
-    /**
-     * The STUN server hostname (optional), used to provide the public IP address in case the
-     * softphone stay behind a NAT.
-     */
-    std::string stunServer {};
-
-    /**
      * Network settings
      */
     unsigned registrationExpire {600};
@@ -76,20 +64,6 @@ struct SipAccountConfig : public SipAccountBaseConfig {
      * Input Outbound Proxy Server Address
      */
     std::string serviceRoute;
-
-    /**
-     * The TLS listener port
-     */
-    uint16_t tlsListenerPort {sip_utils::DEFAULT_SIP_TLS_PORT};
-    bool tlsEnable {false};
-    std::string tlsMethod;
-    std::string tlsCiphers;
-    std::string tlsServerName;
-    bool tlsVerifyServer {true};
-    bool tlsVerifyClient {true};
-    bool tlsRequireClientCertificate {true};
-    bool tlsDisableSecureDlgCheck {true};
-    int tlsNegotiationTimeout {2};
 
     /**
      * Determine if the softphone should fallback on non secured media channel if SRTP negotiation

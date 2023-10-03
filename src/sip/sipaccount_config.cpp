@@ -44,30 +44,15 @@ constexpr const char* PRESENCE_STATUS_KEY = "presenceStatus";
 constexpr const char* PRESENCE_NOTE_KEY = "presenceNote";
 constexpr const char* PRESENCE_MODULE_ENABLED_KEY = "presenceModuleEnabled";
 constexpr const char* KEEP_ALIVE_INTERVAL = "keepAliveInterval";
+constexpr const char* TRANSPORT = "hash";
 
-constexpr const char* const TLS_KEY = "tls";
-constexpr const char* CERTIFICATE_KEY = "certificate";
-constexpr const char* CALIST_KEY = "calist";
-constexpr const char* TLS_PORT_KEY = "tlsPort";
-constexpr const char* CIPHERS_KEY = "ciphers";
-constexpr const char* TLS_ENABLE_KEY = "enable";
-constexpr const char* METHOD_KEY = "method";
-constexpr const char* TIMEOUT_KEY = "timeout";
-constexpr const char* TLS_PASSWORD_KEY = "password";
-constexpr const char* PRIVATE_KEY_KEY = "privateKey";
-constexpr const char* REQUIRE_CERTIF_KEY = "requireCertif";
-constexpr const char* SERVER_KEY = "server";
-constexpr const char* VERIFY_CLIENT_KEY = "verifyClient";
-constexpr const char* VERIFY_SERVER_KEY = "verifyServer";
-constexpr const char* DISABLE_SECURE_DLG_CHECK = "keepAlive";
 
-constexpr const char* STUN_ENABLED_KEY = "stunEnabled";
-constexpr const char* STUN_SERVER_KEY = "stunServer";
 constexpr const char* CRED_KEY = "credential";
 constexpr const char* SRTP_KEY = "srtp";
 constexpr const char* SRTP_ENABLE_KEY = "enable";
 constexpr const char* KEY_EXCHANGE_KEY = "keyExchange";
 constexpr const char* RTP_FALLBACK_KEY = "rtpFallback";
+
 } // namespace Conf
 
 static const SipAccountConfig DEFAULT_CONFIG {};
@@ -101,26 +86,6 @@ SipAccountConfig::serialize(YAML::Emitter& out) const
         << registrationExpire;
     out << YAML::Key << Conf::SERVICE_ROUTE_KEY << YAML::Value << serviceRoute;
     out << YAML::Key << Conf::ALLOW_IP_AUTO_REWRITE << YAML::Value << allowIPAutoRewrite;
-    out << YAML::Key << Conf::STUN_ENABLED_KEY << YAML::Value << stunEnabled;
-    out << YAML::Key << Conf::STUN_SERVER_KEY << YAML::Value << stunServer;
-
-    // tls submap
-    out << YAML::Key << Conf::TLS_KEY << YAML::Value << YAML::BeginMap;
-    out << YAML::Key << Conf::CALIST_KEY << YAML::Value << tlsCaListFile;
-    out << YAML::Key << Conf::CERTIFICATE_KEY << YAML::Value << tlsCertificateFile;
-    out << YAML::Key << Conf::TLS_PASSWORD_KEY << YAML::Value << tlsPassword;
-    out << YAML::Key << Conf::PRIVATE_KEY_KEY << YAML::Value << tlsPrivateKeyFile;
-    out << YAML::Key << Conf::TLS_ENABLE_KEY << YAML::Value << tlsEnable;
-    out << YAML::Key << Conf::TLS_PORT_KEY << YAML::Value << tlsListenerPort;
-    out << YAML::Key << Conf::VERIFY_CLIENT_KEY << YAML::Value << tlsVerifyClient;
-    out << YAML::Key << Conf::VERIFY_SERVER_KEY << YAML::Value << tlsVerifyServer;
-    out << YAML::Key << Conf::REQUIRE_CERTIF_KEY << YAML::Value << tlsRequireClientCertificate;
-    out << YAML::Key << Conf::DISABLE_SECURE_DLG_CHECK << YAML::Value << tlsDisableSecureDlgCheck;
-    out << YAML::Key << Conf::TIMEOUT_KEY << YAML::Value << tlsNegotiationTimeout;
-    out << YAML::Key << Conf::CIPHERS_KEY << YAML::Value << tlsCiphers;
-    out << YAML::Key << Conf::METHOD_KEY << YAML::Value << tlsMethod;
-    out << YAML::Key << Conf::SERVER_KEY << YAML::Value << tlsServerName;
-    out << YAML::EndMap;
 
     // srtp submap
     out << YAML::Key << Conf::SRTP_KEY << YAML::Value << YAML::BeginMap;
@@ -151,36 +116,12 @@ SipAccountConfig::unserialize(const YAML::Node& node)
     parseValueOptional(node, Conf::PRESENCE_PUBLISH_SUPPORTED_KEY, publishSupported);
     parseValueOptional(node, Conf::PRESENCE_SUBSCRIBE_SUPPORTED_KEY, subscribeSupported);
 
-    // ICE - STUN/TURN
-    parseValueOptional(node, Conf::STUN_ENABLED_KEY, stunEnabled);
-    parseValueOptional(node, Conf::STUN_SERVER_KEY, stunServer);
-
     const auto& credsNode = node[Conf::CRED_KEY];
     setCredentials(parseVectorMap(credsNode,
                                   {Conf::CONFIG_ACCOUNT_REALM,
                                    Conf::CONFIG_ACCOUNT_USERNAME,
                                    Conf::CONFIG_ACCOUNT_PASSWORD,
                                    Conf::CONFIG_ACCOUNT_HASH}));
-
-    // get tls submap
-    try {
-        const auto& tlsMap = node[Conf::TLS_KEY];
-        parseValueOptional(tlsMap, Conf::CERTIFICATE_KEY, tlsCertificateFile);
-        parseValueOptional(tlsMap, Conf::CALIST_KEY, tlsCaListFile);
-        parseValueOptional(tlsMap, Conf::TLS_PASSWORD_KEY, tlsPassword);
-        parseValueOptional(tlsMap, Conf::PRIVATE_KEY_KEY, tlsPrivateKeyFile);
-        parseValueOptional(tlsMap, Conf::TLS_ENABLE_KEY, tlsEnable);
-        parseValueOptional(tlsMap, Conf::TLS_PORT_KEY, tlsListenerPort);
-        parseValueOptional(tlsMap, Conf::CIPHERS_KEY, tlsCiphers);
-        parseValueOptional(tlsMap, Conf::METHOD_KEY, tlsMethod);
-        parseValueOptional(tlsMap, Conf::SERVER_KEY, tlsServerName);
-        parseValueOptional(tlsMap, Conf::REQUIRE_CERTIF_KEY, tlsRequireClientCertificate);
-        parseValueOptional(tlsMap, Conf::VERIFY_CLIENT_KEY, tlsVerifyClient);
-        parseValueOptional(tlsMap, Conf::VERIFY_SERVER_KEY, tlsVerifyServer);
-        parseValueOptional(tlsMap, Conf::DISABLE_SECURE_DLG_CHECK, tlsDisableSecureDlgCheck);
-        parseValueOptional(tlsMap, Conf::TIMEOUT_KEY, tlsNegotiationTimeout);
-    } catch (...) {
-    }
 
     // get srtp submap
     const auto& srtpMap = node[Conf::SRTP_KEY];
@@ -201,9 +142,8 @@ SipAccountConfig::toMap() const
     a.emplace(Conf::CONFIG_PUBLISHED_PORT, std::to_string(publishedPort));
     a.emplace(Conf::CONFIG_PUBLISHED_SAMEAS_LOCAL, publishedSameasLocal ? TRUE_STR : FALSE_STR);
     a.emplace(Conf::CONFIG_PUBLISHED_ADDRESS, publishedIp);
-    a.emplace(Conf::CONFIG_STUN_ENABLE, stunEnabled ? TRUE_STR : FALSE_STR);
-    a.emplace(Conf::CONFIG_STUN_SERVER, stunServer);
     a.emplace(Conf::CONFIG_KEEP_ALIVE_INTERVAL, std::to_string(keepAliveInterval));
+    a.emplace(Conf::CONFIG_ACCOUNT_ROUTESET, serviceRoute);
 
     std::string password {};
     std::string hash {};
@@ -218,22 +158,6 @@ SipAccountConfig::toMap() const
     a.emplace(Conf::CONFIG_ACCOUNT_PASSWORD, std::move(password));
     a.emplace(Conf::CONFIG_ACCOUNT_HASH, std::move(hash));
 
-    a.emplace(Conf::CONFIG_TLS_ENABLE, tlsEnable ? TRUE_STR : FALSE_STR);
-    a.emplace(Conf::CONFIG_TLS_LISTENER_PORT, std::to_string(tlsListenerPort));
-    a.emplace(Conf::CONFIG_TLS_CA_LIST_FILE, tlsCaListFile);
-    a.emplace(Conf::CONFIG_TLS_CERTIFICATE_FILE, tlsCertificateFile);
-    a.emplace(Conf::CONFIG_TLS_PRIVATE_KEY_FILE, tlsPrivateKeyFile);
-    a.emplace(Conf::CONFIG_TLS_PASSWORD, tlsPassword);
-    a.emplace(Conf::CONFIG_TLS_METHOD, tlsMethod);
-    a.emplace(Conf::CONFIG_TLS_CIPHERS, tlsCiphers);
-    a.emplace(Conf::CONFIG_TLS_SERVER_NAME, tlsServerName);
-    a.emplace(Conf::CONFIG_TLS_VERIFY_SERVER, tlsVerifyServer ? TRUE_STR : FALSE_STR);
-    a.emplace(Conf::CONFIG_TLS_VERIFY_CLIENT, tlsVerifyClient ? TRUE_STR : FALSE_STR);
-    a.emplace(Conf::CONFIG_TLS_REQUIRE_CLIENT_CERTIFICATE,
-              tlsRequireClientCertificate ? TRUE_STR : FALSE_STR);
-    a.emplace(Conf::CONFIG_TLS_NEGOTIATION_TIMEOUT_SEC, std::to_string(tlsNegotiationTimeout));
-    a.emplace(Conf::CONFIG_TLS_DISABLE_SECURE_DLG_CHECK,
-              tlsDisableSecureDlgCheck ? TRUE_STR : FALSE_STR);
     return a;
 }
 
@@ -272,25 +196,6 @@ SipAccountConfig::fromMap(const std::map<std::string, std::string>& details)
         setCredentials({map});
     }
 
-    // ICE - STUN
-    parseBool(details, Conf::CONFIG_STUN_ENABLE, stunEnabled);
-    parseString(details, Conf::CONFIG_STUN_SERVER, stunServer);
-
-    // TLS
-    parseBool(details, Conf::CONFIG_TLS_ENABLE, tlsEnable);
-    parseInt(details, Conf::CONFIG_TLS_LISTENER_PORT, tlsListenerPort);
-    parsePath(details, Conf::CONFIG_TLS_CA_LIST_FILE, tlsCaListFile, path);
-    parsePath(details, Conf::CONFIG_TLS_CERTIFICATE_FILE, tlsCertificateFile, path);
-    parsePath(details, Conf::CONFIG_TLS_PRIVATE_KEY_FILE, tlsPrivateKeyFile, path);
-    parseString(details, Conf::CONFIG_TLS_PASSWORD, tlsPassword);
-    parseString(details, Conf::CONFIG_TLS_METHOD, tlsMethod);
-    parseString(details, Conf::CONFIG_TLS_CIPHERS, tlsCiphers);
-    parseString(details, Conf::CONFIG_TLS_SERVER_NAME, tlsServerName);
-    parseBool(details, Conf::CONFIG_TLS_VERIFY_SERVER, tlsVerifyServer);
-    parseBool(details, Conf::CONFIG_TLS_VERIFY_CLIENT, tlsVerifyClient);
-    parseBool(details, Conf::CONFIG_TLS_REQUIRE_CLIENT_CERTIFICATE, tlsRequireClientCertificate);
-    parseBool(details, Conf::CONFIG_TLS_DISABLE_SECURE_DLG_CHECK, tlsDisableSecureDlgCheck);
-    parseInt(details, Conf::CONFIG_TLS_NEGOTIATION_TIMEOUT_SEC, tlsNegotiationTimeout);
 }
 
 SipAccountConfig::Credentials::Credentials(const std::map<std::string, std::string>& cred)

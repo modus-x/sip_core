@@ -32,12 +32,14 @@
 #include "registration_states.h"
 #include "im/message_engine.h"
 #include "connectivity/ip_utils.h"
+#include "connectivity/transport.h"
 #include "media_codec.h"
 #include "media/media_attribute.h"
 #include "logger.h"
 #include "compiler_intrinsics.h" // include the "UNUSED" macro
 #include "call_set.h"
 #include "account_config.h"
+#include "sip_core/account_const.h"
 
 #include <functional>
 #include <string>
@@ -59,9 +61,9 @@ namespace sip_core {
 static constexpr uint64_t SIP_CORE_ID_MAX_VAL = 9007199254740992;
 constexpr static const char RINGDIR[] = "ringtones";
 
+
 class Call;
 class SystemCodecContainer;
-struct IceTransportOptions;
 
 class VoipLinkException : public std::runtime_error
 {
@@ -107,6 +109,11 @@ public:
      */
     virtual void loadConfig();
 
+    /**
+     * Every account type will support transport types listed in account_const.
+     */
+    virtual bool switchTransport(TransportType type) = 0;
+
     const AccountConfig& config() const {
         if (config_) return *config_;
         else throw std::runtime_error("Account doesn't have a configuration");
@@ -145,11 +152,6 @@ public:
     const std::string& getAccountID() const { return accountID_; }
 
     virtual std::string_view getAccountType() const = 0;
-
-    /**
-     * Returns true if this is the IP2IP account
-     */
-    virtual bool isIP2IP() const { return false; }
 
     /**
      * Register the account.

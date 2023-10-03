@@ -56,6 +56,7 @@ static const char* const CONFIG_ACCOUNT_HASH = "Account.hash";
 static const char* const CONFIG_ACCOUNT_USERNAME = "Account.username";
 static const char* const CONFIG_ACCOUNT_ROUTESET = "Account.routeset";
 static const char* const CONFIG_ACCOUNT_IP_AUTO_REWRITE = "Account.allowIPAutoRewrite";
+static const char* const CONFIG_ACCOUNT_TRANSPORT = "Account.transport";
 static const char* const CONFIG_ACCOUNT_PASSWORD = "Account.password";
 static const char* const CONFIG_ACCOUNT_REALM = "Account.realm";
 static const char* const CONFIG_ACCOUNT_USERAGENT = "Account.useragent";
@@ -76,34 +77,10 @@ static const char* const CONFIG_DEFAULT_MODERATORS = "Account.defaultModerators"
 static const char* const CONFIG_LOCAL_MODERATORS_ENABLED = "Account.localModeratorsEnabled";
 static const char* const CONFIG_ALL_MODERATORS_ENABLED = "Account.allModeratorEnabled";
 
-// SIP specific parameters
-static const char* const CONFIG_STUN_SERVER = "STUN.server";
-static const char* const CONFIG_STUN_ENABLE = "STUN.enable";
-static const char* const CONFIG_TURN_SERVER = "TURN.server";
-static const char* const CONFIG_TURN_ENABLE = "TURN.enable";
-static const char* const CONFIG_TURN_SERVER_UNAME = "TURN.username";
-static const char* const CONFIG_TURN_SERVER_PWD = "TURN.password";
-static const char* const CONFIG_TURN_SERVER_REALM = "TURN.realm";
-
 // SRTP specific parameters
 static const char* const CONFIG_SRTP_ENABLE = "SRTP.enable";
 static const char* const CONFIG_SRTP_KEY_EXCHANGE = "SRTP.keyExchange";
 static const char* const CONFIG_SRTP_RTP_FALLBACK = "SRTP.rtpFallback";
-
-static const char* const CONFIG_TLS_LISTENER_PORT = "TLS.listenerPort";
-static const char* const CONFIG_TLS_ENABLE = "TLS.enable";
-static const char* const CONFIG_TLS_CA_LIST_FILE = "TLS.certificateListFile";
-static const char* const CONFIG_TLS_CERTIFICATE_FILE = "TLS.certificateFile";
-static const char* const CONFIG_TLS_PRIVATE_KEY_FILE = "TLS.privateKeyFile";
-static const char* const CONFIG_TLS_PASSWORD = "TLS.password";
-static const char* const CONFIG_TLS_METHOD = "TLS.method";
-static const char* const CONFIG_TLS_CIPHERS = "TLS.ciphers";
-static const char* const CONFIG_TLS_SERVER_NAME = "TLS.serverName";
-static const char* const CONFIG_TLS_VERIFY_SERVER = "TLS.verifyServer";
-static const char* const CONFIG_TLS_VERIFY_CLIENT = "TLS.verifyClient";
-static const char* const CONFIG_TLS_REQUIRE_CLIENT_CERTIFICATE = "TLS.requireClientCertificate";
-static const char* const CONFIG_TLS_DISABLE_SECURE_DLG_CHECK = "TLS.disableSecureDlgCheck";
-static const char* const CONFIG_TLS_NEGOTIATION_TIMEOUT_SEC = "TLS.negotiationTimeoutSec";
 
 // DHT specific parameters
 static const char* const CONFIG_DHT_PORT = "DHT.port";

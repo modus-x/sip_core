@@ -145,9 +145,6 @@ SIPAccountBase::getVolatileAccountDetails() const
 {
     auto a = Account::getVolatileAccountDetails();
 
-    // replace value from Account for IP2IP
-    if (isIP2IP())
-        a[Conf::CONFIG_ACCOUNT_REGISTRATION_STATUS] = "READY";
 
     a.emplace(Conf::CONFIG_TRANSPORT_STATE_CODE, std::to_string(transportStatus_));
     a.emplace(Conf::CONFIG_TRANSPORT_STATE_DESC, transportError_);

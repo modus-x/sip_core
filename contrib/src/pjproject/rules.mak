@@ -59,7 +59,7 @@ endif
 ifdef HAVE_IOS
 	cd $< && ARCH="-arch $(ARCH)" IPHONESDK=$(IOS_SDK) $(HOSTVARS) EXCLUDE_APP=1 ./configure-iphone $(HOSTCONF) $(PJPROJECT_OPTIONS)
 else
-	cd $< && $(HOSTVARS) EXCLUDE_APP=1 ./aconfigure $(HOSTCONF) $(PJPROJECT_OPTIONS) CFLAGS="-g -fno-omit-frame-pointer -O0" $(HOSTVARS)
+	cd $< && $(HOSTVARS) EXCLUDE_APP=1 ./aconfigure $(HOSTCONF) $(PJPROJECT_OPTIONS) $(HOSTVARS)
 endif
 	cd $< && EXCLUDE_APP=1 $(HOSTVARS) $(MAKE) && $(MAKE) install
 	touch $@

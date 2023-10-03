@@ -21,9 +21,11 @@
 #pragma once
 
 #include "connectivity/ip_utils.h"
+#include "connectivity/transport.h"
 #include "media_codec.h"
 #include "media/audio/audiobuffer.h"
 #include "noncopyable.h"
+#include "account_config.h"
 
 #include <utility>
 #include <string>
@@ -92,6 +94,18 @@ static inline KeyExchangeProtocol
 getKeyExchangeProtocol(std::string_view name)
 {
     return name == "sdes"sv ? KeyExchangeProtocol::SDES : KeyExchangeProtocol::NONE;
+}
+
+static inline TransportType
+getTransportType(const std::string& name)
+{
+    return std::lower(name) == "tcp" ? TransportType::TCP : TransportType::UDP;
+}
+
+static constexpr const char*
+getTransportTypeName(TransportType tp)
+{
+    return tp == TransportType::UDP ? "udp" : "tcp";
 }
 
 /**

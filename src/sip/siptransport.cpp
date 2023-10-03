@@ -75,10 +75,10 @@ SipTransport::SipTransport(pjsip_transport* t)
                  pj_atomic_get(transport_->ref_cnt));
 }
 
-SipTransport::SipTransport(pjsip_transport* t, const std::shared_ptr<TlsListener>& l)
+SipTransport::SipTransport(pjsip_transport* t, const std::shared_ptr<TcpListener>& l)
     : SipTransport(t)
 {
-    tlsListener_ = l;
+    tcpListener_ = l;
 }
 
 SipTransport::~SipTransport()
@@ -106,17 +106,6 @@ void
 SipTransport::stateCallback(pjsip_transport_state state, const pjsip_transport_state_info* info)
 {
     connected_ = state == PJSIP_TP_STATE_CONNECTED;
-
-    auto extInfo = static_cast<const pjsip_tls_state_info*>(info->ext_info);
-    if (isSecure() && extInfo && extInfo->ssl_sock_info && extInfo->ssl_sock_info->established) {
-        auto tlsInfo = extInfo->ssl_sock_info;
-        tlsInfos_.proto = (pj_ssl_sock_proto) tlsInfo->proto;
-        tlsInfos_.cipher = tlsInfo->cipher;
-        tlsInfos_.verifyStatus = (pj_ssl_cert_verify_flag_t) tlsInfo->verify_status;
-
-    } else {
-        tlsInfos_ = {};
-    }
 
     std::vector<SipTransportStateCallback> cbs;
     {
@@ -150,17 +139,6 @@ SipTransport::removeStateListener(uintptr_t lid)
     return false;
 }
 
-uint16_t
-SipTransport::getTlsMtu()
-{
-    return 1232; /* Hardcoded yes (it's the IPv6 value).
-                  * This method is broken by definition.
-                  * A MTU should not be defined at this layer.
-                  * And a correct value should come from the underlying transport itself,
-                  * not from a constant...
-                  */
-}
-
 SipTransportBroker::SipTransportBroker(pjsip_endpoint* endpt)
     : endpt_(endpt)
 {}
@@ -170,6 +148,7 @@ SipTransportBroker::~SipTransportBroker()
     shutdown();
 
     udpTransports_.clear();
+    tcpTransports_.clear();
     transports_.clear();
 
     SIP_CORE_DBG("destroying SipTransportBroker@%p", this);
@@ -306,8 +285,45 @@ SipTransportBroker::createUdpTransport(const IpAddr& ipAddress)
     return std::make_shared<SipTransport>(transport);
 }
 
+pjsip_tpfactory *
+SipTransportBroker::createTcpTransport(const IpAddr& ipAddress)
+{
+    RETURN_IF_FAIL(ipAddress, nullptr, "Could not determine IP address for this transport");
+
+    pjsip_tcp_transport_cfg pj_cfg;
+    pjsip_tcp_transport_cfg_default(&pj_cfg, ipAddress.getFamily());
+    pj_cfg.bind_addr = ipAddress;
+    pjsip_tpfactory *tcp;
+    if (pj_status_t status = pjsip_tcp_transport_start3(endpt_, &pj_cfg, &tcp)) {
+        SIP_CORE_ERR("pjsip_tcp_transport_start3 failed with error %d: %s",
+                 status,
+                 sip_utils::sip_strerror(status).c_str());
+        SIP_CORE_ERR("TCP IPv%s Transport did not start on %s",
+                 ipAddress.isIpv4() ? "4" : "6",
+                 ipAddress.toString(true).c_str());
+        return nullptr;
+    }
+
+    SIP_CORE_DBG("Created TCP transport on address %s", ipAddress.toString(true).c_str());
+    return tcp;
+}
+
+std::shared_ptr<TcpListener>
+SipTransportBroker::getTcpListener(const IpAddr& ipAddress)
+{
+    RETURN_IF_FAIL(ipAddress, nullptr, "Could not determine IP address for TCP local listener");
+    SIP_CORE_DEBUG("Creating local TCP listener on {:s}...", ipAddress.toString(true));
+
+    pjsip_tpfactory* listener = createTcpTransport(ipAddress);
+    if (listener == nullptr) {
+        SIP_CORE_ERR("TLS local listener did not start because transport was not created.");
+        return nullptr;
+    }
+    return std::make_shared<TcpListener>(listener);
+}
+
 std::shared_ptr<SipTransport>
-SipTransportBroker::getTlsTransport(const std::shared_ptr<TlsListener>& l,
+SipTransportBroker::getTcpTransport(const std::shared_ptr<TcpListener>& l,
                                     const IpAddr& remote,
                                     const std::string& remote_name)
 {
@@ -317,7 +333,7 @@ SipTransportBroker::getTlsTransport(const std::shared_ptr<TlsListener>& l,
     if (remoteAddr.getPort() == 0)
         remoteAddr.setPort(pjsip_transport_get_default_port_for_type(l->get()->type));
 
-    SIP_CORE_DBG("Get new TLS transport to %s", remoteAddr.toString(true).c_str());
+    SIP_CORE_DBG("Get new TCP transport to %s", remoteAddr.toString(true).c_str());
     pjsip_tpselector sel;
     sel.type = PJSIP_TPSELECTOR_LISTENER;
     sel.u.listener = l->get();
@@ -336,10 +352,16 @@ SipTransportBroker::getTlsTransport(const std::shared_ptr<TlsListener>& l,
                                                         &transport);
 
     if (!transport || status != PJ_SUCCESS) {
-        SIP_CORE_ERR("Could not get new TLS transport: %s", sip_utils::sip_strerror(status).c_str());
+        SIP_CORE_ERR("Could not get new TCP transport: %s", sip_utils::sip_strerror(status).c_str());
         return nullptr;
     }
+
     auto ret = std::make_shared<SipTransport>(transport, l);
+
+    tcpTransports_[remote] = ret->get();
+    transports_[ret->get()] = ret;
+
+    // TODO: that's because pjsip_endpt_acquire_transport2 adds ref, but we need to destroy it in destructor
     pjsip_transport_dec_ref(transport);
     {
         std::lock_guard<std::mutex> lock(transportMapMutex_);

@@ -48,29 +48,23 @@ class ChannelSocket;
 class SIPAccountBase;
 using onShutdownCb = std::function<void(void)>;
 
-struct TlsListener
+// TCP local listener
+struct TcpListener
 {
-    TlsListener() {}
-    TlsListener(pjsip_tpfactory* f)
+    TcpListener() {}
+    TcpListener(pjsip_tpfactory* f)
         : listener(f)
     {}
-    virtual ~TlsListener()
+    virtual ~TcpListener()
     {
-        SIP_CORE_DBG("Destroying listener");
+        SIP_CORE_DBG("Destroying listener for TCP");
         listener->destroy(listener);
     }
     pjsip_tpfactory* get() { return listener; }
 
 private:
-    NON_COPYABLE(TlsListener);
+    NON_COPYABLE(TcpListener);
     pjsip_tpfactory* listener {nullptr};
-};
-
-struct TlsInfos
-{
-    pj_ssl_cipher cipher {PJ_TLS_UNKNOWN_CIPHER};
-    pj_ssl_sock_proto proto {PJ_SSL_SOCK_PROTO_DEFAULT};
-    pj_ssl_cert_verify_flag_t verifyStatus {};
 };
 
 using SipTransportStateCallback
@@ -83,7 +77,7 @@ class SipTransport
 {
 public:
     SipTransport(pjsip_transport*);
-    SipTransport(pjsip_transport*, const std::shared_ptr<TlsListener>&);
+    SipTransport(pjsip_transport*, const std::shared_ptr<TcpListener>&);
     // If the SipTransport is a channeled transport, we are already connected to the peer,
     // so, we can directly set tlsInfos_.peerCert and avoid any copy
 
@@ -100,8 +94,6 @@ public:
 
     bool isSecure() const { return PJSIP_TRANSPORT_IS_SECURE(transport_); }
 
-    const TlsInfos& getTlsInfos() const { return tlsInfos_; }
-
     static bool isAlive(pjsip_transport_state state);
 
     /** Only makes sense for connection-oriented transports */
@@ -112,29 +104,24 @@ public:
     inline void setAccount(const std::shared_ptr<SIPAccountBase>& account) { account_ = account; }
     inline const std::weak_ptr<SIPAccountBase>& getAccount() const { return account_; }
 
-    uint16_t getTlsMtu();
 
 private:
     NON_COPYABLE(SipTransport);
 
+    // this will be called in DEstructor of SipTransport
     static void deleteTransport(pjsip_transport* t);
 
     std::unique_ptr<pjsip_transport, decltype(deleteTransport)&> transport_;
-    std::shared_ptr<TlsListener> tlsListener_;
+    std::shared_ptr<TcpListener> tcpListener_;
     std::mutex stateListenersMutex_;
     std::map<uintptr_t, SipTransportStateCallback> stateListeners_;
     std::weak_ptr<SIPAccountBase> account_ {};
 
     bool connected_ {false};
     std::string deviceId_ {};
-    TlsInfos tlsInfos_;
 };
 
 class IpAddr;
-class IceTransport;
-namespace tls {
-struct TlsParams;
-};
 
 /**
  * Manages the transports and receive callbacks from PJSIP
@@ -147,9 +134,11 @@ public:
 
     std::shared_ptr<SipTransport> getUdpTransport(const IpAddr&);
 
-    std::shared_ptr<SipTransport> getTlsTransport(const std::shared_ptr<TlsListener>&,
-                                                  const IpAddr& remote,
-                                                  const std::string& remote_name = {});
+    std::shared_ptr<SipTransport> getTcpTransport(
+        const std::shared_ptr<TcpListener>& l, const IpAddr& remote, const std::string& remote_name);
+    
+    std::shared_ptr<TcpListener>
+        getTcpListener(const IpAddr& ipAddress);
 
     std::shared_ptr<SipTransport> addTransport(pjsip_transport*);
 
@@ -173,8 +162,10 @@ private:
      */
     std::shared_ptr<SipTransport> createUdpTransport(const IpAddr&);
 
+    pjsip_tpfactory* createTcpTransport(const IpAddr&);
+
     /**
-     * List of transports so we can bubble the events up.
+     * List of transports so we can bubble the events up. Transports are destroyed then there are no refs
      */
     std::map<pjsip_transport*, std::weak_ptr<SipTransport>> transports_ {};
     std::mutex transportMapMutex_ {};
@@ -184,6 +175,8 @@ private:
      * several accounts would share the same port number.
      */
     std::map<IpAddr, pjsip_transport*> udpTransports_;
+
+    std::map<IpAddr, pjsip_transport*> tcpTransports_;
 
     pjsip_endpoint* endpt_;
     std::atomic_bool isDestroying_ {false};

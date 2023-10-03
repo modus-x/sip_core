@@ -119,11 +119,6 @@ public:
     bool checkNATAddress(pjsip_regc_cbparam* param, pj_pool_t* pool);
 
     /**
-     * Returns true if this is the IP2IP account
-     */
-    bool isIP2IP() const override;
-
-    /**
      * Retrieve volatile details such as recent registration errors
      * @return std::map< std::string, std::string > The account volatile details
      */
@@ -236,41 +231,6 @@ public:
     }
 
     /**
-     * @return pjsip_tls_setting structure, filled from the configuration
-     * file, that can be used directly by PJSIP to initialize
-     * TLS transport.
-     */
-    pjsip_tls_setting* getTlsSetting() { return &tlsSetting_; }
-
-    /**
-     * Get the local port for TLS listener.
-     * @return pj_uint16 The port used for that account
-     */
-    pj_uint16_t getTlsListenerPort() const { return config().tlsListenerPort; }
-
-    pj_str_t getStunServerName() const { return stunServerName_; }
-
-    /**
-     * @return pj_uint8_t structure, filled from the configuration
-     * file, that can be used directly by PJSIP to initialize
-     * an alternate UDP transport.
-     */
-    pj_uint16_t getStunPort() const override { return stunPort_; }
-
-    /**
-     * @return bool Tells if current transport for that
-     * account is set to OTHER.
-     */
-    bool isStunEnabled() const override { return config().stunEnabled; }
-
-    /**
-     * @return pj_str_t , filled from the configuration
-     * file, that can be used directly by PJSIP to initialize
-     * an alternate UDP transport.
-     */
-    std::string getStunServer() const { return config().stunServer; }
-
-    /**
      * @return pj_str_t "From" uri based on account information.
      * From RFC3261: "The To header field first and foremost specifies the desired
      * logical" recipient of the request, or the address-of-record of the
@@ -316,8 +276,6 @@ public:
 
     bool hasServiceRoute() const { return not config().serviceRoute.empty(); }
 
-    virtual bool isTlsEnabled() const override { return config().tlsEnable; }
-
     virtual bool getSrtpFallback() const override { return config().srtpFallback; }
 
     void setReceivedParameter(const std::string& received)
@@ -348,6 +306,8 @@ public:
 
     void setTransport(const std::shared_ptr<SipTransport>& = nullptr);
 
+    bool switchTransport(TransportType type) override;
+
     /**
      * Try to register a new keepalive registration timer (only for UDP!)
      */
@@ -358,10 +318,12 @@ public:
      */
     void cancelKeepAliveTimer();
 
+
+    // current transport
     virtual inline std::shared_ptr<SipTransport> getTransport() { return transport_; }
 
+    // current transport type
     inline pjsip_transport_type_e getTransportType() const { return transportType_; }
-
 
     /**
      * Shortcut for SipTransport::getTransportSelector(account.getTransport()).
@@ -503,28 +465,15 @@ private:
 
     std::shared_ptr<SipTransport> transport_ {};
 
-    std::shared_ptr<TlsListener> tlsListener_ {};
+    std::shared_ptr<TcpListener> tcpListener_ {};
 
     /**
      * Transport type used for this sip account. Currently supported types:
      *    PJSIP_TRANSPORT_UNSPECIFIED
      *    PJSIP_TRANSPORT_UDP
-     *    PJSIP_TRANSPORT_TLS
+     *    PJSIP_TRANSPORT_TCP
      */
     pjsip_transport_type_e transportType_ {PJSIP_TRANSPORT_UNSPECIFIED};
-
-    /**
-     * Maps a string description of the SSL method
-     * to the corresponding enum value in pjsip_ssl_method.
-     * @param method The string representation
-     * @return pjsip_ssl_method The corresponding value in the enum
-     */
-    static pj_uint32_t tlsProtocolFromString(const std::string& method);
-
-    /**
-     * Initializes STUN config from the config file
-     */
-    void initStunConfiguration();
 
     /**
      * If username is not provided, as it happens for Direct ip calls,

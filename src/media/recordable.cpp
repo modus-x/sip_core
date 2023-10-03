@@ -98,6 +98,12 @@ Recordable::startRecording(const std::string& path)
     return recording_;
 }
 
+bool
+Recordable::startRecording()
+{
+    return false;
+}
+
 void
 Recordable::stopRecording()
 {

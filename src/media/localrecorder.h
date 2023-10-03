@@ -54,7 +54,7 @@ public:
      * Start local recording. Return true if recording was successfully
      * started, false otherwise.
      */
-    bool startRecording();
+    bool startRecording() override;
 
     /**
      * Stops recording.

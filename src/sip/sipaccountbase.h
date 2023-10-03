@@ -113,12 +113,6 @@ public:
     virtual std::string getDtmfType() const { return config().dtmfType; }
 
     /**
-     * Determine if TLS is enabled for this account. TLS provides a secured channel for
-     * SIP signalization. It is independent of the media encryption (as provided by SRTP).
-     */
-    virtual bool isTlsEnabled() const { return false; }
-
-    /**
      * Create UAC attached dialog and invite session
      * @return true if success. false if failure and dlg and inv pointers
      *         should not be considered as valid.
@@ -172,8 +166,6 @@ public:
     uint16_t generateVideoPort() const;
 #endif
     static void releasePort(uint16_t port) noexcept;
-
-    IceTransportOptions getIceOptions() const noexcept;
 
     virtual void sendMessage(const std::string& to,
                              const std::map<std::string, std::string>& payloads,

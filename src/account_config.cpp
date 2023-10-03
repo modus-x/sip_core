@@ -15,11 +15,11 @@
  *  along with this program; if not, see <https://www.gnu.org/licenses/>.
  */
 #include "account_config.h"
-#include "account_const.h"
 #include "account_schema.h"
 #include "string_utils.h"
 #include "fileutils.h"
 #include "config/account_config_utils.h"
+#include "string_utils.h"
 
 #include <fmt/compile.h>
 
@@ -31,9 +31,7 @@ constexpr const char* VIDEO_ENABLED_KEY = "videoEnabled";
 constexpr const char* DISPLAY_NAME_KEY = "displayName";
 constexpr const char* ALIAS_KEY = "alias";
 constexpr const char* TYPE_KEY = "type";
-constexpr const char* AUTHENTICATION_USERNAME_KEY = "authenticationUsername";
 constexpr const char* USERNAME_KEY = "username";
-constexpr const char* PASSWORD_KEY = "password";
 constexpr const char* HOSTNAME_KEY = "hostname";
 constexpr const char* ACCOUNT_ENABLE_KEY = "enable";
 constexpr const char* ACCOUNT_AUTOANSWER_KEY = "autoAnswer";
@@ -42,7 +40,6 @@ constexpr const char* ACCOUNT_ISRENDEZVOUS_KEY = "rendezVous";
 constexpr const char* ACCOUNT_ACTIVE_CALL_LIMIT_KEY = "activeCallLimit";
 constexpr const char* MAILBOX_KEY = "mailbox";
 constexpr const char* USER_AGENT_KEY = "useragent";
-constexpr const char* HAS_CUSTOM_USER_AGENT_KEY = "hasCustomUserAgent";
 constexpr const char* UPNP_ENABLED_KEY = "upnpEnabled";
 constexpr const char* ACTIVE_CODEC_KEY = "activeCodecs";
 constexpr const char* DEFAULT_MODERATORS_KEY = "defaultModerators";
@@ -50,19 +47,23 @@ constexpr const char* LOCAL_MODERATORS_ENABLED_KEY = "localModeratorsEnabled";
 constexpr const char* ALL_MODERATORS_ENABLED_KEY = "allModeratorsEnabled";
 constexpr const char* PROXY_PUSH_TOKEN_KEY = "proxyPushToken";
 constexpr const char* PROXY_PUSH_TOPIC_KEY = "proxyPushiOSTopic";
+constexpr const char* TRANSPORT_KEY = "transport";
 
 using yaml_utils::parseValueOptional;
 
 void
 AccountConfig::serializeDiff(YAML::Emitter& out, const AccountConfig& DEFAULT_CONFIG) const
 {
+    std::string tmp = sip_utils::getTransportTypeName(transport);
     SERIALIZE_CONFIG(ACCOUNT_ENABLE_KEY, enabled);
     SERIALIZE_CONFIG(TYPE_KEY, type);
     SERIALIZE_CONFIG(ALIAS_KEY, alias);
     SERIALIZE_CONFIG(HOSTNAME_KEY, hostname);
     SERIALIZE_CONFIG(USERNAME_KEY, username);
+    out << YAML::Key << TRANSPORT_KEY << YAML::Value << sip_utils::getTransportTypeName(transport);
     SERIALIZE_CONFIG(MAILBOX_KEY, mailbox);
-    out << YAML::Key << ACTIVE_CODEC_KEY << YAML::Value << fmt::format(FMT_COMPILE("{}"), fmt::join(activeCodecs, "/"sv));
+    out << YAML::Key << ACTIVE_CODEC_KEY << YAML::Value
+        << fmt::format(FMT_COMPILE("{}"), fmt::join(activeCodecs, "/"sv));
     SERIALIZE_CONFIG(ACCOUNT_AUTOANSWER_KEY, autoAnswerEnabled);
     SERIALIZE_CONFIG(ACCOUNT_READRECEIPT_KEY, sendReadReceipt);
     SERIALIZE_CONFIG(ACCOUNT_ISRENDEZVOUS_KEY, isRendezVous);
@@ -84,7 +85,8 @@ void
 AccountConfig::unserialize(const YAML::Node& node)
 {
     parseValueOptional(node, ALIAS_KEY, alias);
-    //parseValueOptional(node, TYPE_KEY, type);
+
+    // parseValueOptional(node, TYPE_KEY, type);
     parseValueOptional(node, ACCOUNT_ENABLE_KEY, enabled);
     parseValueOptional(node, HOSTNAME_KEY, hostname);
     parseValueOptional(node, ACCOUNT_AUTOANSWER_KEY, autoAnswerEnabled);
@@ -113,6 +115,10 @@ AccountConfig::unserialize(const YAML::Node& node)
     parseValueOptional(node, ALL_MODERATORS_ENABLED_KEY, allModeratorsEnabled);
     parseValueOptional(node, PROXY_PUSH_TOKEN_KEY, deviceKey);
     parseValueOptional(node, PROXY_PUSH_TOPIC_KEY, notificationTopic);
+
+    std::string tmpKey;
+    parseValueOptional(node, TRANSPORT_KEY, tmpKey);
+    transport = sip_utils::getTransportType(tmpKey);
 }
 
 std::map<std::string, std::string>
@@ -124,12 +130,14 @@ AccountConfig::toMap() const
             {Conf::CONFIG_ACCOUNT_TYPE, type},
             {Conf::CONFIG_ACCOUNT_USERNAME, username},
             {Conf::CONFIG_ACCOUNT_HOSTNAME, hostname},
+            {Conf::CONFIG_ACCOUNT_TRANSPORT, sip_utils::getTransportTypeName(transport)},
             {Conf::CONFIG_ACCOUNT_MAILBOX, mailbox},
             {Conf::CONFIG_ACCOUNT_USERAGENT, customUserAgent},
             {Conf::CONFIG_ACCOUNT_AUTOANSWER, autoAnswerEnabled ? TRUE_STR : FALSE_STR},
             {Conf::CONFIG_ACCOUNT_SENDREADRECEIPT, sendReadReceipt ? TRUE_STR : FALSE_STR},
             {Conf::CONFIG_ACCOUNT_ISRENDEZVOUS, isRendezVous ? TRUE_STR : FALSE_STR},
-            {libsip_core::Account::ConfProperties::ACTIVE_CALL_LIMIT, std::to_string(activeCallLimit)},
+            {libsip_core::Account::ConfProperties::ACTIVE_CALL_LIMIT,
+             std::to_string(activeCallLimit)},
             {Conf::CONFIG_RINGTONE_ENABLED, ringtoneEnabled ? TRUE_STR : FALSE_STR},
             {Conf::CONFIG_RINGTONE_PATH, ringtonePath},
             {Conf::CONFIG_VIDEO_ENABLED, videoEnabled ? TRUE_STR : FALSE_STR},
@@ -147,6 +155,7 @@ AccountConfig::fromMap(const std::map<std::string, std::string>& details)
     parseBool(details, Conf::CONFIG_ACCOUNT_ENABLE, enabled);
     parseBool(details, Conf::CONFIG_VIDEO_ENABLED, videoEnabled);
     parseString(details, Conf::CONFIG_ACCOUNT_HOSTNAME, hostname);
+
     parseString(details, Conf::CONFIG_ACCOUNT_MAILBOX, mailbox);
     parseBool(details, Conf::CONFIG_ACCOUNT_AUTOANSWER, autoAnswerEnabled);
     parseBool(details, Conf::CONFIG_ACCOUNT_SENDREADRECEIPT, sendReadReceipt);
@@ -161,17 +170,21 @@ AccountConfig::fromMap(const std::map<std::string, std::string>& details)
     defaultModerators = string_split_set(defMod);
     parseBool(details, Conf::CONFIG_LOCAL_MODERATORS_ENABLED, localModeratorsEnabled);
     parseBool(details, Conf::CONFIG_ALL_MODERATORS_ENABLED, allModeratorsEnabled);
+
+    std::string tmpKey;
+    parseString(details, Conf::CONFIG_ACCOUNT_TRANSPORT, tmpKey);
+    transport = sip_utils::getTransportType(tmpKey);
 }
 
 void
 parsePath(const std::map<std::string, std::string>& details,
-                   const char* key,
-                   std::string& s,
-                   const std::string& base)
+          const char* key,
+          std::string& s,
+          const std::string& base)
 {
     auto it = details.find(key);
     if (it != details.end())
         s = fileutils::getFullPath(base, it->second);
 }
 
-}
+} // namespace sip_core
