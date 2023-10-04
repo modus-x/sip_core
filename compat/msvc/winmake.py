@@ -69,6 +69,15 @@ vs_where_path = os.path.join(
     os.environ['ProgramFiles(x86)'], 'Microsoft Visual Studio', 'Installer', 'vswhere.exe'
 )
 
+# Build config
+build_type = "Release"
+install_prefix = "win32/x64"
+
+def getInstallDir():
+    if os.path.isabs(install_prefix):
+        return os.path.join(install_prefix, build_type)
+    else:
+        return os.path.join(os.getcwd(), install_prefix, build_type)
 
 def getLatestVSVersion():
     args = [
@@ -85,7 +94,7 @@ def getLatestVSVersion():
         return
 
 # vs help
-win_sdk_default = '10.0.18362.0'
+win_sdk_default = '10.0.22621.0'
 VSVersion = getLatestVSVersion()
 if VSVersion == '17':
     win_toolset_default = '143'
@@ -230,13 +239,13 @@ def make_plugin(pkg_info, force, sdk_version, toolset):
 
 
 def make_sip_core_deps(pkg_info, force, sdk_version, toolset):
-    cmake_script = 'cmake -DCMAKE_CONFIGURATION_TYPES="ReleaseLib_win32" -DCMAKE_SYSTEM_VERSION=' + sdk_version + \
-        ' -DCMAKE_VS_PLATFORM_NAME="x64" -G ' + getCMakeGenerator(getLatestVSVersion(
-        )) + ' -T $(DefaultPlatformToolset) -S ../../ -B ../../build'
-    root_logger.warning("Cmake generating vcxproj files")
-    result = getSHrunner().exec_batch(cmake_script)
-    if result[0] != 0:
-        sys.exit("Cmake Errors")
+    # cmake_script = 'cmake -DCMAKE_CONFIGURATION_TYPES="ReleaseLib_win32" -DCMAKE_SYSTEM_VERSION=' + sdk_version + \
+    #   ' -DCMAKE_VS_PLATFORM_NAME="x64" -G ' + getCMakeGenerator(getLatestVSVersion(
+    #   )) + ' -T $(DefaultPlatformToolset) -S ../../ -B ../../build'
+    # root_logger.warning("Cmake generating vcxproj files")
+    # result = getSHrunner().exec_batch(cmake_script)
+    # if result[0] != 0:
+    #    sys.exit("Cmake Errors")
 
     for dep in pkg_info.get('deps', []):
         resolve(dep, False, sdk_version, toolset)
@@ -255,7 +264,7 @@ def make(pkg_info, force, sdk_version, toolset, isPlugin):
     # attempt to get the current built version
     current_version = ''
     # check build file for current version
-    build_file = contrib_build_dir + r'\\.' + pkg_name
+    build_file = contrib_build_dir + r'\\.' + pkg_name + r'_' + build_type
     if os.path.exists(build_file):
         if force:
             os.remove(build_file)
@@ -473,17 +482,17 @@ def resolve(pkg_name, force=False, sdk_version='', toolset='', isPlugin=False):
 
 def track_build(pkg_name, version, isPlugin):
     if isPlugin:
-        build_file = plugins_bin_dir + '\\.' + pkg_name
+        build_file = plugins_bin_dir + '\\.' + pkg_name + '_' + build_type
     else:
-        build_file = contrib_build_dir + '\\.' + pkg_name
+        build_file = contrib_build_dir + '\\.' + pkg_name + '_' + build_type
     f = open(build_file, "w+", encoding="utf8", errors='ignore')
     f.write(version)
     f.close()
 
 
 def build(pkg_name, pkg_dir, project_paths, custom_scripts, with_env, sdk,
-          toolset, arch='x64', conf='Release', use_cmake=False):
-    getMSbuilder().set_msbuild_configuration(with_env, arch, conf, toolset)
+          toolset, arch='x64', use_cmake=False):
+    getMSbuilder().set_msbuild_configuration(with_env, arch, toolset)
     getMSbuilder().setup_vs_env(sdk)
 
     success = True
@@ -523,7 +532,7 @@ def build(pkg_name, pkg_dir, project_paths, custom_scripts, with_env, sdk,
         if use_cmake is True:
             log.debug('CMake build phase')
             cmake_build_script = "cmake --build '" + pkg_dir + \
-                "\\build' " + "--config " + conf
+                "\\build' " + "--config " + build_type
             result = getSHrunner().exec_batch(cmake_build_script)
             if result[0] != 0:
                 log.error("Error building with CMake")
@@ -600,6 +609,8 @@ class SHrunner():
         self.project_env_vars = {
             'sip_core_deps_DIR': sip_core_deps_dir,
             'CONTRIB_SRC_DIR': contrib_src_dir,
+            'BUILD_TYPE': build_type,
+            'INSTALL_PREFIX': install_prefix,
             'CONTRIB_BUILD_DIR': contrib_build_dir,
             'VCVARSALL_CMD': getVSEnvCmd(),
             'CMAKE_GENERATOR': getCMakeGenerator(getLatestVSVersion())
@@ -627,6 +638,7 @@ class SHrunner():
         if script_type is ScriptType.sh:
             cmd[-1] = cmd[-1] + '\"'
             cmd = " ".join(cmd)
+        log.info(f"executing script: {cmd}")
         p = subprocess.Popen(cmd,
                              shell=True,
                              stderr=sys.stderr,
@@ -667,11 +679,11 @@ class MSbuilder:
         self.set_msbuild_configuration()
 
     def set_msbuild_configuration(self, with_env='false', arch='x64',
-                                  configuration='Release',
                                   toolset=win_toolset_default):
         self.extra_msbuild_args = [
             '/p:Platform=' + arch,
-            '/p:Configuration=' + configuration,
+            '/p:Configuration=' + build_type,
+            '/p:OutDir=' + getInstallDir(),
             '/p:PlatformToolset=' + toolset,
             '/p:useenv=' + with_env
         ]
@@ -687,11 +699,6 @@ class MSbuilder:
     def build(self, pkg_name, proj_path, sdk_version, toolset):
         if not os.path.isfile(self.msbuild):
             raise IOError('msbuild.exe not found. path=' + self.msbuild)
-        if os.environ.get('JENKINS_URL'):
-            log.info("Jenkins Clear DebugInformationFormat")
-            self.__class__.replace_vs_prop(proj_path,
-                                           'DebugInformationFormat',
-                                           'None')
         # force chosen sdk
         self.__class__.replace_vs_prop(proj_path,
                                        'WindowsTargetPlatformVersion',
@@ -755,6 +762,14 @@ def parse_args():
         '-P', '--plugin', default=False, action='store_true',
         help="Defines if we're building a plugin"
     )
+    ap.add_argument(
+        '--build_debug', default=False, action='store_true',
+        help="Defines if this will be build in debug mode"
+    )
+    ap.add_argument(
+        '--install_prefix', default=install_prefix,
+        help="Defines installation prefix"
+    )
 
     parsed_args = ap.parse_args()
 
@@ -781,9 +796,16 @@ def main():
         log.error('These scripts will only run on a 64-bit Windows system for now!')
         sys.exit(1)
 
+    global build_type, install_prefix
+
     if int(getLatestVSVersion()) < 16:
         log.error('These scripts require at least Visual Studio v16 2019!')
         sys.exit(1)
+
+    if parsed_args.build_debug:
+        build_type = "Debug"
+
+    install_prefix = parsed_args.install_prefix
 
     if parsed_args.purge:
         if os.path.exists(contrib_tmp_dir):
