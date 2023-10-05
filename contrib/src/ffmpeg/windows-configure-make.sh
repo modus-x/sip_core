@@ -4,8 +4,6 @@ set +e
 
 cd $3/ffmpeg
 
-[ "$1" == "Debug" ] && EXTRACFLAGS="-MDd" || EXTRACFLAGS="-MD"
-
 INSTALL_DIR="${2//\\//}"
 
 INCLUDE_DIR="${INSTALL_DIR}/include"
@@ -112,11 +110,24 @@ FFMPEGCONF+='
                 --enable-indev=dshow
                 --enable-indev=gdigrab'
 
-
 echo "configure and make ffmpeg for win32-x64... in $(pwd)"
 
+# extra libs
+EXTRALDFLAGS="libopus.lib libx264.lib"
+
+# configure debug / release libs
+if [ "$1" == "Debug" ]; then
+  EXTRACFLAGS="-MDd"
+  FFMPEGCONF+=' --enable-debug --disable-optimizations'
+  # IGNORE LIBCMT -> read https://trac.ffmpeg.org/wiki/CompilationGuide/MSVC#DebugBuilds
+  EXTRALDFLAGS=" ${EXTRALDFLAGS} /NODEFAULTLIB:libcmt"
+else
+  EXTRACFLAGS="-MD"
+fi
+
 EXTRACFLAGS="${EXTRACFLAGS} -D_WINDLL -D_WIN32_WINNT=0x0601 -I${INCLUDE_DIR} -I${INCLUDE_DIR}/opus"
-EXTRALDFLAGS="-APPCONTAINER:NO -MACHINE:x64 Ole32.lib Kernel32.lib Gdi32.lib User32.lib Strmiids.lib Advapi32.lib OleAut32.lib Shlwapi.lib Vfw32.lib Secur32.lib Advapi32.lib libopus.lib libx264.lib -LIBPATH:${LIB_DIR}"
+
+EXTRALDFLAGS="${EXTRALDFLAGS} -APPCONTAINER:NO -MACHINE:x64 Ole32.lib Kernel32.lib Gdi32.lib User32.lib Strmiids.lib Advapi32.lib OleAut32.lib Shlwapi.lib Vfw32.lib Secur32.lib Advapi32.lib -LIBPATH:${LIB_DIR}"
 FFMPEGCONF+=' --arch=x86_64'
 
 # DO NOT mix debug and release builds

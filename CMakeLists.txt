@@ -472,8 +472,6 @@ if(MSVC)
       optimized
       ${DEPS_RELEASE}/fmt.lib
       optimized
-      ${DEPS_RELEASE}/http-parser.lib
-      optimized
       ${DEPS_RELEASE}/libspeexdsp.lib
       optimized
       ${DEPS_RELEASE}/webrtc-audio-processing.lib
@@ -517,11 +515,9 @@ if(MSVC)
       debug
       ${DEPS_DEBUG}/lib/x64/lib_json.lib
       debug
-      ${DEPS_DEBUG}/libyaml-cppmd.lib
+      ${DEPS_DEBUG}/libyaml-cppmdd.lib
       debug
-      ${DEPS_DEBUG}/fmt.lib
-      debug
-      ${DEPS_DEBUG}/http-parser.lib
+      ${DEPS_DEBUG}/fmtd.lib
       debug
       ${DEPS_DEBUG}/libspeexdsp.lib
       debug

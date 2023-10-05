@@ -9,7 +9,6 @@
         "portaudio",
         "yaml-cpp",
         "jsoncpp",
-        "http_parser",
         "fmt",
         "webrtc-audio-processing"
     ],
