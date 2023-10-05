@@ -141,7 +141,6 @@ clang-tidy-report.txt
 sonar-project.properties.save
 compile_commands.json
 
-# ignore all downloaded libs
-native-*
-native
+# sip core standalone builds
+sip-core-*
 

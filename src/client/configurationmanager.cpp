@@ -112,13 +112,11 @@ switchTransport(const std::string& accountID, Account::Transport type)
 {
     switch (type) {
     case Account::Transport::UDP:
-        sip_core::Manager::instance().switchTransport(accountID, sip_core::TransportType::UDP);
-        break;
+        return sip_core::Manager::instance().switchTransport(accountID, sip_core::TransportType::UDP);
     case Account::Transport::TCP:
-        sip_core::Manager::instance().switchTransport(accountID, sip_core::TransportType::TCP);
-        break;
+        return sip_core::Manager::instance().switchTransport(accountID, sip_core::TransportType::TCP);
     default:
-        break;
+        return false;
     }
 }
 

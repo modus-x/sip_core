@@ -7,7 +7,7 @@ systems. This function is required for `alloca.c' support on those systems.
 /* #undef C_ALLOCA */
 
 /* Define to 1 if you want hardware acceleration support. */
-#define RING_ACCEL 1
+#define SIP_CORE_ACCEL 0
 
 /* Define to 1 if you have `alloca', as a function or macro. */
 #define HAVE_ALLOCA 1
@@ -27,9 +27,6 @@ systems. This function is required for `alloca.c' support on those systems.
 
 /* define if the compiler supports basic C++11 syntax */
 #define HAVE_CXX11 1
-
-/* Define to enable dht */
-#define HAVE_DHT 1
 
 /* Define to 1 if you have the <dlfcn.h> header file. */
 #define HAVE_DLFCN_H 1
@@ -51,12 +48,6 @@ systems. This function is required for `alloca.c' support on those systems.
 
 /* Define to 1 if you have the <libintl.h> header file. */
 #define HAVE_LIBINTL_H 0
-
-/* Define if you have libupnp */
-#define HAVE_LIBUPNP 1
-
-/* Define if you have natpmp */
-#define HAVE_LIBNATPMP 1
 
 /* Define to 1 if you have the <limits.h> header file. */
 #define HAVE_LIMITS_H 1
@@ -143,25 +134,25 @@ systems. This function is required for `alloca.c' support on those systems.
 #define LT_OBJDIR ".libs/"
 
 /* Name of package */
-#define PACKAGE "jami"
+#define PACKAGE "sip_core"
 
 /* Define to the address where bug reports for this package should be sent. */
-#define PACKAGE_BUGREPORT "jami@lists.savoirfairelinux.net"
+#define PACKAGE_BUGREPORT "n.plaksin@technologysv.ru"
 
 /* Define to the full name of this package. */
-#define PACKAGE_NAME "Jami Daemon"
+#define PACKAGE_NAME "SIP core"
 
 /* Define to the full name and version of this package. */
-#define PACKAGE_STRING "Jami Daemon 10.0.2"
+#define PACKAGE_STRING "SIP core 0.0.6"
 
 /* Define to the one symbol short name of this package. */
-#define PACKAGE_TARNAME "jami"
+#define PACKAGE_TARNAME "sip_core"
 
 /* Define to the home page for this package. */
 #define PACKAGE_URL ""
 
 /* Define to the version of this package. */
-#define PACKAGE_VERSION "10.0.2"
+#define PACKAGE_VERSION "0.0.6"
 
 /* Define to necessary symbol if this constant uses a non-standard name on
 your system. */
@@ -172,9 +163,6 @@ your system. */
 
 /* Jami Plugin support enabled */
 #define ENABLE_PLUGIN /**/
-
-/* Name directory service support enabled */
-#define HAVE_RINGNS 1
 
 /* If using the C implementation of alloca, define if you know the
 direction of stack growth for your system; otherwise it will be
@@ -198,10 +186,7 @@ STACK_DIRECTION = 0 => direction of growth unknown */
 #undef _MBCS
 
 /* Version number of package */
-#define VERSION "10.0.2"
-
-// UWP compatibility
-#define JAMI_DATADIR ""
+#define VERSION "0.0.6"
 
 /* Define to limit the scope of <windows.h>. */
 /* #undef WIN32_LEAN_AND_MEAN */

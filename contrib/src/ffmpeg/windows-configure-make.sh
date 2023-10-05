@@ -1,13 +1,19 @@
 #!/usr/bin/env bash
 set +x
 set +e
-DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 
-[ "$3" == "Debug" ] && EXTRACFLAGS="-MDd" || EXTRACFLAGS="-MD"
+cd $3/ffmpeg
 
-INSTALL_DIR = "$4"
+[ "$1" == "Debug" ] && EXTRACFLAGS="-MDd" || EXTRACFLAGS="-MD"
 
-cd $DIR/../../build/ffmpeg
+INSTALL_DIR="${2//\\//}"
+
+INCLUDE_DIR="${INSTALL_DIR}/include"
+LIB_DIR="${INSTALL_DIR}/lib/x64"
+
+echo include dir is $INCLUDE_DIR
+echo lib dir is $LIB_DIR
+
 FFMPEGCONF='
             --toolchain=msvc
             --target-os=win32'
@@ -102,45 +108,27 @@ FFMPEGCONF+='
             --enable-filter=transpose
             --enable-filter=pad'
 
-if [ "$1" == "uwp" ]; then
-    EXTRACFLAGS='-MD -DWINAPI_FAMILY=WINAPI_FAMILY_APP -D_WIN32_WINNT=0x0601 -I../../../../../msvc/include -I../../../../../msvc/include/opus'
-    if [ "$2" == "x64" ]; then
-        echo "configure and make ffmpeg for UWP-x64..."
-            EXTRALDFLAGS='-APPCONTAINER WindowsApp.lib libopus.lib libx264.lib -LIBPATH:../../../../../msvc/lib/x64'
-            FFMPEGCONF+=' --arch=x86_64'
-            PREFIX=../../../Build/Windows10/x64
-            OUTDIR=Output/Windows10/x64
-    elif [ "$2" == "x86" ]; then
-        echo "configure and make ffmpeg for UWP-x86..."
-            EXTRALDFLAGS='-APPCONTAINER WindowsApp.lib libopus.lib libx264.lib -LIBPATH:../../../../../msvc/lib/x86'
-            FFMPEGCONF+=' --arch=x86'
-            PREFIX=../../../Build/Windows10/x86
-            OUTDIR=Output/Windows10/x86
-    fi
-elif [ "$1" == "win32" ]; then
-    EXTRACFLAGS="${EXTRACFLAGS} -D_WINDLL -I../../../../../msvc/include -I../../../../../msvc/include/opus -D_WIN32_WINNT=0x0601"
-    FFMPEGCONF+='
+FFMPEGCONF+='
                 --enable-indev=dshow
                 --enable-indev=gdigrab'
-    if [ "$2" == "x64" ]; then
-        echo "configure and make ffmpeg for win32-x64... in $(pwd)"
-        EXTRALDFLAGS='-APPCONTAINER:NO -MACHINE:x64 Ole32.lib Kernel32.lib Gdi32.lib User32.lib Strmiids.lib Advapi32.lib OleAut32.lib Shlwapi.lib Vfw32.lib Secur32.lib Advapi32.lib libopus.lib libx264.lib  -LIBPATH:../../../../../msvc/lib/x64'
-        FFMPEGCONF+=' --arch=x86_64'
-        OUTDIR=Output/win32/x64
-    elif [ "$2" == "x86" ]; then
-        echo "configure and make ffmpeg for win32-x86..."
-        EXTRALDFLAGS='-APPCONTAINER:NO -MACHINE:x86 Ole32.lib Kernel32.lib Gdi32.lib User32.lib Strmiids.lib OleAut32.lib Shlwapi.lib Vfw32.lib Secur32.lib Advapi32.lib libopus.lib libx264.lib -LIBPATH:../../../../../msvc/lib/x86'
-        FFMPEGCONF+=' --arch=x86'
-        OUTDIR=Output/win32/x86
-    fi
-fi
-rm -rf $OUTDIR
+
+
+echo "configure and make ffmpeg for win32-x64... in $(pwd)"
+
+EXTRACFLAGS="${EXTRACFLAGS} -D_WINDLL -D_WIN32_WINNT=0x0601 -I${INCLUDE_DIR} -I${INCLUDE_DIR}/opus"
+EXTRALDFLAGS="-APPCONTAINER:NO -MACHINE:x64 Ole32.lib Kernel32.lib Gdi32.lib User32.lib Strmiids.lib Advapi32.lib OleAut32.lib Shlwapi.lib Vfw32.lib Secur32.lib Advapi32.lib libopus.lib libx264.lib -LIBPATH:${LIB_DIR}"
+FFMPEGCONF+=' --arch=x86_64'
+
+# DO NOT mix debug and release builds
+OUTDIR=Output/win32/x64/$1
 mkdir -p $OUTDIR
 cd $OUTDIR
 pwd
+
 FFMPEGCONF=$(echo $FFMPEGCONF | sed -e "s/[[:space:]]\+/ /g")
+
 set -x
 set -e
-../../../configure $FFMPEGCONF --extra-cflags="${EXTRACFLAGS}" --extra-ldflags="${EXTRALDFLAGS}" --prefix="${INSTALL_DIR}" --extra-cxxflags="-std:c++20"
+../../../../configure $FFMPEGCONF --extra-cflags="${EXTRACFLAGS}" --extra-ldflags="${EXTRALDFLAGS}" --prefix="${INSTALL_DIR}" --extra-cxxflags="-std:c++20"
 make -j8 install
-cd ../../..
+cd ../../../..

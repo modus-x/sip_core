@@ -205,8 +205,8 @@ void
 VideoDeviceMonitorImpl::run()
 {
     // Create a dummy window with the sole purpose to receive device change messages.
-    static const wchar_t* className = L"Message";
-    static const wchar_t* windowName = L"devicenotifications";
+    static const char* className = "Message";
+    static const char* windowName = "devicenotifications";
     WNDCLASSEX wx = {};
     wx.cbSize = sizeof(WNDCLASSEX);
     wx.lpfnWndProc = WinProcCallback;

@@ -171,7 +171,7 @@ index 0000000..071c9b3
 +      <CompileAs>CompileAsC</CompileAs>
 +    </ClCompile>
 +    <Lib>
-+      <OutputFile>../../../lib/libspeexdsp.lib</OutputFile>
++      <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
 +    </Lib>
 +  </ItemDefinitionGroup>
 +  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -188,7 +188,7 @@ index 0000000..071c9b3
 +      <CompileAs>CompileAsC</CompileAs>
 +    </ClCompile>
 +    <Lib>
-+      <OutputFile>../../../lib/libspeexdsp.lib</OutputFile>
++      <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
 +    </Lib>
 +  </ItemDefinitionGroup>
 +  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -210,7 +210,7 @@ index 0000000..071c9b3
 +      <DisableSpecificWarnings>4244;4305;4311;4100;4127;%(DisableSpecificWarnings)</DisableSpecificWarnings>
 +    </ClCompile>
 +    <Lib>
-+      <OutputFile>../../../lib/libspeexdsp.lib</OutputFile>
++      <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
 +    </Lib>
 +  </ItemDefinitionGroup>
 +  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -234,7 +234,7 @@ index 0000000..071c9b3
 +      <DisableSpecificWarnings>4244;4305;4311;4100;4127;%(DisableSpecificWarnings)</DisableSpecificWarnings>
 +    </ClCompile>
 +    <Lib>
-+      <OutputFile>../../../lib/libspeexdsp.lib</OutputFile>
++      <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
 +    </Lib>
 +  </ItemDefinitionGroup>
 +  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release_Dynamic_SSE|Win32'">
@@ -264,7 +264,7 @@ index 0000000..071c9b3
 +      <EnableCOMDATFolding>true</EnableCOMDATFolding>
 +      <RandomizedBaseAddress>false</RandomizedBaseAddress>
 +      <DataExecutionPrevention />
-+      <ImportLibrary>../../../lib/libspeexdsp.lib</ImportLibrary>
++      <ImportLibrary>$(OutDir)$(TargetName)$(TargetExt)</ImportLibrary>
 +      <TargetMachine>MachineX86</TargetMachine>
 +    </Link>
 +  </ItemDefinitionGroup>
@@ -298,7 +298,7 @@ index 0000000..071c9b3
 +      <RandomizedBaseAddress>false</RandomizedBaseAddress>
 +      <DataExecutionPrevention>
 +      </DataExecutionPrevention>
-+      <ImportLibrary>../../../lib/libspeexdsp.lib</ImportLibrary>
++      <ImportLibrary>$(OutDir)$(TargetName)$(TargetExt)</ImportLibrary>
 +    </Link>
 +  </ItemDefinitionGroup>
 +  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release_Static_SSE|Win32'">
@@ -321,7 +321,7 @@ index 0000000..071c9b3
 +      <DisableSpecificWarnings>4244;4305;4311;4100;4127;%(DisableSpecificWarnings)</DisableSpecificWarnings>
 +    </ClCompile>
 +    <Lib>
-+      <OutputFile>../../../lib/libspeexdsp.lib</OutputFile>
++      <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
 +    </Lib>
 +  </ItemDefinitionGroup>
 +  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release_Static_SSE|x64'">
@@ -346,7 +346,7 @@ index 0000000..071c9b3
 +      <DisableSpecificWarnings>4244;4305;4311;4100;4127;%(DisableSpecificWarnings)</DisableSpecificWarnings>
 +    </ClCompile>
 +    <Lib>
-+      <OutputFile>../../../lib/libspeexdsp.lib</OutputFile>
++      <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
 +    </Lib>
 +  </ItemDefinitionGroup>
 +  <ItemGroup>

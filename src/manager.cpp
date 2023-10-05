@@ -862,7 +862,7 @@ bool
 Manager::switchTransport(const std::string& accountId, TransportType type)
 {
     if (auto account = getAccount(accountId)) {
-        account->switchTransport(type);
+        return account->switchTransport(type);
     }
 }
 

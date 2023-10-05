@@ -26,7 +26,6 @@ import subprocess
 import platform
 import argparse
 import json
-import re
 import zipfile
 import tarfile
 import multiprocessing
@@ -36,7 +35,6 @@ import glob
 import time
 from datetime import timedelta
 import struct
-import importlib
 import logging
 import traceback
 import re
@@ -47,14 +45,14 @@ root_logger = logging.getLogger(__name__)
 log = None
 
 # project paths
-sip_core_deps_msvc_dir = os.path.dirname(os.path.realpath(__file__))
-sip_core_deps_dir = os.path.dirname(os.path.dirname(sip_core_deps_msvc_dir))
-sip_core_deps_build_dir = sip_core_deps_dir + r'\build'
-contrib_src_dir = sip_core_deps_dir + r'\contrib\src'
-contrib_build_dir = sip_core_deps_dir + r'\contrib\build'
-contrib_tmp_dir = sip_core_deps_dir + r'\contrib\tarballs'
-plugins_bin_dir = sip_core_deps_dir + r'\..\plugins\build'
-plugins_dir = sip_core_deps_dir + r'\..\plugins'
+sip_core_msvc_dir = os.path.dirname(os.path.realpath(__file__))
+sip_core_dir = os.path.dirname(os.path.dirname(sip_core_msvc_dir))
+sip_core_build_dir = sip_core_dir + r'\sip-core-win32'
+contrib_src_dir = sip_core_dir + r'\contrib\src'
+contrib_build_dir = sip_core_dir + r'\contrib\native-win32'
+contrib_tmp_dir = sip_core_dir + r'\contrib\tarballs'
+plugins_bin_dir = sip_core_dir + r'\..\plugins\plugins-wins32'
+plugins_dir = sip_core_dir + r'\..\plugins'
 
 # SCM
 wget_args = [
@@ -69,15 +67,20 @@ vs_where_path = os.path.join(
     os.environ['ProgramFiles(x86)'], 'Microsoft Visual Studio', 'Installer', 'vswhere.exe'
 )
 
+# build only deps of our target!
+deps_only = False
+
 # Build config
 build_type = "Release"
-install_prefix = "win32/x64"
 
-def getInstallDir():
-    if os.path.isabs(install_prefix):
-        return os.path.join(install_prefix, build_type)
-    else:
-        return os.path.join(os.getcwd(), install_prefix, build_type)
+# Something similar to make scripts
+install_prefix = os.path.join(sip_core_dir, "contrib", "win32")
+
+
+# add build type postfix to custom builds
+def getInstallDirForExternalProjects():
+    return os.path.join(install_prefix, build_type)
+
 
 def getLatestVSVersion():
     args = [
@@ -92,6 +95,7 @@ def getLatestVSVersion():
         return output.splitlines()[0].split('.')[0]
     else:
         return
+
 
 # vs help
 win_sdk_default = '10.0.22621.0'
@@ -152,7 +156,7 @@ def findMSBuild():
 
 def getVSEnv(arch='x64', platform='', version=''):
     env_cmd = 'set path=%path:"=% && ' + \
-        getVSEnvCmd(arch, platform, version) + ' && set'
+              getVSEnvCmd(arch, platform, version) + ' && set'
     p = subprocess.Popen(env_cmd,
                          shell=True,
                          stdout=subprocess.PIPE)
@@ -223,9 +227,9 @@ def make_plugin(pkg_info, force, sdk_version, toolset):
         sdk_to_use = sdk_version if env_set == 'false' else pkg_info.get(
             'with_env', '')
         cmake_script = "cmake -DCMAKE_SYSTEM_VERSION=" + sdk_version + \
-            " -G " + getCMakeGenerator(getLatestVSVersion()) + cmake_defines + \
-            " -T " + toolset + \
-            " -S " + plugin_path + " -B " + plugin_path + "/msvc"
+                       " -G " + getCMakeGenerator(getLatestVSVersion()) + cmake_defines + \
+                       " -T " + toolset + \
+                       " -S " + plugin_path + " -B " + plugin_path + "/msvc"
         root_logger.warning("Cmake generating vcxproj files")
         _ = getSHrunner().exec_batch(cmake_script)
         build(pkg_name,
@@ -238,24 +242,48 @@ def make_plugin(pkg_info, force, sdk_version, toolset):
         track_build(pkg_name, version, True)
 
 
-def make_sip_core_deps(pkg_info, force, sdk_version, toolset):
-    # cmake_script = 'cmake -DCMAKE_CONFIGURATION_TYPES="ReleaseLib_win32" -DCMAKE_SYSTEM_VERSION=' + sdk_version + \
-    #   ' -DCMAKE_VS_PLATFORM_NAME="x64" -G ' + getCMakeGenerator(getLatestVSVersion(
-    #   )) + ' -T $(DefaultPlatformToolset) -S ../../ -B ../../build'
-    # root_logger.warning("Cmake generating vcxproj files")
-    # result = getSHrunner().exec_batch(cmake_script)
-    # if result[0] != 0:
-    #    sys.exit("Cmake Errors")
-
+# build only deps
+def make_sip_core_deps(pkg_info, sdk_version, toolset):
     for dep in pkg_info.get('deps', []):
         resolve(dep, False, sdk_version, toolset)
 
 
-def make(pkg_info, force, sdk_version, toolset, isPlugin):
+# build sip_core, but do not build contrib from within sip_core CMakeLists.txt
+def make_sip_core(pkg_info, sdk_version, toolset):
+    make_sip_core_deps(pkg_info, sdk_version, toolset)
+
+    cmake_script = 'cmake -DCMAKE_SYSTEM_VERSION=' + sdk_version + \
+                   ' -DCMAKE_VS_PLATFORM_NAME="x64" -G ' + getCMakeGenerator(getLatestVSVersion(
+    )) + ' -T $(DefaultPlatformToolset) -S ../../ -B ' + \
+                   f"'{sip_core_build_dir}/{build_type}/build'" + " -DBUILD_CONTRIB=OFF"
+
+    root_logger.warning("Cmake generating vcxproj files")
+    result = getSHrunner().exec_batch(cmake_script)
+    if result[0] != 0:
+        sys.exit("Cmake Errors")
+
+    root_logger.warning(
+        "Building sip_core with preferred sdk version %s and toolset %s", sdk_version, toolset)
+    env_set = 'false' if pkg_info.get('with_env', '') == '' else 'true'
+    sdk_to_use = sdk_version if env_set == 'false' else pkg_info.get(
+        'with_env', '')
+    build('sip_core', sip_core_build_dir + f"/{build_type}",
+          pkg_info.get('project_paths', []),
+          pkg_info.get('custom_scripts', {}),
+          env_set,
+          sdk_to_use,
+          toolset,
+          use_cmake=pkg_info.get('use_cmake', True))
+
+
+def make(pkg_info, force, sdk_version, toolset, is_plugin):
     pkg_name = pkg_info.get('name')
-    if pkg_name == 'sip_core_deps':
-        return make_sip_core_deps(pkg_info, force, sdk_version, toolset)
-    if isPlugin:
+    if pkg_name == 'sip_core':
+        if deps_only:
+            return make_sip_core_deps(pkg_info, sdk_version, toolset)
+        else:
+            return make_sip_core(pkg_info, sdk_version, toolset)
+    if is_plugin:
         return make_plugin(pkg_info, force, sdk_version, toolset)
     md5 = getMd5ForDirectory(contrib_src_dir + r'\\' + pkg_name)
     version = pkg_info.get('version')
@@ -308,7 +336,7 @@ def make(pkg_info, force, sdk_version, toolset, isPlugin):
                 cmake_defines += " -D" + define
             if not pkg_up_to_date or current_version is None or force:
                 cmake_conf_script = "cmake -G " + getCMakeGenerator(getLatestVSVersion(
-                )) + cmake_defines + " -S '" + pkg_build_path + "' -B '" + pkg_build_path + "\\build'"
+                )) + cmake_defines + " -S '" + pkg_build_path + "' -B '" + pkg_build_path + "\\build'" + f" -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY='{install_prefix}'"
                 log.debug("Configuring with Cmake")
                 result = getSHrunner().exec_batch(cmake_conf_script)
                 if result[0] != 0:
@@ -430,7 +458,7 @@ def apply(pkg_name, patches, win_patches):
     tmp_dir = os.getcwd()
     pkg_build_path = contrib_build_dir + '\\' + pkg_name
     if not os.path.exists(pkg_build_path):
-        os.makedirs(pkg_bild_path)
+        os.makedirs(pkg_build_path)
     os.chdir(pkg_build_path)
     base_sh_src_path = get_sh_path(contrib_src_dir)
     # 1. git patches (LF)
@@ -452,13 +480,13 @@ def apply(pkg_name, patches, win_patches):
     os.chdir(tmp_dir)
 
 
-def get_pkg_file(pkg_name, isPlugin = False):
-    if pkg_name == 'sip_core_deps':
-        pkg_location = sip_core_deps_msvc_dir
-    elif (isPlugin):
+def get_pkg_file(pkg_name, is_plugin=False):
+    if pkg_name == 'sip_core':
+        pkg_location = sip_core_msvc_dir
+    elif (is_plugin):
         pkg_location = plugins_dir + r'\\' + pkg_name
     else:
-        pkg_location = sip_core_deps_dir + r'\contrib\src\\' + pkg_name
+        pkg_location = sip_core_dir + r'\contrib\src\\' + pkg_name
     pkg_json_file = pkg_location + r"\\package.json"
     if not os.path.exists(pkg_json_file):
         log.error("No package info for " + pkg_name)
@@ -532,7 +560,7 @@ def build(pkg_name, pkg_dir, project_paths, custom_scripts, with_env, sdk,
         if use_cmake is True:
             log.debug('CMake build phase')
             cmake_build_script = "cmake --build '" + pkg_dir + \
-                "\\build' " + "--config " + build_type
+                                 "\\build' " + "--config " + build_type
             result = getSHrunner().exec_batch(cmake_build_script)
             if result[0] != 0:
                 log.error("Error building with CMake")
@@ -550,7 +578,7 @@ def build(pkg_name, pkg_dir, project_paths, custom_scripts, with_env, sdk,
 
     # should cover header only, no cmake, etc
     ops = len(build_scripts) + len(project_paths) + \
-        len(pre_build_scripts) + len(post_build_scripts)
+          len(pre_build_scripts) + len(post_build_scripts)
     return success and build_operations == ops
 
 
@@ -607,10 +635,10 @@ class SHrunner():
                 log.debug('Using alternate bash found at ' + self.sh_path)
 
         self.project_env_vars = {
-            'sip_core_deps_DIR': sip_core_deps_dir,
+            'sip_core_deps_DIR': sip_core_dir,
             'CONTRIB_SRC_DIR': contrib_src_dir,
             'BUILD_TYPE': build_type,
-            'INSTALL_PREFIX': install_prefix,
+            'INSTALL_PREFIX': getInstallDirForExternalProjects(),
             'CONTRIB_BUILD_DIR': contrib_build_dir,
             'VCVARSALL_CMD': getVSEnvCmd(),
             'CMAKE_GENERATOR': getCMakeGenerator(getLatestVSVersion())
@@ -683,7 +711,7 @@ class MSbuilder:
         self.extra_msbuild_args = [
             '/p:Platform=' + arch,
             '/p:Configuration=' + build_type,
-            '/p:OutDir=' + getInstallDir(),
+            '/p:OutDir=' + getInstallDirForExternalProjects(),
             '/p:PlatformToolset=' + toolset,
             '/p:useenv=' + with_env
         ]
@@ -763,12 +791,16 @@ def parse_args():
         help="Defines if we're building a plugin"
     )
     ap.add_argument(
-        '--build_debug', default=False, action='store_true',
-        help="Defines if this will be build in debug mode"
+        '--build_type', default=build_type, type=str,
+        help="Defines build type"
     )
     ap.add_argument(
         '--install_prefix', default=install_prefix,
         help="Defines installation prefix"
+    )
+    ap.add_argument(
+        '--deps_only', action='store_true', default=deps_only,
+        help="Build only deps for build target"
     )
 
     parsed_args = ap.parse_args()
@@ -796,16 +828,19 @@ def main():
         log.error('These scripts will only run on a 64-bit Windows system for now!')
         sys.exit(1)
 
-    global build_type, install_prefix
+    global build_type, install_prefix, deps_only
 
     if int(getLatestVSVersion()) < 16:
         log.error('These scripts require at least Visual Studio v16 2019!')
         sys.exit(1)
 
-    if parsed_args.build_debug:
-        build_type = "Debug"
+    build_type = parsed_args.build_type
+
+    deps_only = parsed_args.deps_only
 
     install_prefix = parsed_args.install_prefix
+
+    os.makedirs(contrib_tmp_dir, exist_ok=True)
 
     if parsed_args.purge:
         if os.path.exists(contrib_tmp_dir):
@@ -866,7 +901,7 @@ def main():
 
 def get_sh_path(path):
     driveless_path = path.replace(os.path.sep, '/')[3:]
-    drive_letter = os.path.splitdrive(sip_core_deps_dir)[0][0].lower()
+    drive_letter = os.path.splitdrive(sip_core_dir)[0][0].lower()
     wsl_drive_path = '/mnt/' + drive_letter + '/'
     no_echo = ' &> /dev/null'
     result = getSHrunner().exec_sh('pwd | grep ' + wsl_drive_path + no_echo)

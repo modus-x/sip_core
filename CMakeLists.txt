@@ -189,10 +189,7 @@ endif()
 # Source groups
 # ##############################################################################
 
-# compat, src source group
-if(MSVC)
-  add_subdirectory("compat")
-endif()
+
 
 add_subdirectory("src")
 source_group("Source Files" FILES ${Source_Files})
@@ -286,20 +283,36 @@ set_target_properties(${PROJECT_NAME} PROPERTIES FOLDER "sip_core")
 set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 20
                                                  CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# compat, src source group + create deps with proper configuration
+if(MSVC)
+  if(BUILD_CONTRIB)
+      add_custom_command(
+        TARGET ${PROJECT_NAME}
+        PRE_BUILD
+        COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/compat/msvc/winmake.py
+        --build sip_core -v -i -d DEBUG --deps_only --build_type $<IF:$<CONFIG:Debug>,"Debug","Release">
+        RESULT_VARIABLE CMD_RESULT)
+
+      if(CMD_RESULT)
+        message(
+          FATAL_ERROR
+            "Compiling native deps for target win32 failed with code ${CMD_RESULT}")
+      endif()
+
+  endif()
+  add_subdirectory("compat")
+
+endif()
+
 target_compile_definitions(
   ${PROJECT_NAME}
   PRIVATE
-    PACKAGE_NAME="${PACKAGE_NAME}"
-    PACKAGE_VERSION="${PROJECT_VERSION}"
-    PACKAGE="sip_core"
-    # try to enable hardware accel RING_ACCEL for now, force video compilation
-    # even when compiling standalone sip_core lib
-    ENABLE_VIDEO
     # we are building sip_core, not using it!
     LIBSIP_CORE_BUILD
     # define exports
     # Conditionally add compile definitions based on platform
     $<$<OR:$<BOOL:${LINUX}>,$<BOOL:${MSVC}>,$<BOOL:${ANDROID}>>:HAVE_WEBRTC_AP>
+    # Building shared library
     SIP_CORE_EXPORTS)
 
 if(IOS)
@@ -328,48 +341,13 @@ target_include_directories(
          "${CMAKE_CURRENT_SOURCE_DIR}/src/sip_core;")
 
 if(MSVC)
-  # ############################################################################
-  # Target
-  # ############################################################################
-  include("CMake/Utils.cmake")
-  use_props(${PROJECT_NAME} "${CMAKE_CONFIGURATION_TYPES}"
-            "${DEFAULT_CXX_PROPS}")
-
-  # ############################################################################
-  # Include necessary .cmake file (need to init use_props first)
-  # ############################################################################
-  include("CMake/Default.cmake")
-  include("CMake/DefaultCXX.cmake")
-
   # Supress generation of ZERO_CHECK
   set(CMAKE_SUPPRESS_REGENERATION true)
   set(ROOT_NAMESPACE sip_core)
 
-  # ############################################################################
-  # Target name
-  # ############################################################################
-  if("${CMAKE_VS_PLATFORM_NAME}" STREQUAL "x64")
-    set_target_properties(${PROJECT_NAME}
-                          PROPERTIES TARGET_NAME_RELEASELIB_WIN32 "sip_core")
-  endif()
 
-  # ############################################################################
-  # Output directory
-  # ############################################################################
-  if("${CMAKE_VS_PLATFORM_NAME}" STREQUAL "x64")
-    set_target_properties(
-      ${PROJECT_NAME}
-      PROPERTIES
-        OUTPUT_DIRECTORY_RELEASELIB_WIN32
-        "${CMAKE_CURRENT_SOURCE_DIR}/build/${CMAKE_VS_PLATFORM_NAME}/$<CONFIG>/bin/"
-    )
-  endif()
-
-  if("${CMAKE_VS_PLATFORM_NAME}" STREQUAL "x64")
-    set_target_properties(
-      ${PROJECT_NAME} PROPERTIES INTERPROCEDURAL_OPTIMIZATION_RELEASELIB_WIN32
-                                 "FALSE")
-  endif()
+  set(DEPS_RELEASE ${CMAKE_CURRENT_SOURCE_DIR}/contrib/win32/Release)
+  set(DEPS_DEBUG ${CMAKE_CURRENT_SOURCE_DIR}/contrib/win32/Debug)
 
   # ############################################################################
   # Include directories
@@ -380,21 +358,22 @@ if(MSVC)
       "${CMAKE_CURRENT_SOURCE_DIR}/compat/msvc;"
       "${CMAKE_CURRENT_SOURCE_DIR}/contrib/msvc;"
       "${CMAKE_CURRENT_SOURCE_DIR}/contrib/msvc/include;"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/fmt/include;"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/http_parser;"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/jsoncpp/include;"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/yaml-cpp/include;"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/pjproject/pjlib/include;"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/pjproject/pjnath/include;"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/pjproject/pjlib-util/include;"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/pjproject/pjsip/include;"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/pjproject/third_party;"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/speexdsp/include;"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/webrtc-audio-processing;"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/portaudio/include;"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/pjproject/pjmedia/include;"
+      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/fmt/include;"
+      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/http_parser;"
+      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/jsoncpp/include;"
+      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/yaml-cpp/include;"
+      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/pjproject/pjlib/include;"
+      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/pjproject/pjnath/include;"
+      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/pjproject/pjlib-util/include;"
+      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/pjproject/pjsip/include;"
+      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/pjproject/third_party;"
+      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/speexdsp/include;"
+      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/webrtc-audio-processing;"
+      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/portaudio/include;"
+      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/pjproject/pjmedia/include;"
     PUBLIC
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/ffmpeg/Build/win32/x64/include;"
+       $<$<CONFIG:Debug>:${DEPS_DEBUG}/include>
+       $<$<CONFIG:Release>:${DEPS_RELEASE}/include>
   )
 
   # ############################################################################
@@ -422,7 +401,6 @@ if(MSVC)
     target_compile_options(
       ${PROJECT_NAME}
       PRIVATE /Oi;
-              ${DEFAULT_CXX_RUNTIME_LIBRARY};
               /MP;
               /Oy-;
               /sdl-;
@@ -436,8 +414,8 @@ if(MSVC)
               /wd4180;
               /wd4244;
               /wd4267;
-              /Zc:__cplusplus;
-              ${DEFAULT_CXX_EXCEPTION_HANDLING})
+              /Zc:__cplusplus
+              )
   endif()
 
   if("${CMAKE_VS_PLATFORM_NAME}" STREQUAL "x64")
@@ -447,12 +425,12 @@ if(MSVC)
       /MACHINE:X64
       /VERBOSE:LIB
       # all dependencies are build with /MD
-      /NODEFAULTLIB:libcmtd
-      /NODEFAULTLIB:libcmt
+      # /NODEFAULTLIB:libcmtd
+      # /NODEFAULTLIB:libcmt
       # Always generate PDB
-      /DEBUG
       /ignore:4006)
   endif()
+
 
   # ############################################################################
   # Dependencies
@@ -460,6 +438,7 @@ if(MSVC)
   target_link_libraries(
     ${PROJECT_NAME}
     PRIVATE
+      # System
       ws2_32.lib
       advapi32.lib
       Ole32.lib
@@ -469,36 +448,120 @@ if(MSVC)
       Strmiids.lib
       OleAut32.lib
       Shlwapi.lib
-      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/ffmpeg/Build/win32/x64/lib/libavcodec.lib
-      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/ffmpeg/Build/win32/x64/lib/libavdevice.lib
-      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/ffmpeg/Build/win32/x64/lib/libavfilter.lib
-      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/ffmpeg/Build/win32/x64/lib/libavformat.lib
-      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/ffmpeg/Build/win32/x64/lib/libswresample.lib
-      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/ffmpeg/Build/win32/x64/lib/libswscale.lib
-      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/msvc/lib/x64/libx264.lib
-      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/msvc/lib/x64/libopus.lib
-      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/msvc/lib/x64/lib_json.lib
-      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/yaml-cpp/msvc/Release/libyaml-cppmd.lib
-      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/pjproject/pjsip/lib/pjsip-core-x86_64-x64-vc15-Release.lib
-      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/pjproject/pjsip/lib/pjsip-simple-x86_64-x64-vc15-Release.lib
-      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/pjproject/pjsip/lib/pjsua2-lib-x86_64-x64-vc15-Release.lib
-      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/pjproject/pjsip/lib/pjsua-lib-x86_64-x64-vc15-Release.lib
-      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/pjproject/pjsip/lib/pjsip-ua-x86_64-x64-vc15-Release.lib
-      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/pjproject/pjmedia/lib/pjmedia-x86_64-x64-vc15-Release.lib
-      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/pjproject/pjlib-util/lib/pjlib-util-x86_64-x64-vc15-Release.lib
-      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/pjproject/pjlib/lib/pjlib-x86_64-x64-vc15-Release.lib
-      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/pjproject/pjnath/lib/pjnath-x86_64-x64-vc15-Release.lib
-      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/fmt/msvc/Release/fmt.lib
-      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/http_parser/x64/Release/http-parser.lib
-      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/speexdsp/lib/libspeexdsp.lib
-      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/webrtc-audio-processing/build/Release/webrtc-audio-processing.lib
-      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/portaudio/build/Release/portaudio_static_x64.lib
+
+      optimized 
+      ${DEPS_RELEASE}/lib/libavcodec.lib
+      optimized
+      ${DEPS_RELEASE}/lib/libavdevice.lib
+      optimized
+      ${DEPS_RELEASE}/lib/libavfilter.lib
+      optimized
+      ${DEPS_RELEASE}/lib/libavformat.lib
+      optimized
+      ${DEPS_RELEASE}/lib/libswresample.lib
+      optimized
+      ${DEPS_RELEASE}/lib/libswscale.lib
+      optimized
+      ${DEPS_RELEASE}/lib/x64/libx264.lib
+      optimized
+      ${DEPS_RELEASE}/lib/x64/libopus.lib
+      optimized
+      ${DEPS_RELEASE}/lib/x64/lib_json.lib
+      optimized
+      ${DEPS_RELEASE}/libyaml-cppmd.lib
+      optimized
+      ${DEPS_RELEASE}/fmt.lib
+      optimized
+      ${DEPS_RELEASE}/http-parser.lib
+      optimized
+      ${DEPS_RELEASE}/libspeexdsp.lib
+      optimized
+      ${DEPS_RELEASE}/webrtc-audio-processing.lib
+      optimized
+      ${DEPS_RELEASE}/portaudio_static_x64.lib
+      optimized
+      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/pjproject/pjsip/lib/pjsip-core-x86_64-x64-vc15-Release.lib
+      optimized
+      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/pjproject/pjsip/lib/pjsip-simple-x86_64-x64-vc15-Release.lib
+      optimized
+      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/pjproject/pjsip/lib/pjsua2-lib-x86_64-x64-vc15-Release.lib
+      optimized
+      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/pjproject/pjsip/lib/pjsua-lib-x86_64-x64-vc15-Release.lib
+      optimized
+      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/pjproject/pjsip/lib/pjsip-ua-x86_64-x64-vc15-Release.lib
+      optimized
+      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/pjproject/pjmedia/lib/pjmedia-x86_64-x64-vc15-Release.lib
+      optimized
+      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/pjproject/pjlib-util/lib/pjlib-util-x86_64-x64-vc15-Release.lib
+      optimized
+      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/pjproject/pjlib/lib/pjlib-x86_64-x64-vc15-Release.lib
+      optimized
+      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/pjproject/pjnath/lib/pjnath-x86_64-x64-vc15-Release.lib
+
+      debug
+      ${DEPS_DEBUG}/lib/libavcodec.lib
+      debug
+      ${DEPS_DEBUG}/lib/libavdevice.lib
+      debug
+      ${DEPS_DEBUG}/lib/libavfilter.lib
+      debug
+      ${DEPS_DEBUG}/lib/libavformat.lib
+      debug
+      ${DEPS_DEBUG}/lib/libswresample.lib
+      debug
+      ${DEPS_DEBUG}/lib/libswscale.lib
+      debug
+      ${DEPS_DEBUG}/lib/x64/libx264.lib
+      debug
+      ${DEPS_DEBUG}/lib/x64/libopus.lib
+      debug
+      ${DEPS_DEBUG}/lib/x64/lib_json.lib
+      debug
+      ${DEPS_DEBUG}/libyaml-cppmd.lib
+      debug
+      ${DEPS_DEBUG}/fmt.lib
+      debug
+      ${DEPS_DEBUG}/http-parser.lib
+      debug
+      ${DEPS_DEBUG}/libspeexdsp.lib
+      debug
+      ${DEPS_DEBUG}/webrtc-audio-processing.lib
+      debug
+      ${DEPS_DEBUG}/portaudio_static_x64.lib
+      debug
+      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/pjproject/pjsip/lib/pjsip-core-x86_64-x64-vc15-Debug.lib
+      debug
+      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/pjproject/pjsip/lib/pjsip-simple-x86_64-x64-vc15-Debug.lib
+      debug
+      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/pjproject/pjsip/lib/pjsua2-lib-x86_64-x64-vc15-Debug.lib
+      debug
+      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/pjproject/pjsip/lib/pjsua-lib-x86_64-x64-vc15-Debug.lib
+      debug
+      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/pjproject/pjsip/lib/pjsip-ua-x86_64-x64-vc15-Debug.lib
+      debug
+      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/pjproject/pjmedia/lib/pjmedia-x86_64-x64-vc15-Debug.lib
+      debug
+      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/pjproject/pjlib-util/lib/pjlib-util-x86_64-x64-vc15-Debug.lib
+      debug
+      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/pjproject/pjlib/lib/pjlib-x86_64-x64-vc15-Debug.lib
+      debug
+      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/pjproject/pjnath/lib/pjnath-x86_64-x64-vc15-Debug.lib
+
       # this is for dependencies to work with frames emmitted by our library
     PUBLIC
-      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/ffmpeg/Build/win32/x64/lib/libavutil.lib
-      ${CMAKE_CURRENT_SOURCE_DIR}/contrib/build/ffmpeg/Build/win32/x64/lib/libswscale.lib
       Secur32.lib
-      bcrypt.lib)
+      bcrypt.lib
+
+      debug
+      ${DEPS_DEBUG}/lib/libavutil.lib
+      debug
+      ${DEPS_DEBUG}/lib/libswscale.lib
+
+      optimized
+      ${DEPS_RELEASE}/lib/libavutil.lib
+      optimized
+      ${DEPS_RELEASE}/lib/libswscale.lib
+      )
 
 else()
   foreach(CONTRIB_PATH ${CONTRIB_PATHS})

@@ -1,9 +1,10 @@
 {
     "name": "sip_core",
     "deps": [
-        "speexdsp",
         "opus",
+        "x264",
         "ffmpeg",
+        "speexdsp",
         "pjproject",
         "portaudio",
         "yaml-cpp",
@@ -12,6 +13,5 @@
         "fmt",
         "webrtc-audio-processing"
     ],
-    "configuration": "ReleaseLib_win32",
-    "project_paths": ["sip_core.vcxproj"]
+    "use_cmake": true
 }
