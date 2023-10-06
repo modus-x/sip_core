@@ -290,8 +290,7 @@ if(MSVC)
         TARGET ${PROJECT_NAME}
         PRE_BUILD
         COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/compat/msvc/winmake.py
-        --build sip_core -v -i -d DEBUG --deps_only --build_type $<IF:$<CONFIG:Debug>,"Debug","Release">
-        RESULT_VARIABLE CMD_RESULT)
+        --build sip_core -v -i -d DEBUG --deps_only --build_type $<IF:$<CONFIG:Debug>,Debug,Release>)
 
       if(CMD_RESULT)
         message(
