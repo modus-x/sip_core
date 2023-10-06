@@ -453,7 +453,6 @@ PresSubClient::lock()
         lock_flag_ = PRESENCE_LOCK_FLAG;
 
         if (dlg_ == NULL) {
-            pres_->unlock();
             return true;
         }
 
