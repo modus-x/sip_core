@@ -346,27 +346,27 @@ void
 Logger::setConsoleLog(bool en)
 {
     ConsoleLog::instance().enable(en);
-#ifdef _WIN32
-    static WORD original_attributes;
-    if (en) {
-        if (AttachConsole(ATTACH_PARENT_PROCESS) || AllocConsole()) {
-            FILE *fpstdout = stdout, *fpstderr = stderr;
-            freopen_s(&fpstdout, "CONOUT$", "w", stdout);
-            freopen_s(&fpstderr, "CONOUT$", "w", stderr);
-            // Save the original state of the console window(in case AttachConsole worked).
-            CONSOLE_SCREEN_BUFFER_INFO consoleInfo;
-            GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &consoleInfo);
-            original_attributes = consoleInfo.wAttributes;
-            SetConsoleCP(CP_UTF8);
-            SetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE),
-                           ENABLE_QUICK_EDIT_MODE | ENABLE_EXTENDED_FLAGS);
-        }
-    } else {
-        // Restore the original state of the console window in case we attached.
-        SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), original_attributes);
-        FreeConsole();
-    }
-#endif
+//#ifdef _WIN32
+//    static WORD original_attributes;
+//    if (en) {
+//        if (AttachConsole(ATTACH_PARENT_PROCESS) || AllocConsole()) {
+//            FILE *fpstdout = stdout, *fpstderr = stderr;
+//            freopen_s(&fpstdout, "CONOUT$", "w", stdout);
+//            freopen_s(&fpstderr, "CONOUT$", "w", stderr);
+//            // Save the original state of the console window(in case AttachConsole worked).
+//            CONSOLE_SCREEN_BUFFER_INFO consoleInfo;
+//            GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &consoleInfo);
+//            original_attributes = consoleInfo.wAttributes;
+//            SetConsoleCP(CP_UTF8);
+//            SetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE),
+//                           ENABLE_QUICK_EDIT_MODE | ENABLE_EXTENDED_FLAGS);
+//        }
+//    } else {
+//        // Restore the original state of the console window in case we attached.
+//        SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), original_attributes);
+//        FreeConsole();
+//    }
+//#endif
 }
 
 class SysLog : public Logger::Handler
