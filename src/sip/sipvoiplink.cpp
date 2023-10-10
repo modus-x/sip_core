@@ -420,7 +420,7 @@ transaction_request_cb(pjsip_rx_data* rdata)
             pjsip_generic_string_hdr* genericHeader = (pjsip_generic_string_hdr*) hdr;
             std::string_view headerValue(genericHeader->hvalue.ptr, genericHeader->hvalue.slen);
             std::string_view headerName(genericHeader->name.ptr, genericHeader->name.slen);
-            SIP_CORE_DBG() << "Found custom header in incoming call << " << headerName << " -> "
+            SIP_CORE_DBG() << "Found custom header in incoming call: " << headerName << " -> "
                            << headerValue;
             extraHeaders.emplace(headerName, headerValue);
         }
