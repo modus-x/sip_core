@@ -563,6 +563,10 @@ transaction_request_cb(pjsip_rx_data* rdata)
 
     call->setState(Call::ConnectionState::RINGING);
 
+    if (!extraHeaders.empty()) {
+        call->setExtraSipHeaders(extraHeaders);
+    }
+
     Manager::instance().incomingCall(account->getAccountID(), *call);
 
     if (replaced_dlg) {
@@ -578,10 +582,6 @@ transaction_request_cb(pjsip_rx_data* rdata)
         // Close call at application level
         if (auto replacedCall = getCallFromInvite(replaced_inv))
             replacedCall->hangup(PJSIP_SC_OK);
-    }
-
-    if (!extraHeaders.empty()) {
-        call->setExtraSipHeaders(extraHeaders);
     }
 
     return PJ_FALSE;
