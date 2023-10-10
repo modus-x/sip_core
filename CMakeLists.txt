@@ -32,6 +32,8 @@ if(ANDROID)
 
 endif()
 
+add_compile_definitions(PACKAGE="ru.svetets.SipCore" PACKAGE_NAME="Svetets Sip Core")
+
 if(NOT MSVC)
   # ############################################################################
   # Contrib

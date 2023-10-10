@@ -395,12 +395,35 @@ transaction_request_cb(pjsip_rx_data* rdata)
         }
     }
 
+    pjsip_hdr* hdr;
+    pj_ssize_t len;
+
+    char buf[PJSIP_MAX_URL_SIZE];
+    pj_str_t p;
+
+    p.ptr = buf;
+    p.slen = 0;
+
     auto call = account->newIncomingCall(std::string(remote_user),
                                          MediaAttribute::mediaAttributesToMediaMaps(localMediaList),
                                          transport);
 
     if (!call) {
         return PJ_FALSE;
+    }
+
+    std::map<std::string, std::string> extraHeaders;
+
+    for (hdr = rdata->msg_info.msg->hdr.next; hdr != &rdata->msg_info.msg->hdr; hdr = hdr->next) {
+        auto type = hdr->type;
+        if (type == PJSIP_H_OTHER) {
+            pjsip_generic_string_hdr* genericHeader = (pjsip_generic_string_hdr*) hdr;
+            std::string_view headerValue(genericHeader->hvalue.ptr, genericHeader->hvalue.slen);
+            std::string_view headerName(genericHeader->name.ptr, genericHeader->name.slen);
+            SIP_CORE_DBG() << "Found custom header in incoming call << " << headerName << " -> "
+                           << headerValue;
+            extraHeaders.emplace(headerName, headerValue);
+        }
     }
 
     call->setPeerUaVersion(sip_utils::getPeerUserAgent(rdata));
@@ -555,6 +578,10 @@ transaction_request_cb(pjsip_rx_data* rdata)
         // Close call at application level
         if (auto replacedCall = getCallFromInvite(replaced_inv))
             replacedCall->hangup(PJSIP_SC_OK);
+    }
+
+    if (!extraHeaders.empty()) {
+        call->setExtraSipHeaders(extraHeaders);
     }
 
     return PJ_FALSE;
@@ -773,7 +800,6 @@ SIPVoIPLink::guessAccount(std::string_view userName,
 void
 SIPVoIPLink::handleEvents()
 {
-    
     const pj_time_val timeout = {5, 0};
     if (auto ret = pjsip_endpt_handle_events(endpt_, &timeout))
         SIP_CORE_ERR("pjsip_endpt_handle_events failed with error %s",
@@ -861,7 +887,6 @@ invite_session_state_changed_cb(pjsip_inv_session* inv, pjsip_event* ev)
                 call->setControlledByRemote();
             }
             call->onPeerRinging();
-
         }
         break;
 

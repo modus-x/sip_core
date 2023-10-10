@@ -698,6 +698,13 @@ SIPCall::terminateSipSession(int status)
 }
 
 void
+SIPCall::setExtraSipHeaders(std::map<std::string, std::string> extraHeaders)
+{
+    extraHeaders_.merge(extraHeaders);
+    emitSignal<libsip_core::CallSignal::ExtraHeadersUpdated>(getCallId(), extraHeaders_);
+}
+
+void
 SIPCall::answer()
 {
     std::lock_guard<std::recursive_mutex> lk {callMutex_};
@@ -1289,7 +1296,6 @@ SIPCall::internalOffHold(const std::function<void()>& sdp_cb)
     return true;
 }
 
-
 // switch or reload media input on the fly
 void
 SIPCall::switchInput(const std::string& source)
@@ -1298,7 +1304,7 @@ SIPCall::switchInput(const std::string& source)
 
     for (auto const& stream : rtpStreams_) {
         auto mediaAttr = stream.mediaAttribute_;
-        
+
         // change source uri for all media types
         mediaAttr->sourceUri_ = source;
         if (mediaAttr->type_ == MEDIA_VIDEO) {

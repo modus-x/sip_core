@@ -105,6 +105,8 @@ private:
     void merge(Call& call) override; // not public - only called by Call
 
 public:
+
+    void setExtraSipHeaders(std::map<std::string, std::string> extraHeaders);
     void answer() override;
     void answer(const std::vector<libsip_core::MediaMap>& mediaList) override;
     bool checkMediaChangeRequest(const std::vector<libsip_core::MediaMap>& remoteMediaList) override;
@@ -347,6 +349,9 @@ private:
     {
         return std::static_pointer_cast<SIPCall>(shared_from_this());
     }
+
+    // Extra sip headers found during call which can be very client-specific
+    std::map<std::string, std::string> extraHeaders_ = {};
 
     // Peer's User-Agent.
     std::string peerUserAgent_ {};

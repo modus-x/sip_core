@@ -40,7 +40,7 @@ class CallFactory
 {
 public:
     CallFactory()
-        : rand_{std::make_unique<std::mt19937_64>(std::random_device{}())}
+        : rand_ {std::make_unique<std::mt19937_64>(std::random_device {}())}
     {}
 
     std::string getNewCallID() const;
