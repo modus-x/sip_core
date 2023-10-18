@@ -123,6 +123,8 @@ public:
      */
     const std::string& getLastMessage() const;
 
+    std::string_view getEvent();
+
     /**
      * TODO: explain this:
      */

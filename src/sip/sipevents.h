@@ -29,7 +29,6 @@ private:
     pj_caching_pool cp_;
     pj_pool_t* pool_;
 
-    std::vector<std::string> registered_modules_;
 
 public:
     static pjsip_module test_mod;
@@ -72,7 +71,6 @@ public:
 
     bool isEnabled() { return enabled_; }
     const std::list<CustomEventSubClient*>& getEventSubscriptions() const { return sub_list_; }
-    const std::vector<std::string>& registeredModules() const { return registered_modules_; }
     void lock();
     bool tryLock();
     void unlock();

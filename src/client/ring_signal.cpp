@@ -84,6 +84,7 @@ getSignalHandlers()
         exported_callback<libsip_core::PresenceSignal::ServerError>(),
         exported_callback<libsip_core::PresenceSignal::NewBuddyNotification>(),
         exported_callback<libsip_core::PresenceSignal::SubscriptionStateChanged>(),
+        exported_callback<libsip_core::PresenceSignal::NotifyReceived>(),
 
         /* Audio */
         exported_callback<libsip_core::AudioSignal::DeviceEvent>(),

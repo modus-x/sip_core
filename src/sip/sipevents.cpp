@@ -40,6 +40,8 @@ namespace sip_core {
 
 using sip_utils::CONST_PJ_STR;
 
+static std::vector<std::string> REGISTERED_MODULES = {};
+
 SIPEvents::SIPEvents(SIPAccount* acc)
     : enabled_(true)
     , sub_list_()
@@ -101,7 +103,7 @@ SIPEvents::subscribeClient(const std::string& uri, const std::string& event, boo
 
     /* Check if the buddy was already subscribed */
     for (const auto& c : sub_list_) {
-        if (c->getURI() == uri) {
+        if (c->getURI() == uri && c->getEvent() == event) {
             if (flag)
                 c->subscribe();
             else
@@ -122,8 +124,8 @@ SIPEvents::subscribeClient(const std::string& uri, const std::string& event, boo
 pj_status_t
 SIPEvents::registerEventPkg(const std::string& event)
 {
-    if (std::find(registered_modules_.begin(), registered_modules_.end(), event)
-        != registered_modules_.end()) {
+    if (std::find(REGISTERED_MODULES.begin(), REGISTERED_MODULES.end(), event)
+        != REGISTERED_MODULES.end()) {
         return PJ_SUCCESS;
     }
     pj_status_t status;
@@ -159,7 +161,7 @@ SIPEvents::registerEventPkg(const std::string& event)
         return status;
     }
 
-    registered_modules_.push_back(event);
+    REGISTERED_MODULES.push_back(event);
     return status;
 }
 

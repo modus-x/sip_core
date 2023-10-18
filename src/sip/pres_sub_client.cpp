@@ -84,8 +84,12 @@ PresSubClient::pres_client_evsub_on_state(pjsip_evsub* sub, pjsip_event* event)
 
     if (state == PJSIP_EVSUB_STATE_ACCEPTED) {
         pres_client->enable(true);
-        emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(
-            pres->getAccount()->getAccountID(), std::string(pres_client->getURI()), PJ_TRUE);
+        emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(pres->getAccount()
+                                                                              ->getAccountID(),
+                                                                          std::string(
+                                                                              pres_client->getURI()),
+                                                                          "presence",
+                                                                          PJ_TRUE);
 
         pres->getAccount()->supportPresence(PRESENCE_FUNCTION_SUBSCRIBE, true);
 
@@ -95,8 +99,12 @@ PresSubClient::pres_client_evsub_on_state(pjsip_evsub* sub, pjsip_event* event)
                             &pres_client->term_reason_,
                             pjsip_evsub_get_termination_reason(sub));
 
-        emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(
-            pres->getAccount()->getAccountID(), std::string(pres_client->getURI()), PJ_FALSE);
+        emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(pres->getAccount()
+                                                                              ->getAccountID(),
+                                                                          std::string(
+                                                                              pres_client->getURI()),
+                                                                          "presence",
+                                                                          PJ_FALSE);
 
         pres_client->term_code_ = 200;
 
@@ -501,10 +509,20 @@ PresSubClient::unsubscribe()
     if (sub_ == NULL or dlg_ == NULL) {
         SIP_CORE_WARN("PresSubClient already unsubscribed.");
         unlock();
+        emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(pres_->getAccount()
+                                                                              ->getAccountID(),
+                                                                          std::string(getURI()),
+                                                                          "presence",
+                                                                          PJ_FALSE);
         return false;
     }
 
     if (pjsip_evsub_get_state(sub_) == PJSIP_EVSUB_STATE_TERMINATED) {
+        emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(pres_->getAccount()
+                                                                              ->getAccountID(),
+                                                                          std::string(getURI()),
+                                                                          "presence",
+                                                                          PJ_FALSE);
         SIP_CORE_WARN("pres_client already unsubscribed sub=TERMINATED.");
         sub_ = NULL;
         unlock();
@@ -564,16 +582,27 @@ PresSubClient::subscribe()
     status = pjsip_dlg_create_uac(pjsip_ua_instance(), &from, &contact_, &uri_, NULL, &dlg_);
 
     if (status != PJ_SUCCESS) {
+        emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(pres_->getAccount()
+                                                                              ->getAccountID(),
+                                                                          std::string(getURI()),
+                                                                          "presence",
+                                                                          PJ_FALSE);
         SIP_CORE_ERR("Unable to create dialog \n");
         return false;
     }
 
     /* Add credential for auth. */
     if (acc->hasCredentials()
+
         and pjsip_auth_clt_set_credentials(&dlg_->auth_sess,
                                            acc->getCredentialCount(),
                                            acc->getCredInfo())
                 != PJ_SUCCESS) {
+        emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(pres_->getAccount()
+                                                                              ->getAccountID(),
+                                                                          std::string(getURI()),
+                                                                          "presence",
+                                                                          PJ_FALSE);
         SIP_CORE_ERR("Could not initialize credentials for subscribe session authentication");
     }
 
@@ -585,6 +614,11 @@ PresSubClient::subscribe()
     const pjsip_tpselector tp_sel = acc->getTransportSelector();
     if (pjsip_dlg_set_transport(dlg_, &tp_sel) != PJ_SUCCESS) {
         SIP_CORE_ERR("Unable to associate transport for invite session dialog");
+        emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(pres_->getAccount()
+                                                                              ->getAccountID(),
+                                                                          std::string(getURI()),
+                                                                          "presence",
+                                                                          PJ_FALSE);
         return false;
     }
 
@@ -600,6 +634,11 @@ PresSubClient::subscribe()
         if (dlg_) {
             pjsip_dlg_dec_lock(dlg_);
         }
+        emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(pres_->getAccount()
+                                                                              ->getAccountID(),
+                                                                          std::string(getURI()),
+                                                                          "presence",
+                                                                          PJ_FALSE);
 
         return false;
     }
@@ -614,6 +653,11 @@ PresSubClient::subscribe()
         if (dlg_) {
             pjsip_dlg_dec_lock(dlg_);
         }
+        emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(pres_->getAccount()
+                                                                              ->getAccountID(),
+                                                                          std::string(getURI()),
+                                                                          "presence",
+                                                                          PJ_FALSE);
         return false;
     }
 
@@ -634,6 +678,11 @@ PresSubClient::subscribe()
         if (sub_)
             pjsip_pres_terminate(sub_, PJ_FALSE);
         sub_ = NULL;
+        emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(pres_->getAccount()
+                                                                              ->getAccountID(),
+                                                                          std::string(getURI()),
+                                                                          "presence",
+                                                                          PJ_FALSE);
         SIP_CORE_WARN("Unable to create initial SUBSCRIBE (%d)", status);
         return false;
     }
@@ -648,6 +697,11 @@ PresSubClient::subscribe()
         if (sub_)
             pjsip_pres_terminate(sub_, PJ_FALSE);
         sub_ = NULL;
+        emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(pres_->getAccount()
+                                                                              ->getAccountID(),
+                                                                          std::string(getURI()),
+                                                                          "presence",
+                                                                          PJ_FALSE);
         SIP_CORE_WARN("Unable to send initial SUBSCRIBE (%d)", status);
         return false;
     }

@@ -79,7 +79,16 @@ struct LIBSIP_CORE_PUBLIC PresenceSignal
         constexpr static const char* name = "SubscriptionStateChanged";
         using cb_type = void(const std::string& /*account_id*/,
                              const std::string& /*buddy_uri*/,
+                             const std::string& /*event*/,
                              int /*state*/);
+    };
+    struct LIBSIP_CORE_PUBLIC NotifyReceived
+    {
+        constexpr static const char* name = "NotifyReceived";
+        using cb_type = void(const std::string& /*account_id*/,
+                             const std::string& /*buddy_uri*/,
+                             const std::string& /*event*/,
+                             const std::string& /*body*/);
     };
 };
 

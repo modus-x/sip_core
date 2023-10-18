@@ -43,7 +43,7 @@
 
 #include "logger.h"
 
-#define TIMER_MSEC_AFTER_TERMINATE 300 
+#define TIMER_MSEC_AFTER_TERMINATE 300
 
 namespace sip_core {
 
@@ -85,7 +85,10 @@ CustomEventSubClient::client_evsub_on_state(pjsip_evsub* sub, pjsip_event* event
     if (state == PJSIP_EVSUB_STATE_ACCEPTED) {
         event_client->enable(true);
         emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(
-            manager->getAccount()->getAccountID(), std::string(event_client->getURI()), PJ_TRUE);
+            manager->getAccount()->getAccountID(),
+            std::string(event_client->getURI()),
+            std::string(event_client->getEvent()),
+            PJ_TRUE);
 
     } else if (state == PJSIP_EVSUB_STATE_TERMINATED) {
         int resub_delay = -1;
@@ -94,7 +97,10 @@ CustomEventSubClient::client_evsub_on_state(pjsip_evsub* sub, pjsip_event* event
                             pjsip_evsub_get_termination_reason(sub));
 
         emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(
-            manager->getAccount()->getAccountID(), std::string(event_client->getURI()), PJ_FALSE);
+            manager->getAccount()->getAccountID(),
+            std::string(event_client->getURI()),
+            std::string(event_client->getEvent()),
+            PJ_FALSE);
 
         event_client->term_code_ = 200;
 
@@ -287,14 +293,26 @@ CustomEventSubClient::client_evsub_on_rx_notify(pjsip_evsub* sub,
         return;
     }
     /* No need to manager->lock() here since the client has a locked dialog*/
+    auto body = rdata->msg_info.msg->body;
 
-    // pjsip_pres_get_status(sub, &event_client->status_);
-    // event_client->reportPresence();
+    if (body && body->len > 0) {
+        void* clonedData = body->clone_data(event_client->pool_, body->data, body->len);
+        if (clonedData) {
+            // Convert the cloned data to a C++ string
+            std::string result(static_cast<char*>(clonedData), body->len);
+            emitSignal<libsip_core::PresenceSignal::NotifyReceived>(
+                event_client->getManager()->getAccount()->getAccountID(),
+                std::string(event_client->getURI()),
+                std::string(event_client->getEvent()),
+                result);
+        }
+    } else {
+        SIP_CORE_WARN("No notify body.");
+    }
 
     /* The default is to send 200 response to NOTIFY.
      * Just leave it there..
      */
-    PJ_UNUSED_ARG(rdata);
     PJ_UNUSED_ARG(p_st_code);
     PJ_UNUSED_ARG(p_st_text);
     PJ_UNUSED_ARG(res_hdr);
@@ -361,6 +379,12 @@ CustomEventSubClient::getLastMessage() const
     return last_message_;
 }
 
+std::string_view
+CustomEventSubClient::getEvent()
+{
+    return {event_.ptr, (size_t) event_.slen};
+}
+
 bool
 CustomEventSubClient::isTermReason(const std::string& reason)
 {
@@ -425,7 +449,6 @@ CustomEventSubClient::lock()
         lock_flag_ = SIP_EVENTS_LOCK_FLAG;
 
         if (dlg_ == NULL) {
-            manager_->unlock();
             return true;
         }
 
@@ -439,6 +462,7 @@ CustomEventSubClient::lock()
 
         lock_flag_ = SIP_EVENTS_CLIENT_LOCK_FLAG;
         manager_->unlock();
+        break;
     }
 
     if (lock_flag_ == 0) {
@@ -470,15 +494,28 @@ CustomEventSubClient::unsubscribe()
     pj_status_t retStatus;
 
     if (sub_ == NULL or dlg_ == NULL) {
-        SIP_CORE_WARN("CustomEventSubClient already unsubscribed.");
+        SIP_CORE_WARN("CustomEventSubClient already unsubscribed. Sending result to client.");
         unlock();
+        emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(manager_->getAccount()
+                                                                              ->getAccountID(),
+                                                                          std::string(getURI()),
+                                                                          std::string(getEvent()),
+                                                                          PJ_FALSE);
+
         return false;
     }
 
     if (pjsip_evsub_get_state(sub_) == PJSIP_EVSUB_STATE_TERMINATED) {
-        SIP_CORE_WARN("event_client already unsubscribed sub=TERMINATED.");
+        SIP_CORE_WARN(
+            "event_client already unsubscribed sub=TERMINATED. Sending result to client.");
         sub_ = NULL;
         unlock();
+        emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(manager_->getAccount()
+                                                                              ->getAccountID(),
+                                                                          std::string(getURI()),
+                                                                          std::string(getEvent()),
+                                                                          PJ_FALSE);
+
         return false;
     }
 
@@ -488,7 +525,6 @@ CustomEventSubClient::unsubscribe()
 
     if (retStatus == PJ_SUCCESS) {
         retStatus = pjsip_evsub_send_request(sub_, tdata);
-        ;
     }
 
     if (retStatus != PJ_SUCCESS and sub_) {
@@ -508,6 +544,11 @@ CustomEventSubClient::subscribe()
 {
     if (sub_ and dlg_) { // do not bother if already subscribed
         pjsip_evsub_terminate(sub_, PJ_FALSE);
+        emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(manager_->getAccount()
+                                                                              ->getAccountID(),
+                                                                          std::string(getURI()),
+                                                                          std::string(getEvent()),
+                                                                          PJ_TRUE);
         SIP_CORE_DBG("CustomEventSubClient %.*s: already subscribed. Refresh it.",
                      (int) uri_.slen,
                      uri_.ptr);
@@ -532,6 +573,11 @@ CustomEventSubClient::subscribe()
     status = pjsip_dlg_create_uac(pjsip_ua_instance(), &from, &contact_, &uri_, NULL, &dlg_);
 
     if (status != PJ_SUCCESS) {
+        emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(manager_->getAccount()
+                                                                              ->getAccountID(),
+                                                                          std::string(getURI()),
+                                                                          std::string(getEvent()),
+                                                                          PJ_FALSE);
         SIP_CORE_ERR("Unable to create dialog \n");
         return false;
     }
@@ -542,6 +588,11 @@ CustomEventSubClient::subscribe()
                                            acc->getCredentialCount(),
                                            acc->getCredInfo())
                 != PJ_SUCCESS) {
+        emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(manager_->getAccount()
+                                                                              ->getAccountID(),
+                                                                          std::string(getURI()),
+                                                                          std::string(getEvent()),
+                                                                          PJ_FALSE);
         SIP_CORE_ERR("Could not initialize credentials for subscribe session authentication");
     }
 
@@ -556,6 +607,12 @@ CustomEventSubClient::subscribe()
     if (status != PJ_SUCCESS) {
         sub_ = NULL;
         SIP_CORE_WARN("Unable to create sip events client (%d)", status);
+
+        emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(manager_->getAccount()
+                                                                              ->getAccountID(),
+                                                                          std::string(getURI()),
+                                                                          std::string(getEvent()),
+                                                                          PJ_FALSE);
 
         /* This should destroy the dialog since there's no session
          * referencing it
@@ -574,6 +631,11 @@ CustomEventSubClient::subscribe()
                                            acc->getCredInfo())
                 != PJ_SUCCESS) {
         SIP_CORE_ERR("Could not initialize credentials for invite session authentication");
+        emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(manager_->getAccount()
+                                                                              ->getAccountID(),
+                                                                          std::string(getURI()),
+                                                                          std::string(getEvent()),
+                                                                          PJ_FALSE);
         return false;
     }
 
@@ -595,6 +657,11 @@ CustomEventSubClient::subscribe()
         if (sub_)
             pjsip_evsub_terminate(sub_, PJ_FALSE);
         sub_ = NULL;
+        emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(manager_->getAccount()
+                                                                              ->getAccountID(),
+                                                                          std::string(getURI()),
+                                                                          std::string(getEvent()),
+                                                                          PJ_FALSE);
         SIP_CORE_WARN("Unable to create initial SUBSCRIBE (%d)", status);
         return false;
     }
@@ -607,7 +674,12 @@ CustomEventSubClient::subscribe()
         if (sub_)
             pjsip_evsub_terminate(sub_, PJ_FALSE);
         sub_ = NULL;
-        SIP_CORE_WARN("Unable to create initial SUBSCRIBE (%d)", status);
+        emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(manager_->getAccount()
+                                                                              ->getAccountID(),
+                                                                          std::string(getURI()),
+                                                                          std::string(getEvent()),
+                                                                          PJ_FALSE);
+        SIP_CORE_WARN("Unable to send initial SUBSCRIBE (%d)", status);
         return false;
     }
 
