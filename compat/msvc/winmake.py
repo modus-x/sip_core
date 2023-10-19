@@ -297,7 +297,8 @@ def make(pkg_info, force, sdk_version, toolset, is_plugin):
         if force:
             os.remove(build_file)
         else:
-            pkg_build_uptodate = is_build_uptodate(pkg_name, build_file)
+            pkg_build_uptodate = True
+            print(f"pkg_build_uptodate: {pkg_build_uptodate}")
             with open(build_file, 'r+', encoding="utf8", errors='ignore') as f:
                 current_version = f.read()
                 if current_version == md5:
@@ -306,6 +307,8 @@ def make(pkg_info, force, sdk_version, toolset, is_plugin):
         dep_build_dep = resolve(dep, False, sdk_version, toolset)
         if dep_build_dep:
             pkg_build_uptodate = False
+    
+    print(f"pkg_ver_uptodate: {pkg_ver_uptodate}")
     pkg_up_to_date = pkg_build_uptodate & pkg_ver_uptodate
     if not pkg_up_to_date or current_version is None or force:
         if current_version != '':
@@ -315,8 +318,7 @@ def make(pkg_info, force, sdk_version, toolset, is_plugin):
         should_fetch = not pkg_up_to_date
         pkg_build_path = contrib_build_dir + '\\' + pkg_name
         if os.path.exists(pkg_build_path):
-            log.warning('Cleaning build for ' + pkg_name)
-            getSHrunner().exec_batch('rmdir', ['/s', '/q', pkg_build_path])
+            pkg_up_to_date = True
         if not pkg_up_to_date or force:
             if not force and not current_version is None:
                 log.warning(pkg_name + ' is not up to date')
