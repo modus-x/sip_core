@@ -426,8 +426,8 @@ if(MSVC)
       /MACHINE:X64
       /VERBOSE:LIB
       # all dependencies are build with /MD
-      # /NODEFAULTLIB:libcmtd
-      # /NODEFAULTLIB:libcmt
+      /NODEFAULTLIB:libcmtd
+      /NODEFAULTLIB:libcmt
       # Always generate PDB
       /ignore:4006)
   endif()
