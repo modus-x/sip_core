@@ -2545,9 +2545,8 @@ Manager::removeAccount(const std::string& accountID, bool flush)
 {
     // Get it down and dying
     if (const auto& remAccount = getAccount(accountID)) {
-        // Force stopping connection before doUnregister as it will
-        // wait for dht threads to finish
-        remAccount->doUnregister();
+        // Unregister explicitely
+        // remAccount->doUnregister();
         if (flush)
             remAccount->flush();
         accountFactory.removeAccount(*remAccount);
