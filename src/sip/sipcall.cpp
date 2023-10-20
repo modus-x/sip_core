@@ -2127,14 +2127,10 @@ SIPCall::requestMediaChange(const std::vector<libsip_core::MediaMap>& mediaList)
         }
     }
 
-    // If peer doesn't support multiple ice, keep only the last audio/video
-    // This keep the old behaviour (if sharing both camera + sharing a file, will keep the shared file)
-    if (mediaList.size() > 2)
-        SIP_CORE_WARN("[call:%s] Peer does not support more than 2 ICE medias. Media change "
-                      "request modified",
-                      getCallId().c_str());
     MediaAttribute audioAttr;
     MediaAttribute videoAttr;
+
+    // find audio, video media
     auto hasVideo = false, hasAudio = false;
     for (auto it = mediaAttrList.rbegin(); it != mediaAttrList.rend(); ++it) {
         if (it->type_ == MediaType::MEDIA_VIDEO && !hasVideo) {
@@ -2164,7 +2160,7 @@ SIPCall::requestMediaChange(const std::vector<libsip_core::MediaMap>& mediaList)
                      newMediaAttr.toString(true).c_str());
     }
 
-    auto needReinvite = true;
+    auto needReinvite = isReinviteRequired(mediaAttrList);
 
     if (!updateAllMediaStreams(mediaAttrList, false))
         return false;

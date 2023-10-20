@@ -1893,32 +1893,32 @@ Manager::ringback()
 void
 Manager::playRingtone(const std::string& accountID)
 {
-    // const auto account = getAccount(accountID);
-    // if (!account) {
-    //     SIP_CORE_WARN("Invalid account in ringtone");
-    //     return;
-    // }
+     const auto account = getAccount(accountID);
+     if (!account) {
+         SIP_CORE_WARN("Invalid account in ringtone");
+         return;
+     }
 
-    // if (!account->getRingtoneEnabled()) {
-    //     ringback();
-    //     return;
-    // }
+     if (!account->getRingtoneEnabled()) {
+         ringback();
+         return;
+     }
 
-    // {
-    //     std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
+     {
+         std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
 
-    //     if (not pimpl_->audiodriver_) {
-    //         SIP_CORE_ERR("no audio layer in ringtone");
-    //         return;
-    //     }
-    //     // start audio if not started AND flush all buffers (main and urgent)
-    //     auto oldGuard = std::move(pimpl_->toneDeviceGuard_);
-    //     pimpl_->toneDeviceGuard_ = startAudioStream(AudioDeviceType::RINGTONE);
-    //     pimpl_->toneCtrl_.setSampleRate(pimpl_->audiodriver_->getSampleRate());
-    // }
+         if (not pimpl_->audiodriver_) {
+             SIP_CORE_ERR("no audio layer in ringtone");
+             return;
+         }
+         // start audio if not started AND flush all buffers (main and urgent)
+         auto oldGuard = std::move(pimpl_->toneDeviceGuard_);
+         pimpl_->toneDeviceGuard_ = startAudioStream(AudioDeviceType::RINGTONE);
+         pimpl_->toneCtrl_.setSampleRate(pimpl_->audiodriver_->getSampleRate());
+     }
 
-    // if (not pimpl_->toneCtrl_.setAudioFile(account->getRingtonePath()))
-    //     ringback();
+     if (not pimpl_->toneCtrl_.setAudioFile(account->getRingtonePath()))
+         ringback();
 }
 
 std::shared_ptr<AudioLoop>

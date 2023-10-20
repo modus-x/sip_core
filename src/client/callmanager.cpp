@@ -122,6 +122,8 @@ answerMediaChangeRequest(const std::string& accountId,
 bool
 hangUp(const std::string& accountId, const std::string& callId)
 {
+
+    SIP_CORE_ERR("Hanging up %s", callId.c_str());
     return sip_core::Manager::instance().hangupCall(accountId, callId);
 }
 

@@ -207,10 +207,10 @@ VideoDeviceMonitor::addDevice(const string& id,
         // restore its preferences if any, or store the defaults
         auto it = findPreferencesById(id);
         if (it != preferences_.end()) {
-            dev.applySettings(*it);
+//            dev.applySettings(*it);
         } else {
-            dev.applySettings(dev.getDefaultSettings());
-            preferences_.emplace_back(dev.getSettings());
+//            dev.applySettings(dev.getDefaultSettings());
+//            preferences_.emplace_back(dev.getSettings());
         }
 
         // in case there is no default device on a fresh run
