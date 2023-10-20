@@ -29,6 +29,7 @@
 #include "media_stream.h"
 #include "noncopyable.h"
 #include "observer.h"
+#include <thread>
 
 #include <map>
 #include <memory>
@@ -168,6 +169,8 @@ private:
     bool isRecording_ = false;
     bool audioOnly_ = false;
     int lastVideoPts_ = 0;
+
+    std::thread record_;
 
     std::condition_variable cv_;
     std::atomic_bool interrupted_ {false};

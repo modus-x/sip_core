@@ -194,41 +194,40 @@ MediaRecorder::startRecording()
     SIP_CORE_DBG() << "Start recording '" << getPath() << "'";
     if (initRecord() >= 0) {
         isRecording_ = true;
-        // start thread after isRecording_ is set to true
-        //         dht::ThreadPool::computation().run([rec = shared_from_this()] {
-        //             std::lock_guard<std::mutex> lk(rec->encoderMtx_);
-        //             while (rec->isRecording()) {
-        //                 std::shared_ptr<MediaFrame> frame;
-        //                 // get frame from queue
-        //                 {
-        //                     std::unique_lock<std::mutex> lk(rec->mutexFrameBuff_);
-        //                     rec->cv_.wait(lk, [rec] {
-        //                         return rec->interrupted_ or not rec->frameBuff_.empty();
-        //                     });
-        //                     if (rec->interrupted_) {
-        //                         break;
-        //                     }
-        //                     frame = std::move(rec->frameBuff_.front());
-        //                     rec->frameBuff_.pop_front();
-        //                 }
-        //                 try {
-        //                     // encode frame
-        //                     if (rec->encoder_ && frame && frame->pointer()) {
-        // #ifdef ENABLE_VIDEO
-//                         bool isVideo = (frame->pointer()->width > 0 && frame->pointer()->height > 0);
-        //                         rec->encoder_->encode(frame->pointer(),
-        //                                               isVideo ? rec->videoIdx_ : rec->audioIdx_);
-        // #else
-        //                         rec->encoder_->encode(frame->pointer(), rec->audioIdx_);
-        // #endif // ENABLE_VIDEO
-        //                     }
-        //                 } catch (const MediaEncoderException& e) {
-        //                     SIP_CORE_ERR() << "Failed to record frame: " << e.what();
-        //                 }
-        //             }
-        //             rec->flush();
-        //             rec->reset(); // allows recorder to be reused in same call
-        //         });
+        record_ = std::thread([rec = shared_from_this()] {
+            std::lock_guard<std::mutex> lk(rec->encoderMtx_);
+            while (rec->isRecording()) {
+                std::shared_ptr<MediaFrame> frame;
+                // get frame from queue
+                {
+                    std::unique_lock<std::mutex> lk(rec->mutexFrameBuff_);
+                    rec->cv_.wait(lk, [rec] {
+                        return rec->interrupted_ or not rec->frameBuff_.empty();
+                    });
+                    if (rec->interrupted_) {
+                        break;
+                    }
+                    frame = std::move(rec->frameBuff_.front());
+                    rec->frameBuff_.pop_front();
+                }
+                try {
+                    // encode frame
+                    if (rec->encoder_ && frame && frame->pointer()) {
+#ifdef ENABLE_VIDEO
+                        bool isVideo = (frame->pointer()->width > 0 && frame->pointer()->height > 0);
+                        rec->encoder_->encode(frame->pointer(),
+                                              isVideo ? rec->videoIdx_ : rec->audioIdx_);
+#else
+                        rec->encoder_->encode(frame->pointer(), rec->audioIdx_);
+#endif // ENABLE_VIDEO
+                    }
+                } catch (const MediaEncoderException& e) {
+                    SIP_CORE_ERR() << "Failed to record frame: " << e.what();
+                }
+            }
+            rec->flush();
+            rec->reset(); // allows recorder to be reused in same call
+        });
     }
     interrupted_ = false;
     return 0;
@@ -241,7 +240,8 @@ MediaRecorder::stopRecording()
     cv_.notify_all();
     if (isRecording_) {
         SIP_CORE_DBG() << "Stop recording '" << getPath() << "'";
-        isRecording_ = false;
+        if (record_.joinable())
+            record_.join();
         emitSignal<libsip_core::CallSignal::RecordPlaybackStopped>(getPath());
     }
 }
@@ -261,13 +261,11 @@ MediaRecorder::addStream(const MediaStream& ms)
 
     auto it = streams_.find(ms.name);
     if (it == streams_.end()) {
-        auto streamPtr = std::make_unique<StreamObserver>(ms,
-                                                          [this,
-                                                           ms](const std::shared_ptr<MediaFrame>& frame) {
-                                                              onFrame(ms.name, frame);
-                                                          });
+        auto streamPtr = std::make_unique<StreamObserver>(
+            ms, [this, ms](const std::shared_ptr<MediaFrame>& frame) { onFrame(ms.name, frame); });
         it = streams_.insert(std::make_pair(ms.name, std::move(streamPtr))).first;
-        // SIP_CORE_INFO("[Recorder: {:p}] Recorder input #{}: {:s}", fmt::ptr(this), streams_.size(), ms.name);
+        // SIP_CORE_INFO("[Recorder: {:p}] Recorder input #{}: {:s}", fmt::ptr(this),
+        // streams_.size(), ms.name);
     } else {
         // SIP_CORE_INFO("[Recorder: {:p}] Recorder already has '{:s}' as input", fmt::ptr(this), ms.name);
     }
@@ -531,13 +529,14 @@ MediaRecorder::setupVideoOutput()
 
     outputVideoFilter_.reset(new MediaFilter);
 
-    float scaledHeight = 1280 * (float)secondaryFilter.height / (float)secondaryFilter.width;
+    float scaledHeight = 1280 * (float) secondaryFilter.height / (float) secondaryFilter.width;
     std::string scaleFilter = "scale=1280:-2";
     if (scaledHeight > 720)
         scaleFilter += ",scale=-2:720";
 
-    ret = outputVideoFilter_->initialize(
-        "[input]" + scaleFilter + ",pad=1280:720:(ow-iw)/2:(oh-ih)/2,format=pix_fmts=yuv420p,fps=30",
+    ret = outputVideoFilter_
+              ->initialize("[input]" + scaleFilter
+                               + ",pad=1280:720:(ow-iw)/2:(oh-ih)/2,format=pix_fmts=yuv420p,fps=30",
                            {secondaryFilter});
 
     if (ret < 0) {
@@ -659,8 +658,8 @@ MediaRecorder::setupAudioOutput()
     }
 
     outputAudioFilter_.reset(new MediaFilter);
-    ret = outputAudioFilter_
-            ->initialize("[input]aformat=sample_fmts=s16:sample_rates=48000:channel_layouts=stereo",
+    ret = outputAudioFilter_->initialize(
+        "[input]aformat=sample_fmts=s16:sample_rates=48000:channel_layouts=stereo",
         {secondaryFilter});
 
     if (ret < 0) {
