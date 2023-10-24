@@ -242,9 +242,6 @@ VideoDeviceImpl::setup()
         // use 1e7 / MinFrameInterval to get maximum fps
         auto rate = sip_core::video::FrameRate(1e7, pSCC.MinFrameInterval);
         auto bitrate = videoInfo->dwBitRate;
-        // Only add configurations with positive bitrates.
-        if (bitrate == 0)
-            continue;
         // Avoid adding multiple rates with different bitrates.
         auto ratesIt = rateList_.find(size);
         if (ratesIt != rateList_.end()
