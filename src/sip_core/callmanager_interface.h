@@ -46,18 +46,15 @@ LIBSIP_CORE_PUBLIC std::string placeCallWithMedia(
     const std::string& to,
     const std::vector<std::map<std::string, std::string>>& mediaList);
 LIBSIP_CORE_PUBLIC bool refuse(const std::string& accountId, const std::string& callId);
-LIBSIP_CORE_PUBLIC void attachLocalVideo(const std::string& accountId,
-                                         const std::string& callId,
-                                         bool attach);
-LIBSIP_CORE_PUBLIC void controlRTPReceiver(const std::string& accountId,
-                                           const std::string& callId,
-                                           const std::string& labelId,
-                                           bool active);
 LIBSIP_CORE_PUBLIC bool accept(const std::string& accountId, const std::string& callId);
 LIBSIP_CORE_PUBLIC bool hangUp(const std::string& accountId, const std::string& callId);
 LIBSIP_CORE_PUBLIC bool hold(const std::string& accountId, const std::string& callId);
 LIBSIP_CORE_PUBLIC bool unhold(const std::string& accountId, const std::string& callId);
 LIBSIP_CORE_PUBLIC bool muteLocalMedia(const std::string& accountId,
+                                       const std::string& callId,
+                                       const std::string& mediaType,
+                                       bool mute);
+LIBSIP_CORE_PUBLIC bool muteRemoteMedia(const std::string& accountId,
                                        const std::string& callId,
                                        const std::string& mediaType,
                                        bool mute);
@@ -319,6 +316,11 @@ struct LIBSIP_CORE_PUBLIC CallSignal
     struct LIBSIP_CORE_PUBLIC AudioMuted
     {
         constexpr static const char* name = "AudioMuted";
+        using cb_type = void(const std::string&, bool);
+    };
+    struct LIBSIP_CORE_PUBLIC PeerMuted
+    {
+        constexpr static const char* name = "PeerMuted";
         using cb_type = void(const std::string&, bool);
     };
     struct LIBSIP_CORE_PUBLIC SmartInfo

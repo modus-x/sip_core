@@ -70,6 +70,10 @@ VideoSender::VideoSender(const std::string& dest,
 void
 VideoSender::blackFrame()
 {
+    if (stream_.width <= 0 || stream_.height <= 0) {
+        return;
+    }
+
     // will be auto-deleted from memory when function returns
     std::unique_ptr<VideoFrame> frame = std::make_unique<VideoFrame>();
     VideoFrame& output = *frame.get();

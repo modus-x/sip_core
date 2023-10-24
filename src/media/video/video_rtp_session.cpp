@@ -45,6 +45,15 @@
 namespace sip_core {
 namespace video {
 
+using std::string;
+
+static constexpr unsigned MAX_REMB_DEC {1};
+
+constexpr auto DELAY_AFTER_RESTART = std::chrono::milliseconds(1000);
+constexpr auto EXPIRY_TIME_RTCP = std::chrono::seconds(2);
+constexpr auto DELAY_AFTER_REMB_INC = std::chrono::seconds(1);
+constexpr auto DELAY_AFTER_REMB_DEC = std::chrono::milliseconds(500);
+
 static void
 keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
 {
@@ -86,14 +95,40 @@ keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
     }
 }
 
-using std::string;
+void
+VideoRtpSession::setupKaTimer()
+{
+    if (ka_timer_.id != PJ_FALSE) {
+        return;
+    }
+    /* Setup and start the timer */
+    pj_time_val delay;
+    pj_status_t status;
+    unsigned delay_initial;
+    unsigned lower_bound;
 
-static constexpr unsigned MAX_REMB_DEC {1};
+    ka_timer_.cb = &keep_alive_timer_cb;
+    ka_timer_.user_data = (void*) this;
 
-constexpr auto DELAY_AFTER_RESTART = std::chrono::milliseconds(1000);
-constexpr auto EXPIRY_TIME_RTCP = std::chrono::seconds(2);
-constexpr auto DELAY_AFTER_REMB_INC = std::chrono::seconds(1);
-constexpr auto DELAY_AFTER_REMB_DEC = std::chrono::milliseconds(500);
+    delay_initial = ka_inverval_;
+
+    lower_bound = (unsigned) ((float) delay_initial * 0.8f);
+    delay.sec = pj_rand() % (delay_initial - lower_bound) + lower_bound;
+    delay.msec = 0;
+    status = pjsip_endpt_schedule_timer(account_->getVoipLink().getEndpoint(), &ka_timer_, &delay);
+    SIP_CORE_DEBUG("VideoRtpSession rtp keep-alive delay_initial is {:d}, lower_bound is {:d}",
+                   delay_initial,
+                   lower_bound);
+    if (status == PJ_SUCCESS) {
+        ka_timer_.id = PJ_TRUE;
+        SIP_CORE_DEBUG(
+            "VideoRtpSession Keep-alive timer started for video rtp session {:s}, interval: {:d}s",
+            getRemoteRtpUri(),
+            delay.sec);
+    } else {
+        ka_timer_.id = PJ_FALSE;
+    }
+}
 
 VideoRtpSession::VideoRtpSession(const string& callId,
                                  const string& streamId,
@@ -115,6 +150,7 @@ VideoRtpSession::VideoRtpSession(const string& callId,
 
 VideoRtpSession::~VideoRtpSession()
 {
+    cancelKeepAliveTimer();
     deinitRecorder();
     stop();
     SIP_CORE_DBG("VideoRtpSession [%p] Video RTP session destroyed", this);
@@ -140,7 +176,9 @@ VideoRtpSession::natPing()
 {
     SIP_CORE_DEBUG("VideoRtpSession Sending keep-alive rtp packet to session {:s}",
                    getRemoteRtpUri());
-    sender_->natPing();
+    if (sender_) {
+        sender_->natPing();
+    }
 }
 
 void
@@ -152,7 +190,6 @@ VideoRtpSession::setRequestKeyFrameCallback(std::function<void(void)> cb)
 void
 VideoRtpSession::startSender()
 {
-    bool restart = false;
     std::lock_guard<std::recursive_mutex> lock(mutex_);
 
     SIP_CORE_DBG("VideoRtpSession [%p] Start video RTP sender: input [%s] - muted [%s]",
@@ -162,13 +199,12 @@ VideoRtpSession::startSender()
 
     if (not socketPair_) {
         // Ignore if the transport is not set yet
-        SIP_CORE_WARN("[%p] Transport not set yet", this);
+        SIP_CORE_WARN("VideoRtpSession [%p] Transport not set yet", this);
         return;
     }
 
     if (send_.enabled and not send_.onHold) {
         if (sender_) {
-            restart = true;
             if (videoLocal_)
                 videoLocal_->detach(sender_.get());
             if (videoMixer_)
@@ -253,13 +289,15 @@ VideoRtpSession::startSender()
             if (socketPair_)
                 socketPair_->setPacketLossCallback([this]() { cbKeyFrameRequest_(); });
 
-            // make hole and wait for turning video on / immediate attaching to video conference
-            if (!videoMixer_) {
-                natPing();
-                emitSignal<libsip_core::CallSignal::VideoSenderNatResolved>(callId_);
+            if (!muteState_) {
+                // if needed, cancel sending empty packets and start video
+                cancelKeepAliveTimer();
+                attachVideoInput();
             }
-
-            setupKaTimer();
+            else {
+                // start keep alive timer
+                setupKaTimer();
+            }
 
         } catch (const MediaEncoderException& e) {
             SIP_CORE_ERR("%s", e.what());
@@ -272,40 +310,6 @@ VideoRtpSession::startSender()
             rtcpCheckerThread_.start();
         else if (not autoQuality and rtcpCheckerThread_.isRunning())
             rtcpCheckerThread_.join();
-    }
-}
-
-void
-VideoRtpSession::setupKaTimer()
-{
-    if (ka_timer_.id != PJ_FALSE) {
-        return;
-    }
-    /* Setup and start the timer */
-    pj_time_val delay;
-    pj_status_t status;
-    unsigned delay_initial;
-    unsigned lower_bound;
-
-    ka_timer_.cb = &keep_alive_timer_cb;
-    ka_timer_.user_data = (void*) this;
-
-    delay_initial = ka_inverval_;
-
-    lower_bound = (unsigned) ((float) delay_initial * 0.8f);
-    delay.sec = pj_rand() % (delay_initial - lower_bound) + lower_bound;
-    delay.msec = 0;
-    status = pjsip_endpt_schedule_timer(account_->getVoipLink().getEndpoint(), &ka_timer_, &delay);
-    SIP_CORE_DEBUG("Video rtp keep-alive delay_initial is {:d}, lower_bound is {:d}",
-                   delay_initial,
-                   lower_bound);
-    if (status == PJ_SUCCESS) {
-        ka_timer_.id = PJ_TRUE;
-        SIP_CORE_DEBUG("Keep-alive timer started for video rtp session {:s}, interval: {:d}s",
-                       getRemoteRtpUri(),
-                       delay.sec);
-    } else {
-        ka_timer_.id = PJ_FALSE;
     }
 }
 
@@ -361,24 +365,25 @@ VideoRtpSession::stopSender()
 
                  send_.onHold ? "YES" : "NO");
 
-    cancelKeepAliveTimer();
-
     if (sender_) {
         if (videoLocal_) {
             auto ms = videoLocal_->getInfo();
+
+            // detach local video input
+            detachVideoInput();
+
+            // detach recorder
+            // TODO: Is this compatible with recording?
             if (auto ob = recorder_->getStream(ms.name)) {
                 videoLocal_->detach(ob);
                 recorder_->removeStream(ms);
             }
-            videoLocal_->detach(sender_.get());
         }
+
+        // detach mixer
         if (videoMixer_)
             videoMixer_->detach(sender_.get());
-        sender_.reset();
     }
-
-    if (socketPair_)
-        socketPair_->stopSendOp();
 }
 
 void
@@ -397,9 +402,7 @@ VideoRtpSession::startReceiver()
         // XXX keyframe requests can timeout if unanswered
         receiveThread_->addIOContext(*socketPair_);
         receiveThread_->setSuccessfulSetupCb(onSuccessfulSetup_);
-        receiveThread_->setResolutionChangedCallback([this]() {
-            restartSender();
-        });
+        receiveThread_->setResolutionChangedCallback([this]() { restartSender(); });
         receiveThread_->setDeviceParams(remoteVideoParams_);
         receiveThread_->startLoop();
         receiveThread_->setRequestKeyFrameCallback([this]() { cbKeyFrameRequest_(); });
@@ -475,6 +478,14 @@ VideoRtpSession::start()
     SIP_CORE_WARN("VideoRtpSession [%p] Starting video rtp session", this);
     std::lock_guard<std::recursive_mutex> lock(mutex_);
 
+    // start only if local and remote sessions are active
+    if (not send_.enabled or not receive_.enabled) {
+        SIP_CORE_WARN("VideoRtpSession [%p] Video rtp session stopped, because send is not enabled",
+                      this);
+        stop();
+        return;
+    }
+
     try {
         socketPair_.reset(new SocketPair(getRemoteRtpUri().c_str(), receive_.addr.getPort()));
 
@@ -495,16 +506,9 @@ VideoRtpSession::start()
         return;
     }
 
-    startSender();
-
-    if (not send_.enabled and not receive_.enabled) {
-        SIP_CORE_WARN("VideoRtpSession [%p] Video rtp session stopped, because send is not enabled",
-                      this);
-        stop();
-        return;
-    }
-
     startReceiver();
+
+    startSender();
 
     if (conference_) {
         if (send_.enabled and not send_.onHold) {
@@ -540,8 +544,11 @@ VideoRtpSession::stop()
 void
 VideoRtpSession::setMuted(bool mute, Direction dir)
 {
-    SIP_CORE_DBG("[%p] VideoRtpSession change to %s", this, mute ? "muted" : "un-muted");
+    SIP_CORE_DBG("VideoRtpSession [%p] change to %s", this, mute ? "muted" : "un-muted");
     std::lock_guard<std::recursive_mutex> lock(mutex_);
+
+    // save state for future explicit starting of sender
+    muteState_ = mute;
 
     // ensure that start has been called before setmuted
     if (not socketPair_)
@@ -549,33 +556,18 @@ VideoRtpSession::setMuted(bool mute, Direction dir)
 
     // Sender
     if (dir == Direction::SEND) {
-        if (send_.onHold == mute) {
-            SIP_CORE_DBG("[%p] Local already %s", this, mute ? "muted" : "un-muted");
-            return;
-        }
-
-        if ((send_.onHold = mute)) {
-            if (videoLocal_) {
-                auto ms = videoLocal_->getInfo();
-                if (auto ob = recorder_->getStream(ms.name)) {
-                    videoLocal_->detach(ob);
-                    recorder_->removeStream(ms);
-                }
-            }
+        if (mute) {
             stopSender();
+            setupKaTimer();
         } else {
+            cancelKeepAliveTimer();
             restartSender();
         }
         return;
     }
 
-    // Receiver
-    if (receive_.onHold == mute) {
-        SIP_CORE_DBG("[%p] Remote already %s", this, mute ? "muted" : "un-muted");
-        return;
-    }
-
-    if ((receive_.onHold = mute)) {
+    // Receiver, mostly never used with video
+    if (mute) {
         if (receiveThread_) {
             auto ms = receiveThread_->getInfo();
             if (auto ob = recorder_->getStream(ms.name)) {
@@ -586,6 +578,7 @@ VideoRtpSession::setMuted(bool mute, Direction dir)
         stopReceiver();
     } else {
         startReceiver();
+        // if not on hold and binded to conference re-create pipeline
         if (conference_ and not receive_.onHold) {
             setupConferenceVideoPipeline(*conference_, Direction::RECV);
         }
@@ -606,6 +599,15 @@ VideoRtpSession::forceKeyFrame()
 }
 
 void
+VideoRtpSession::cancelKeepAliveTimer()
+{
+    if (ka_timer_.id != PJ_FALSE) {
+        pjsip_endpt_cancel_timer(account_->getVoipLink().getEndpoint(), &ka_timer_);
+        ka_timer_.id = PJ_FALSE;
+    }
+}
+
+void
 VideoRtpSession::setRotation(int rotation)
 {
     rotation_.store(rotation);
@@ -614,26 +616,8 @@ VideoRtpSession::setRotation(int rotation)
 }
 
 void
-VideoRtpSession::attachLocalVideo(bool attach)
-{
-    if (sender_) {
-        if (videoLocal_) {
-            SIP_CORE_DBG("VideoRtpSession [%p] Attach local video - %d", this, attach);
-            if (attach) {
-                attachVideoInput();
-            } else {
-                detachVideoInput();
-            }
-        }
-    } else {
-        videoLocal_.reset();
-    }
-}
-
-void
 VideoRtpSession::attachVideoInput()
 {
-    cancelKeepAliveTimer();
     videoLocal_->attach(sender_.get());
     videoInputAttached_ = true;
 
@@ -641,20 +625,18 @@ VideoRtpSession::attachVideoInput()
     videoLocal_->startInput();
 }
 
-void VideoRtpSession::detachVideoInput()
+void
+VideoRtpSession::detachVideoInput()
 {
     auto sender = sender_.get();
     videoLocal_->detach(sender);
+
     // send some black frames immediately to remote party as we cannot change
     // our stream mode to sendonly
     for (size_t i = 0; i < 5; i++) {
         sender->blackFrame();
     }
     videoInputAttached_ = false;
-    setupKaTimer();
-
-    // TODO: do not stop loop here, as other calls my already use it - fix it! input will be closed only when no references to it are left
-    // videoLocal_->stopInput();
 }
 
 void
@@ -828,15 +810,16 @@ VideoRtpSession::dropProcessing(RTCPInfo* rtcpi)
     if (restartTimer < DELAY_AFTER_RESTART + std::chrono::seconds(1)) {
         return;
     } else {
-        // If ponderate drops are inferior to 10% that mean drop are not from congestion but from
-        // network...
+        // If ponderate drops are inferior to 10% that mean drop are not from congestion but
+        // from network...
         // ... we can increase
         if (pondLoss >= 5.0f && rtcpi->packetLoss > 0.0f) {
             newBitrate *= 1.0f - rtcpi->packetLoss / 150.0f;
             histoLoss_.clear();
             lastMediaRestart_ = now;
             SIP_CORE_DBG(
-                "[BandwidthAdapt] Detected transmission bandwidth overuse, decrease bitrate from "
+                "[BandwidthAdapt] Detected transmission bandwidth overuse, decrease bitrate "
+                "from "
                 "%u Kbps to %d Kbps, ratio %f (ponderate loss: %f%%, packet loss rate: %f%%)",
                 oldBitrate,
                 newBitrate,

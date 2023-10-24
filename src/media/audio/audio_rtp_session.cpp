@@ -240,20 +240,6 @@ AudioRtpSession::stop()
 }
 
 void
-AudioRtpSession::controlReceiver(bool active)
-{
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
-    if (active != receiverActive_ && receiveThread_) {
-        if (active) {
-            startReceiver();
-        } else {
-            receiveThread_->stopReceiver();
-        }
-        receiverActive_ = active;
-    }
-}
-
-void
 AudioRtpSession::setMuted(bool muted, Direction dir)
 {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
@@ -274,6 +260,9 @@ AudioRtpSession::setMuted(bool muted, Direction dir)
                     receiveThread_->attach(ob);
                 }
             }
+            // do not stop receiving frames. just don't send them to our ring
+            // buffer
+            receiveThread_->setMuted(muted);
         }
     }
 }

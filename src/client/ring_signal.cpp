@@ -50,6 +50,7 @@ getSignalHandlers()
         exported_callback<libsip_core::CallSignal::PeerHold>(),
         exported_callback<libsip_core::CallSignal::VideoMuted>(),
         exported_callback<libsip_core::CallSignal::AudioMuted>(),
+        exported_callback<libsip_core::CallSignal::PeerMuted>(),
         exported_callback<libsip_core::CallSignal::SmartInfo>(),
         exported_callback<libsip_core::CallSignal::ConnectionUpdate>(),
         exported_callback<libsip_core::CallSignal::OnConferenceInfosUpdated>(),

@@ -116,7 +116,6 @@ public:
     void hangup(int reason) override;
     void refuse() override;
 
-    void controlRTPReceiver(bool active, const std::string& label) override;
     void transfer(const std::string& to) override;
     bool attendedTransfer(const std::string& to) override;
     bool onhold(OnReadyCb&& cb) override;
@@ -409,8 +408,6 @@ private:
     std::mutex setupSuccessMutex_;
 #ifdef ENABLE_VIDEO
     int rotation_ {0};
-    // Control video sending (attach / detach video sender)
-    void attachLocalVideo(bool attach) override;
 #endif
 };
 

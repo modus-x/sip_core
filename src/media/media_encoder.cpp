@@ -43,14 +43,11 @@ extern "C" {
 #include <string_view>
 #include <cmath>
 
-
 #define DEBUG_SDP 1
 
 using namespace std::literals;
 
 namespace sip_core {
-
-
 
 constexpr double LOGREG_PARAM_A {101};
 constexpr double LOGREG_PARAM_B {-5.};
@@ -314,8 +311,8 @@ MediaEncoder::initStream(const SystemCodecInfo& systemCodecInfo, AVBufferRef* fr
             } else {
                 // Succeed to open codec
                 SIP_CORE_WARN("Using hardware encoding for %s with %s ",
-                          avcodec_get_name(static_cast<AVCodecID>(systemCodecInfo.avcodecId)),
-                          it.getName().c_str());
+                              avcodec_get_name(static_cast<AVCodecID>(systemCodecInfo.avcodecId)),
+                              it.getName().c_str());
                 encoders_.emplace_back(encoderCtx);
                 break;
             }

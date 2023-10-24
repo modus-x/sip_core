@@ -88,22 +88,9 @@ public:
 
     void reloadInputDevice(const std::string& input);
     void setMuted(bool mute, Direction dir = Direction::SEND) override;
-    void controlReceiver(bool active) override
-    {
-        if (active) {
-            startReceiver();
-        } else {
-            stopReceiver();
-        }
-    };
 
-    void cancelKeepAliveTimer()
-    {
-        if (ka_timer_.id != PJ_FALSE) {
-            pjsip_endpt_cancel_timer(account_->getVoipLink().getEndpoint(), &ka_timer_);
-            ka_timer_.id = PJ_FALSE;
-        }
-    };
+    void cancelKeepAliveTimer();
+
 
     /**
      * Set video orientation
@@ -140,7 +127,6 @@ public:
     int getKaInterval() { return ka_inverval_; }
     void startSender();
     void stopSender();
-    void attachLocalVideo(bool attach);
 
     void attachVideoInput();
 
@@ -226,6 +212,9 @@ private:
     void attachLocalRecorder(const MediaStream& ms);
 
     bool videoInputAttached_ {false};
+
+    // only for local
+    bool muteState_ {false};
 };
 
 } // namespace video

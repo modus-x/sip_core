@@ -139,21 +139,6 @@ hold(const std::string& accountId, const std::string& callId)
     return sip_core::Manager::instance().onHoldCall(accountId, callId);
 }
 
-void
-attachLocalVideo(const std::string& accountId, const std::string& callId, bool attach)
-{
-    return sip_core::Manager::instance().attachLocalVideo(accountId, callId, attach);
-}
-
-void
-controlRTPReceiver(const std::string& accountId,
-                   const std::string& callId,
-                   const std::string& labelId,
-                   bool active)
-{
-    return sip_core::Manager::instance().controlRTPReceiver(accountId, callId, labelId, active);
-}
-
 bool
 unhold(const std::string& accountId, const std::string& callId)
 {
@@ -180,6 +165,22 @@ muteLocalMedia(const std::string& accountId,
         } else {
             SIP_CORE_WARN("ID %s doesn't match any call or conference", callId.c_str());
         }
+    }
+    return false;
+}
+
+bool
+muteRemoteMedia(const std::string& accountId,
+               const std::string& callId,
+               const std::string& mediaType,
+               bool mute)
+{
+    if (auto account = sip_core::Manager::instance().getAccount(accountId)) {
+        if (auto call = account->getCall(callId)) {
+            SIP_CORE_DBG("Muting [%s] for call %s", mediaType.c_str(), callId.c_str());
+            call->peerMuted(mute, -1);
+            return true;
+        } 
     }
     return false;
 }

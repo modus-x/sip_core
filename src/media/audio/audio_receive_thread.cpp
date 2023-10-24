@@ -57,8 +57,10 @@ bool
 AudioReceiveThread::setup()
 {
     audioDecoder_.reset(new MediaDecoder([this](std::shared_ptr<MediaFrame>&& frame) mutable {
-        notify(frame);
-        ringbuffer_->put(std::static_pointer_cast<AudioFrame>(frame));
+        if (!muteState_) {
+            notify(frame);
+            ringbuffer_->put(std::static_pointer_cast<AudioFrame>(frame));
+        }
     }));
     audioDecoder_->setContextCallback([this]() {
         if (recorderCallback_)
@@ -163,6 +165,12 @@ void
 AudioReceiveThread::stopReceiver()
 {
     loop_.stop();
+}
+
+void
+AudioReceiveThread::setMuted(bool muted)
+{
+    muteState_ = muted;
 }
 
 }; // namespace sip_core

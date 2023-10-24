@@ -73,13 +73,11 @@ template<typename Ts, typename... Args>
 void
 emitSignal(Args... args)
 {
-    SIP_CORE_DBG("Emit signal request -> %s", Ts::name);
     sip_core_tracepoint_if_enabled(emit_signal, demangle<Ts>().c_str());
 
     const auto& handlers = getSignalHandlers();
     if (auto wrap = libsip_core::CallbackWrapper<typename Ts::cb_type>(handlers.at(Ts::name))) {
         try {
-            SIP_CORE_DBG("Signal scheduling  %s", Ts::name);
 
             sip_core_tracepoint(emit_signal_begin_callback, wrap.file_, wrap.linum_);
             auto cb = *wrap;
@@ -87,7 +85,6 @@ emitSignal(Args... args)
             cb(args...);
 #else
             runOnEventThread([callback = cb, ... arguments = std::forward<Args>(args)] {
-                SIP_CORE_DBG("Running signal on thread %s", Ts::name);
                 callback(arguments...);
             });
 #endif

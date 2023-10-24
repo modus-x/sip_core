@@ -184,29 +184,6 @@ SIPCall::createRtpSession(RtpStream& stream)
         throw std::runtime_error("Failed to create RTP Session");
     ;
 }
-#ifdef ENABLE_VIDEO
-
-void
-SIPCall::attachLocalVideo(bool attach)
-{
-    for (const auto& videoRtp : getRtpSessionList(MediaType::MEDIA_VIDEO)) {
-        std::static_pointer_cast<video::VideoRtpSession>(videoRtp)->attachLocalVideo(attach);
-    }
-
-    std::map<std::string, std::string> messages;
-    Json::StreamWriterBuilder wbuilder;
-    wbuilder["commentStyle"] = "None";
-    wbuilder["indentation"] = "";
-    messages["application/localVideoStatus+json"] = std::string("{\"state\":\"")
-                                                    + (attach ? "stopped\"}" : "active\"}");
-
-    auto w = getAccount();
-    auto account = w.lock();
-    if (account)
-        sendTextMessage(messages, account->getFromUri());
-}
-
-#endif
 
 void
 SIPCall::configureRtpSession(const std::shared_ptr<RtpSession>& rtpSession,
@@ -231,13 +208,12 @@ SIPCall::configureRtpSession(const std::shared_ptr<RtpSession>& rtpSession,
     // Mute/un-mute media
     if (mediaAttr->muted_) {
         rtpSession->setMuted(true);
-        // TODO. Setting mute to true should be enough to mute.
-        // Kept for backward compatiblity.
-        rtpSession->setMediaSource("");
     } else {
         rtpSession->setMuted(false);
-        rtpSession->setMediaSource(mediaAttr->sourceUri_);
     }
+
+    // always set media source event for muted - we need to start NAT ping streams too.
+    rtpSession->setMediaSource(mediaAttr->sourceUri_);
 
     rtpSession->setSuccessfulSetupCb([w = weak()](MediaType type, bool isRemote) {
         if (auto thisPtr = w.lock())
@@ -1712,9 +1688,11 @@ SIPCall::setupNegotiatedMedia()
         const auto& local = slot.first;
         const auto& remote = slot.second;
 
+
         if (static_cast<size_t>(streamIdx) >= rtpStreams_.size()) {
             throw std::runtime_error("Stream index is out-of-range");
         }
+
 
         auto const& rtpStream = rtpStreams_[streamIdx];
 
@@ -1722,16 +1700,8 @@ SIPCall::setupNegotiatedMedia()
             throw std::runtime_error("Missing media attribute");
         }
 
-        // To enable a media, it must be enabled on both sides. Should be done before all other operations
-        rtpStream.mediaAttribute_->enabled_ = local.enabled and remote.enabled;
 
-        // Skip disabled media
-        if (not local.enabled) {
-            SIP_CORE_DBG("[call:%s] [SDP:slot#%u] The media is disabled, skipping",
-                         getCallId().c_str(),
-                         streamIdx);
-            continue;
-        }
+        rtpStream.mediaAttribute_->enabled_ = local.enabled;
 
         if (not rtpStream.rtpSession_)
             throw std::runtime_error("Must have a valid RTP Session");
@@ -1946,18 +1916,6 @@ SIPCall::muteMedia(const std::string& mediaType, bool mute)
 }
 
 void
-SIPCall::controlRTPReceiver(bool active, const std::string& label)
-{
-    auto streamIdx = findRtpStreamIndex(label);
-
-    // is rtp stream found
-    if (streamIdx >= 0) {
-        auto const& rtpStream = rtpStreams_[streamIdx];
-        rtpStream.rtpSession_->controlReceiver(active);
-    }
-}
-
-void
 SIPCall::updateMediaStream(const MediaAttribute& newMediaAttr, size_t streamIdx)
 {
     assert(streamIdx < rtpStreams_.size());
@@ -2055,7 +2013,7 @@ SIPCall::updateAllMediaStreams(const std::vector<MediaAttribute>& mediaAttrList,
 
     if (mediaAttrList.size() < rtpStreams_.size()) {
 #ifdef ENABLE_VIDEO
-        // If new medias list got more medias than current size, we can remove old medias from conference
+        // remove all reduntant video streams from conference
         for (auto i = mediaAttrList.size(); i < rtpStreams_.size(); ++i) {
             auto& stream = rtpStreams_[i];
             if (stream.rtpSession_->getMediaType() == MediaType::MEDIA_VIDEO)
@@ -2092,11 +2050,6 @@ SIPCall::isReinviteRequired(const std::vector<MediaAttribute>& mediaAttrList)
             return true;
         }
 
-#ifdef ENABLE_VIDEO
-        if (newAttr.type_ == MediaType::MEDIA_VIDEO) {
-            return false;
-        }
-#endif
     }
 
     return false;
@@ -2818,6 +2771,8 @@ SIPCall::peerMuted(bool muted, int streamIdx)
     peerMuted_ = muted;
     if (auto conf = conf_.lock())
         conf->updateMuted();
+    
+    emitSignal<libsip_core::CallSignal::PeerMuted>(getCallId(), peerMuted_);
 }
 
 void

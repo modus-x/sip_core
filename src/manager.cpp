@@ -152,18 +152,17 @@ static constexpr const char* SIPLOGLEVEL = "SIPLOGLEVEL";
 static void
 setSipLogLevel()
 {
-    int level = 6;
+    int level = PJ_LOG_MAX_LEVEL;
 
     pj_log_set_level(level);
-    // TODO: Gete rid off duplicate messages
-    // pj_log_set_log_func([](int level, const char* data, int /*len*/) {
-    //     if (level < 2)
-    //         SIP_CORE_ERR() << data;
-    //     else if (level < 4)
-    //         SIP_CORE_WARN() << data;
-    //     else
-    //         SIP_CORE_DBG() << data;
-    // });
+    pj_log_set_log_func([](int level, const char* data, int /*len*/) {
+        if (level < 2)
+            SIP_CORE_ERR() << data;
+        else if (level < 4)
+            SIP_CORE_WARN() << data;
+        else
+            SIP_CORE_DBG() << data;
+    });
 }
 
 struct Manager::ManagerPimpl
@@ -846,20 +845,6 @@ Manager::answerCall(const std::string& accountId,
     return false;
 }
 
-void
-Manager::controlRTPReceiver(const std::string& accountId,
-                            const std::string& callId,
-                            const std::string& labelId,
-                            bool active)
-{
-    if (auto account = getAccount(accountId)) {
-        if (auto call = account->getCall(callId)) {
-            call->controlRTPReceiver(active, labelId);
-            return;
-        }
-    }
-}
-
 bool
 Manager::switchTransport(const std::string& accountId, TransportType type)
 {
@@ -867,21 +852,6 @@ Manager::switchTransport(const std::string& accountId, TransportType type)
         return account->switchTransport(type);
     }
 }
-
-#ifdef ENABLE_VIDEO
-
-void
-Manager::attachLocalVideo(const std::string& accountId, const std::string& callId, bool attach)
-{
-    if (auto account = getAccount(accountId)) {
-        if (auto call = account->getCall(callId)) {
-            call->attachLocalVideo(attach);
-            return;
-        }
-    }
-}
-
-#endif
 
 bool
 Manager::answerCall(Call& call, const std::vector<libsip_core::MediaMap>& mediaList)

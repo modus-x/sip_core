@@ -443,11 +443,6 @@ public:
 
     void removeAccounts();
 
-    void controlRTPReceiver(const std::string& accountId,
-                            const std::string& callId,
-                            const std::string& labelId,
-                            bool active);
-
     bool switchTransport(const std::string& accountId, TransportType type);
 
     /**

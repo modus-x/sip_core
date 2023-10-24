@@ -421,9 +421,6 @@ public:
     virtual bool hasVideo() const = 0;
     virtual bool isCaptureDeviceMuted(const MediaType& mediaType) const = 0;
 
-    virtual void attachLocalVideo(bool attach) = 0;
-    virtual void controlRTPReceiver(bool active, const std::string& label) = 0;
-
     /**
      * A Call can be in a conference. If this is the case, the other side
      * will send conference informations describing the rendered image

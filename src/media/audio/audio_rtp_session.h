@@ -59,7 +59,6 @@ public:
     void restartSender() override;
     void stop() override;
     void setMuted(bool muted, Direction dir = Direction::SEND) override;
-    void controlReceiver(bool active) override;
 
     void initRecorder() override;
     void deinitRecorder() override;

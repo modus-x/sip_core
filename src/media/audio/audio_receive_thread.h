@@ -53,6 +53,7 @@ public:
     void addIOContext(SocketPair& socketPair);
     void startReceiver();
     void stopReceiver();
+    void setMuted(bool muted);
 
     void setSuccessfulSetupCb(const std::function<void(MediaType, bool)>& cb)
     {
@@ -93,6 +94,8 @@ private:
 
     std::function<void(MediaType, bool)> onSuccessfulSetup_;
     std::function<void(const MediaStream& ms)> recorderCallback_;
+
+    bool muteState_ {false};
 };
 
 } // namespace sip_core
