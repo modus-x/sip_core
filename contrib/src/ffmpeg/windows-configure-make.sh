@@ -42,10 +42,16 @@ FFMPEGCONF+='
 #enable parsers
 FFMPEGCONF+='
             --enable-parser=h264
+            --enable-parser=vp8
+            --enable-parser=vp9
             --enable-parser=opus'
 
 #encoders/decoders
 FFMPEGCONF+='
+            --enable-libvpx
+            --enable-encoder=libvpx_vp8
+            --enable-decoder=vp8 
+            --enable-decoder=vp9 
             --enable-libopus
             --enable-encoder=libopus
             --enable-decoder=libopus
@@ -113,7 +119,7 @@ FFMPEGCONF+='
 echo "configure and make ffmpeg for win32-x64... in $(pwd)"
 
 # extra libs
-EXTRALDFLAGS="libopus.lib libx264.lib"
+EXTRALDFLAGS="libopus.lib libx264.lib libvpx.lib"
 
 # configure debug / release libs
 if [ "$1" == "Debug" ]; then

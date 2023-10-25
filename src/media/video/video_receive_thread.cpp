@@ -62,6 +62,8 @@ VideoReceiveThread::VideoReceiveThread(const std::string& id,
 
 VideoReceiveThread::~VideoReceiveThread()
 {
+
+    stopLoop();
     SIP_CORE_DBG("VideoReceiveThread [%p] Instance destroyed", this);
 }
 

@@ -467,6 +467,8 @@ if(MSVC)
       optimized
       ${DEPS_RELEASE}/lib/x64/libopus.lib
       optimized
+      ${DEPS_RELEASE}/lib/x64/libvpx.lib
+      optimized
       ${DEPS_RELEASE}/lib/x64/lib_json.lib
       optimized
       ${DEPS_RELEASE}/libyaml-cppmd.lib
@@ -513,6 +515,8 @@ if(MSVC)
       ${DEPS_DEBUG}/lib/x64/libx264.lib
       debug
       ${DEPS_DEBUG}/lib/x64/libopus.lib
+      debug
+      ${DEPS_DEBUG}/lib/x64/libvpx.lib
       debug
       ${DEPS_DEBUG}/lib/x64/lib_json.lib
       debug
@@ -583,6 +587,8 @@ else()
                       libpjproject)
     pkg_search_module(avformat_${CONTRIB_TARGET_NAME} REQUIRED IMPORTED_TARGET
                       libavformat)
+    pkg_search_module(vpx_${CONTRIB_TARGET_NAME} REQUIRED IMPORTED_TARGET
+                      vpx)
     pkg_search_module(avdevice_${CONTRIB_TARGET_NAME} REQUIRED IMPORTED_TARGET
                       libavdevice)
     pkg_search_module(avfilter_${CONTRIB_TARGET_NAME} REQUIRED IMPORTED_TARGET
@@ -608,6 +614,8 @@ else()
     if(APPLE)
       set_target_properties(PkgConfig::pjproject_${CONTRIB_TARGET_NAME}
                             PROPERTIES INTERFACE_LINK_OPTIONS "")
+      set_target_properties(PkgConfig::vpx_${CONTRIB_TARGET_NAME}
+                            PROPERTIES INTERFACE_LINK_OPTIONS "")
       set_target_properties(PkgConfig::avformat_${CONTRIB_TARGET_NAME}
                             PROPERTIES INTERFACE_LINK_OPTIONS "")
       set_target_properties(PkgConfig::avdevice_${CONTRIB_TARGET_NAME}
@@ -630,6 +638,7 @@ else()
               PkgConfig::avformat_${CONTRIB_TARGET_NAME}
               PkgConfig::avdevice_${CONTRIB_TARGET_NAME}
               PkgConfig::avfilter_${CONTRIB_TARGET_NAME}
+              PkgConfig::vpx_${CONTRIB_TARGET_NAME}
               PkgConfig::avcodec_${CONTRIB_TARGET_NAME}
               PkgConfig::swresample_${CONTRIB_TARGET_NAME}
               PkgConfig::swscale_${CONTRIB_TARGET_NAME}

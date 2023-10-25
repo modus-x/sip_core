@@ -3,6 +3,7 @@
     "deps": [
         "opus",
         "x264",
+        "vpx",
         "ffmpeg",
         "speexdsp",
         "pjproject",

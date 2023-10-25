@@ -62,6 +62,16 @@ SystemCodecContainer::initCodecConfig()
     availableCodecList_ = {
 #ifdef ENABLE_VIDEO
 
+        std::make_shared<SystemVideoCodecInfo>(AV_CODEC_ID_VP8,
+                                               AV_CODEC_ID_VP8,
+                                               "VP8",
+                                               "VP8",
+                                               "libvpx",
+                                               CODEC_ENCODER_DECODER,
+                                               defaultBitrate,
+                                               minVP8,
+                                               maxVP8),
+
         std::make_shared<SystemVideoCodecInfo>(AV_CODEC_ID_H264,
                                                AV_CODEC_ID_H264,
                                                "H.264/AVC",

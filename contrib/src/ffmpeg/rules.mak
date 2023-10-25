@@ -9,7 +9,7 @@ PKGS_FOUND += ffmpeg
 endif
 endif
 
-DEPS_ffmpeg = iconv zlib opus speex x264
+DEPS_ffmpeg = iconv zlib vpx opus speex x264
 
 FFMPEGCONF = \
 	--cc="$(CC)" \
@@ -60,6 +60,8 @@ FFMPEGCONF += \
 #enable parsers
 FFMPEGCONF += \
 	--enable-parser=h264 \
+	--enable-parser=vp8 \
+	--enable-parser=vp9 \
 	--enable-parser=opus
 
 #encoders/decoders
@@ -72,8 +74,18 @@ FFMPEGCONF += \
 	--enable-decoder=pcm_alaw \
 	--enable-encoder=pcm_mulaw \
 	--enable-decoder=pcm_mulaw \
+	--enable-encoder=libvpx_vp8 \
+	--enable-decoder=vp8 \
+	--enable-decoder=vp9 \
+	--enable-encoder=h263 \
+	--enable-encoder=h263p \
+	--enable-decoder=h263 \
+	--enable-encoder=mjpeg \
+	--enable-decoder=mjpeg \
+	--enable-decoder=mjpegb \
 	--enable-libspeex \
 	--enable-libopus \
+	--enable-libvpx \
 	--enable-libx264 \
 	--enable-encoder=libspeex \
 	--enable-decoder=libspeex \
@@ -134,6 +146,7 @@ ifdef HAVE_ANDROID
 FFMPEGCONF += \
 	--target-os=android \
 	--enable-jni \
+	--enable-decoder=vp8_mediacodec \
 	--enable-mediacodec \
 	--disable-vulkan \
 	--enable-decoder=h264_mediacodec \
