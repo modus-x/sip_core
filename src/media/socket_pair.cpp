@@ -361,10 +361,18 @@ SocketPair::createIOContext(const uint16_t mtu)
 int
 SocketPair::waitForData()
 {
+
+    int tries = 0;
+
     // System sockets
     if (rtpHandle_ >= 0) {
         int ret;
         do {
+            if (tries == 10) {
+                errno = ETIMEDOUT;
+                return -2;
+            }
+
             if (interrupted_) {
                 errno = EINTR;
                 return -1;
@@ -376,6 +384,7 @@ SocketPair::waitForData()
 
             // work with system socket
             struct pollfd p[2] = {{rtpHandle_, POLLIN, 0}, {rtcpHandle_, POLLIN, 0}};
+
             ret = poll(p, 2, NET_POLL_TIMEOUT);
             if (ret > 0) {
                 ret = 0;
@@ -384,6 +393,7 @@ SocketPair::waitForData()
                 if (p[1].revents & POLLIN)
                     ret |= static_cast<int>(DataType::RTCP);
             }
+            tries++;
         } while (!ret or (ret < 0 and errno == EAGAIN));
 
         return ret;
