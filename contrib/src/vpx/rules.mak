@@ -86,7 +86,7 @@ VPX_CONF := \
 	--disable-unit-tests \
 	--disable-install-bins \
 	--disable-install-docs \
-	--enable-realtime-only \
+	--disable-realtime-only \
 	--enable-error-concealment \
 	--disable-webm-io
 
