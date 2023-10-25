@@ -169,24 +169,18 @@ Sdp::mediaDirection(const MediaAttribute& mediaAttr)
         return DIRECTION_STR[MediaDirection::INACTIVE];
     }
 
-    if (mediaAttr.onHold_) {
-        return DIRECTION_STR[MediaDirection::SENDONLY];
+
+    if (mediaAttr.type_ == MediaType::MEDIA_AUDIO) {
+        // ignore hold for video. It just can be stopped with sending black frames. 
+        // Audio will played to callee by the SIP server.
+        if (mediaAttr.onHold_) {
+            return DIRECTION_STR[MediaDirection::SENDONLY];
+        }
     }
 
     // Since mute/un-mute audio is only done locally (RTP packets
     // are still sent to the peer), the media direction must be
     // set to "sendrecv" regardless of the mute state.
-    if (mediaAttr.type_ == MediaType::MEDIA_AUDIO) {
-        return DIRECTION_STR[MediaDirection::SENDRECV];
-    }
-
-    if (mediaAttr.muted_) {
-        if (mediaAttr.onHold_) {
-            return DIRECTION_STR[MediaDirection::INACTIVE];
-        }
-        return DIRECTION_STR[MediaDirection::RECVONLY];
-    }
-
     return DIRECTION_STR[MediaDirection::SENDRECV];
 }
 

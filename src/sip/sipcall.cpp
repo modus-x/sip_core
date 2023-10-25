@@ -1199,7 +1199,7 @@ SIPCall::hold()
         return false;
     }
 
-    // stopAllMedia();
+    stopAllMedia();
 
     for (auto& stream : rtpStreams_) {
         stream.mediaAttribute_->onHold_ = true;
