@@ -618,25 +618,35 @@ VideoRtpSession::setRotation(int rotation)
 void
 VideoRtpSession::attachVideoInput()
 {
-    videoLocal_->attach(sender_.get());
-    videoInputAttached_ = true;
+    if (videoLocal_) {
+        videoLocal_->attach(sender_.get());
+        videoInputAttached_ = true;
 
-    // start input if not already started
-    videoLocal_->startInput();
+        // start input if not already started
+        videoLocal_->startInput();
+
+    } else if (videoMixer_) {
+        videoMixer_->attach(sender_.get());
+    }
 }
 
 void
 VideoRtpSession::detachVideoInput()
 {
-    auto sender = sender_.get();
-    videoLocal_->detach(sender);
+    if (videoLocal_) {
+        auto sender = sender_.get();
+        videoLocal_->detach(sender);
 
-    // send some black frames immediately to remote party as we cannot change
-    // our stream mode to sendonly
-    for (size_t i = 0; i < 5; i++) {
-        sender->blackFrame();
+        // send some black frames immediately to remote party as we cannot change
+        // our stream mode to sendonly. he will see black screen instead of us.
+        for (size_t i = 0; i < 5; i++) {
+            sender->blackFrame();
+        }
+        videoInputAttached_ = false;
+
+    } else if (videoMixer_) {
+        videoMixer_->detach(sender_.get());
     }
-    videoInputAttached_ = false;
 }
 
 void
