@@ -592,7 +592,10 @@ VideoInput::initFile(std::string path)
 void
 VideoInput::restart()
 {
-    switchInput(currentResource_);
+    if (loop_.isStopping()) {
+        switchInput(currentResource_);
+        startInput();
+    }
 }
 
 std::shared_future<DeviceParams>

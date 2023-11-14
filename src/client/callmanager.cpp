@@ -207,14 +207,13 @@ joinParticipant(const std::string& accountId,
                 const std::string& sel_callId,
                 const std::string& account2Id,
                 const std::string& drag_callId,
-                bool attached, bool audioOnly)
+                bool attached)
 {
     return sip_core::Manager::instance().joinParticipant(accountId,
                                                          sel_callId,
                                                          account2Id,
                                                          drag_callId,
-                                                         attached,
-                                                         audioOnly);
+                                                         attached);
 }
 
 void

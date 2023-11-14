@@ -163,7 +163,12 @@ contextHeader(const char* const file, int line)
     }
 
     if (file) {
-        return fmt::format(FMT_COMPILE("[{: >3d}.{:0<3d}|{: >4}|{: <24s}:{: <4d}] "), secs, milli, tid, stripDirName(file), line);
+        return fmt::format(FMT_COMPILE("[{: >3d}.{:0<3d}|{: >4}|{: <24s}:{: <4d}]"),
+                           secs,
+                           milli,
+                           tid,
+                           stripDirName(file),
+                           line);
     } else {
         return fmt::format(FMT_COMPILE("[{: >3d}.{:0<3d}|{: >4}] "), secs, milli, tid);
     }
@@ -185,7 +190,7 @@ formatPrintfArgs(const char* format, va_list ap)
     int size = vsnprintf(ret.data(), ret.size(), format, ap);
 
     /* Not enough space?  Well try again. */
-    if ((size_t)size >= ret.size()) {
+    if ((size_t) size >= ret.size()) {
         ret.resize(size + 1);
         vsnprintf((char*) ret.data(), ret.size(), format, cp);
     }
@@ -346,27 +351,6 @@ void
 Logger::setConsoleLog(bool en)
 {
     ConsoleLog::instance().enable(en);
-//#ifdef _WIN32
-//    static WORD original_attributes;
-//    if (en) {
-//        if (AttachConsole(ATTACH_PARENT_PROCESS) || AllocConsole()) {
-//            FILE *fpstdout = stdout, *fpstderr = stderr;
-//            freopen_s(&fpstdout, "CONOUT$", "w", stdout);
-//            freopen_s(&fpstderr, "CONOUT$", "w", stderr);
-//            // Save the original state of the console window(in case AttachConsole worked).
-//            CONSOLE_SCREEN_BUFFER_INFO consoleInfo;
-//            GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &consoleInfo);
-//            original_attributes = consoleInfo.wAttributes;
-//            SetConsoleCP(CP_UTF8);
-//            SetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE),
-//                           ENABLE_QUICK_EDIT_MODE | ENABLE_EXTENDED_FLAGS);
-//        }
-//    } else {
-//        // Restore the original state of the console window in case we attached.
-//        SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), original_attributes);
-//        FreeConsole();
-//    }
-//#endif
 }
 
 class SysLog : public Logger::Handler
@@ -396,7 +380,7 @@ public:
 #ifdef __ANDROID__
         __android_log_print(msg.level_, APP_NAME, "%s%s", msg.header_.c_str(), msg.payload_.c_str());
 #else
-        ::syslog(msg.level_, "%.*s", (int)msg.payload_.size(), msg.payload_.data());
+        ::syslog(msg.level_, "%.*s", (int) msg.payload_.size(), msg.payload_.data());
 #endif
     }
 };
@@ -505,7 +489,7 @@ private:
     void do_consume(std::ofstream& file, const std::vector<Logger::Msg>& messages)
     {
         for (const auto& msg : messages) {
-            file << msg.header_ << msg.payload_;
+            file << msg.header_ << "{" << Logger::logLevelToString(msg.level_) << "} " << msg.payload_;
 
             if (msg.linefeed_)
                 file << ENDL;
@@ -582,7 +566,8 @@ Logger::vlog(int level, const char* file, int line, bool linefeed, const char* f
 }
 
 void
-Logger::write(int level, const char* file, int line, std::string&& message) {
+Logger::write(int level, const char* file, int line, std::string&& message)
+{
     /* Timestamp is generated here. */
     Msg msg(level, file, line, true, std::move(message));
 
@@ -601,6 +586,24 @@ Logger::fini()
 #ifdef _WIN32
     Logger::setConsoleLog(false);
 #endif /* _WIN32 */
+}
+
+std::string
+Logger::logLevelToString(int level)
+{
+    if (level == LOG_ERR) {
+        return "ERROR";
+    } else if (level == LOG_WARNING) {
+        return "WARNING";
+    }
+    else if (level == LOG_INFO)
+    {
+        return "INFO";
+    }
+    else if (level == LOG_DEBUG) {
+        return "DEBUG";
+    }
+    return "UNKNOWN";
 }
 
 } // namespace sip_core

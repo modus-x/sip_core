@@ -95,8 +95,8 @@ LIBSIP_CORE_PUBLIC bool joinParticipant(const std::string& accountId,
                                         const std::string& sel_callId,
                                         const std::string& account2Id,
                                         const std::string& drag_callId,
-                                        bool attached,
-                                        bool audioOnly);
+                                        bool attached);
+
 LIBSIP_CORE_PUBLIC void createConfFromParticipantList(const std::string& accountId,
                                                       const std::vector<std::string>& participants);
 LIBSIP_CORE_PUBLIC void setConferenceLayout(const std::string& accountId,

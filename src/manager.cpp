@@ -628,7 +628,7 @@ Manager::init(const std::string& config_file, const std::string& data_path)
     SIP_CORE_DBG("Using PJSIP version %s for %s", pj_get_version(), PJ_OS_NAME);
 
     SIP_CORE_DBG("Using FFmpeg version %s", av_version_info());
-    SIP_CORE_DBG("Using TEEEST %s", av_version_info());
+SIP_CORE_DBG("Using TEEEST %s", av_version_info());
 
     // Manager can restart without being recreated (Unit tests)
     // So only create the SipLink once
@@ -1213,8 +1213,7 @@ Manager::joinParticipant(const std::string& accountId,
                          const std::string& callId1,
                          const std::string& account2Id,
                          const std::string& callId2,
-                         bool attached,
-                         bool audioOnly)
+                         bool attached)
 {
     SIP_CORE_INFO("JoinParticipant(%s, %s, %i)", callId1.c_str(), callId2.c_str(), attached);
     auto account = getAccount(accountId);
@@ -1246,13 +1245,49 @@ Manager::joinParticipant(const std::string& accountId,
         SIP_CORE_ERR("Could not find call %s", callId2.c_str());
         return false;
     }
+    std::vector<MediaAttribute> allMedia {};
     std::vector<MediaAttribute> media {};
 
-    if (audioOnly) {
-        MediaAttribute audioAttr
-            = {MediaType::MEDIA_AUDIO, false, false, true, {}, sip_utils::DEFAULT_AUDIO_STREAMID};
+    auto call1Media = call1->getMediaAttributeList();
+    auto call2Media = call2->getMediaAttributeList();
 
-        media.emplace_back(audioAttr);
+    bool audioMuted = true;
+    bool videoMuted = true;
+
+    // if even one source is UN muted, then make mixer source unmuted
+    // TODO: add media attribute list as function parameter
+    for (auto m : call1Media) {
+        if (m.type_ == MediaType::MEDIA_AUDIO) {
+            allMedia.push_back((m));
+            if (m.muted_ == false) {
+                audioMuted = false;
+            }
+        }
+        if (m.type_ == MediaType::MEDIA_VIDEO) {
+            allMedia.push_back((m));
+            if (m.muted_ == false) {
+                videoMuted = false;
+            }
+        }
+    }
+
+    // find first audio + video
+    auto itVideo = std::find_if(allMedia.begin(), allMedia.end(), [&](auto attr) {
+        return attr.type_ == MediaType::MEDIA_VIDEO;
+    });
+
+    if (itVideo != allMedia.end()) {
+        itVideo->muted_ = videoMuted;
+        media.push_back(*itVideo);
+    }
+
+    auto itAudio = std::find_if(allMedia.begin(), allMedia.end(), [&](auto attr) {
+        return attr.type_ == MediaType::MEDIA_AUDIO;
+    });
+
+    if (itAudio != allMedia.end()) {
+        itAudio->muted_ = audioMuted;
+        media.push_back(*itAudio);
     }
 
     auto conf = std::make_shared<Conference>(account, "", attached, media);
@@ -1863,32 +1898,32 @@ Manager::ringback()
 void
 Manager::playRingtone(const std::string& accountID)
 {
-     const auto account = getAccount(accountID);
-     if (!account) {
-         SIP_CORE_WARN("Invalid account in ringtone");
-         return;
-     }
+    const auto account = getAccount(accountID);
+    if (!account) {
+        SIP_CORE_WARN("Invalid account in ringtone");
+        return;
+    }
 
-     if (!account->getRingtoneEnabled()) {
-         ringback();
-         return;
-     }
+    if (!account->getRingtoneEnabled()) {
+        ringback();
+        return;
+    }
 
-     {
-         std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
+    {
+        std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
 
-         if (not pimpl_->audiodriver_) {
-             SIP_CORE_ERR("no audio layer in ringtone");
-             return;
-         }
-         // start audio if not started AND flush all buffers (main and urgent)
-         auto oldGuard = std::move(pimpl_->toneDeviceGuard_);
-         pimpl_->toneDeviceGuard_ = startAudioStream(AudioDeviceType::RINGTONE);
-         pimpl_->toneCtrl_.setSampleRate(pimpl_->audiodriver_->getSampleRate());
-     }
+        if (not pimpl_->audiodriver_) {
+            SIP_CORE_ERR("no audio layer in ringtone");
+            return;
+        }
+        // start audio if not started AND flush all buffers (main and urgent)
+        auto oldGuard = std::move(pimpl_->toneDeviceGuard_);
+        pimpl_->toneDeviceGuard_ = startAudioStream(AudioDeviceType::RINGTONE);
+        pimpl_->toneCtrl_.setSampleRate(pimpl_->audiodriver_->getSampleRate());
+    }
 
-     if (not pimpl_->toneCtrl_.setAudioFile(account->getRingtonePath()))
-         ringback();
+    if (not pimpl_->toneCtrl_.setAudioFile(account->getRingtonePath()))
+        ringback();
 }
 
 std::shared_ptr<AudioLoop>

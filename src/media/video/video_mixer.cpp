@@ -86,14 +86,13 @@ VideoMixer::VideoMixer(const std::string& id, const std::string& localInput, boo
     , sink_(Manager::instance().createSinkClient(id, true))
     , loop_([] { return true; }, std::bind(&VideoMixer::process, this), [] {})
 {
-    // Local video camera is the main participant
+    // Local video camera is the main participant. add it if exists
     if (not localInput.empty() && attachHost) {
         auto videoInput = getVideoInput(localInput);
         localInputs_.emplace_back(videoInput);
-        attachVideo(videoInput.get(),
-                    "",
-                    sip_utils::streamId("", sip_utils::DEFAULT_VIDEO_STREAMID));
     }
+
+    // start loop, but do no start video input
     loop_.start();
     nextProcess_ = std::chrono::steady_clock::now();
 
@@ -110,45 +109,37 @@ VideoMixer::~VideoMixer()
     SIP_CORE_DBG("[mixer:%s] Instance destroyed", id_.c_str());
 }
 
+// let the caller control when inputs are actually attached to video mixer
 void
 VideoMixer::switchInputs(const std::vector<std::string>& inputs)
 {
-    // Do not stop video inputs that are already there
-    // But only detach it to get new index
+    // Do not stop video inputs that are already in mixer
     std::lock_guard<std::mutex> lk(localInputsMtx_);
     decltype(localInputs_) newInputs;
     for (auto i = 0u; i != inputs.size(); ++i) {
         auto videoInput = getVideoInput(inputs[i]);
-        // Start input if it not already started
-        videoInput->startInput();
-        auto onlyDetach = false;
+        auto alreadyExistsInMixer = false;
         auto it = std::find(localInputs_.cbegin(), localInputs_.cend(), videoInput);
-        onlyDetach = it != localInputs_.cend();
+        alreadyExistsInMixer = it != localInputs_.cend();
         newInputs.emplace_back(videoInput);
-        if (onlyDetach) {
+        if (alreadyExistsInMixer) {
+            // detach to get new stream id corresponding to it's index in localInputs_ via next startInputs() call
             videoInput->detach(this);
             localInputs_.erase(it);
         }
     }
-    // Stop other video inputs
+    // Stop other video inputs (detach them from mixer)
     stopInputs();
-    localInputs_ = std::move(newInputs);
 
-    // Re-attach videoInput to mixer
-    for (auto i = 0u; i != localInputs_.size(); ++i)
-        attachVideo(localInputs_[i].get(), "", sip_utils::streamId("", fmt::format("video_{}", i)));
+    // set localInputs_ and wait for the startInputs() call
+    localInputs_ = std::move(newInputs);
 }
 
 void
 VideoMixer::stopInput(const std::shared_ptr<VideoFrameActiveWriter>& input)
 {
-    // Detach videoInputs from mixer
+    // Detach videoInputs from mixer, but DO NOT STOP IT
     input->detach(this);
-#if !VIDEO_CLIENT_INPUT
-    // Stop old VideoInput
-    // if (auto oldInput = std::dynamic_pointer_cast<VideoInput>(input))
-    //     oldInput->stopInput();
-#endif
 }
 
 void
@@ -156,7 +147,16 @@ VideoMixer::stopInputs()
 {
     for (auto& input : localInputs_)
         stopInput(input);
-    localInputs_.clear();
+}
+
+void
+VideoMixer::startInputs()
+{
+    // Attach videoInput to mixer and start / restart it if it was stopped before
+    for (auto i = 0u; i != localInputs_.size(); ++i) {
+        attachVideo(localInputs_[i].get(), "", sip_utils::streamId("", fmt::format("video_{}", i)));
+        localInputs_[i]->startInput();
+    }
 }
 
 void

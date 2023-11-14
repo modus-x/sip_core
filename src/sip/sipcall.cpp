@@ -2553,6 +2553,7 @@ SIPCall::setRotation(int streamIdx, int rotation)
     // });
 }
 
+// the main idea is to create sinks from receiving video of a call!
 void
 SIPCall::createSinks(ConfInfo& infos)
 {
@@ -2561,6 +2562,7 @@ SIPCall::createSinks(ConfInfo& infos)
     if (!hasVideo())
         return;
 
+    // find ourself in patricipant list and take all sizes from local video
     for (auto& participant : infos) {
         if (string_remove_suffix(participant.uri, '@') == account_.lock()->getUsername()
             && participant.device
@@ -2593,6 +2595,7 @@ SIPCall::createSinks(ConfInfo& infos)
         }
     }
 
+    // find VideoReceiveThead, get it't sink and create "child" sinks for it (one sink - one participant)
     std::vector<std::shared_ptr<video::VideoFrameActiveWriter>> sinks;
     for (const auto& videoRtp : getRtpSessionList(MediaType::MEDIA_VIDEO)) {
         auto& videoReceive = std::static_pointer_cast<video::VideoRtpSession>(videoRtp)
@@ -2771,7 +2774,7 @@ SIPCall::peerMuted(bool muted, int streamIdx)
     peerMuted_ = muted;
     if (auto conf = conf_.lock())
         conf->updateMuted();
-    
+
     emitSignal<libsip_core::CallSignal::PeerMuted>(getCallId(), peerMuted_);
 }
 

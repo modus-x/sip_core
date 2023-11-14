@@ -131,6 +131,9 @@ public:
 
     static void fini();
 
+
+    static std::string logLevelToString(int level);
+
     ///
     /// Stream fashion logging.
     ///
@@ -142,6 +145,7 @@ public:
     }
 
 private:
+
 
     int level_;              ///< LOG_XXXX values
     const char* const file_; ///< contextual filename (printed as header)

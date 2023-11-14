@@ -185,7 +185,9 @@ Conference::Conference(const std::shared_ptr<Account>& account,
                     if (uri.empty() && !hostAdded) {
                         hostAdded = true;
                         peerId = "host"sv;
-                        deviceId = Manager::instance().getVideoManager().videoDeviceMonitor.getMRLForDefaultDevice();
+                        deviceId = Manager::instance()
+                                       .getVideoManager()
+                                       .videoDeviceMonitor.getMRLForDefaultDevice();
                         isLocalMuted = shared->isMediaSourceMuted(MediaType::MEDIA_AUDIO);
                         isPeerRecording = shared->isRecording();
                     }
@@ -272,6 +274,11 @@ Conference::Conference(const std::shared_ptr<Account>& account,
     parser_.onVoiceActivity(
         [&](const auto& streamId, bool state) { setVoiceActivity(streamId, state); });
     sip_core_tracepoint(conference_begin, id_.c_str());
+
+    // if not muted, start inputs
+    if (!isMediaSourceMuted(MediaType::MEDIA_VIDEO)) {
+        videoMixer_->startInputs();
+    }
 }
 
 Conference::~Conference()
@@ -294,7 +301,7 @@ Conference::~Conference()
             toggleRecording();
             if (not call->isRecording()) {
                 SIP_CORE_DEBUG("Conference was recorded, start recording for conf {:s}",
-                           call->getCallId());
+                               call->getCallId());
                 call->toggleRecording();
             }
         }
@@ -326,9 +333,9 @@ void
 Conference::setState(State state)
 {
     SIP_CORE_DEBUG("[conf {:s}] Set state to [{:s}] (was [{:s}])",
-               id_,
-               getStateStr(state),
-               getStateStr());
+                   id_,
+                   getStateStr(state),
+                   getStateStr());
 
     confState_ = state;
 }
@@ -344,7 +351,9 @@ Conference::setLocalHostDefaultMediaSource()
             = {MediaType::MEDIA_AUDIO, false, false, true, {}, sip_utils::DEFAULT_AUDIO_STREAMID};
     }
 
-    SIP_CORE_DEBUG("[conf {:s}] Setting local host audio source to [{:s}]", id_, audioAttr.toString());
+    SIP_CORE_DEBUG("[conf {:s}] Setting local host audio source to [{:s}]",
+                   id_,
+                   audioAttr.toString());
     hostSources_.emplace_back(audioAttr);
 
 #ifdef ENABLE_VIDEO
@@ -361,8 +370,8 @@ Conference::setLocalHostDefaultMediaSource()
                    sip_utils::DEFAULT_VIDEO_STREAMID};
         }
         SIP_CORE_DEBUG("[conf {:s}] Setting local host video source to [{:s}]",
-                   id_,
-                   videoAttr.toString());
+                       id_,
+                       videoAttr.toString());
         hostSources_.emplace_back(videoAttr);
     }
 #endif
@@ -411,7 +420,7 @@ Conference::isMediaSourceMuted(MediaType type) const
             return true;
         if (source.type_ == MediaType::MEDIA_NONE) {
             SIP_CORE_WARN("The host source for %s is not set. The mute state is meaningless",
-                      source.mediaTypeToString(source.type_));
+                          source.mediaTypeToString(source.type_));
             // Assume muted if the media is not present.
             return true;
         }
@@ -450,18 +459,17 @@ Conference::takeOverMediaSourceControl(const std::string& callId)
             // Nothing to do if the call does not have a stream with
             // the requested media.
             SIP_CORE_DEBUG("[Call: {:s}] Does not have an active [{:s}] media source",
-                       callId,
-                       MediaAttribute::mediaTypeToString(mediaType));
+                           callId,
+                           MediaAttribute::mediaTypeToString(mediaType));
             continue;
         }
 
         if (getState() == State::ACTIVE_ATTACHED) {
-            // To mute the local source, all the sources of the participating
-            // calls must be muted. If it's the first participant, just use
-            // its mute state.
+            // If it's the first participant, just use its mute state.
             if (participants_.size() == 1) {
                 setLocalHostMuteState(iter->type_, iter->muted_);
             } else {
+                // The best logic here is to set muted only if previous state was muted.
                 setLocalHostMuteState(iter->type_, iter->muted_ and isMediaSourceMuted(iter->type_));
             }
         }
@@ -478,15 +486,17 @@ Conference::takeOverMediaSourceControl(const std::string& callId)
     for (auto mediaType : mediaTypeList) {
         if (mediaType == MediaType::MEDIA_AUDIO) {
             bool muted = isMediaSourceMuted(MediaType::MEDIA_AUDIO);
-            SIP_CORE_WARN("Take over [AUDIO] control from call %s - current local source state [%s]",
-                      callId.c_str(),
-                      muted ? "muted" : "un-muted");
+            SIP_CORE_WARN(
+                "Take over [AUDIO] control from call %s - current local source state [%s]",
+                callId.c_str(),
+                muted ? "muted" : "un-muted");
             emitSignal<libsip_core::CallSignal::AudioMuted>(id_, muted);
         } else {
             bool muted = isMediaSourceMuted(MediaType::MEDIA_VIDEO);
-            SIP_CORE_WARN("Take over [VIDEO] control from call %s - current local source state [%s]",
-                      callId.c_str(),
-                      muted ? "muted" : "un-muted");
+            SIP_CORE_WARN(
+                "Take over [VIDEO] control from call %s - current local source state [%s]",
+                callId.c_str(),
+                muted ? "muted" : "un-muted");
             emitSignal<libsip_core::CallSignal::VideoMuted>(id_, muted);
         }
     }
@@ -497,7 +507,7 @@ Conference::requestMediaChange(const std::vector<libsip_core::MediaMap>& mediaLi
 {
     if (getState() != State::ACTIVE_ATTACHED) {
         SIP_CORE_ERR("[conf %s] Request media change can be performed only in attached mode",
-                 getConfId().c_str());
+                     getConfId().c_str());
         return false;
     }
 
@@ -506,53 +516,55 @@ Conference::requestMediaChange(const std::vector<libsip_core::MediaMap>& mediaLi
     auto mediaAttrList = MediaAttribute::buildMediaAttributesList(mediaList, false);
 
     for (auto const& mediaAttr : mediaAttrList) {
-        SIP_CORE_DEBUG("[conf {:s}] New requested media: {:s}", getConfId(), mediaAttr.toString(true));
+        SIP_CORE_DEBUG("[conf {:s}] New requested media: {:s}",
+                       getConfId(),
+                       mediaAttr.toString(true));
     }
 
-    std::vector<std::string> newVideoInputs;
+
     for (auto& mediaAttr : mediaAttrList) {
         // Find media
         auto oldIdx = std::find_if(hostSources_.begin(), hostSources_.end(), [&](auto oldAttr) {
             return oldAttr.sourceUri_ == mediaAttr.sourceUri_ && oldAttr.type_ == mediaAttr.type_;
         });
-        // If video, add to newVideoInputs
-        // NOTE: For now, only supports video
-        if (mediaAttr.type_ == MediaType::MEDIA_VIDEO) {
 
-            if (mediaAttr.sourceUri_ == "") {
-                mediaAttr.sourceUri_ =  Manager::instance().getVideoManager().videoDeviceMonitor.getMRLForDefaultDevice();
+        // if it new source, we should switch inputs
+        if (oldIdx == hostSources_.end()) {
+            std::vector<std::string> newVideoInputs;
+            // If video, add to newVideoInputs (if not specified, set default device)
+            // NOTE: For now, only supports video
+            if (mediaAttr.type_ == MediaType::MEDIA_VIDEO) {
+                if (mediaAttr.sourceUri_ == "") {
+                    mediaAttr.sourceUri_ = Manager::instance()
+                                               .getVideoManager()
+                                               .videoDeviceMonitor.getMRLForDefaultDevice();
+                }
+
+                newVideoInputs.emplace_back(mediaAttr.sourceUri_);
+
+                // if videoMixer_ is defined, switch inputs!
+                if (videoMixer_) {
+                    videoMixer_->switchInputs(newVideoInputs);
+                }
             }
-
-            newVideoInputs.emplace_back(mediaAttr.sourceUri_);
-
-        }
-        if (oldIdx != hostSources_.end()) {
-            // Check if muted status changes
-            if (mediaAttr.muted_ != oldIdx->muted_) {
-                // If the current media source is muted, just call un-mute, it
-                // will set the new source as input.
-                muteLocalHost(mediaAttr.muted_,
-                              mediaAttr.type_ == MediaType::MEDIA_AUDIO
-                                  ? libsip_core::Media::Details::MEDIA_TYPE_AUDIO
-                                  : libsip_core::Media::Details::MEDIA_TYPE_VIDEO);
-            }
         }
 
+        // Check if muted status changes OR if new device is added
+        if (oldIdx == hostSources_.end() || mediaAttr.muted_ != oldIdx->muted_) {
+            // If the current media source is muted, just call un-mute, it
+            // will attach / detach input to / from mixer
+            muteLocalHost(mediaAttr.muted_,
+                          mediaAttr.type_ == MediaType::MEDIA_AUDIO
+                              ? libsip_core::Media::Details::MEDIA_TYPE_AUDIO
+                              : libsip_core::Media::Details::MEDIA_TYPE_VIDEO);
+        }
     }
 
-#ifdef ENABLE_VIDEO
-    if (videoMixer_)
-        videoMixer_->switchInputs(newVideoInputs);
-#endif
-    hostSources_ = mediaAttrList; // New medias
-
-    // It's host medias, so no need to negotiate anything, but inform the client.
-    reportMediaNegotiationStatus();
-    return true;
+    hostSources_ = mediaAttrList; // New medias, MUST be set after everything else
 }
 
-void
-Conference::handleMediaChangeRequest(const std::shared_ptr<Call>& call,
+// handle media change request OF CALL -> should auto - add / auto - delete patricipant video from mixer!
+void Conference::handleMediaChangeRequest(const std::shared_ptr<Call>& call,
                                      const std::vector<libsip_core::MediaMap>& remoteMediaList)
 {
     SIP_CORE_DEBUG("Conf [{:s}] Answer to media change request", getConfId());
@@ -647,12 +659,10 @@ Conference::addParticipant(const std::string& participant_id)
         // In conference, if a participant joins with an audio only
         // call, it must be listed in the audioonlylist.
         auto mediaList = call->getMediaAttributeList();
-        if (call->peerUri().find("swarm:") != 0) { // We're hosting so it's already ourself.
-            if (videoMixer_ && not MediaAttribute::hasMediaType(mediaList, MediaType::MEDIA_VIDEO)) {
-                videoMixer_->addAudioOnlySource(call->getCallId(),
-                                                sip_utils::streamId(call->getCallId(),
-                                                                    sip_utils::DEFAULT_AUDIO_STREAMID));
-            }
+        if (videoMixer_ && not MediaAttribute::hasMediaType(mediaList, MediaType::MEDIA_VIDEO)) {
+            videoMixer_->addAudioOnlySource(call->getCallId(),
+                                            sip_utils::streamId(call->getCallId(),
+                                                                sip_utils::DEFAULT_AUDIO_STREAMID));
         }
         call->enterConference(shared_from_this());
         // Continue the recording for the conference if one participant was recording
@@ -661,7 +671,7 @@ Conference::addParticipant(const std::string& participant_id)
             call->toggleRecording();
             if (not this->isRecording()) {
                 SIP_CORE_DEBUG("One participant was recording, start recording for conference {:s}",
-                           getConfId());
+                               getConfId());
                 this->toggleRecording();
             }
         }
@@ -765,8 +775,7 @@ Conference::sendConferenceInfos()
             return;
 
         call->sendConfInfo(
-            getConfInfoHostUri(account->getUsername() + "@server", call->getPeerNumber())
-                .toString());
+            getConfInfoHostUri(account->getUsername() + "@server", call->getPeerNumber()).toString());
     });
 
     auto confInfo = getConfInfoHostUri("", "");
@@ -775,9 +784,8 @@ Conference::sendConferenceInfos()
 #endif
 
     // Inform client that layout has changed
-    sip_core::emitSignal<libsip_core::CallSignal::OnConferenceInfosUpdated>(id_,
-                                                                    confInfo
-                                                                        .toVectorMapStringString());
+    sip_core::emitSignal<libsip_core::CallSignal::OnConferenceInfosUpdated>(
+        id_, confInfo.toVectorMapStringString());
 }
 
 #ifdef ENABLE_VIDEO
@@ -855,7 +863,11 @@ Conference::attachLocalParticipant()
                 if (source.type_ == MediaType::MEDIA_VIDEO)
                     videoInputs.emplace_back(source.sourceUri_);
             }
+
             videoMixer_->switchInputs(videoInputs);
+            if (!isMediaSourceMuted(MediaType::MEDIA_VIDEO)) {
+                videoMixer_->startInputs();
+            }
         }
 #endif
     } else {
@@ -1014,6 +1026,11 @@ Conference::switchInput(const std::string& input)
 
     if (auto mixer = videoMixer_) {
         mixer->switchInputs({input});
+
+        // if local video was not muted, start / restart video input again
+        if (!isMediaSourceMuted(MediaType::MEDIA_VIDEO)) {
+            mixer->startInputs();
+        }
     }
 #endif
 }
@@ -1505,7 +1522,10 @@ Conference::hangupParticipant(const std::string& accountUri, const std::string& 
         }
         if (auto call = getCallFromPeerID(string_remove_suffix(remoteHost, '@'))) {
             // Forward to the remote host.
-            libsip_core::hangupParticipant(acc->getAccountID(), call->getCallId(), accountUri, deviceId);
+            libsip_core::hangupParticipant(acc->getAccountID(),
+                                           call->getCallId(),
+                                           accountUri,
+                                           deviceId);
         }
     }
 }
@@ -1516,7 +1536,7 @@ Conference::muteLocalHost(bool is_muted, const std::string& mediaType)
     if (mediaType.compare(libsip_core::Media::Details::MEDIA_TYPE_AUDIO) == 0) {
         if (is_muted == isMediaSourceMuted(MediaType::MEDIA_AUDIO)) {
             SIP_CORE_DEBUG("Local audio source already in [{:s}] state",
-                       is_muted ? "muted" : "un-muted");
+                           is_muted ? "muted" : "un-muted");
             return;
         }
 
@@ -1541,11 +1561,12 @@ Conference::muteLocalHost(bool is_muted, const std::string& mediaType)
 
         if (is_muted == isMediaSourceMuted(MediaType::MEDIA_VIDEO)) {
             SIP_CORE_DEBUG("Local video source already in [{:s}] state",
-                       is_muted ? "muted" : "un-muted");
+                           is_muted ? "muted" : "un-muted");
             return;
         }
         setLocalHostMuteState(MediaType::MEDIA_VIDEO, is_muted);
         if (is_muted) {
+            // detach local inputs from this conference
             if (auto mixer = videoMixer_) {
                 SIP_CORE_DBG("Muting local video sources");
                 mixer->stopInputs();
@@ -1553,12 +1574,7 @@ Conference::muteLocalHost(bool is_muted, const std::string& mediaType)
         } else {
             if (auto mixer = videoMixer_) {
                 SIP_CORE_DBG("Un-muting local video sources");
-                std::vector<std::string> videoInputs;
-                for (const auto& source : hostSources_) {
-                    if (source.type_ == MediaType::MEDIA_VIDEO)
-                        videoInputs.emplace_back(source.sourceUri_);
-                }
-                mixer->switchInputs(videoInputs);
+                mixer->startInputs();
             }
         }
         emitSignal<libsip_core::CallSignal::VideoMuted>(id_, is_muted);

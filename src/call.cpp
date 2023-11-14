@@ -661,7 +661,9 @@ Call::setConferenceInfo(const std::string& msg)
 #ifdef ENABLE_VIDEO
             createSinks(confInfo_);
 #endif
-            // Inform client that layout has changed
+            // Inform client that layout has changed. WARNING: conferenceCreated
+            // is NOT called! so that is how client can be sure that this
+            // conference is remote
             sip_core::emitSignal<libsip_core::CallSignal::OnConferenceInfosUpdated>(
                 id_, confInfo_.toVectorMapStringString());
         } else if (auto conf = conf_.lock()) {

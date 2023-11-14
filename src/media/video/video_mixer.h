@@ -24,6 +24,7 @@
 #include "noncopyable.h"
 #include "video_base.h"
 #include "video_scaler.h"
+#include "video_input.h"
 #include "threadloop.h"
 #include "media_stream.h"
 
@@ -79,13 +80,17 @@ public:
     /**
      * Set all inputs at once
      * @param inputs        New inputs
-     * @note previous inputs will be stopped
+     * @note previous inputs will be stopped, new inputs won't be automatically turned on.
+     * until these inputs are not attached, black frames will be sent
      */
     void switchInputs(const std::vector<std::string>& inputs);
+
     /**
      * Stop all inputs
      */
     void stopInputs();
+
+    void startInputs();
 
     void setActiveStream(const std::string& id);
     void resetActiveStream()
@@ -179,7 +184,7 @@ private:
 
     std::chrono::time_point<std::chrono::steady_clock> nextProcess_;
     std::mutex localInputsMtx_;
-    std::vector<std::shared_ptr<VideoFrameActiveWriter>> localInputs_ {};
+    std::vector<std::shared_ptr<VideoInput>> localInputs_ {};
     void stopInput(const std::shared_ptr<VideoFrameActiveWriter>& input);
 
     VideoScaler scaler_;
