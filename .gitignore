@@ -143,4 +143,5 @@ compile_commands.json
 
 # sip core standalone builds
 sip-core-*
+cmake-build-debug-visual-studio/
 
