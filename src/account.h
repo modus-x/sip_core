@@ -235,6 +235,10 @@ public:
 
     void setEnabled(bool enable) { config_->enabled = enable; }
 
+    bool isDND () const noexcept { return isDND_; }
+
+    void setDND(bool dnd) noexcept { isDND_ = dnd; }
+
     /**
      * Tell if the account is activated
      * (can currently be used).
@@ -456,6 +460,9 @@ protected:
     std::vector<unsigned> getAccountCodecInfoIdList(MediaType mediaType) const;
     void setAllCodecsActive(MediaType mediaType, bool active);
     void sortCodec();
+
+    // just ignore incoming calls with refusing
+    bool isDND_ {false};
 };
 
 static inline std::ostream&

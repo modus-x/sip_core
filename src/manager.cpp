@@ -2329,6 +2329,10 @@ Manager::ManagerPimpl::processIncomingCall(const std::string& accountId, Call& i
         return;
     }
 
+    if (account->isDND()) {
+        base_.refuseCall(accountId, incomCallId);
+    }
+
     auto const& mediaList = MediaAttribute::mediaAttributesToMediaMaps(
         incomCall.getMediaAttributeList());
 

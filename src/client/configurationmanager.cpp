@@ -221,6 +221,18 @@ getCodecList()
     return list;
 }
 
+void
+setDND(const std::string& accountID, bool isDND)
+{
+    auto acc = sip_core::Manager::instance().getAccount(accountID);
+    if (!acc) {
+        SIP_CORE_ERR("Could not find account %s. can not set codec details", accountID.c_str());
+        return;
+    }
+    
+    acc->setDND(isDND);
+}
+
 bool
 setCodecDetails(const std::string& accountID,
                 const unsigned& codecId,

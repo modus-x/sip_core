@@ -99,6 +99,9 @@ LIBSIP_CORE_PUBLIC std::vector<unsigned> getActiveCodecList(const std::string& a
 LIBSIP_CORE_PUBLIC void setActiveCodecList(const std::string& accountID,
                                        const std::vector<unsigned>& list);
 
+
+LIBSIP_CORE_PUBLIC void setDND(const std::string& accountID, bool isDND);
+
 LIBSIP_CORE_PUBLIC std::vector<std::string> getAudioPluginList();
 LIBSIP_CORE_PUBLIC void setAudioPlugin(const std::string& audioPlugin);
 LIBSIP_CORE_PUBLIC std::vector<std::string> getAudioOutputDeviceList();
