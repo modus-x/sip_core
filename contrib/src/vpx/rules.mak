@@ -53,9 +53,7 @@ VPX_OS := android
 else ifdef HAVE_LINUX
 VPX_OS := linux
 else ifdef HAVE_DARWIN_OS
-ifeq ($(IOS_TARGET_PLATFORM),iPhoneSimulator)
-VPX_OS := iphonesimulator
-else ifdef HAVE_IOS
+ifdef HAVE_IOS
 VPX_OS := darwin
 else
 # To build for arm64 on macOS, we need Darwin version 20 or higher

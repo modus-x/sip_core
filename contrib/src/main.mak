@@ -166,7 +166,11 @@ CCAS=$(CC) -c
 ifdef HAVE_IOS
 
 ifndef MIN_IOS_VERSION
-MIN_IOS_VERSION=9.3
+MIN_IOS_VERSION=13.0
+endif
+
+ifndef MIN_IOS
+MIN_IOS=13.0
 endif
 
 CC=xcrun clang
