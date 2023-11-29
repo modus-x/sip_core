@@ -628,7 +628,6 @@ Manager::init(const std::string& config_file, const std::string& data_path)
     SIP_CORE_DBG("Using PJSIP version %s for %s", pj_get_version(), PJ_OS_NAME);
 
     SIP_CORE_DBG("Using FFmpeg version %s", av_version_info());
-SIP_CORE_DBG("Using TEEEST %s", av_version_info());
 
     // Manager can restart without being recreated (Unit tests)
     // So only create the SipLink once
@@ -733,7 +732,7 @@ Manager::monitor(bool continuous)
 {
     Logger::setMonitorLog(true);
     SIP_CORE_DBG("############## START MONITORING ##############");
-    SIP_CORE_DBG("Using PJSIP version %s for %s", pj_get_version(), PJ_OS_NAME);
+    SIP_CORE_DBG("Using PJSIP %s for %s", pj_get_version(), PJ_OS_NAME);
 
 #ifdef __linux__
 #if defined(__ANDROID__)
