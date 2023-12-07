@@ -4,8 +4,8 @@ Date: Thu, 27 Feb 2020 13:44:47 -0500
 Subject: [PATCH 9/9] add config site
 
 ---
- pjlib/include/pj/config_site.h | 26 ++++++++++++++++++++++++++
- 1 file changed, 26 insertions(+)
+ pjlib/include/pj/config_site.h | 28 ++++++++++++++++++++++++++
+ 1 file changed, 28 insertions(+)
  create mode 100644 pjlib/include/pj/config_site.h
 
 diff --git a/pjlib/include/pj/config_site.h b/pjlib/include/pj/config_site.h
@@ -13,7 +13,7 @@ new file mode 100644
 index 000000000..7b8ea2561
 --- /dev/null
 +++ b/pjlib/include/pj/config_site.h
-@@ -0,0 +1,26 @@
+@@ -0,0 +1,28 @@
 +#include "config_site_sample.h"
 +
 +/*
@@ -27,6 +27,8 @@ index 000000000..7b8ea2561
 +*/
 +#define PJSIP_MAX_PKT_LEN                       8000
 +#define PJSIP_TRANSPORT_SERVER_IDLE_TIME        3
++#define PJSIP_AUTH_HEADER_CACHING 1
++#define PJSIP_AUTH_AUTO_SEND_NEXT 1
 +
 +/*
 +* PJNAT settings.

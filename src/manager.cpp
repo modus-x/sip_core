@@ -2036,8 +2036,8 @@ Manager::getHomePath()
 void
 Manager::startAudio()
 {
-    if (!pimpl_->audiodriver_)
-        pimpl_->audiodriver_.reset(pimpl_->base_.audioPreference.createAudioLayer());
+    // if (!pimpl_->audiodriver_)
+    pimpl_->audiodriver_.reset(pimpl_->base_.audioPreference.createAudioLayer());
     constexpr std::array<AudioDeviceType, 3> TYPES {AudioDeviceType::CAPTURE,
                                                     AudioDeviceType::PLAYBACK,
                                                     AudioDeviceType::RINGTONE};

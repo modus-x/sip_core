@@ -800,7 +800,7 @@ SIPVoIPLink::guessAccount(std::string_view userName,
 void
 SIPVoIPLink::handleEvents()
 {
-    const pj_time_val timeout = {5, 0};
+    const pj_time_val timeout = {0, 100};
     if (auto ret = pjsip_endpt_handle_events(endpt_, &timeout))
         SIP_CORE_ERR("pjsip_endpt_handle_events failed with error %s",
                      sip_utils::sip_strerror(ret).c_str());

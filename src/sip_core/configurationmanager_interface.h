@@ -138,6 +138,7 @@ LIBSIP_CORE_PUBLIC void muteRingtone(bool mute);
 LIBSIP_CORE_PUBLIC std::vector<std::string> getSupportedAudioManagers();
 LIBSIP_CORE_PUBLIC std::string getAudioManager();
 LIBSIP_CORE_PUBLIC bool setAudioManager(const std::string& api);
+LIBSIP_CORE_PUBLIC bool isInitialized();
 
 LIBSIP_CORE_PUBLIC std::string getRecordPath();
 LIBSIP_CORE_PUBLIC std::string getHomePath();

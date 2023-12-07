@@ -38,13 +38,13 @@ dispatch_queue_t audioConfigurationQueueIOS() {
 
 // AudioLayer implementation.
 CoreLayer::CoreLayer(const AudioPreference &pref)
-    : AudioLayer(pref)
-    , indexIn_(pref.getAlsaCardin())
-    , indexOut_(pref.getAlsaCardout())
-    , indexRing_(pref.getAlsaCardRingtone())
-    , playbackBuff_(0, audioFormat_)
+: AudioLayer(pref)
+, indexIn_(pref.getAlsaCardin())
+, indexOut_(pref.getAlsaCardout())
+, indexRing_(pref.getAlsaCardRingtone())
+, playbackBuff_(0, audioFormat_)
 {
-     audioConfigurationQueue = dispatch_queue_create("ru.svetets.audioConfigurationQueueIOS", DISPATCH_QUEUE_SERIAL);
+    audioConfigurationQueue = dispatch_queue_create("ru.svetets.audioConfigurationQueueIOS", DISPATCH_QUEUE_SERIAL);
 }
 
 CoreLayer::~CoreLayer()
@@ -74,7 +74,7 @@ CoreLayer::getPlaybackDeviceList() const
     // input/output pairs.
     // Unavailable options like the receiver on iPad can be ignored by the client.
     ret.assign({"built_in_spk", "bluetooth", "headphones", "receiver"});
-
+    
     return ret;
 }
 
@@ -99,27 +99,26 @@ bool
 CoreLayer::initAudioLayerIO(AudioDeviceType stream)
 {
     SIP_CORE_DBG("iOS CoreLayer - initializing audio session");
-
+    
     AudioComponentDescription outputUnitDescription;
     outputUnitDescription.componentType             = kAudioUnitType_Output;
     outputUnitDescription.componentSubType          = kAudioUnitSubType_VoiceProcessingIO;
     outputUnitDescription.componentManufacturer     = kAudioUnitManufacturer_Apple;
     outputUnitDescription.componentFlags            = 0;
     outputUnitDescription.componentFlagsMask        = 0;
-
+    
     auto comp = AudioComponentFindNext(nullptr, &outputUnitDescription);
     if (comp == nullptr) {
         SIP_CORE_ERR("iOS CoreLayer - Can't find default output audio component.");
         return false;
     }
-
+    
     checkErr(AudioComponentInstanceNew(comp, &ioUnit_));
-
-    // bool setUpInput = stream == AudioDeviceType::ALL || stream == AudioDeviceType::CAPTURE;
+    
     NSError* error = nil;
     AVAudioSessionCategory audioCategory = AVAudioSessionCategoryPlayAndRecord;
     AVAudioSessionMode mode = AVAudioSessionModeVoiceChat;
-    AVAudioSessionCategoryOptions options = AVAudioSessionCategoryOptionAllowBluetooth;
+    AVAudioSessionCategoryOptions options = AVAudioSessionCategoryOptionAllowBluetooth | AVAudioSessionCategoryOptionMixWithOthers;
     [[AVAudioSession sharedInstance] setCategory:audioCategory mode: mode options:options error:&error];
     if (error) {
         NSLog(@"iOS CoreLayer - Initializing audio session failed, %@",[error localizedDescription]);
@@ -146,9 +145,7 @@ CoreLayer::initAudioLayerIO(AudioDeviceType stream)
             break;
     }
     setupOutputBus();
-    // if (setUpInput) {
-   setupInputBus();
-    // }
+    setupInputBus();
     bindCallbacks();
     return true;
 }
@@ -156,13 +153,13 @@ CoreLayer::initAudioLayerIO(AudioDeviceType stream)
 void
 CoreLayer::setupOutputBus() {
     SIP_CORE_DBG("iOS CoreLayer - initializing output bus");
-
+    
     AudioUnitScope outputBus = 0;
     UInt32 size;
-
+    
     AudioStreamBasicDescription outputASBD;
     size = sizeof(outputASBD);
-
+    
     Float64 outSampleRate;
     size = sizeof(outSampleRate);
     AudioSessionGetProperty(kAudioSessionProperty_CurrentHardwareSampleRate,
@@ -170,7 +167,7 @@ CoreLayer::setupOutputBus() {
                             &outSampleRate);
     outputASBD.mSampleRate = outSampleRate;
     outSampleRate_ = outputASBD.mSampleRate;
-
+    
     size = sizeof(outputASBD);
     checkErr(AudioUnitGetProperty(ioUnit_,
                                   kAudioUnitProperty_StreamFormat,
@@ -178,15 +175,15 @@ CoreLayer::setupOutputBus() {
                                   outputBus,
                                   &outputASBD,
                                   &size));
-
+    
     // Only change sample rate.
     outputASBD.mSampleRate = outSampleRate_;
     outputASBD.mFormatID = kAudioFormatLinearPCM;
     outputASBD.mFormatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked;
-
+    
     outSampleRate_ = outputASBD.mSampleRate;
     outChannelsPerFrame_ = outputASBD.mChannelsPerFrame;
-
+    
     // Set output steam format
     checkErr(AudioUnitSetProperty(ioUnit_,
                                   kAudioUnitProperty_StreamFormat,
@@ -194,21 +191,21 @@ CoreLayer::setupOutputBus() {
                                   outputBus,
                                   &outputASBD,
                                   size));
-
+    
     hardwareFormatAvailable({static_cast<unsigned int>(outputASBD.mSampleRate),
-                            static_cast<unsigned int>(outputASBD.mChannelsPerFrame)});
+        static_cast<unsigned int>(outputASBD.mChannelsPerFrame)});
 }
 
 void
 CoreLayer::setupInputBus() {
-    SIP_CORE_DBG("iOS CoreLayer - initializing input bus");
-
+    SIP_CORE_DBG("iOS CoreLayer - initializing input bus STARTED");
+    
     AudioUnitScope inputBus = 1;
     UInt32 size;
-
+    
     AudioStreamBasicDescription inputASBD;
     size = sizeof(inputASBD);
-
+    
     // Enable input
     UInt32 flag = 1;
     checkErr(AudioUnitSetProperty (ioUnit_,
@@ -217,7 +214,7 @@ CoreLayer::setupInputBus() {
                                    inputBus,
                                    &flag,
                                    sizeof(flag)));
-
+    
     // Setup audio formats
     checkErr(AudioUnitGetProperty(ioUnit_,
                                   kAudioUnitProperty_StreamFormat,
@@ -225,17 +222,17 @@ CoreLayer::setupInputBus() {
                                   inputBus,
                                   &inputASBD,
                                   &size));
-
+    
     AVAudioSession *session = [AVAudioSession sharedInstance];
     // Replace AudioSessionGetProperty with AVAudioSession
     Float64 inSampleRate = session.sampleRate;
     Float32 bufferDuration = session.IOBufferDuration;
-
+    
     inputASBD.mSampleRate = inSampleRate;
     inputASBD.mFormatID = kAudioFormatLinearPCM;
     inputASBD.mFormatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked;
-
-
+    
+    
     // Set format on output *SCOPE* in input *BUS*.
     checkErr(AudioUnitGetProperty(ioUnit_,
                                   kAudioUnitProperty_StreamFormat,
@@ -245,13 +242,13 @@ CoreLayer::setupInputBus() {
                                   &size));
     inputASBD.mSampleRate = inSampleRate;
     audioInputFormat_ = {static_cast<unsigned int>(inputASBD.mSampleRate),
-                         static_cast<unsigned int>(inputASBD.mChannelsPerFrame)};
+        static_cast<unsigned int>(inputASBD.mChannelsPerFrame)};
     hardwareInputFormatAvailable(audioInputFormat_);
-
+    
     // Keep some values to not ask them every time the read callback is fired up
     inSampleRate_ = inputASBD.mSampleRate;
     inChannelsPerFrame_ = inputASBD.mChannelsPerFrame;
-
+    
     size = sizeof(inputASBD);
     checkErr(AudioUnitSetProperty(ioUnit_,
                                   kAudioUnitProperty_StreamFormat,
@@ -259,7 +256,7 @@ CoreLayer::setupInputBus() {
                                   inputBus,
                                   &inputASBD,
                                   size));
-
+    
     // Input buffer setup. Note that ioData is empty and we have to store data
     // in another buffer.
     flag = 0;
@@ -269,20 +266,21 @@ CoreLayer::setupInputBus() {
                          inputBus,
                          &flag,
                          sizeof(flag));
-
+    
     UInt32 bufferSizeFrames = std::round(inSampleRate_ * bufferDuration);
     UInt32 bufferSizeBytes = bufferSizeFrames * sizeof(Float32);
     size = offsetof(AudioBufferList, mBuffers[0]) + (sizeof(AudioBuffer) * inputASBD.mChannelsPerFrame);
     rawBuff_.reset(new Byte[size + bufferSizeBytes * inputASBD.mChannelsPerFrame]);
     captureBuff_ = reinterpret_cast<::AudioBufferList*>(rawBuff_.get());
     captureBuff_->mNumberBuffers = inputASBD.mChannelsPerFrame;
-
+    
     auto bufferBasePtr = rawBuff_.get() + size;
     for (UInt32 i = 0; i < captureBuff_->mNumberBuffers; ++i) {
         captureBuff_->mBuffers[i].mNumberChannels = 1;
         captureBuff_->mBuffers[i].mDataByteSize = bufferSizeBytes;
         captureBuff_->mBuffers[i].mData =  bufferBasePtr + bufferSizeBytes * i;
     }
+    SIP_CORE_DBG("iOS CoreLayer - initializing input bus FINISHED");
 }
 
 void
@@ -290,30 +288,30 @@ CoreLayer::bindCallbacks() {
     AURenderCallbackStruct callback;
     AudioUnitScope outputBus = 0;
     AudioUnitScope inputBus = 1;
-
+    
     // Output callback setup
     callback.inputProc = outputCallback;
     callback.inputProcRefCon = this;
-
+    
     checkErr(AudioUnitSetProperty(ioUnit_,
                                   kAudioUnitProperty_SetRenderCallback,
                                   kAudioUnitScope_Global,
                                   outputBus,
                                   &callback,
                                   sizeof(AURenderCallbackStruct)));
-
+    
     // Input callback setup
     AURenderCallbackStruct inputCall;
     inputCall.inputProc = inputCallback;
     inputCall.inputProcRefCon = this;
-
+    
     checkErr(AudioUnitSetProperty(ioUnit_,
                                   kAudioOutputUnitProperty_SetInputCallback,
                                   kAudioUnitScope_Global,
                                   inputBus,
                                   &inputCall,
                                   sizeof(AURenderCallbackStruct)));
-
+    
 }
 
 void
@@ -321,20 +319,22 @@ CoreLayer::startStream(AudioDeviceType stream)
 {
     dispatch_async(audioConfigurationQueueIOS(), ^{
         SIP_CORE_DBG("iOS CoreLayer - Start Stream %d", stream );
+        const std::lock_guard<std::mutex> lock(layerLock_);
         auto currentCategory =  [[AVAudioSession sharedInstance] category];
-
-        bool updateStream = currentCategory == AVAudioSessionCategoryPlayback && (stream == AudioDeviceType::CAPTURE || stream == AudioDeviceType::ALL);
+        
+        bool updateStream = false;
+        bool started = status_ == Status::Started;
+        
         if (status_ == Status::Started) {
-if (updateStream)
-        destroyAudioLayer();
-        else
-        return;
+            if (updateStream)
+                destroyAudioLayer();
+            else
+                return;
         }
         status_ = Status::Started;
-
-        dcblocker_.reset();
+        
         if (!initAudioLayerIO(stream) || AudioUnitInitialize(ioUnit_) || AudioOutputUnitStart(ioUnit_)) {
-             SIP_CORE_DBG("iOS CoreLayer - could not load");
+            SIP_CORE_DBG("iOS CoreLayer - could not load");
             destroyAudioLayer();
             status_ = Status::Idle;
         }
@@ -344,6 +344,7 @@ if (updateStream)
 void
 CoreLayer::destroyAudioLayer()
 {
+    const std::lock_guard<std::mutex> lock(layerLock_);
     SIP_CORE_DBG("iOS CoreLayer - destroy Audio layer");
     AudioOutputUnitStop(ioUnit_);
     AudioUnitUninitialize(ioUnit_);
@@ -370,11 +371,11 @@ CoreLayer::stopStream(AudioDeviceType stream)
 
 OSStatus
 CoreLayer::outputCallback(void* inRefCon,
-    AudioUnitRenderActionFlags* ioActionFlags,
-    const AudioTimeStamp* inTimeStamp,
-    UInt32 inBusNumber,
-    UInt32 inNumberFrames,
-    AudioBufferList* ioData)
+                          AudioUnitRenderActionFlags* ioActionFlags,
+                          const AudioTimeStamp* inTimeStamp,
+                          UInt32 inBusNumber,
+                          UInt32 inNumberFrames,
+                          AudioBufferList* ioData)
 {
     static_cast<CoreLayer*>(inRefCon)->write(ioActionFlags, inTimeStamp, inBusNumber, inNumberFrames, ioData);
     return kAudioServicesNoError;
@@ -382,19 +383,19 @@ CoreLayer::outputCallback(void* inRefCon,
 
 void
 CoreLayer::write(AudioUnitRenderActionFlags* ioActionFlags,
-    const AudioTimeStamp* inTimeStamp,
-    UInt32 inBusNumber,
-    UInt32 inNumberFrames,
-    AudioBufferList* ioData)
+                 const AudioTimeStamp* inTimeStamp,
+                 UInt32 inBusNumber,
+                 UInt32 inNumberFrames,
+                 AudioBufferList* ioData)
 {
     (void) ioActionFlags;
     (void) inTimeStamp;
     (void) inBusNumber;
-
+    
     AudioFormat currentOutFormat {  static_cast<unsigned>(outSampleRate_),
-                                    static_cast<unsigned>(outChannelsPerFrame_),
-                                    AV_SAMPLE_FMT_FLTP};
-
+        static_cast<unsigned>(outChannelsPerFrame_),
+        AV_SAMPLE_FMT_FLTP};
+    
     if (auto toPlay = getPlayback(currentOutFormat, inNumberFrames)) {
         const auto& frame = *toPlay->pointer();
         for (unsigned i = 0; i < frame.channels; ++i) {
@@ -408,11 +409,11 @@ CoreLayer::write(AudioUnitRenderActionFlags* ioActionFlags,
 
 OSStatus
 CoreLayer::inputCallback(void* inRefCon,
-    AudioUnitRenderActionFlags* ioActionFlags,
-    const AudioTimeStamp* inTimeStamp,
-    UInt32 inBusNumber,
-    UInt32 inNumberFrames,
-    AudioBufferList* ioData)
+                         AudioUnitRenderActionFlags* ioActionFlags,
+                         const AudioTimeStamp* inTimeStamp,
+                         UInt32 inBusNumber,
+                         UInt32 inNumberFrames,
+                         AudioBufferList* ioData)
 {
     static_cast<CoreLayer*>(inRefCon)->read(ioActionFlags, inTimeStamp, inBusNumber, inNumberFrames, ioData);
     return kAudioServicesNoError;
@@ -420,51 +421,51 @@ CoreLayer::inputCallback(void* inRefCon,
 
 void
 CoreLayer::read(AudioUnitRenderActionFlags* ioActionFlags,
-    const AudioTimeStamp* inTimeStamp,
-    UInt32 inBusNumber,
-    UInt32 inNumberFrames,
-    AudioBufferList* ioData)
+                const AudioTimeStamp* inTimeStamp,
+                UInt32 inBusNumber,
+                UInt32 inNumberFrames,
+                AudioBufferList* ioData)
 {
     (void) ioData;
-
+    
     if (inNumberFrames <= 0) {
         SIP_CORE_WARN("iOS CoreLayer - No frames for input.");
         return;
     }
-
+    
     // Check if buffer is large enough for inNumberFrames
     UInt32 bufferSizeFrames = captureBuff_->mBuffers[0].mDataByteSize / sizeof(Float32);
-
+    
     if (inNumberFrames > bufferSizeFrames) {
         // Buffer is too small, need to reallocate
         SIP_CORE_DBG("iOS CoreLayer - Reallocating capture buffer...");
-
+        
         UInt32 bufferSizeBytes = inNumberFrames * sizeof(Float32);
         UInt32 size = offsetof(AudioBufferList, mBuffers[0]) + (sizeof(AudioBuffer) * inChannelsPerFrame_);
-
+        
         rawBuff_.reset(new Byte[size + bufferSizeBytes * inChannelsPerFrame_]);
         captureBuff_ = reinterpret_cast<::AudioBufferList*>(rawBuff_.get());
         captureBuff_->mNumberBuffers = inChannelsPerFrame_;
-
+        
         auto bufferBasePtr = rawBuff_.get() + size;
         for (UInt32 i = 0; i < captureBuff_->mNumberBuffers; ++i) {
             captureBuff_->mBuffers[i].mNumberChannels = 1;
             captureBuff_->mBuffers[i].mDataByteSize = bufferSizeBytes;
             captureBuff_->mBuffers[i].mData =  bufferBasePtr + bufferSizeBytes * i;
         }
-
+        
         // Update bufferSizeFrames
         bufferSizeFrames = inNumberFrames;
     }
-
+    
     // Write the mic samples in our buffer
     checkErr(AudioUnitRender(ioUnit_,
-            ioActionFlags,
-            inTimeStamp,
-            inBusNumber,
-            inNumberFrames,
-            captureBuff_));
-
+                             ioActionFlags,
+                             inTimeStamp,
+                             inBusNumber,
+                             inNumberFrames,
+                             captureBuff_));
+    
     auto format = audioInputFormat_;
     format.sampleFormat = AV_SAMPLE_FMT_FLTP;
     auto inBuff = std::make_shared<AudioFrame>(format, inNumberFrames);
@@ -485,15 +486,15 @@ void CoreLayer::updatePreference(AudioPreference &preference, int index, AudioDe
         case AudioDeviceType::PLAYBACK:
             preference.setAlsaCardout(index);
             break;
-
+            
         case AudioDeviceType::CAPTURE:
             preference.setAlsaCardin(index);
             break;
-
+            
         case AudioDeviceType::RINGTONE:
             preference.setAlsaCardRingtone(index);
             break;
-
+            
         default:
             break;
     }

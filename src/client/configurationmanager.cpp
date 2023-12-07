@@ -83,6 +83,11 @@ getVolatileAccountDetails(const std::string& accountID)
     return sip_core::Manager::instance().getVolatileAccountDetails(accountID);
 }
 
+bool 
+isInitialized() {
+    return sip_core::Manager::initialized;
+}
+
 void
 setAccountDetails(const std::string& accountID, const std::map<std::string, std::string>& details)
 {

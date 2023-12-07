@@ -24,6 +24,7 @@
 
 #include "audio/audiolayer.h"
 #include <AudioToolbox/AudioToolbox.h>
+#include <mutex>
 
 #define checkErr(err) \
     if (err) { \
@@ -162,6 +163,8 @@ private:
 
     std::condition_variable readyCv_ {};
     dispatch_queue_t audioConfigurationQueue;
+    
+    std::mutex layerLock_;
 };
 
 } // namespace sip_core
