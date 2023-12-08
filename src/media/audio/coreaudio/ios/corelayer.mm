@@ -98,7 +98,7 @@ CoreLayer::getAudioDeviceName(int index, AudioDeviceType type) const
 bool
 CoreLayer::initAudioLayerIO(AudioDeviceType stream)
 {
-    SIP_CORE_DBG("iOS CoreLayer - initializing audio session");
+    SIP_CORE_DBG("iOS CoreLayer - initializing audio session STARTED");
     
     AudioComponentDescription outputUnitDescription;
     outputUnitDescription.componentType             = kAudioUnitType_Output;
@@ -147,12 +147,14 @@ CoreLayer::initAudioLayerIO(AudioDeviceType stream)
     setupOutputBus();
     setupInputBus();
     bindCallbacks();
+    SIP_CORE_DBG("iOS CoreLayer - initializing audio session FINISHED");
+
     return true;
 }
 
 void
 CoreLayer::setupOutputBus() {
-    SIP_CORE_DBG("iOS CoreLayer - initializing output bus");
+    SIP_CORE_DBG("iOS CoreLayer - initializing output bus STARTED");
     
     AudioUnitScope outputBus = 0;
     UInt32 size;
@@ -194,6 +196,8 @@ CoreLayer::setupOutputBus() {
     
     hardwareFormatAvailable({static_cast<unsigned int>(outputASBD.mSampleRate),
         static_cast<unsigned int>(outputASBD.mChannelsPerFrame)});
+    SIP_CORE_DBG("iOS CoreLayer - initializing output bus FINISHED");
+
 }
 
 void
@@ -318,26 +322,30 @@ void
 CoreLayer::startStream(AudioDeviceType stream)
 {
     dispatch_async(audioConfigurationQueueIOS(), ^{
-        SIP_CORE_DBG("iOS CoreLayer - Start Stream %d", stream );
         const std::lock_guard<std::mutex> lock(layerLock_);
-        auto currentCategory =  [[AVAudioSession sharedInstance] category];
         
-        bool updateStream = false;
-        bool started = status_ == Status::Started;
-        
-        if (status_ == Status::Started) {
-            if (updateStream)
-                destroyAudioLayer();
-            else
-                return;
+        // if started, exit
+        if (status_ != Status::Idle) {
+            return;
         }
-        status_ = Status::Started;
         
+        SIP_CORE_DBG("iOS CoreLayer - Start Stream %d STARTED", stream);
+
+        // destroyAudioLayer must be safely destroyed if something is wrong
         if (!initAudioLayerIO(stream) || AudioUnitInitialize(ioUnit_) || AudioOutputUnitStart(ioUnit_)) {
-            SIP_CORE_DBG("iOS CoreLayer - could not load");
-            destroyAudioLayer();
-            status_ = Status::Idle;
+            SIP_CORE_DBG("iOS CoreLayer - Start Stream %d FINISHED BAD, destroying", stream);
+            AudioOutputUnitStop(ioUnit_);
+            AudioUnitUninitialize(ioUnit_);
+            AudioComponentInstanceDispose(ioUnit_);
+            [[AVAudioSession sharedInstance] setActive: false withOptions: AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation error: nil];
+            return;
         }
+        else {
+            SIP_CORE_DBG("iOS CoreLayer - Start Stream %d FINISHED OK", stream);
+        }
+        
+        status_ = Status::Started;
+
     });
 }
 
@@ -345,11 +353,18 @@ void
 CoreLayer::destroyAudioLayer()
 {
     const std::lock_guard<std::mutex> lock(layerLock_);
-    SIP_CORE_DBG("iOS CoreLayer - destroy Audio layer");
+
+    // if not started, exit
+    if (status_ != Status::Started) {
+        return;
+    }
+    
+    SIP_CORE_DBG("iOS CoreLayer - destroy!!!!!!! Audio layer");
     AudioOutputUnitStop(ioUnit_);
     AudioUnitUninitialize(ioUnit_);
     AudioComponentInstanceDispose(ioUnit_);
     [[AVAudioSession sharedInstance] setActive: false withOptions: AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation error: nil];
+    status_ = Status::Idle;
 }
 
 void
@@ -357,11 +372,6 @@ CoreLayer::stopStream(AudioDeviceType stream)
 {
     dispatch_async(audioConfigurationQueueIOS(), ^{
         SIP_CORE_DBG("iOS CoreLayer - Stop Stream %d", stream);
-        auto currentCategory =  [[AVAudioSession sharedInstance] category];
-        bool keepCurrentStream = currentCategory == AVAudioSessionCategoryPlayAndRecord && (stream == AudioDeviceType::PLAYBACK);
-        if (status_ != Status::Started || keepCurrentStream)
-            return;
-        status_ = Status::Idle;
         destroyAudioLayer();
     });
     /* Flush the ring buffers */
