@@ -105,6 +105,8 @@
 #include <list>
 #include <random>
 
+const char* SIP_CORE_VERSION = "0.8.2";
+
 namespace sip_core {
 
 /** To store uniquely a list of Call ids */
@@ -597,7 +599,9 @@ void
 Manager::init(const std::string& config_file, const std::string& data_path)
 {
     // FIXME: this is no good
+
     initialized = true;
+    SIP_CORE_INFO("Using SIP core version %s for %s", SIP_CORE_VERSION, PJ_OS_NAME);
 
 #ifndef WIN32
     // Set the max number of open files.

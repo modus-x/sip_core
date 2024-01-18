@@ -750,13 +750,25 @@ SIPVoIPLink::shutdown()
                      Manager::instance().callFactory.callCount(Call::LinkType::SIP));
 
     sipTransportBroker->shutdown();
+
+    SIP_CORE_DBG("sipTransportBroker was shutdown");
     pjsip_tpmgr_set_state_cb(pjsip_endpt_get_tpmgr(endpt_), nullptr);
 
     running_ = false;
     sipThread_.join();
     pjsip_endpt_destroy(endpt_);
+
+
+    SIP_CORE_DBG("endpoint was destroyed");
     pool_.reset();
+
     pj_caching_pool_destroy(&cp_);
+    SIP_CORE_DBG("pool was destroyed");
+
+    // reset pointer
+    endpt_ = NULL;
+    SIP_CORE_DBG("endpoint pointer was reset to NULL");
+
     sipTransportBroker.reset();
 
     SIP_CORE_DBG("SIPVoIPLink@%p is shutdown", this);
