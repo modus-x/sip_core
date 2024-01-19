@@ -853,7 +853,7 @@ Sdp::getMediaDescriptions(const pjmedia_sdp_session* session, bool remote) const
                     } else {
                         // for now, just keep the first codec only
                         descr.enabled = true;
-                        descr.payload_type = 8;
+                        descr.payload_type = 0;
                         descr.rtp_clockrate = 8000;
                         SIP_CORE_INFO("Found codec for %s", media->desc.fmt[j].ptr);
                         break;
