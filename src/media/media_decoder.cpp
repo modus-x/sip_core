@@ -163,6 +163,7 @@ MediaDemuxer::openInput(const DeviceParams& params)
         "fpsprobesize",
         1,
         AV_OPT_SEARCH_CHILDREN); // Don't waste time fetching framerate when finding stream info
+    inputCtx_->video_codec_id = AV_CODEC_ID_H264;
     int ret = avformat_open_input(&inputCtx_, input.c_str(), iformat, options_ ? &options_ : NULL);
 
     if (ret) {
@@ -559,9 +560,9 @@ MediaDecoder::setupStream()
 #endif
 
     SIP_CORE_DBG("Using {} ({}) decoder for {}",
-             inputDecoder_->long_name,
-             inputDecoder_->name,
-             av_get_media_type_string(avStream_->codecpar->codec_type));
+                 inputDecoder_->long_name,
+                 inputDecoder_->name,
+                 av_get_media_type_string(avStream_->codecpar->codec_type));
 
     decoderCtx_->thread_count = std::max(1u, std::min(8u, std::thread::hardware_concurrency() / 2));
     if (emulateRate_)
@@ -630,7 +631,6 @@ MediaDecoder::decode(AVPacket& packet)
 {
     auto begin = steady_clock::now();
     if (inputDecoder_->type == AVMEDIA_TYPE_VIDEO && frameCount_ % 100 == 0) {
-        
         SIP_CORE_DBG() << "[" << demuxer_->getInputName() << "] MediaDecoder decodeFrame started";
     }
     int frameFinished = 0;
