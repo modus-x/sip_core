@@ -57,7 +57,7 @@ constexpr const size_t TRANSPORT_STATE_SZ = std::size(TRANSPORT_STATE_STR);
 void
 SipTransport::deleteTransport(pjsip_transport* t)
 {
-    pjsip_transport_dec_ref(t);
+    // pjsip_transport_dec_ref(t);
 }
 
 SipTransport::SipTransport(pjsip_transport* t)
