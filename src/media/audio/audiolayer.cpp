@@ -58,12 +58,13 @@ AudioLayer::AudioLayer(const AudioPreference& pref)
 {
     urgentRingBuffer_.createReadOffset(RingBufferPool::DEFAULT_ID);
 
-    SIP_CORE_INFO("[audiolayer] AGC: %d, noiseReduce: %s, VAD: %d, echoCancel: %s, audioProcessor: %s",
-              pref_.isAGCEnabled(),
-              pref.getNoiseReduce().c_str(),
-              pref.getVadEnabled(),
-              pref.getEchoCanceller().c_str(),
-              pref.getAudioProcessor().c_str());
+    SIP_CORE_INFO(
+        "[audiolayer] AGC: %d, noiseReduce: %s, VAD: %d, echoCancel: %s, audioProcessor: %s",
+        pref_.isAGCEnabled(),
+        pref.getNoiseReduce().c_str(),
+        pref.getVadEnabled(),
+        pref.getEchoCanceller().c_str(),
+        pref.getAudioProcessor().c_str());
 }
 
 AudioLayer::~AudioLayer() {}
@@ -132,7 +133,10 @@ AudioLayer::recordChanged(bool started)
 static inline bool
 shouldUseAudioProcessorEchoCancel(bool hasNativeAEC, const std::string& echoCancellerPref)
 {
-    SIP_CORE_INFO("[audiolayer] shouldUseAudioProcessorEchoCancel setHasNativeAEC: %d, echoCancellerPref: %s", hasNativeAEC, echoCancellerPref.c_str());
+    SIP_CORE_INFO(
+        "[audiolayer] shouldUseAudioProcessorEchoCancel setHasNativeAEC: %d, echoCancellerPref: %s",
+        hasNativeAEC,
+        echoCancellerPref.c_str());
     return
         // user doesn't care which and there is not a system AEC
         (echoCancellerPref == "auto" && !hasNativeAEC)
@@ -144,7 +148,10 @@ shouldUseAudioProcessorEchoCancel(bool hasNativeAEC, const std::string& echoCanc
 static inline bool
 shouldUseAudioProcessorNoiseSuppression(bool hasNativeNS, const std::string& noiseSuppressionPref)
 {
-    SIP_CORE_INFO("[audiolayer] shouldUseAudioProcessorEchoCancel hasNativeNS: %d, noiseSuppressionPref: %s", hasNativeNS, noiseSuppressionPref.c_str());
+    SIP_CORE_INFO(
+        "[audiolayer] shouldUseAudioProcessorEchoCancel hasNativeNS: %d, noiseSuppressionPref: %s",
+        hasNativeNS,
+        noiseSuppressionPref.c_str());
     return
         // user doesn't care which and there is no system noise suppression
         (noiseSuppressionPref == "auto" && !hasNativeNS)
@@ -198,13 +205,13 @@ AudioLayer::createAudioProcessor()
     }
 
     SIP_CORE_WARN("Input {%d Hz, %d channels}",
-              audioInputFormat_.sample_rate,
-              audioInputFormat_.nb_channels);
+                  audioInputFormat_.sample_rate,
+                  audioInputFormat_.nb_channels);
     SIP_CORE_WARN("Output {%d Hz, %d channels}", audioFormat_.sample_rate, audioFormat_.nb_channels);
     SIP_CORE_WARN("Starting audio processor with: {%d Hz, %d channels, %d samples/frame}",
-              sample_rate,
-              nb_channels,
-              frame_size);
+                  sample_rate,
+                  nb_channels,
+                  frame_size);
 
     if (pref_.getAudioProcessor() == "webrtc") {
 #if HAVE_WEBRTC_AP
@@ -212,7 +219,7 @@ AudioLayer::createAudioProcessor()
         audioProcessor.reset(new WebRTCAudioProcessor(formatForProcessor, frame_size));
 #else
         SIP_CORE_ERR("[audiolayer] audioProcessor preference is webrtc, but library not linked! "
-                 "using NullAudioProcessor instead");
+                     "using NullAudioProcessor instead");
         audioProcessor.reset(new NullAudioProcessor(formatForProcessor, frame_size));
 #endif
     } else if (pref_.getAudioProcessor() == "speex") {
@@ -221,15 +228,16 @@ AudioLayer::createAudioProcessor()
         audioProcessor.reset(new SpeexAudioProcessor(formatForProcessor, frame_size));
 #else
         SIP_CORE_ERR("[audiolayer] audioProcessor preference is speex, but library not linked! "
-                 "using NullAudioProcessor instead");
+                     "using NullAudioProcessor instead");
         audioProcessor.reset(new NullAudioProcessor(formatForProcessor, frame_size));
 #endif
     } else if (pref_.getAudioProcessor() == "null") {
         SIP_CORE_WARN("[audiolayer] using NullAudioProcessor");
         audioProcessor.reset(new NullAudioProcessor(formatForProcessor, frame_size));
     } else {
-        SIP_CORE_ERR("[audiolayer] audioProcessor preference not recognized, using NullAudioProcessor "
-                 "instead");
+        SIP_CORE_ERR(
+            "[audiolayer] audioProcessor preference not recognized, using NullAudioProcessor "
+            "instead");
         audioProcessor.reset(new NullAudioProcessor(formatForProcessor, frame_size));
     }
 
@@ -338,6 +346,9 @@ AudioLayer::getToPlay(AudioFormat format, size_t writableSamples)
 
         if (resampled) {
             std::lock_guard<std::mutex> lock(audioProcessorMutex);
+
+            adjustVolume(resampled, true);
+
             if (audioProcessor) {
                 audioProcessor->putPlayback(resampled);
             }
@@ -352,16 +363,47 @@ AudioLayer::getToPlay(AudioFormat format, size_t writableSamples)
 }
 
 void
+AudioLayer::adjustVolume(std::shared_ptr<AudioFrame>& frame, bool playback)
+{
+    AVFrame* pFrame = frame->pointer();
+    if (!pFrame) {
+        return;
+    }
+    auto* data = pFrame->data[0];
+
+    if (!data) {
+        return;
+    }
+    for (int i = 0; i < pFrame->nb_samples * pFrame->channels; ++i) {
+        // Assuming AV_SAMPLE_FMT_S16
+        int16_t sample = reinterpret_cast<int16_t*>(data)[i];
+
+        // SIP_CORE_DBG("current sample is %d", sample);
+
+        // Adjust the volume (multiply by a factor, e.g., 1.5 for increased volume)
+        sample = static_cast<int16_t>(sample * (playback ? playbackGain_ : captureGain_));
+
+        // Ensure that the adjusted value is within the valid range
+        sample = std::min(std::max(sample, std::numeric_limits<int16_t>::min()),
+                          std::numeric_limits<int16_t>::max());
+
+        // Store the adjusted sample back
+        reinterpret_cast<int16_t*>(data)[i] = sample;
+    }
+}
+
+void
 AudioLayer::putRecorded(std::shared_ptr<AudioFrame>&& frame)
 {
     std::lock_guard<std::mutex> lock(audioProcessorMutex);
     if (audioProcessor && playbackStarted_ && recordStarted_) {
         audioProcessor->putRecorded(std::move(frame));
         while (auto rec = audioProcessor->getProcessed()) {
+            adjustVolume(rec, false);
             mainRingBuffer_->put(std::move(rec));
         }
-
     } else {
+        adjustVolume(frame, false);
         mainRingBuffer_->put(std::move(frame));
     }
 

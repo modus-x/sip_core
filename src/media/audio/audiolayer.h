@@ -300,6 +300,9 @@ protected:
      */
     std::unique_ptr<Resampler> resampler_;
 
+
+    void adjustVolume(std::shared_ptr<AudioFrame> &frame, bool playback);
+
 private:
     std::mutex audioProcessorMutex {};
     std::unique_ptr<AudioProcessor> audioProcessor;
