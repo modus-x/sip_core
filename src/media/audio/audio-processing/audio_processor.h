@@ -118,11 +118,11 @@ protected:
     bool tidyQueues()
     {
         while (recordQueue_.samples() > recordQueue_.frameSize() * 10) {
-            SIP_CORE_DBG("record overflow %d / %d", recordQueue_.samples(), frameSize_);
+            // SIP_CORE_DBG("record overflow %d / %d", recordQueue_.samples(), frameSize_);
             recordQueue_.dequeue();
         }
         while (playbackQueue_.samples() > playbackQueue_.frameSize() * 10) {
-            SIP_CORE_DBG("playback overflow %d / %d", playbackQueue_.samples(), frameSize_);
+            // SIP_CORE_DBG("playback overflow %d / %d", playbackQueue_.samples(), frameSize_);
             playbackQueue_.dequeue();
         }
         if (recordQueue_.samples() < recordQueue_.frameSize()
