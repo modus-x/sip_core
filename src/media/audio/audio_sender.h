@@ -61,7 +61,6 @@ private:
     MediaDescription args_;
     std::unique_ptr<MediaEncoder> audioEncoder_;
     std::unique_ptr<MediaIOHandle> muxContext_;
-    std::unique_ptr<Resampler> resampler_;
 
     uint64_t sent_samples = 0;
 

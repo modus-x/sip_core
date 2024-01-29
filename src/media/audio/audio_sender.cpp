@@ -26,7 +26,6 @@
 #include "media_encoder.h"
 #include "media_io_handle.h"
 #include "media_stream.h"
-#include "resampler.h"
 
 #include <memory>
 
