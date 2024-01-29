@@ -37,6 +37,23 @@ FFMPEGCONF+='
 #enable muxers/demuxers
 FFMPEGCONF+='
             --enable-demuxers
+            --enable-decoders
+            --disable-decoder=libvpx_vp9
+            --disable-decoder=vp3
+            --disable-decoder=vp4
+            --disable-decoder=vp5
+            --disable-decoder=vp6
+            --disable-decoder=vp6a
+            --disable-decoder=vp6f
+            --disable-decoder=vp7
+            --disable-decoder=vp8_cuvid
+            --disable-decoder=vp8_mediacodec
+            --disable-decoder=vp8_qsv
+            --disable-decoder=vp8_v4l2m2m
+            --disable-decoder=vp9_cuvid
+            --disable-decoder=vp9_mediacodec
+            --disable-decoder=vp9_qsv
+            --disable-decoder=vp9_v4l2m2m
             --enable-muxers'
 
 #enable parsers
@@ -51,7 +68,7 @@ FFMPEGCONF+='
             --enable-libvpx
             --enable-encoder=libvpx_vp8
             --enable-decoder=vp8 
-            --enable-decoder=vp9 
+            --enable-decoder=vp9
             --enable-libopus
             --enable-encoder=libopus
             --enable-decoder=libopus
