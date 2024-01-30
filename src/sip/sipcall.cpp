@@ -1058,14 +1058,7 @@ transfer_client_cb(pjsip_evsub* sub, pjsip_event* event)
         if (!r_data->msg_info.cid)
             return;
 
-        auto call = static_cast<SIPCall*>(pjsip_evsub_get_mod_data(sub, mod_ua_id));
-        if (!call)
-            return;
-
         if (status_line.code / 100 == 2) {
-            if (call->inviteSession_)
-                call->terminateSipSession(PJSIP_SC_GONE);
-            Manager::instance().hangupCall(call->getAccountId(), call->getCallId());
             pjsip_evsub_set_mod_data(sub, mod_ua_id, NULL);
         }
 
@@ -1084,12 +1077,22 @@ transfer_client_cb(pjsip_evsub* sub, pjsip_event* event)
 bool
 SIPCall::transferCommon(const pj_str_t* dst)
 {
+
+
+    auto acc = getSIPAccount();
+    if (not acc) {
+        SIP_CORE_ERR("No account detected");
+        return !PJ_SUCCESS;
+    }
+
     if (not inviteSession_ or not inviteSession_->dlg)
         return false;
 
     pjsip_evsub_user xfer_cb;
     pj_bzero(&xfer_cb, sizeof(xfer_cb));
     xfer_cb.on_evsub_state = &transfer_client_cb;
+
+    static const pj_str_t str_ref_by = { "Referred-By", 11 };
 
     pjsip_evsub* sub;
 
@@ -1110,6 +1113,13 @@ SIPCall::transferCommon(const pj_str_t* dst)
 
     if (pjsip_xfer_initiate(sub, dst, &tdata) != PJ_SUCCESS)
         return false;
+
+    // add user agent and Referred-by header
+    pjsip_generic_string_hdr *gs_hdr = pjsip_generic_string_hdr_create(tdata->pool, &str_ref_by,
+                     &inviteSession_->dlg->local.info_str);
+    pjsip_msg_add_hdr(tdata->msg, reinterpret_cast<pjsip_hdr *>(gs_hdr));
+
+    sip_utils::addUserAgentHeader(acc->getUserAgentName(), tdata);
 
     /* Send. */
     if (pjsip_xfer_send_request(sub, tdata) != PJ_SUCCESS)
