@@ -264,7 +264,7 @@ private:
     int width_ {0};
     int height_ {0};
 
-    bool fecEnabled_ {true};
+    bool fecEnabled_ {false};
 
     std::function<void()> contextCallback_;
     std::atomic_bool firstDecode_ {true};

@@ -30,6 +30,8 @@ getSignalHandlers()
     static SignalHandlerMap handlers = {
         /* Call */
         exported_callback<libsip_core::CallSignal::StateChange>(),
+        exported_callback<libsip_core::CallSignal::TransferStateChange>(),
+        exported_callback<libsip_core::CallSignal::StateChange>(),
         exported_callback<libsip_core::CallSignal::TransferFailed>(),
         exported_callback<libsip_core::CallSignal::TransferSucceeded>(),
         exported_callback<libsip_core::CallSignal::RecordPlaybackStopped>(),

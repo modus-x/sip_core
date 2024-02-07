@@ -369,7 +369,7 @@ SIPAccount::newOutgoingCall(std::string_view toUrl,
         call = manager.callFactory.newSipCall(shared(),
                                               Call::CallType::OUTGOING,
                                               MediaAttribute::mediaAttributesToMediaMaps(
-                                                  createDefaultMediaList(isVideoEnabled())));
+                                                  createDefaultMediaList(false)));
     }
 
     if (not call)

@@ -160,6 +160,12 @@ as_view(const pj_str_t& str) noexcept
     return {str.ptr, (size_t) str.slen};
 }
 
+inline constexpr std::string
+as_string(const pj_str_t& str) noexcept
+{
+    return {str.ptr, (size_t) str.slen};
+}
+
 constexpr std::string_view DEFAULT_VIDEO_STREAMID = "video_0";
 constexpr std::string_view DEFAULT_AUDIO_STREAMID = "audio_0";
 

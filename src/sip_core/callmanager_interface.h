@@ -32,6 +32,7 @@
 #include <cstdint>
 
 #include "sip_core.h"
+#include "pjsip-simple/evsub.h"
 
 namespace libsip_core {
 
@@ -214,6 +215,11 @@ struct LIBSIP_CORE_PUBLIC CallSignal
     {
         constexpr static const char* name = "StateChange";
         using cb_type = void(const std::string&, const std::string&, const std::string&, int);
+    };
+    struct LIBSIP_CORE_PUBLIC TransferStateChange
+    {
+        constexpr static const char* name = "TransferStateChange";
+        using cb_type = void(const std::string&, const std::string&, const pjsip_evsub_state, int, const std::string&);
     };
     struct LIBSIP_CORE_PUBLIC TransferFailed
     {

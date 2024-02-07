@@ -56,6 +56,7 @@ AudioReceiveThread::~AudioReceiveThread()
 bool
 AudioReceiveThread::setup()
 {
+    std::lock_guard lk(mutex_);
     audioDecoder_.reset(new MediaDecoder([this](std::shared_ptr<MediaFrame>&& frame) mutable {
         if (!muteState_) {
             notify(frame);
@@ -79,7 +80,6 @@ AudioReceiveThread::setup()
     }
 
     audioDecoder_->setIOContext(sdpContext_.get());
-    audioDecoder_->setFEC(true);
     if (audioDecoder_->openInput(args_)) {
         SIP_CORE_ERR("Could not open input \"%s\"", SDP_FILENAME);
         return false;
@@ -93,6 +93,8 @@ AudioReceiveThread::setup()
     }
 
     ringbuffer_ = Manager::instance().getRingBufferPool().getRingBuffer(id_);
+    Manager::instance().getRingBufferPool().bindHalfDuplexOut(RingBufferPool::DEFAULT_ID, id_);
+
 
     if (onSuccessfulSetup_)
         onSuccessfulSetup_(MEDIA_AUDIO, 1);
@@ -109,6 +111,7 @@ AudioReceiveThread::process()
 void
 AudioReceiveThread::cleanup()
 {
+    std::lock_guard lk(mutex_);
     audioDecoder_.reset();
     demuxContext_.reset();
 }

@@ -1011,7 +1011,52 @@ transfer_client_cb(pjsip_evsub* sub, pjsip_event* event)
 {
     auto mod_ua_id = Manager::instance().sipVoIPLink().getModId();
 
-    switch (pjsip_evsub_get_state(sub)) {
+    pjsip_evsub_state state = pjsip_evsub_get_state(sub);
+
+    pjsip_status_line status_line {};
+
+    pjsip_rx_data* r_data = event->body.rx_msg.rdata;
+
+    switch (state) {
+        case PJSIP_EVSUB_STATE_ACTIVE:
+        case PJSIP_EVSUB_STATE_TERMINATED: {
+            if (r_data && r_data->msg_info.msg && r_data->msg_info.len > 0) {
+                std::string request(pjsip_rx_data_get_info(r_data));
+                if (r_data->msg_info.msg->line.req.method.id == PJSIP_OTHER_METHOD
+                    and request.find("NOTIFY") != std::string::npos) {
+                    pjsip_msg_body* body = r_data->msg_info.msg->body;
+
+                    if (body) {
+                        // may parse, or may not
+                        pjsip_parse_status_line((char*) body->data, body->len, &status_line);
+                    }
+                }
+            }
+            break;
+        }
+
+
+        case PJSIP_EVSUB_STATE_ACCEPTED:
+        case PJSIP_EVSUB_STATE_NULL:
+        case PJSIP_EVSUB_STATE_SENT:
+        case PJSIP_EVSUB_STATE_PENDING:
+        case PJSIP_EVSUB_STATE_UNKNOWN:
+            break;
+    }
+
+
+    auto call = static_cast<SIPCall*>(pjsip_evsub_get_mod_data(sub, mod_ua_id));
+    if (call) {
+        emitSignal<libsip_core::CallSignal::TransferStateChange>(
+                call->getSIPAccount()->getAccountID(),
+                call->getCallId(),
+                state,
+                status_line.code,
+                sip_utils::as_string(status_line.reason));
+    }
+
+
+    switch (state) {
     case PJSIP_EVSUB_STATE_ACCEPTED:
         if (!event)
             return;
@@ -1020,45 +1065,21 @@ transfer_client_cb(pjsip_evsub* sub, pjsip_event* event)
                   && event->body.tsx_state.type == PJSIP_EVENT_RX_MSG);
         break;
 
-    case PJSIP_EVSUB_STATE_TERMINATED:
+    case PJSIP_EVSUB_STATE_TERMINATED: {
+        // clean mod data on sub termination
         pjsip_evsub_set_mod_data(sub, mod_ua_id, NULL);
         break;
+    }
 
     case PJSIP_EVSUB_STATE_ACTIVE: {
         if (!event)
             return;
 
-        pjsip_rx_data* r_data = event->body.rx_msg.rdata;
-
-        if (!r_data)
-            return;
-
-        std::string request(pjsip_rx_data_get_info(r_data));
-
-        pjsip_status_line status_line = {500, *pjsip_get_status_text(500)};
-
-        if (!r_data->msg_info.msg)
-            return;
-
-        if (r_data->msg_info.msg->line.req.method.id == PJSIP_OTHER_METHOD
-            and request.find("NOTIFY") != std::string::npos) {
-            pjsip_msg_body* body = r_data->msg_info.msg->body;
-
-            if (!body)
-                return;
-
-            if (pj_stricmp2(&body->content_type.type, "message")
-                or pj_stricmp2(&body->content_type.subtype, "sipfrag"))
-                return;
-
-            if (pjsip_parse_status_line((char*) body->data, body->len, &status_line) != PJ_SUCCESS)
-                return;
-        }
-
         if (!r_data->msg_info.cid)
             return;
 
         if (status_line.code / 100 == 2) {
+            // clean mod data on success
             pjsip_evsub_set_mod_data(sub, mod_ua_id, NULL);
         }
 
@@ -1092,7 +1113,7 @@ SIPCall::transferCommon(const pj_str_t* dst)
     pj_bzero(&xfer_cb, sizeof(xfer_cb));
     xfer_cb.on_evsub_state = &transfer_client_cb;
 
-    static const pj_str_t str_ref_by = { "Referred-By", 11 };
+    constexpr pj_str_t str_ref_by = CONST_PJ_STR("Referred-by");
 
     pjsip_evsub* sub;
 
@@ -1173,8 +1194,8 @@ SIPCall::attendedTransfer(const std::string& to)
                                  sizeof(str_dest_buf) - dst.slen,
                                  "?"
                                  "Replaces=%.*s"
-                                 "%%3Bto-tag%%3D%.*s"
-                                 "%%3Bfrom-tag%%3D%.*s>",
+                                 "%%3bto-tag%%3d%.*s"
+                                 "%%3bfrom-tag%%3d%.*s>",
                                  (int) target_dlg->call_id->id.slen,
                                  target_dlg->call_id->id.ptr,
                                  (int) target_dlg->remote.info->tag.slen,
