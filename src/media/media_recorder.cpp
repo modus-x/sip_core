@@ -143,7 +143,7 @@ MediaRecorder::MediaRecorder() {}
 
 MediaRecorder::~MediaRecorder()
 {
-    flush();
+    // flush();
     reset();
 }
 
