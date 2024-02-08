@@ -633,7 +633,7 @@ else ()
 
         target_link_libraries(
                 ${PROJECT_NAME}
-                PRIVATE PkgConfig::pjproject_${CONTRIB_TARGET_NAME}
+                PUBLIC
                 PkgConfig::avformat_${CONTRIB_TARGET_NAME}
                 PkgConfig::avdevice_${CONTRIB_TARGET_NAME}
                 PkgConfig::avfilter_${CONTRIB_TARGET_NAME}
@@ -646,7 +646,10 @@ else ()
                 PkgConfig::speex_${CONTRIB_TARGET_NAME}
                 PkgConfig::speexdsp_${CONTRIB_TARGET_NAME}
                 PkgConfig::fmt_${CONTRIB_TARGET_NAME}
-                PUBLIC PkgConfig::avutil_${CONTRIB_TARGET_NAME})
+                PUBLIC
+                PkgConfig::avutil_${CONTRIB_TARGET_NAME}
+                PkgConfig::pjproject_${CONTRIB_TARGET_NAME}
+                )
 
         if (LINUX)
             target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::webrtcap)
