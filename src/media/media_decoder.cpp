@@ -163,7 +163,6 @@ MediaDemuxer::openInput(const DeviceParams& params)
         "fpsprobesize",
         1,
         AV_OPT_SEARCH_CHILDREN); // Don't waste time fetching framerate when finding stream info
-    inputCtx_->video_codec_id = AV_CODEC_ID_H264;
     int ret = avformat_open_input(&inputCtx_, input.c_str(), iformat, options_ ? &options_ : NULL);
 
     if (ret) {
