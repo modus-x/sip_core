@@ -105,7 +105,7 @@
 #include <list>
 #include <random>
 
-const char* SIP_CORE_VERSION = "0.8.2";
+const char* SIP_CORE_VERSION = "0.8.4.1";
 
 namespace sip_core {
 
@@ -704,8 +704,6 @@ Manager::finish() noexcept
 
         // Disconnect accounts, close link stacks and free allocated ressources
         unregisterAccounts();
-        accountFactory.clear();
-
         {
             std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
             pimpl_->audiodriver_.reset();
@@ -723,6 +721,8 @@ Manager::finish() noexcept
             pimpl_->sipLink_->shutdown();
             pimpl_->sipLink_.reset();
         }
+
+        accountFactory.clear();
 
         pj_shutdown();
 

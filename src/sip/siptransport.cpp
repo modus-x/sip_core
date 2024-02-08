@@ -165,7 +165,7 @@ SipTransportBroker::transportStateChanged(pjsip_transport* tp,
     // and remove it from any mapping if destroy pending or done.
 
     std::shared_ptr<SipTransport> sipTransport;
-    std::lock_guard<std::mutex> lock(transportMapMutex_);
+    // std::lock_guard<std::mutex> lock(transportMapMutex_);
     auto key = transports_.find(tp);
     if (key == transports_.end())
         return;
