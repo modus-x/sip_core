@@ -138,7 +138,7 @@ if (NOT MSVC)
             endif ()
 
             execute_process(
-                    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/contrib/bootstrap --host=${TARGET} --enable-debug
+                    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/contrib/bootstrap --host=${TARGET}
                     WORKING_DIRECTORY ${CONTRIB_BUILD_PATH}
                     RESULT_VARIABLE CMD_RESULT)
 
