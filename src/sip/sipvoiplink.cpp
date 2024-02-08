@@ -426,6 +426,10 @@ transaction_request_cb(pjsip_rx_data* rdata)
         }
     }
 
+    if (!extraHeaders.empty()) {
+        call->setExtraSipHeaders(extraHeaders);
+    }
+
     call->setPeerUaVersion(sip_utils::getPeerUserAgent(rdata));
     // The username can be used to join specific calls in conversations
     call->toUsername(std::string(toUsername));
@@ -563,9 +567,7 @@ transaction_request_cb(pjsip_rx_data* rdata)
 
     call->setState(Call::ConnectionState::RINGING);
 
-    if (!extraHeaders.empty()) {
-        call->setExtraSipHeaders(extraHeaders);
-    }
+
 
     Manager::instance().incomingCall(account->getAccountID(), *call);
 
