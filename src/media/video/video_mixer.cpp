@@ -155,7 +155,6 @@ VideoMixer::startInputs()
     // Attach videoInput to mixer and start / restart it if it was stopped before
     for (auto i = 0u; i != localInputs_.size(); ++i) {
         attachVideo(localInputs_[i].get(), "", sip_utils::streamId("", fmt::format("video_{}", i)));
-        localInputs_[i]->startInput();
     }
 }
 

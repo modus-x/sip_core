@@ -654,6 +654,7 @@ public:
      * new call, not answered or refused
      */
     bool incomingCallsWaiting();
+    bool checkIfDND(const std::string& accountId) const;
 
     /**
      * Get the current call

@@ -60,7 +60,7 @@ struct SipAccountBaseConfig: public AccountConfig {
 inline void
 updateRange(uint16_t min, uint16_t max, std::pair<uint16_t, uint16_t>& range)
 {
-    if (min > 0 and (max > min) and max <= MAX_PORT - 2) {
+    if (min > 0 && max > 0 && min <= max) {
         range.first = min;
         range.second = max;
     }

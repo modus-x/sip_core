@@ -148,6 +148,12 @@ CONST_PJ_STR(const std::string& str) noexcept
     return {const_cast<char*>(str.c_str()), (pj_ssize_t) str.size()};
 }
 
+inline pj_str_t
+PJ_STR(const std::string& str) noexcept
+{
+    return {const_cast<char*>(str.c_str()), (pj_ssize_t) str.size()};
+}
+
 inline constexpr pj_str_t
 CONST_PJ_STR(const std::string_view& str) noexcept
 {

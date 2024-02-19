@@ -460,7 +460,6 @@ transaction_request_cb(pjsip_rx_data* rdata)
     call->setPeerNumber(peerNumber);
     call->setPeerUri(account->getToUri(peerNumber));
     call->setPeerDisplayName(peerDisplayName);
-    call->setState(Call::ConnectionState::PROGRESSING);
     call->getSDP().setPublishedIP(addrSdp);
     call->setPeerAllowMethods(sip_utils::getPeerAllowMethods(rdata));
 
@@ -529,7 +528,6 @@ transaction_request_cb(pjsip_rx_data* rdata)
         return PJ_FALSE;
     }
 
-    // Check if call has been transferred
     pjsip_tx_data* tdata = nullptr;
 
     if (pjsip_inv_initial_answer(call->inviteSession_.get(),
@@ -551,6 +549,22 @@ transaction_request_cb(pjsip_rx_data* rdata)
         return PJ_FALSE;
     }
 
+    if (Manager::instance().checkIfDND(account->getAccountID())) {
+        const pj_str_t message = CONST_PJ_STR(
+            "Call is declined because user is in DND / away state");
+
+        if (pjsip_inv_end_session(call->inviteSession_.get(), PJSIP_SC_DECLINE, &message, &tdata)) {
+            SIP_CORE_ERR("Could not create answer DECLINE");
+            return PJ_FALSE;
+        }
+
+        if (pjsip_inv_send_msg(call->inviteSession_.get(), tdata) != PJ_SUCCESS) {
+            SIP_CORE_ERR("Could not send msg DECLINE");
+        }
+
+        return PJ_FALSE;
+    }
+
     call->setState(Call::ConnectionState::TRYING);
 
     if (pjsip_inv_answer(call->inviteSession_.get(), PJSIP_SC_RINGING, NULL, NULL, &tdata)
@@ -566,8 +580,6 @@ transaction_request_cb(pjsip_rx_data* rdata)
     }
 
     call->setState(Call::ConnectionState::RINGING);
-
-
 
     Manager::instance().incomingCall(account->getAccountID(), *call);
 

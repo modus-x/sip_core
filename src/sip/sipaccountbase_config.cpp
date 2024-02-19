@@ -52,8 +52,15 @@ unserializeRange(const YAML::Node& node,
                  const char* maxKey,
                  std::pair<uint16_t, uint16_t>& range)
 {
-    int tmpMin = yaml_utils::parseValueOptional(node, minKey, tmpMin);
-    int tmpMax = yaml_utils::parseValueOptional(node, maxKey, tmpMax);
+    int tmpMin, tmpMax;
+    if (!yaml_utils::parseValueOptional(node, minKey, tmpMin)) {
+        // set default
+        tmpMin = range.first;
+    }
+    if (!yaml_utils::parseValueOptional(node, maxKey, tmpMax)) {
+        // set default
+        tmpMax = range.second;
+    };
     updateRange(tmpMin, tmpMax, range);
 }
 
@@ -76,7 +83,7 @@ SipAccountBaseConfig::serializeDiff(YAML::Emitter& out, const SipAccountBaseConf
     SERIALIZE_CONFIG(Conf::PUBLISH_ADDR_KEY, publishedIp);
     SERIALIZE_CONFIG(Conf::SAME_AS_LOCAL_KEY, publishedSameasLocal);
     SERIALIZE_CONFIG(Conf::AUDIO_PORT_MAX_KEY, audioPortRange.second);
-    SERIALIZE_CONFIG(Conf::AUDIO_PORT_MAX_KEY, audioPortRange.first);
+    SERIALIZE_CONFIG(Conf::AUDIO_PORT_MIN_KEY, audioPortRange.first);
     SERIALIZE_CONFIG(Conf::VIDEO_PORT_MAX_KEY, videoPortRange.second);
     SERIALIZE_CONFIG(Conf::VIDEO_PORT_MIN_KEY, videoPortRange.first);
 }

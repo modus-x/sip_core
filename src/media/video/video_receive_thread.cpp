@@ -219,10 +219,6 @@ VideoReceiveThread::setResolutionChangedCallback(const std::function<void(void)>
 void
 VideoReceiveThread::decodeFrame()
 {
-    auto begin = steady_clock::now();
-    if (frameCount_ % 100 == 0) {
-        SIP_CORE_DBG() << "VideoReceiveThread decodeFrame started: " << this;
-    }
     if (not loop_.isRunning())
         return;
 
@@ -235,19 +231,9 @@ VideoReceiveThread::decodeFrame()
         }
     }
     auto status = videoDecoder_->decode();
-    if (status == MediaDemuxer::Status::EndOfFile || status == MediaDemuxer::Status::ReadError) {
-        SIP_CORE_ERR("[%p] VideoReceiveThread Decoding error: %s",
-                     this,
-                     MediaDemuxer::getStatusStr(status));
-    }
     if (status == MediaDemuxer::Status::FallBack) {
         if (keyFrameRequestCallback_)
             keyFrameRequestCallback_();
-    }
-    auto end = steady_clock::now();
-    if (frameCount_ % 100 == 0) {
-        SIP_CORE_DBG() << "VideoReceiveThread decodeFrame completed in "
-                       << duration_cast<milliseconds>(end - begin).count() << " " << this;
     }
     frameCount_++;
 }

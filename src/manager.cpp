@@ -310,7 +310,8 @@ struct Manager::ManagerPimpl
     std::unique_ptr<SIPVoIPLink> sipLink_;
 };
 
-Manager::ManagerPimpl::ManagerPimpl(Manager& base)
+Manager::ManagerPimpl::
+ManagerPimpl(Manager& base)
     : base_(base)
     , toneCtrl_(base.preferences)
     , dtmfBuf_(0, AudioFormat::MONO())
@@ -574,7 +575,8 @@ Manager::instance()
     return instance;
 }
 
-Manager::Manager()
+Manager::
+Manager()
     : preferences()
     , voipPreferences()
     , audioPreference()
@@ -587,7 +589,9 @@ Manager::Manager()
     , pimpl_(new ManagerPimpl(*this))
 {}
 
-Manager::~Manager() {}
+Manager::~
+Manager()
+{}
 
 void
 Manager::setAutoAnswer(bool enable)
@@ -1649,6 +1653,19 @@ Manager::incomingCallsWaiting()
     return not pimpl_->waitingCalls_.empty();
 }
 
+bool
+Manager::checkIfDND(const std::string& accountId) const
+{
+    auto const& account = getAccount(accountId);
+
+    // always ignore all unknown calls - we do not need them
+    if (not account) {
+        return true;
+    }
+
+    return account->isDND();
+}
+
 void
 Manager::incomingCall(const std::string& accountId, Call& call)
 {
@@ -2040,18 +2057,18 @@ Manager::getHomePath()
 void
 Manager::startAudio()
 {
-    
     SIP_CORE_INFO("START AUDIO!!!!!!!!!!");
     // if (!pimpl_->audiodriver_)
     pimpl_->audiodriver_.reset(pimpl_->base_.audioPreference.createAudioLayer());
     constexpr std::array<AudioDeviceType, 3> TYPES {AudioDeviceType::CAPTURE};
-    
+
     for (const auto& type : TYPES)
         if (pimpl_->audioStreamUsers_[(unsigned) type])
             pimpl_->audiodriver_->startStream(type);
 }
 
-AudioDeviceGuard::AudioDeviceGuard(Manager& manager, AudioDeviceType type)
+AudioDeviceGuard::
+AudioDeviceGuard(Manager& manager, AudioDeviceType type)
     : manager_(manager)
     , type_(type)
 {
@@ -2064,7 +2081,8 @@ AudioDeviceGuard::AudioDeviceGuard(Manager& manager, AudioDeviceType type)
     }
 }
 
-AudioDeviceGuard::~AudioDeviceGuard()
+AudioDeviceGuard::~
+AudioDeviceGuard()
 {
     auto streamId = (unsigned) type_;
     if (--manager_.pimpl_->audioStreamUsers_[streamId] == 0) {
@@ -2333,11 +2351,6 @@ Manager::ManagerPimpl::processIncomingCall(const std::string& accountId, Call& i
         return;
     }
 
-    if (account->isDND()) {
-        base_.refuseCall(accountId, incomCallId);
-        return;
-    }
-
     auto const& mediaList = MediaAttribute::mediaAttributesToMediaMaps(
         incomCall.getMediaAttributeList());
 
@@ -2494,18 +2507,7 @@ Manager::setAccountDetails(const std::string& accountID,
     if (details == account->getAccountDetails())
         return;
 
-    // Unregister before modifying any account information
-    account->doUnregister([&](bool /* transport_free */) {
-        account->setAccountDetails(details);
-
-        if (account->isUsable())
-            account->doRegister();
-        else
-            account->doUnregister();
-
-        // Update account details to the client side
-        emitSignal<libsip_core::ConfigurationSignal::AccountDetailsChanged>(accountID, details);
-    });
+    account->setAccountDetails(details);
 }
 
 std::string

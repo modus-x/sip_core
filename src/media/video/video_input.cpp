@@ -55,7 +55,8 @@ namespace video {
 static constexpr unsigned default_grab_width = 640;
 static constexpr unsigned default_grab_height = 480;
 
-VideoInput::VideoInput(VideoInputMode inputMode, const std::string& id_)
+VideoInput::
+VideoInput(VideoInputMode inputMode, const std::string& id_)
     : VideoGenerator::VideoGenerator()
     , loop_(std::bind(&VideoInput::setup, this),
             std::bind(&VideoInput::process, this),
@@ -79,15 +80,10 @@ VideoInput::VideoInput(VideoInputMode inputMode, const std::string& id_)
     switchInput(id_);
 }
 
-VideoInput::~VideoInput()
+VideoInput::~
+VideoInput()
 {
-    isStopped_ = true;
-    if (videoManagedByClient()) {
-        emitSignal<libsip_core::VideoSignal::StopCapture>(decOpts_.input);
-        capturing_ = false;
-        return;
-    }
-    loop_.join();
+    stopInput();
 }
 
 void
@@ -97,8 +93,9 @@ VideoInput::startLoop()
         switchDevice();
         return;
     }
-    if (!loop_.isRunning())
+    if (!loop_.isRunning()) {
         loop_.start();
+    }
 }
 
 void
@@ -111,7 +108,6 @@ VideoInput::switchDevice()
             return;
         }
 
-        emitSignal<libsip_core::VideoSignal::StartCapture>(decOpts_.input);
         capturing_ = true;
     }
 }
@@ -406,15 +402,23 @@ VideoInput::deleteDecoder()
 void
 VideoInput::stopInput()
 {
+    isStopped_ = true;
+    if (videoManagedByClient()) {
+        capturing_ = false;
+        return;
+    }
+    loop_.join();
     clearOptions();
-    loop_.stop();
+
+    emitSignal<libsip_core::VideoSignal::StopCapture>(decOpts_.input);
 }
 
 void
 VideoInput::startInput()
 {
-    // start input even if no depOpts are found, which can be found later!
     startLoop();
+
+    emitSignal<libsip_core::VideoSignal::StartCapture>(decOpts_.input);
 }
 
 void
@@ -594,7 +598,6 @@ VideoInput::restart()
 {
     if (loop_.isStopping()) {
         switchInput(currentResource_);
-        startInput();
     }
 }
 
@@ -659,8 +662,8 @@ VideoInput::switchInput(const std::string& resource)
     }
     futureDecOpts_ = foundDecOpts_.get_future().share();
 
-    // do not start loop immediately
-    // startLoop();
+    startInput();
+
     return futureDecOpts_;
 }
 
