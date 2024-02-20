@@ -54,12 +54,14 @@ const constexpr auto jitterBufferMaxDelay_ = std::chrono::milliseconds(50);
 // maximum number of times accelerated decoding can fail in a row before falling back to software
 const constexpr unsigned MAX_ACCEL_FAILURES {5};
 
-MediaDemuxer::MediaDemuxer()
+MediaDemuxer::
+MediaDemuxer()
     : inputCtx_(avformat_alloc_context())
     , startTime_(AV_NOPTS_VALUE)
 {}
 
-MediaDemuxer::~MediaDemuxer()
+MediaDemuxer::~
+MediaDemuxer()
 {
     if (inputCtx_)
         avformat_close_input(&inputCtx_);
@@ -157,11 +159,16 @@ MediaDemuxer::openInput(const DeviceParams& params)
                  params.width,
                  params.height,
                  params.framerate.real());
+    av_opt_set_int(inputCtx_, "probesize", 20000000,
+                   AV_OPT_SEARCH_CHILDREN); // Don't
+
+    av_opt_set_int(inputCtx_, "analyzeduration", 300000000,
+                   AV_OPT_SEARCH_CHILDREN); //
 
     av_opt_set_int(
         inputCtx_,
         "fpsprobesize",
-        5,
+        1,
         AV_OPT_SEARCH_CHILDREN); // Don't waste time fetching framerate when finding stream info
     int ret = avformat_open_input(&inputCtx_, input.c_str(), iformat, options_ ? &options_ : NULL);
 
@@ -413,7 +420,8 @@ MediaDemuxer::decode()
     return Status::Success;
 }
 
-MediaDecoder::MediaDecoder(const std::shared_ptr<MediaDemuxer>& demuxer, int index)
+MediaDecoder::
+MediaDecoder(const std::shared_ptr<MediaDemuxer>& demuxer, int index)
     : demuxer_(demuxer)
     , avStream_(demuxer->getStream(index))
 {
@@ -421,9 +429,8 @@ MediaDecoder::MediaDecoder(const std::shared_ptr<MediaDemuxer>& demuxer, int ind
     setupStream();
 }
 
-MediaDecoder::MediaDecoder(const std::shared_ptr<MediaDemuxer>& demuxer,
-                           int index,
-                           MediaObserver observer)
+MediaDecoder::
+MediaDecoder(const std::shared_ptr<MediaDemuxer>& demuxer, int index, MediaObserver observer)
     : demuxer_(demuxer)
     , avStream_(demuxer->getStream(index))
     , callback_(std::move(observer))
@@ -438,23 +445,27 @@ MediaDecoder::emitFrame(bool isAudio)
     demuxer_->emitFrame(isAudio);
 }
 
-MediaDecoder::MediaDecoder()
+MediaDecoder::
+MediaDecoder()
     : demuxer_(new MediaDemuxer)
 {}
 
-MediaDecoder::MediaDecoder(MediaObserver o)
+MediaDecoder::
+MediaDecoder(MediaObserver o)
     : demuxer_(new MediaDemuxer)
     , callback_(std::move(o))
 {}
 
-MediaDecoder::MediaDecoder(MediaObserver o, int width, int height)
+MediaDecoder::
+MediaDecoder(MediaObserver o, int width, int height)
     : demuxer_(new MediaDemuxer)
     , callback_(std::move(o))
     , width_(width)
     , height_(height)
 {}
 
-MediaDecoder::~MediaDecoder()
+MediaDecoder::~
+MediaDecoder()
 {
 #ifdef RING_ACCEL
     if (decoderCtx_ && decoderCtx_->hw_device_ctx)
