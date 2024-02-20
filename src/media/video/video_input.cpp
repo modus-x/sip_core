@@ -321,21 +321,29 @@ VideoInput::createDecoder()
         decOpts_.width = 0;
         decOpts_.height = 0;
     }
+
+    int tries = 0;
     while (!ready && !isStopped_) {
         // Retry to open the video till the input is opened
         auto ret = decoder->openInput(decOpts_);
         ready = ret >= 0;
         if (ret < 0 && -ret != EBUSY) {
-            SIP_CORE_ERR("Could not open input \"%s\" with status %i", decOpts_.input.c_str(), ret);
-            foundDecOpts(decOpts_);
-            return;
+            tries += 1;
+            if (tries <= 10) {
+                SIP_CORE_ERR("Could not open input \"%s\" with status %i, trying again",
+                             decOpts_.input.c_str(),
+                             ret);
+            } else {
+                foundDecOpts(decOpts_);
+                return;
+            }
         } else if (-ret == EBUSY) {
             // If the device is busy, this means that it can be used by another call.
             // If this is the case, cleanup() can occurs and this will erase shmPath_
             // So, be sure to regenerate a correct shmPath for clients.
             restartSink = true;
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
     if (isStopped_)
@@ -408,9 +416,10 @@ VideoInput::stopInput()
         return;
     }
     loop_.join();
-    clearOptions();
 
     emitSignal<libsip_core::VideoSignal::StopCapture>(decOpts_.input);
+
+    clearOptions();
 }
 
 void
