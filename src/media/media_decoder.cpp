@@ -159,11 +159,6 @@ MediaDemuxer::openInput(const DeviceParams& params)
                  params.width,
                  params.height,
                  params.framerate.real());
-    av_opt_set_int(inputCtx_, "probesize", 20000000,
-                   AV_OPT_SEARCH_CHILDREN); // Don't
-
-    av_opt_set_int(inputCtx_, "analyzeduration", 300000000,
-                   AV_OPT_SEARCH_CHILDREN); //
 
     av_opt_set_int(
         inputCtx_,
@@ -207,7 +202,9 @@ void
 MediaDemuxer::findStreamInfo()
 {
     if (not streamInfoFound_) {
-        inputCtx_->max_analyze_duration = 30 * AV_TIME_BASE;
+        inputCtx_->probesize = 100000000;
+        inputCtx_->format_probesize = 100000000;
+        inputCtx_->max_delay = 99999;
         int err;
         if ((err = avformat_find_stream_info(inputCtx_, nullptr)) < 0) {
             SIP_CORE_ERR() << "Could not find stream info: " << libav_utils::getError(err);
@@ -569,7 +566,7 @@ MediaDecoder::setupStream()
     }
 #endif
 
-    SIP_CORE_DBG("Using {} ({}) decoder for {}",
+    SIP_CORE_DBG("Using %s (%s) decoder for %s",
                  inputDecoder_->long_name,
                  inputDecoder_->name,
                  av_get_media_type_string(avStream_->codecpar->codec_type));
