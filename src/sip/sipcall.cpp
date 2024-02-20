@@ -82,10 +82,11 @@ static constexpr auto NEW_CONFPROTOCOL_VERSION_STR = "13.1.0"sv;
 static const std::vector<unsigned> NEW_CONFPROTOCOL_VERSION
     = split_string_to_unsigned(NEW_CONFPROTOCOL_VERSION_STR, '.');
 
-SIPCall::SIPCall(const std::shared_ptr<SIPAccountBase>& account,
-                 const std::string& callId,
-                 Call::CallType type,
-                 const std::vector<libsip_core::MediaMap>& mediaList)
+SIPCall::
+SIPCall(const std::shared_ptr<SIPAccountBase>& account,
+        const std::string& callId,
+        Call::CallType type,
+        const std::vector<libsip_core::MediaMap>& mediaList)
     : Call(account, callId, type)
     , sdp_(new Sdp(callId))
     , srtpEnabled_(account->isSrtpEnabled())
@@ -129,7 +130,8 @@ SIPCall::SIPCall(const std::shared_ptr<SIPAccountBase>& account,
     initMediaStreams(mediaAttrList);
 }
 
-SIPCall::~SIPCall()
+SIPCall::~
+SIPCall()
 {
     std::lock_guard<std::recursive_mutex> lk {callMutex_};
 
@@ -1018,43 +1020,41 @@ transfer_client_cb(pjsip_evsub* sub, pjsip_event* event)
     pjsip_rx_data* r_data = event->body.rx_msg.rdata;
 
     switch (state) {
-        case PJSIP_EVSUB_STATE_ACTIVE:
-        case PJSIP_EVSUB_STATE_TERMINATED: {
-            if (r_data && r_data->msg_info.msg && r_data->msg_info.len > 0) {
-                std::string request(pjsip_rx_data_get_info(r_data));
-                if (r_data->msg_info.msg->line.req.method.id == PJSIP_OTHER_METHOD
-                    and request.find("NOTIFY") != std::string::npos) {
-                    pjsip_msg_body* body = r_data->msg_info.msg->body;
+    case PJSIP_EVSUB_STATE_ACTIVE:
+    case PJSIP_EVSUB_STATE_TERMINATED: {
+        if (r_data && r_data->msg_info.msg && r_data->msg_info.len > 0) {
+            std::string request(pjsip_rx_data_get_info(r_data));
+            if (r_data->msg_info.msg->line.req.method.id == PJSIP_OTHER_METHOD
+                and request.find("NOTIFY") != std::string::npos) {
+                pjsip_msg_body* body = r_data->msg_info.msg->body;
 
-                    if (body) {
-                        // may parse, or may not
-                        pjsip_parse_status_line((char*) body->data, body->len, &status_line);
-                    }
+                if (body) {
+                    // may parse, or may not
+                    pjsip_parse_status_line((char*) body->data, body->len, &status_line);
                 }
             }
-            break;
         }
-
-
-        case PJSIP_EVSUB_STATE_ACCEPTED:
-        case PJSIP_EVSUB_STATE_NULL:
-        case PJSIP_EVSUB_STATE_SENT:
-        case PJSIP_EVSUB_STATE_PENDING:
-        case PJSIP_EVSUB_STATE_UNKNOWN:
-            break;
+        break;
     }
 
+    case PJSIP_EVSUB_STATE_ACCEPTED:
+    case PJSIP_EVSUB_STATE_NULL:
+    case PJSIP_EVSUB_STATE_SENT:
+    case PJSIP_EVSUB_STATE_PENDING:
+    case PJSIP_EVSUB_STATE_UNKNOWN:
+        break;
+    }
 
     auto call = static_cast<SIPCall*>(pjsip_evsub_get_mod_data(sub, mod_ua_id));
     if (call) {
-        emitSignal<libsip_core::CallSignal::TransferStateChange>(
-                call->getSIPAccount()->getAccountID(),
-                call->getCallId(),
-                state,
-                status_line.code,
-                sip_utils::as_string(status_line.reason));
+        emitSignal<libsip_core::CallSignal::TransferStateChange>(call->getSIPAccount()
+                                                                     ->getAccountID(),
+                                                                 call->getCallId(),
+                                                                 state,
+                                                                 status_line.code,
+                                                                 sip_utils::as_string(
+                                                                     status_line.reason));
     }
-
 
     switch (state) {
     case PJSIP_EVSUB_STATE_ACCEPTED:
@@ -1098,8 +1098,6 @@ transfer_client_cb(pjsip_evsub* sub, pjsip_event* event)
 bool
 SIPCall::transferCommon(const pj_str_t* dst)
 {
-
-
     auto acc = getSIPAccount();
     if (not acc) {
         SIP_CORE_ERR("No account detected");
@@ -1136,9 +1134,11 @@ SIPCall::transferCommon(const pj_str_t* dst)
         return false;
 
     // add user agent and Referred-by header
-    pjsip_generic_string_hdr *gs_hdr = pjsip_generic_string_hdr_create(tdata->pool, &str_ref_by,
-                     &inviteSession_->dlg->local.info_str);
-    pjsip_msg_add_hdr(tdata->msg, reinterpret_cast<pjsip_hdr *>(gs_hdr));
+    pjsip_generic_string_hdr* gs_hdr
+        = pjsip_generic_string_hdr_create(tdata->pool,
+                                          &str_ref_by,
+                                          &inviteSession_->dlg->local.info_str);
+    pjsip_msg_add_hdr(tdata->msg, reinterpret_cast<pjsip_hdr*>(gs_hdr));
 
     sip_utils::addUserAgentHeader(acc->getUserAgentName(), tdata);
 
@@ -1311,15 +1311,17 @@ SIPCall::switchInput(const std::string& source)
 
     for (auto const& stream : rtpStreams_) {
         auto mediaAttr = stream.mediaAttribute_;
-
-        // change source uri for all media types
         mediaAttr->sourceUri_ = source;
-        if (mediaAttr->type_ == MEDIA_VIDEO) {
-            for (const auto& rtpSession : getRtpSessionList(MediaType::MEDIA_VIDEO)) {
-                auto videoRtp = std::static_pointer_cast<video::VideoRtpSession>(rtpSession);
-                videoRtp->reloadInputDevice(source);
-            }
-        }
+    }
+
+    // Check if the call is being recorded in order to continue
+    // ... the recording after the switch
+    bool isRec = Call::isRecording();
+
+    SIPSessionReinvite(getMediaAttributeList());
+    if (isRec) {
+        readyToRecord_ = false;
+        pendingRecord_ = true;
     }
 }
 
@@ -1719,18 +1721,15 @@ SIPCall::setupNegotiatedMedia()
         const auto& local = slot.first;
         const auto& remote = slot.second;
 
-
         if (static_cast<size_t>(streamIdx) >= rtpStreams_.size()) {
             throw std::runtime_error("Stream index is out-of-range");
         }
-
 
         auto const& rtpStream = rtpStreams_[streamIdx];
 
         if (not rtpStream.mediaAttribute_) {
             throw std::runtime_error("Missing media attribute");
         }
-
 
         rtpStream.mediaAttribute_->enabled_ = local.enabled;
 
@@ -2080,7 +2079,6 @@ SIPCall::isReinviteRequired(const std::vector<MediaAttribute>& mediaAttrList)
         if (newAttr.enabled_ != rtpStreams_[streamIdx].mediaAttribute_->enabled_) {
             return true;
         }
-
     }
 
     return false;
