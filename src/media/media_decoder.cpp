@@ -161,7 +161,7 @@ MediaDemuxer::openInput(const DeviceParams& params)
     av_opt_set_int(
         inputCtx_,
         "fpsprobesize",
-        1,
+        5,
         AV_OPT_SEARCH_CHILDREN); // Don't waste time fetching framerate when finding stream info
     int ret = avformat_open_input(&inputCtx_, input.c_str(), iformat, options_ ? &options_ : NULL);
 
