@@ -426,7 +426,7 @@ SIPCall::SIPSessionReinvite(const std::vector<MediaAttribute>& mediaAttrList)
 {
     assert(not mediaAttrList.empty());
 
-    // std::lock_guard<std::recursive_mutex> lk {callMutex_};
+    std::lock_guard<std::recursive_mutex> lk {callMutex_};
 
     // Do nothing if no invitation processed yet
     if (not inviteSession_ or inviteSession_->invite_tsx)
