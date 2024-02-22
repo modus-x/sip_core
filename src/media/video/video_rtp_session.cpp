@@ -523,6 +523,8 @@ VideoRtpSession::start()
 void
 VideoRtpSession::stop()
 {
+    std::lock_guard lock(mutex_);
+
     stopReceiver();
     stopSender();
 

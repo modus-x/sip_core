@@ -62,8 +62,7 @@ VideoReceiveThread::VideoReceiveThread(const std::string& id,
 
 VideoReceiveThread::~VideoReceiveThread()
 {
-
-    stopLoop();
+    loop_.join();
     SIP_CORE_DBG("VideoReceiveThread [%p] Instance destroyed", this);
 }
 
@@ -231,10 +230,19 @@ VideoReceiveThread::decodeFrame()
         }
     }
     auto status = videoDecoder_->decode();
-    if (status == MediaDemuxer::Status::FallBack) {
+    if (status == MediaDemuxer::Status::EndOfFile) {
+        SIP_CORE_DBG("[{:p}] End of file", fmt::ptr(this));
+        loop_.stop();
+    }
+    else if (status == MediaDemuxer::Status::ReadError) {
+        SIP_CORE_ERROR("[{:p}] Decoding error: %s", fmt::ptr(this), MediaDemuxer::getStatusStr(status));
+    }
+    else if (status == MediaDemuxer::Status::FallBack) {
         if (keyFrameRequestCallback_)
             keyFrameRequestCallback_();
     }
+
+
     frameCount_++;
 }
 
