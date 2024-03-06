@@ -899,6 +899,9 @@ SIPAccount::onRegister(pjsip_regc_cbparam* param)
         setRegistrationState(RegistrationState::ERROR_GENERIC, param->code);
         registerKeepAliveTimer(false, param);
     } else if (param->code < 0 || param->code >= 300) {
+        if (param->code == 503) {
+            return;
+        }
         SIP_CORE_ERR("SIP registration failed, status=%d (%.*s)",
                      param->code,
                      (int) param->reason.slen,
@@ -1456,7 +1459,7 @@ SIPAccount::destroyRegistrationInfo()
 {
     if (!regc_)
         return;
-    pjsip_regc_destroy(regc_);
+    // pjsip_regc_destroy(regc_);
     regc_ = nullptr;
 }
 
