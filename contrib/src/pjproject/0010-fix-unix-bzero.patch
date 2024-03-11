@@ -1,0 +1,12 @@
+diff --git a/pjnath/src/pjnath/ice_session.c b/pjnath/src/pjnath/ice_session.c
+index 0570f63..883b49a 100644
+--- a/pjnath/src/pjnath/ice_session.c
++++ b/pjnath/src/pjnath/ice_session.c
+@@ -43,6 +43,7 @@
+ #include <linux/rtnetlink.h>
+ #include <sys/socket.h>
+ #include <unistd.h>
++#include <strings.h>
+ #endif
+ 
+ /* String names for candidate types */
