@@ -202,9 +202,8 @@ void
 MediaDemuxer::findStreamInfo()
 {
     if (not streamInfoFound_) {
-        inputCtx_->probesize = 100000000;
-        inputCtx_->format_probesize = 100000000;
-        inputCtx_->max_delay = 99999;
+        inputCtx_->probesize = 10000000;
+        inputCtx_->max_probe_packets = 5000;
         int err;
         if ((err = avformat_find_stream_info(inputCtx_, nullptr)) < 0) {
             SIP_CORE_ERR() << "Could not find stream info: " << libav_utils::getError(err);

@@ -394,7 +394,10 @@ VideoRtpSession::startReceiver()
     SIP_CORE_DBG("VideoRtpSession [%p] Starting receiver", this);
 
     if (receive_.enabled and not receive_.onHold) {
-        if (receiveThread_)
+        if (receiveThread_) {
+            if (socketPair_)
+                socketPair_->setReadBlockingMode(false);
+        }
             SIP_CORE_WARN("[%p] Already has a receiver, restarting", this);
         receiveThread_.reset(
             new VideoReceiveThread(callId_, !conference_, receive_.receiving_sdp, mtu_));
