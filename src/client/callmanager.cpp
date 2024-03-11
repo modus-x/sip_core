@@ -122,7 +122,6 @@ answerMediaChangeRequest(const std::string& accountId,
 bool
 hangUp(const std::string& accountId, const std::string& callId)
 {
-
     SIP_CORE_ERR("Hanging up %s", callId.c_str());
     return sip_core::Manager::instance().hangupCall(accountId, callId);
 }
@@ -171,16 +170,16 @@ muteLocalMedia(const std::string& accountId,
 
 bool
 muteRemoteMedia(const std::string& accountId,
-               const std::string& callId,
-               const std::string& mediaType,
-               bool mute)
+                const std::string& callId,
+                const std::string& mediaType,
+                bool mute)
 {
     if (auto account = sip_core::Manager::instance().getAccount(accountId)) {
         if (auto call = account->getCall(callId)) {
             SIP_CORE_DBG("Muting [%s] for call %s", mediaType.c_str(), callId.c_str());
             call->peerMuted(mute, -1);
             return true;
-        } 
+        }
     }
     return false;
 }
@@ -456,13 +455,15 @@ getConferenceInfos(const std::string& accountId, const std::string& confId)
 }
 
 void
-playDTMF(const std::string& key)
+playDTMF(const std::string& accountId, const std::string& callId, const std::string& key)
 {
-    auto code = key.data()[0];
-    sip_core::Manager::instance().playDtmf(code);
-
-    if (auto current_call = sip_core::Manager::instance().getCurrentCall())
-        current_call->carryingDTMFdigits(code);
+    if (const auto account = sip_core::Manager::instance().getAccount(accountId)) {
+        if (auto call = account->getCall(callId)) {
+            auto code = key.data()[0];
+            sip_core::Manager::instance().playDtmf(code);
+            call->carryingDTMFdigits(code);
+        }
+    }
 }
 
 void
@@ -615,7 +616,8 @@ setActiveStream(const std::string& accountId,
             accountId)) {
         if (auto conf = account->getConference(confId)) {
             conf->setActiveStream(streamId, state);
-        } else if (auto call = std::static_pointer_cast<sip_core::SIPCall>(account->getCall(confId))) {
+        } else if (auto call = std::static_pointer_cast<sip_core::SIPCall>(
+                       account->getCall(confId))) {
             call->setActiveMediaStream(accountUri, deviceId, streamId, state);
         }
     }

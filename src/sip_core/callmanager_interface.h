@@ -186,7 +186,7 @@ LIBSIP_CORE_PUBLIC void setRecording(const std::string& accountId, const std::st
 
 LIBSIP_CORE_PUBLIC void recordPlaybackSeek(double value);
 LIBSIP_CORE_PUBLIC bool getIsRecording(const std::string& accountId, const std::string& callId);
-LIBSIP_CORE_PUBLIC void playDTMF(const std::string& key);
+LIBSIP_CORE_PUBLIC void playDTMF(const std::string& accountId, const std::string& callId, const std::string& key);
 LIBSIP_CORE_PUBLIC void startTone(int32_t start, int32_t type);
 
 LIBSIP_CORE_PUBLIC bool switchInput(const std::string& accountId,
