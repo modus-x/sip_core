@@ -150,9 +150,13 @@ VideoRtpSession::VideoRtpSession(const string& callId,
 
 VideoRtpSession::~VideoRtpSession()
 {
-    cancelKeepAliveTimer();
-    deinitRecorder();
+
     stop();
+
+    deinitRecorder();
+
+    cancelKeepAliveTimer();
+
     SIP_CORE_DBG("VideoRtpSession [%p] Video RTP session destroyed", this);
 }
 
@@ -528,6 +532,10 @@ VideoRtpSession::stop()
 {
     std::lock_guard lock(mutex_);
 
+
+    if (socketPair_)
+        socketPair_->interrupt();
+
     stopReceiver();
     stopSender();
 
@@ -540,8 +548,6 @@ VideoRtpSession::stop()
     videoBitrateInfo_.videoBitrateCurrent = SystemCodecInfo::DEFAULT_VIDEO_BITRATE;
     storeVideoBitrateInfo();
 
-    if (socketPair_)
-        socketPair_->interrupt();
     socketPair_.reset();
     videoLocal_.reset();
 }
