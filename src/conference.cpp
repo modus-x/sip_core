@@ -986,6 +986,17 @@ Conference::toggleRecording()
     // Notify each participant
     foreachCall([&](auto call) { call->updateRecState(newState); });
 
+
+    std::time_t t = std::time(nullptr);
+    auto recTime = std::localtime(&t);
+    char time[20];
+    strftime(time, 20, "%Y-%m-%d %H-%M-%S", recTime);
+    auto filename = fmt::format("{} Conference [id {}]",
+                                time,
+                                getConfId());
+    SIP_CORE_INFO() << "Recording conference to filename -> " << filename;
+    setRecordingFilename(filename);
+
     auto res = Recordable::toggleRecording();
     updateRecording();
     return res;

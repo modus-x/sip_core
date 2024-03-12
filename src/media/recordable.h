@@ -58,11 +58,19 @@ public:
     virtual void stopRecording();
 
     /**
-     * Start recording
+     * Start recording with filename
      */
-    virtual bool startRecording(const std::string& path);
+    virtual bool startRecording(const std::string& filename);
 
+    /**
+     * Start recording with predefined filename or generated filename
+     */
     virtual bool startRecording();
+
+    /**
+     * Set filename to recorder_ object
+     */
+    virtual void setRecordingFilename(const std::string& filename);
 
     /**
      * Return the file path for this recording
@@ -75,7 +83,10 @@ protected:
     mutable std::mutex apiMutex_;
     bool recording_ {false};
     std::shared_ptr<MediaRecorder> recorder_;
-    bool isAudioOnly_ {false};
+    std::string currentRecordingFilename_;
+   bool isAudioOnly_ {false};
+
+    void setAutoFilename();
 };
 
 } // namespace sip_core

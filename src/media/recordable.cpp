@@ -46,6 +46,14 @@ Recordable::getPath() const
         return "";
 }
 
+void Recordable::setAutoFilename() {
+    std::time_t t = std::time(nullptr);
+    auto startTime = *std::localtime(&t);
+    std::stringstream generatedFileName;
+    generatedFileName << std::put_time(&startTime, "%Y%m%d-%H%M%S");
+    setRecordingFilename(generatedFileName.str());
+}
+
 bool
 Recordable::toggleRecording()
 {
@@ -53,29 +61,33 @@ Recordable::toggleRecording()
         SIP_CORE_ERR("couldn't toggle recording, non existent recorder");
         return false;
     }
-
     if (!recording_) {
-        std::time_t t = std::time(nullptr);
-        auto startTime = *std::localtime(&t);
-        std::stringstream ss;
-        auto dir = Manager::instance().audioPreference.getRecordPath();
-        if (dir.empty())
-            dir = fileutils::get_home_dir();
-        // Check if dir exists, create if if it does not
-        fileutils::check_dir(dir.c_str());
-        ss << dir;
-        if (dir.back() != DIR_SEPARATOR_CH)
-            ss << DIR_SEPARATOR_CH;
-        ss << std::put_time(&startTime, "%Y%m%d-%H%M%S");
-        startRecording(ss.str());
+        startRecording();
     } else {
         stopRecording();
     }
     return recording_;
 }
 
+void
+Recordable::setRecordingFilename(const std::string &filename) {
+    std::stringstream ss;
+    auto dir = Manager::instance().audioPreference.getRecordPath();
+    if (dir.empty())
+        dir = fileutils::get_home_dir();
+    // Check if dir exists, create if it does not
+    fileutils::check_dir(dir.c_str());
+    ss << dir;
+    if (dir.back() != DIR_SEPARATOR_CH)
+        ss << DIR_SEPARATOR_CH;
+    ss << filename;
+    auto fullPath = ss.str();
+    recorder_->setPath(fullPath);
+    currentRecordingFilename_ = filename;
+}
+
 bool
-Recordable::startRecording(const std::string& path)
+Recordable::startRecording(const std::string& filename)
 {
     std::lock_guard<std::mutex> lk {apiMutex_};
     if (!recorder_) {
@@ -84,13 +96,16 @@ Recordable::startRecording(const std::string& path)
     }
 
     if (!recording_) {
-        if (path.empty()) {
-            SIP_CORE_ERR("couldn't start recording, path is empty");
+        if (filename != currentRecordingFilename_) {
+            setRecordingFilename(filename);
+        }
+
+        if (filename.empty()) {
+            SIP_CORE_ERR("couldn't start recording, filename is empty");
             return false;
         }
 
         recorder_->audioOnly(isAudioOnly_);
-        recorder_->setPath(path);
         recorder_->startRecording();
         recording_ = recorder_->isRecording();
     }
@@ -101,7 +116,10 @@ Recordable::startRecording(const std::string& path)
 bool
 Recordable::startRecording()
 {
-    return false;
+    if (currentRecordingFilename_.empty()) {
+        setAutoFilename();
+    }
+    return startRecording(currentRecordingFilename_);
 }
 
 void
@@ -119,6 +137,7 @@ Recordable::stopRecording()
     }
 
     recorder_->stopRecording();
+    currentRecordingFilename_ = "";
     recording_ = false;
 }
 

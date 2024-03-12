@@ -390,7 +390,7 @@ MediaRecorder::initRecord()
     title_ = replaceAll(title_, "%TIMESTAMP", timestampString.str());
 
     if (description_.empty()) {
-        description_ = "Recorded with Virtual PBX";
+        description_ = "Recorded with Svetophone";
     }
     description_ = replaceAll(description_, "%TIMESTAMP", timestampString.str());
 
