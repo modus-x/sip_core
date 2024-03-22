@@ -61,7 +61,6 @@ namespace sip_core {
 static constexpr uint64_t SIP_CORE_ID_MAX_VAL = 9007199254740992;
 constexpr static const char RINGDIR[] = "ringtones";
 
-
 class Call;
 class SystemCodecContainer;
 
@@ -80,7 +79,7 @@ public:
  * It contains account, configuration, VoIP Link and Calls (inside the VoIPLink)
  */
 
-class Account: public std::enable_shared_from_this<Account>
+class Account : public std::enable_shared_from_this<Account>
 {
 public:
     Account(const std::string& accountID);
@@ -98,7 +97,8 @@ public:
 
     virtual std::unique_ptr<AccountConfig> buildConfig() const = 0;
 
-    void setConfig(std::unique_ptr<AccountConfig>&& config) {
+    void setConfig(std::unique_ptr<AccountConfig>&& config)
+    {
         std::lock_guard<std::recursive_mutex> lock(configurationMutex_);
         config_ = std::move(config);
         loadConfig();
@@ -114,12 +114,16 @@ public:
      */
     virtual bool switchTransport(TransportType type) = 0;
 
-    const AccountConfig& config() const {
-        if (config_) return *config_;
-        else throw std::runtime_error("Account doesn't have a configuration");
+    const AccountConfig& config() const
+    {
+        if (config_)
+            return *config_;
+        else
+            throw std::runtime_error("Account doesn't have a configuration");
     }
 
-    inline void editConfig(std::function<void(AccountConfig& config)>&& edit) {
+    inline void editConfig(std::function<void(AccountConfig& config)>&& edit)
+    {
         std::lock_guard<std::recursive_mutex> lock(configurationMutex_);
         edit(*config_);
         saveConfig();
@@ -127,7 +131,8 @@ public:
 
     virtual void saveConfig() const;
 
-    virtual void setAccountDetails(const std::map<std::string, std::string>& details) {
+    virtual void setAccountDetails(const std::map<std::string, std::string>& details)
+    {
         std::lock_guard<std::recursive_mutex> lock(configurationMutex_);
         if (not config_)
             config_ = buildConfig();
@@ -136,7 +141,8 @@ public:
         saveConfig();
     }
 
-    std::map<std::string, std::string> getAccountDetails() const {
+    std::map<std::string, std::string> getAccountDetails() const
+    {
         std::lock_guard<std::recursive_mutex> lock(configurationMutex_);
         return config().toMap();
     }
@@ -174,8 +180,8 @@ public:
      * @param mediaList A list of media
      * @return The created call
      */
-    virtual std::shared_ptr<Call> newOutgoingCall(std::string_view toUrl,
-                                                  const std::vector<libsip_core::MediaMap>& mediaList)
+    virtual std::shared_ptr<Call> newOutgoingCall(
+        std::string_view toUrl, const std::vector<libsip_core::MediaMap>& mediaList)
         = 0;
 
     /**
@@ -215,16 +221,12 @@ public:
 
     virtual void setPushNotificationToken(const std::string& pushDeviceToken = "")
     {
-        editConfig([&](AccountConfig& config){
-            config.deviceKey = pushDeviceToken;
-        });
+        editConfig([&](AccountConfig& config) { config.deviceKey = pushDeviceToken; });
     }
 
     virtual void setPushNotificationTopic(const std::string& topic = "")
     {
-        editConfig([&](AccountConfig& config){
-            config.notificationTopic = topic;
-        });
+        editConfig([&](AccountConfig& config) { config.notificationTopic = topic; });
     }
 
     /**
@@ -235,7 +237,7 @@ public:
 
     void setEnabled(bool enable) { config_->enabled = enable; }
 
-    bool isDND () const noexcept { return isDND_; }
+    bool isDND() const noexcept { return isDND_; }
 
     void setDND(bool dnd) noexcept { isDND_ = dnd; }
 
@@ -249,10 +251,9 @@ public:
 
     bool isUsable() const { return config().enabled and active_; }
 
-    void enableVideo(bool enable) {
-        editConfig([&](AccountConfig& config){
-            config.videoEnabled = enable;
-        });
+    void enableVideo(bool enable)
+    {
+        editConfig([&](AccountConfig& config) { config.videoEnabled = enable; });
     }
     bool isVideoEnabled() const { return config().videoEnabled; }
 
@@ -294,6 +295,11 @@ public:
 
     bool isRendezVous() const { return config().isRendezVous; }
     bool isAutoAnswerEnabled() const { return config().autoAnswerEnabled; }
+    void setAutoAnswer(bool enable)
+    {
+        editConfig([&](AccountConfig& config) { config.autoAnswerEnabled = enable; });
+    }
+
     bool isReadReceiptEnabled() const { return config().sendReadReceipt; }
 
     /**
@@ -473,4 +479,3 @@ operator<<(std::ostream& os, const Account& acc)
 }
 
 } // namespace sip_core
-

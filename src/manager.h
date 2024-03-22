@@ -70,7 +70,7 @@ public:
     // TODO LIBSIP_CORE_PUBLIC only if tests
     static LIBSIP_CORE_TESTABLE Manager& instance();
 
-    void setAutoAnswer(bool enable);
+    void setAutoAnswer(const std::string& accountId, bool enable) const;
 
     /**
      * General preferences configuration

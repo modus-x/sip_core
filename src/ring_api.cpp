@@ -30,9 +30,6 @@
 #include "manager.h"
 #include "logger.h"
 #include "sip_core.h"
-#include "callmanager_interface.h"
-#include "configurationmanager_interface.h"
-#include "presencemanager_interface.h"
 #include "client/ring_signal.h"
 
 #ifdef ENABLE_VIDEO
@@ -61,15 +58,10 @@ init(enum InitFlag flags) noexcept
     sip_core::getSignalHandlers();
 
     try {
-        // current implementation use static variable
-        auto& manager = sip_core::Manager::instance();
-        manager.setAutoAnswer(flags & LIBSIP_CORE_FLAG_AUTOANSWER);
-
 #if TARGET_OS_IOS
         if (flags & LIBSIP_CORE_FLAG_IOS_EXTENSION)
             manager.isIOSExtension = true;
 #endif
-
         return true;
     } catch (...) {
         return false;

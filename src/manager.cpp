@@ -235,8 +235,6 @@ struct Manager::ManagerPimpl
     /** Main scheduler */
     ScheduledExecutor scheduler_ {"manager"};
 
-    std::atomic_bool autoAnswer_ {false};
-
     /** Application wide tone controller */
     ToneControl toneCtrl_;
     std::unique_ptr<AudioDeviceGuard> toneDeviceGuard_;
@@ -594,9 +592,11 @@ Manager()
 {}
 
 void
-Manager::setAutoAnswer(bool enable)
+Manager::setAutoAnswer(const std::string& accountId, bool enable) const
 {
-    pimpl_->autoAnswer_ = enable;
+    if (auto account = getAccount(accountId)) {
+        account->setAutoAnswer(enable);
+    }
 }
 
 void
@@ -1921,6 +1921,10 @@ Manager::playRingtone(const std::string& accountID)
     const auto account = getAccount(accountID);
     if (!account) {
         SIP_CORE_WARN("Invalid account in ringtone");
+        return;
+    }
+
+    if (account->isAutoAnswerEnabled()) {
         return;
     }
 

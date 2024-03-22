@@ -125,6 +125,8 @@ LIBSIP_CORE_PUBLIC void setAgcState(bool enabled);
 LIBSIP_CORE_PUBLIC bool isVADEnabled();
 LIBSIP_CORE_PUBLIC void setVADState(bool enabled);
 
+LIBSIP_CORE_PUBLIC void setAutoAnswer(const std::string& accountId, bool enable);
+
 LIBSIP_CORE_PUBLIC void muteDtmf(bool mute);
 LIBSIP_CORE_PUBLIC bool isDtmfMuted();
 

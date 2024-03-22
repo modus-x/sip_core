@@ -71,6 +71,12 @@ registerConfHandlers(const std::map<std::string, std::shared_ptr<CallbackWrapper
     registerSignalHandlers(handlers);
 }
 
+void
+setAutoAnswer(const std::string& accountId, bool enable)
+{
+    sip_core::Manager::instance().setAutoAnswer(accountId, enable);
+}
+
 std::map<std::string, std::string>
 getAccountDetails(const std::string& accountID)
 {
