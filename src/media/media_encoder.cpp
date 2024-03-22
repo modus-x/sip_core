@@ -848,7 +848,7 @@ MediaEncoder::initCodec(AVMediaType mediaType, AVCodecID avcodecId, uint64_t br)
         forcePresetX2645(encoderCtx);
         initH265(encoderCtx, br);
     } else if (avcodecId == AV_CODEC_ID_VP8) {
-        // initVP8(encoderCtx, br);
+        initVP8(encoderCtx, br);
     } else if (avcodecId == AV_CODEC_ID_MPEG4) {
         initMPEG4(encoderCtx, br);
     } else if (avcodecId == AV_CODEC_ID_H263) {

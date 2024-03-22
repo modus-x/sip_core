@@ -474,34 +474,6 @@ namespace sip_core {
 
     void
     SIPCall::sendSIPInfo(std::string_view body, std::string_view subtype) {
-        std::lock_guard<std::recursive_mutex> lk{callMutex_};
-        if (not inviteSession_ or not inviteSession_->dlg)
-            throw VoipLinkException("Couldn't get invite dialog");
-
-        constexpr pj_str_t methodName = CONST_PJ_STR("INFO");
-        constexpr pj_str_t type = CONST_PJ_STR("application");
-
-        pjsip_method method;
-        pjsip_method_init_np(&method, (pj_str_t *) &methodName);
-
-        /* Create request message. */
-        pjsip_tx_data *tdata;
-        if (pjsip_dlg_create_request(inviteSession_->dlg, &method, -1, &tdata) != PJ_SUCCESS) {
-            SIP_CORE_ERR("[call:%s] Could not create dialog", getCallId().c_str());
-            return;
-        }
-
-        /* Create "application/<subtype>" message body. */
-        pj_str_t content = CONST_PJ_STR(body);
-        pj_str_t pj_subtype = CONST_PJ_STR(subtype);
-        tdata->msg->body = pjsip_msg_body_create(tdata->pool, &type, &pj_subtype, &content);
-        if (tdata->msg->body == NULL)
-            pjsip_tx_data_dec_ref(tdata);
-        else
-            pjsip_dlg_send_request(inviteSession_->dlg,
-                                   tdata,
-                                   Manager::instance().sipVoIPLink().getModId(),
-                                   NULL);
     }
 
     void
@@ -1342,48 +1314,6 @@ namespace sip_core {
 
     void
     SIPCall::sendTextMessage(const std::map<std::string, std::string> &messages, const std::string &from) {
-        std::lock_guard<std::recursive_mutex> lk{callMutex_};
-        // TODO: for now we ignore the "from" (the previous implementation for sending this info was
-        //      buggy and verbose), another way to send the original message sender will be implemented
-        //      in the future
-        if (not subcalls_.empty()) {
-            pendingOutMessages_.emplace_back(messages, from);
-            for (auto &c: subcalls_)
-                c->sendTextMessage(messages, from);
-        } else {
-            if (inviteSession_) {
-                try {
-                    // Ignore if the peer does not allow "MESSAGE" SIP method
-                    // NOTE:
-                    // The SIP "Allow" header is not mandatory as per RFC-3261. If it's
-                    // not present and since "MESSAGE" method is an extention method,
-                    // we choose to assume that the peer does not support the "MESSAGE"
-                    // method to prevent unexpected behavior when interoperating with
-                    // some SIP implementations.
-
-                    // if (not isSipMethodAllowedByPeer(sip_utils::SIP_METHODS::MESSAGE)) {
-                    //     SIP_CORE_WARN() << fmt::format("[call:{}] Peer does not allow \"{}\" method",
-                    //                                getCallId(),
-                    //                                sip_utils::SIP_METHODS::MESSAGE);
-
-                    //     // Print peer's allowed methods
-                    //     SIP_CORE_INFO() << fmt::format("[call:{}] Peer's allowed methods: {}",
-                    //                                getCallId(),
-                    //                                peerAllowedMethods_);
-                    //     return;
-                    // }
-
-                    im::sendSipMessage(inviteSession_.get(), messages);
-
-                } catch (...) {
-                    SIP_CORE_ERR("[call:%s] Failed to send SIP text message", getCallId().c_str());
-                }
-            } else {
-                pendingOutMessages_.emplace_back(messages, from);
-                SIP_CORE_ERR("[call:%s] sendTextMessage: no invite session for this call",
-                             getCallId().c_str());
-            }
-        }
     }
 
     void
