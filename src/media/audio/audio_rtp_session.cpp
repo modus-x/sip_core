@@ -359,33 +359,21 @@ AudioRtpSession::processRtcpChecker()
 void
 AudioRtpSession::attachRemoteRecorder(const MediaStream& ms)
 {
-    if (!mutex_.try_lock()) {
+    if (!recorder_ || !receiveThread_)
         return;
-    };
-    if (!recorder_ || !receiveThread_) {
-        mutex_.unlock();
-        return;
-    }
     if (auto ob = recorder_->addStream(ms)) {
         receiveThread_->attach(ob);
     }
-    mutex_.unlock();
 }
 
 void
 AudioRtpSession::attachLocalRecorder(const MediaStream& ms)
 {
-    if (!mutex_.try_lock()) {
+    if (!recorder_ || !audioInput_)
         return;
-    };
-    if (!recorder_ || !audioInput_) {
-        mutex_.unlock();
-        return;
-    }
     if (auto ob = recorder_->addStream(ms)) {
         audioInput_->attach(ob);
     }
-    mutex_.unlock();
 }
 
 void
