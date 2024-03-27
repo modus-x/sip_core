@@ -818,9 +818,8 @@ setRotation(int angle)
 }
 
 void
-captureVideoPacket(JNIEnv* jenv,
-                   const std::string& input,
-                   jobject buffer,
+captureVideoPacket(const std::string& input,
+                   const ::std::shared_ptr< ::std::vector< uint8_t > >& buffer,
                    int size,
                    int offset,
                    bool keyframe,
@@ -841,7 +840,8 @@ captureVideoPacket(JNIEnv* jenv,
                                                rotMatrix->size);
             std::copy_n(rotMatrix->data, rotMatrix->size, buf);
         }
-        auto data = (uint8_t*) jenv->GetDirectBufferAddress(buffer);
+        ::std::vector< uint8_t > vector = *buffer.get();
+        uint8_t * data = &vector[0];
         packet->data = data + offset;
         packet->size = size;
         packet->pts = timestamp;

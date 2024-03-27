@@ -323,6 +323,7 @@ private:
     bool updateAllMediaStreams(const std::vector<MediaAttribute>& mediaAttrList, bool isRemote);
     // Check if a SIP re-invite must be sent to negotiate the new media
     bool isReinviteRequired(const std::vector<MediaAttribute>& mediaAttrList);
+    bool isRestartRequired(const std::vector<MediaAttribute>& mediaAttrList);
     void requestReinvite(const std::vector<MediaAttribute>& mediaAttrList);
     int SIPSessionReinvite(const std::vector<MediaAttribute>& mediaAttrList);
     int SIPSessionReinvite();

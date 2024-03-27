@@ -239,9 +239,8 @@ LIBSIP_CORE_PUBLIC long acquireNativeWindow(JNIEnv* jenv, jobject javaSurface);
 LIBSIP_CORE_PUBLIC void releaseNativeWindow(long windowId);
 LIBSIP_CORE_PUBLIC void captureVideoFrame(
     JavaVM* javaVM, JNIEnv* jenv, const std::string& inputId, jobject javaImage, int rotation);
-LIBSIP_CORE_PUBLIC void captureVideoPacket(JNIEnv* jenv,
-                                           const std::string& inputId,
-                                           jobject javaBuffer,
+LIBSIP_CORE_PUBLIC void captureVideoPacket(const std::string& inputId,
+                                           const ::std::shared_ptr< ::std::vector< uint8_t > >& buffer,
                                            int size,
                                            int offset,
                                            bool keyframe,
@@ -306,9 +305,9 @@ struct LIBSIP_CORE_PUBLIC VideoSignal
     {
         constexpr static const char* name = "GetCameraInfo";
         using cb_type = void(const std::string& device,
-                             std::vector<int32_t>& formats,
-                             std::vector<uint32_t>& sizes,
-                             std::vector<uint32_t>& rates);
+                             std::vector<int32_t>* formats,
+                             std::vector<uint32_t>* sizes,
+                             std::vector<uint32_t>* rates);
     };
     struct LIBSIP_CORE_PUBLIC RequestKeyFrame
     {
