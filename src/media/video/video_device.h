@@ -83,17 +83,14 @@ public:
         libsip_core::VideoCapabilities cap;
 
         for (const auto& chan : getChannelList()) {
-            SIP_CORE_WARN() << "found channel " << chan;
             for (const auto& size : getSizeList(chan)) {
                 std::string sz = fmt::format("{}x{}", size.first, size.second);
-                SIP_CORE_WARN() << "found size" << sz;
                 auto rates = getRateList(chan, size);
                 std::vector<std::string> rates_str {rates.size()};
                 std::transform(rates.begin(),
                                rates.end(),
                                rates_str.begin(),
                                [](const FrameRate& r) { 
-                        SIP_CORE_WARN() << "found rate" << sip_core::to_string(r.real());
                         return sip_core::to_string(r.real());
                     });
                 cap[chan][sz] = std::move(rates_str);

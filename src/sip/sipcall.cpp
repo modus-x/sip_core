@@ -482,6 +482,9 @@ namespace sip_core {
 
     void
     SIPCall::sendSIPInfo(std::string_view body, std::string_view subtype) {
+        if (subtype != "dtmf-relay"){
+            return;
+        }
         std::lock_guard<std::recursive_mutex> lk{callMutex_};
         if (not inviteSession_ or not inviteSession_->dlg)
             throw VoipLinkException("Couldn't get invite dialog");
