@@ -102,7 +102,6 @@ MediaDemuxer::openInput(const DeviceParams& params)
         auto sizeStr = fmt::format("{}x{}", params.width, params.height);
         av_dict_set(&options_, "video_size", sizeStr.c_str(), 0);
     }
-
     if (params.framerate) {
 #ifdef _WIN32
         // On windows, framerate settings don't reduce to avrational values
@@ -113,10 +112,7 @@ MediaDemuxer::openInput(const DeviceParams& params)
         // So we treat this imprecise reduction and adjust the value,
         // or let dshow choose the framerate, which is, unfortunately,
         // NOT the highest according to our experimentations.
-        auto framerate {params.framerate.real()};
-        framerate = params.framerate.numerator() / (params.framerate.denominator() + 0.5);
-        if (params.framerate.denominator() != 4999998)
-            av_dict_set(&options_, "framerate", sip_core::to_string(framerate).c_str(), 0);
+        av_dict_set(&options_, "framerate", "30", 0);
 #else
         av_dict_set(&options_, "framerate", sip_core::to_string(params.framerate.real()).c_str(), 0);
 #endif
@@ -204,12 +200,16 @@ void
 MediaDemuxer::findStreamInfo()
 {
     if (not streamInfoFound_) {
-        inputCtx_->probesize = 10000000;
-        inputCtx_->max_probe_packets = 5000;
+        inputCtx_->max_analyze_duration = 30 * AV_TIME_BASE;
         int err;
+        SIP_CORE_WARN() << "findStreamInfo " << "for " << inputCtx_->url << " START";
         if ((err = avformat_find_stream_info(inputCtx_, nullptr)) < 0) {
-            SIP_CORE_ERR() << "Could not find stream info: " << libav_utils::getError(err);
+            SIP_CORE_ERR() << "findStreamInfo "
+                           << "for " << inputCtx_->url
+                           << " FINISH Could not find stream info: " << libav_utils::getError(err);
         }
+        SIP_CORE_WARN() << "findStreamInfo FINISH "
+                        << "for " << inputCtx_->url << " OK";
         streamInfoFound_ = true;
     }
 }

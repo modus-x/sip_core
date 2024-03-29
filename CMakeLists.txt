@@ -218,6 +218,8 @@ if (APPLE)
 endif ()
 
 if (MSVC)
+    # needed on latest windows
+    add_definitions(-D_WIN32=1)
     if (WINDOWS_STORE)
         source_group("Source Files\\media\\video\\uwpvideo"
                 FILES ${Source_Files__media__video__uwpvideo})
