@@ -118,6 +118,8 @@ MediaDemuxer::openInput(const DeviceParams& params)
 #endif
     }
 
+    av_dict_set(&options_, "rtbufsize", "15000000", 0);
+
     if (params.offset_x || params.offset_y) {
         av_dict_set(&options_, "offset_x", std::to_string(params.offset_x).c_str(), 0);
         av_dict_set(&options_, "offset_y", std::to_string(params.offset_y).c_str(), 0);
