@@ -116,6 +116,8 @@ private:
     NON_COPYABLE(VideoInput);
 
     std::string id_;
+
+    // full MRL (camera:// + suffix)
     std::string currentResource_;
     std::shared_future<DeviceParams> switchInput(const std::string& resource);
     std::atomic<bool> switchPending_ = {false};
@@ -127,6 +129,8 @@ private:
     bool emulateRate_ = false;
 
     std::atomic_bool decOptsFound_ {false};
+
+    // set value to promise. you can listen for another thread for foundDecOpts_, which it returned from switchInput
     void foundDecOpts(const DeviceParams& params);
 
     void clearOptions();

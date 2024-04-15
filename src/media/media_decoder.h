@@ -113,6 +113,7 @@ public:
     void findStreamInfo();
     int selectStream(AVMediaType type);
 
+    // this sets callbacks, in which compressed bytes from Packets will be decoded
     void setStreamCallback(unsigned stream, StreamCallback cb = {})
     {
         if (streams_.size() <= stream)
@@ -151,16 +152,25 @@ private:
     std::vector<StreamCallback> streams_;
     int64_t startTime_;
     int64_t lastReadPacketTime_ {};
+
+    // params that we get from SYSTEM layer
     DeviceParams inputParams_;
+
+    //
     AVDictionary* options_ = nullptr;
     MediaDemuxer::CurrentState currentState_;
+
+    // AvPackets will be written here!
     std::mutex audioBufferMutex_ {};
     std::mutex videoBufferMutex_ {};
     std::queue<std::unique_ptr<AVPacket, std::function<void(AVPacket*)>>> videoBuffer_ {};
     std::queue<std::unique_ptr<AVPacket, std::function<void(AVPacket*)>>> audioBuffer_ {};
+
     std::function<void()> needFrameCb_;
     std::function<void(bool)> fileFinishedCb_;
     void clearFrames();
+
+    // push
     void pushFrameFrom(std::queue<std::unique_ptr<AVPacket, std::function<void(AVPacket*)>>>& buffer,
                        bool isAudio,
                        std::mutex& mutex);
@@ -183,15 +193,20 @@ public:
 
     void emulateRate() { emulateRate_ = true; }
 
+    /// just forward to demuxer
     int openInput(const DeviceParams&);
+    /// just forward to demuxer
     void setInterruptCallback(int (*cb)(void*), void* opaque);
+    /// just forward to demuxer
     void setIOContext(MediaIOHandle* ioctx);
 
     int setup(AVMediaType type);
     int setupAudio() { return setup(AVMEDIA_TYPE_AUDIO); }
     int setupVideo() { return setup(AVMEDIA_TYPE_VIDEO); }
 
+    // forward to demuxer. at the end, if stream was setup correctly, MediaDecoder's decode ,ethod will be called
     MediaDemuxer::Status decode();
+
     DecodeStatus flush();
 
     int getWidth() const;
@@ -232,6 +247,7 @@ private:
 
     rational<unsigned> getTimeBase() const;
 
+    // demuxer which will get compressed frames from camera, it must be always created in every constructor
     std::shared_ptr<MediaDemuxer> demuxer_;
 
     const AVCodec* inputDecoder_ = nullptr;
@@ -255,20 +271,23 @@ private:
     std::unique_ptr<video::HardwareAccel> accel_;
     unsigned short accelFailures_ = 0;
 #endif
+
+    // report here x value of MediaFrame after demuxer
     MediaObserver callback_;
     int prepareDecoderContext();
     int64_t seekTime_ = -1;
     void resetSeekTime() { seekTime_ = -1; }
     std::function<void(int, int)> resolutionChangedCallback_;
 
+    // what we actually got from selected demuxer's stream
     int width_ {0};
     int height_ {0};
 
+    // for OPUS lol
     bool fecEnabled_ {false};
 
     std::function<void()> contextCallback_;
     std::atomic_bool firstDecode_ {true};
-
 protected:
     AVDictionary* options_ = nullptr;
 };

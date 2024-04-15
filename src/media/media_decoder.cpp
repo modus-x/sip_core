@@ -370,8 +370,13 @@ MediaDemuxer::decode()
             return Status::RestartRequired;
         }
     }
+
+    // allocate buffer with encoded data
     libsip_core::PacketBuffer packet(av_packet_alloc());
+
+    // read one frame into our newly allocated packed
     int ret = av_read_frame(inputCtx_, packet.get());
+
     if (ret == AVERROR(EAGAIN)) {
         /*no data available. Calculate time until next frame.
          We do not use the emulated frame mechanism from the decoder because it will affect all

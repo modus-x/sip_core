@@ -105,7 +105,7 @@
 #include <list>
 #include <random>
 
-const char* SIP_CORE_VERSION = "0.8.6";
+const char* SIP_CORE_VERSION = "0.8.7";
 
 namespace sip_core {
 

@@ -55,8 +55,7 @@ namespace video {
 static constexpr unsigned default_grab_width = 640;
 static constexpr unsigned default_grab_height = 480;
 
-VideoInput::
-VideoInput(VideoInputMode inputMode, const std::string& id_)
+VideoInput::VideoInput(VideoInputMode inputMode, const std::string& id_)
     : VideoGenerator::VideoGenerator()
     , loop_(std::bind(&VideoInput::setup, this),
             std::bind(&VideoInput::process, this),
@@ -80,8 +79,7 @@ VideoInput(VideoInputMode inputMode, const std::string& id_)
     switchInput(id_);
 }
 
-VideoInput::~
-VideoInput()
+VideoInput::~VideoInput()
 {
     stopInput();
 }
@@ -179,6 +177,7 @@ VideoInput::process()
         decoder_->emitFrame(false);
         return;
     }
+    // ALWAYS called on first VideoInput creation
     if (switchPending_)
         createDecoder();
 
@@ -300,12 +299,15 @@ VideoInput::createDecoder()
 
     switchPending_ = false;
 
+    // we cannot create decoder without depOpts_!
     if (decOpts_.input.empty()) {
         foundDecOpts(decOpts_);
         return;
     }
 
+    // create decoder without demuxer, height, width, only with callback
     auto decoder = std::make_unique<MediaDecoder>(
+        // this callback will notify listeners
         [this](const std::shared_ptr<MediaFrame>& frame) mutable {
             publishFrame(std::static_pointer_cast<VideoFrame>(frame));
         });
@@ -339,7 +341,7 @@ VideoInput::createDecoder()
             }
         } else if (-ret == EBUSY) {
             // If the device is busy, this means that it can be used by another call.
-            // If this is the case, cleanup() can occurs and this will erase shmPath_
+            // If this is the case, cleanup() can occur and this will erase shmPath_
             // So, be sure to regenerate a correct shmPath for clients.
             restartSink = true;
         }
@@ -349,11 +351,13 @@ VideoInput::createDecoder()
     if (isStopped_)
         return;
 
-    if (restartSink && !isStopped_) {
+    if (restartSink) {
         sink_->start();
     }
 
-    /* Data available, finish the decoding */
+    // by this time our successfully opened input is producing some output
+    // in this function we wait for demux stream, get its id, set callback for demuxer (pass
+    // compressed frames to decoder), then setup decoder context (copy paramaters from found stream)
     if (decoder->setupVideo() < 0) {
         SIP_CORE_ERR("decoder IO startup failed");
         foundDecOpts(decOpts_);
@@ -615,6 +619,7 @@ VideoInput::switchInput(const std::string& resource)
 {
     SIP_CORE_DBG("MRL: '%s'", resource.c_str());
 
+    // if already is true -> skip
     if (switchPending_.exchange(true)) {
         SIP_CORE_ERR("Video switch already requested");
         return {};
@@ -623,6 +628,7 @@ VideoInput::switchInput(const std::string& resource)
     currentResource_ = resource;
     decOptsFound_ = false;
 
+    // FUTURE of promise can be listened!
     std::promise<DeviceParams> p;
     foundDecOpts_.swap(p);
 

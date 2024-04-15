@@ -332,33 +332,6 @@ VideoRtpSession::restartSender()
         setupConferenceVideoPipeline(*conference_, Direction::SEND);
 }
 
-// change only input device without changing anything in media encoder. video
-// codecs should handle video frame parameters change on the fly both on local
-// and remote
-void
-VideoRtpSession::reloadInputDevice(const std::string& input)
-{
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
-    if (input == input_) {
-        // TODO: this will recreate videoInput decoder and change resolution for
-        // all calls who use this video input. May be it's ok?
-        videoLocal_->restart();
-    } else {
-        setMediaSource(input);
-
-        // close input if no call users left
-        videoLocal_.reset();
-
-        // get new input
-        videoLocal_ = getVideoInput(input);
-
-        // if video was attached, then attach it too
-        if (videoInputAttached_) {
-            attachVideoInput();
-        }
-    }
-}
-
 void
 VideoRtpSession::stopSender()
 {

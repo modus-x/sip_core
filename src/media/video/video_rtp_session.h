@@ -86,7 +86,6 @@ public:
     void restartSender() override;
     void stop() override;
 
-    void reloadInputDevice(const std::string& input);
     void setMuted(bool mute, Direction dir = Direction::SEND) override;
 
     void cancelKeepAliveTimer();
