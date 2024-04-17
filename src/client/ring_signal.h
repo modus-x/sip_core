@@ -47,12 +47,13 @@
 #include <utility>
 #include <string>
 #include "scheduled_executor.h"
+#include <memory.h>
 
 namespace sip_core {
 
 using SignalHandlerMap = std::map<std::string, std::shared_ptr<libsip_core::CallbackWrapperBase>>;
 extern SignalHandlerMap& getSignalHandlers();
-extern ScheduledExecutor eventScheduler;
+extern  std::unique_ptr<ScheduledExecutor> eventScheduler;
 
 template<typename Callback>
 static void
@@ -60,7 +61,9 @@ runOnEventThread(Callback&& cb,
                  const char* filename = CURRENT_FILENAME(),
                  uint32_t linum = CURRENT_LINE())
 {
-    eventScheduler.run([cb = std::forward<Callback>(cb)]() mutable { cb(); }, filename, linum);
+    if (eventScheduler) {
+        eventScheduler->run([cb = std::forward<Callback>(cb)]() mutable { cb(); }, filename, linum);
+    }
 }
 
 /*
@@ -81,7 +84,7 @@ emitSignal(Args... args)
 
             sip_core_tracepoint(emit_signal_begin_callback, wrap.file_, wrap.linum_);
             auto cb = *wrap;
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(__linux__)
             cb(args...);
 #else
             runOnEventThread([callback = cb, ... arguments = std::forward<Args>(args)] {

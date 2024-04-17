@@ -140,7 +140,7 @@ FFMPEGCONF += \
 # platform specific options (LINUX / MAC)
 
 ifdef HAVE_LINUX
-FFMPEGCONF += --enable-pic
+FFMPEGCONF += --enable-pic --disable-asm --disable-autodetect
 ifdef HAVE_ANDROID
 # Android Linux
 FFMPEGCONF += \

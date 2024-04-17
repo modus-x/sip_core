@@ -166,7 +166,7 @@ as_view(const pj_str_t& str) noexcept
     return {str.ptr, (size_t) str.slen};
 }
 
-inline constexpr std::string
+inline std::string
 as_string(const pj_str_t& str) noexcept
 {
     return {str.ptr, (size_t) str.slen};

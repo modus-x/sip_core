@@ -22,7 +22,7 @@
 
 namespace sip_core {
 
-ScheduledExecutor eventScheduler {"eventEmitter"};
+std::unique_ptr<ScheduledExecutor> eventScheduler = nullptr;
 
 SignalHandlerMap&
 getSignalHandlers()
@@ -125,6 +125,9 @@ namespace libsip_core {
 void
 registerSignalHandlers(const std::map<std::string, std::shared_ptr<CallbackWrapperBase>>& handlers)
 {
+    if (sip_core::eventScheduler == nullptr) {
+        sip_core::eventScheduler = std::make_unique<sip_core::ScheduledExecutor>("SipEventEmitter");
+    }
     auto& handlers_ = sip_core::getSignalHandlers();
     for (auto& item : handlers) {
         auto iter = handlers_.find(item.first);
@@ -144,6 +147,7 @@ void
 unregisterSignalHandlers()
 {
     SIP_CORE_DBG("Signals are unregistered");
+    sip_core::eventScheduler = nullptr;
     auto& handlers_ = sip_core::getSignalHandlers();
     for (auto& item : handlers_) {
         item.second = {};
