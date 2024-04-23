@@ -47,6 +47,7 @@ namespace Details {
 
 constexpr static char CALL_TYPE[] = "CALL_TYPE";
 constexpr static char PEER_NUMBER[] = "PEER_NUMBER";
+constexpr static char FROM_HEADER[] = "FROM_HEADER";
 constexpr static char REGISTERED_NAME[] = "REGISTERED_NAME";
 constexpr static char DISPLAY_NAME[] = "DISPLAY_NAME";
 constexpr static char CALL_STATE[] = "CALL_STATE";

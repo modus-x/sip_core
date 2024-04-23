@@ -95,6 +95,20 @@ static constexpr unsigned REGISTRATION_RETRY_INTERVAL = 300;      // seconds
 const pj_str_t KA_DATA = CONST_PJ_STR("ping!");
 const pj_str_t FLOW_HEADER = CONST_PJ_STR("Flow-Timer");
 
+static char*
+randomSvAuthString(int length)
+{
+    const char charset[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    const int charsetLength = strlen(charset);
+    char* result = new char[length + 1]; // Add 1 for null terminator
+    srand(time(0));
+    for (int i = 0; i < length; ++i) {
+        result[i] = charset[rand() % charsetLength];
+    }
+    result[length] = '\0'; // Add null terminator
+    return result;
+}
+
 /* Keep alive timer callback */
 static void
 keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
@@ -842,7 +856,7 @@ SIPAccount::sendRegister()
     pj_list_push_back(&hdr_list, (pjsip_hdr*) h);
 
     constexpr pj_str_t STR_SV_AUTH = CONST_PJ_STR("X-Sv-Auth");
-    constexpr pj_str_t STR_SV_HASH = CONST_PJ_STR("ed045e81d1615333deb74b9eaf9da087");
+    pj_str_t STR_SV_HASH = pj_str(randomSvAuthString(32));
     pjsip_generic_string_hdr* sv_h = pjsip_generic_string_hdr_create(link_.getPool(),
                                                                      &STR_SV_AUTH,
                                                                      &STR_SV_HASH);
@@ -946,9 +960,9 @@ SIPAccount::onRegister(pjsip_regc_cbparam* param)
                                                nullptr);
 
                 if (applicationProxyHdr) {
-                    SIP_CORE_DBG("Found application proxy header: %s", applicationProxyHdr->hvalue);
-                    Manager::instance().applicationProxy = sip_utils::as_view(
-                        applicationProxyHdr->hvalue);
+                    auto header = sip_utils::as_view(applicationProxyHdr->hvalue);
+                    SIP_CORE_DBG() << "Found application proxy header: " << header;
+                    Manager::instance().applicationProxy = header;
                 } else {
                     Manager::instance().applicationProxy = "";
                 }

@@ -266,6 +266,10 @@ transaction_request_cb(pjsip_rx_data* rdata)
         peerNumber = sip_utils::stripSipUriPrefix(std::string_view(tmp, length));
     }
 
+    auto fromHeader = std::string("");
+
+    fromHeader = std::string(rdata->msg_info.msg_buf, rdata->msg_info.len);
+
     auto transport = Manager::instance().sipVoIPLink().sipTransportBroker->addTransport(
         rdata->tp_info.transport);
 
@@ -456,6 +460,7 @@ transaction_request_cb(pjsip_rx_data* rdata)
     }
 
     call->setPeerNumber(peerNumber);
+    call->setFromHeader(fromHeader);
     call->setPeerUri(account->getToUri(peerNumber));
     call->setPeerDisplayName(peerDisplayName);
     call->getSDP().setPublishedIP(addrSdp);
@@ -636,8 +641,7 @@ SIPVoIPLink::getCachingPool() noexcept
     return &cp_;
 }
 
-SIPVoIPLink::
-SIPVoIPLink()
+SIPVoIPLink::SIPVoIPLink()
     : pool_(nullptr, pj_pool_release)
 {
 #define TRY(ret) \
@@ -749,9 +753,7 @@ SIPVoIPLink()
     SIP_CORE_DBG("SIPVoIPLink@%p", this);
 }
 
-SIPVoIPLink::~
-SIPVoIPLink()
-{}
+SIPVoIPLink::~SIPVoIPLink() {}
 
 void
 SIPVoIPLink::shutdown()

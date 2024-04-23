@@ -34,7 +34,7 @@
 #include <sstream>
 #include <algorithm>
 
-#define DEFAULT_EVENT_EXPIRE 150
+#define DEFAULT_EVENT_EXPIRE 600
 
 namespace sip_core {
 

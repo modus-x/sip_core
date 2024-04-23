@@ -163,6 +163,10 @@ public:
      * @return std::string The peer number
      */
     const std::string& getPeerNumber() const { return peerNumber_; }
+
+    void setFromHeader(const std::string& header) { fromHeader_ = header; }
+
+    const std::string& getFromHeader() const { return fromHeader_; }
     /**
      * Set the display name (caller in ingoing)
      * not protected by mutex (when created)
@@ -526,6 +530,9 @@ protected:
 
     /** Number of the peer */
     std::string peerNumber_ {};
+
+    /** From header */
+    std::string fromHeader_ {};
 
     /** Peer Display Name */
     std::string peerDisplayName_ {};
