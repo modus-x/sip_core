@@ -1,0 +1,55 @@
+diff --git a/pjsip/src/pjsip-simple/presence.c b/pjsip/src/pjsip-simple/presence.c
+index 345eddd..b3403c4 100644
+--- a/pjsip/src/pjsip-simple/presence.c
++++ b/pjsip/src/pjsip-simple/presence.c
+@@ -137,6 +137,7 @@ static const pj_str_t STR_PIDF_XML	    = { "pidf+xml", 8};
+ static const pj_str_t STR_XPIDF_XML	    = { "xpidf+xml", 9};
+ static const pj_str_t STR_APP_PIDF_XML	    = { "application/pidf+xml", 20 };
+ static const pj_str_t STR_APP_XPIDF_XML    = { "application/xpidf+xml", 21 };
++static const pj_str_t STR_APP_REG    = { "application/reg", 15 };
+ 
+ 
+ /*
+@@ -146,7 +147,7 @@ PJ_DEF(pj_status_t) pjsip_pres_init_module( pjsip_endpoint *endpt,
+ 					    pjsip_module *mod_evsub)
+ {
+     pj_status_t status;
+-    pj_str_t accept[2];
++    pj_str_t accept[3];
+ 
+     /* Check arguments. */
+     PJ_ASSERT_RETURN(endpt && mod_evsub, PJ_EINVAL);
+@@ -161,6 +162,7 @@ PJ_DEF(pj_status_t) pjsip_pres_init_module( pjsip_endpoint *endpt,
+ 
+     accept[0] = STR_APP_PIDF_XML;
+     accept[1] = STR_APP_XPIDF_XML;
++    accept[2] = STR_APP_REG;
+ 
+     /* Register event package to event module. */
+     status = pjsip_evsub_register_pkg( &mod_presence, &STR_PRESENCE, 
+@@ -831,6 +833,12 @@ static void pres_on_evsub_rx_notify( pjsip_evsub *sub,
+     pres = (pjsip_pres*) pjsip_evsub_get_mod_data(sub, mod_presence.id);
+     PJ_ASSERT_ON_FAIL(pres!=NULL, {return;});
+ 
++    /* Notify application EARLY. */
++    if (pres->user_cb.on_rx_notify) {
++	(*pres->user_cb.on_rx_notify)(sub, rdata, p_st_code, p_st_text, 
++				      res_hdr, p_body);
++    }
++
+     if (rdata->msg_info.msg->body) {
+ 	status = pres_process_rx_notify( pres, rdata, p_st_code, p_st_text,
+ 					 res_hdr );
+@@ -866,11 +874,7 @@ static void pres_on_evsub_rx_notify( pjsip_evsub *sub,
+ #endif
+     }
+ 
+-    /* Notify application. */
+-    if (pres->user_cb.on_rx_notify) {
+-	(*pres->user_cb.on_rx_notify)(sub, rdata, p_st_code, p_st_text, 
+-				      res_hdr, p_body);
+-    }
++
+ 
+     
+     /* If application responded NOTIFY with 2xx, copy temporary status

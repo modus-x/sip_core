@@ -312,8 +312,25 @@ PresSubClient::pres_client_evsub_on_rx_notify(pjsip_evsub* sub,
         SIP_CORE_WARN("Couldn't find pres_client from ev_sub.");
         return;
     }
-    /* No need to pres->lock() here since the client has a locked dialog*/
 
+    /* No need to manager->lock() here since the client has a locked dialog*/
+    auto body = rdata->msg_info.msg->body;
+
+    if (body && body->len > 0) {
+        void* clonedData = body->clone_data(pres_client->pool_, body->data, body->len);
+        if (clonedData) {
+            // Convert the cloned data to a C++ string
+            std::string result(static_cast<char*>(clonedData), body->len);
+            emitSignal<libsip_core::PresenceSignal::NotifyReceived>(
+                pres_client->getPresence()->getAccount()->getAccountID(),
+                std::string(pres_client->getURI()),
+                "presence",
+                result);
+        }
+    } else {
+        SIP_CORE_WARN("No notify body.");
+    }
+    
     pjsip_pres_get_status(sub, &pres_client->status_);
     pres_client->reportPresence();
 
