@@ -679,11 +679,7 @@ MediaEncoder::forcePresetX2645(AVCodecContext* encoderCtx)
     } else
 #endif
     {
-#if (defined(TARGET_OS_IOS) && TARGET_OS_IOS)
         const char* speedPreset = "ultrafast";
-#else
-        const char* speedPreset = "slow";
-#endif
         if (av_opt_set(encoderCtx, "preset", speedPreset, AV_OPT_SEARCH_CHILDREN))
             SIP_CORE_WARN("Failed to set preset '%s'", speedPreset);
         const char* tune = "zerolatency";
@@ -928,7 +924,7 @@ MediaEncoder::initH264(AVCodecContext* encoderCtx, uint64_t br)
 
     // If auto quality disabled use CRF mode
     if (mode_ == RateMode::CRF_CONSTRAINED) {
-        av_opt_set_int(encoderCtx, "crf", 3, AV_OPT_SEARCH_CHILDREN);
+        av_opt_set_int(encoderCtx, "crf", crf, AV_OPT_SEARCH_CHILDREN);
         av_opt_set_int(encoderCtx, "maxrate", maxBitrate, AV_OPT_SEARCH_CHILDREN);
         av_opt_set_int(encoderCtx, "bufsize", bufSize, AV_OPT_SEARCH_CHILDREN);
         SIP_CORE_DEBUG("H264 encoder setup: crf={:d}, maxrate={:d} kbit/s, bufsize={:d} kbit",
