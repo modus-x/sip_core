@@ -25,10 +25,6 @@ PJPROJECT_OPTIONS := --disable-sound        \
 
 PKGS += pjproject
 
-ifeq ($(call need_pkg,'libpjproject'),)
-PKGS_FOUND += pjproject
-endif
-
 ifndef HAVE_MACOSX
 # DEPS_pjproject += uuid
 endif

@@ -5,10 +5,6 @@ JSONCPP_URL := https://github.com/open-source-parsers/jsoncpp/archive/$(JSONCPP_
 
 PKGS += jsoncpp
 
-ifeq ($(call need_pkg,"jsoncpp >= 1.9.3"),)
-PKGS_FOUND += jsoncpp
-endif
-
 JSONCPP_CMAKECONF := -DBUILD_STATIC_LIBS:BOOL=ON \
                      -DBUILD_SHARED_LIBS:BOOL=OFF \
                      -DJSONCPP_WITH_TESTS:BOOL=OFF

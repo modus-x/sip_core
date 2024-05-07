@@ -3,15 +3,8 @@ ZLIB_VERSION := 1.2.8
 ZLIB_URL := https://github.com/madler/zlib/archive/v$(ZLIB_VERSION).tar.gz
 
 PKGS += zlib
-ifndef HAVE_IOS
-ifeq ($(call need_pkg,"zlib"),)
-PKGS_FOUND += zlib
-endif
-else
-PKGS_FOUND += zlib
-endif
-
 ifeq ($(shell uname),Darwin) # zlib tries to use libtool on Darwin
+
 ifdef HAVE_CROSS_COMPILE
 ZLIB_CONFIG_VARS=CHOST=$(HOST)
 endif

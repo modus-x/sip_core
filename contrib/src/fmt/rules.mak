@@ -3,9 +3,6 @@ FMT_VERSION := 9.1.0
 FMT_URL := https://github.com/fmtlib/fmt/archive/$(FMT_VERSION).tar.gz
 
 PKGS += fmt
-ifeq ($(call need_pkg,'fmt >= 7.0'),)
-PKGS_FOUND += fmt
-endif
 
 FMT_CMAKECONF = -DBUILD_SHARED_LIBS=Off \
 				-DFMT_TEST=Off

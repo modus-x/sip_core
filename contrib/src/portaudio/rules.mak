@@ -7,10 +7,6 @@ ifdef HAVE_WIN32
 PKGS += portaudio
 endif
 
-ifeq ($(call need_pkg,"portaudio >= 2.0"),)
-PKGS_FOUND += portaudio
-endif
-
 PORTAUDIOCONF := --with-winapi=directx
 
 $(TARBALLS)/portaudio-$(PORTAUDIO_VERSION).tgz:

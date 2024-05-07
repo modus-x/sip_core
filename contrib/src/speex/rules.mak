@@ -4,9 +4,6 @@ SPEEX_HASH := Speex-1.2.1
 SPEEX_GITURL := https://gitlab.xiph.org/xiph/speex/-/archive/$(SPEEX_HASH)/speex-$(SPEEX_HASH).tar.gz
 
 PKGS += speex
-ifeq ($(call need_pkg,"speex >= 1.0.5"),)
-PKGS_FOUND += speex
-endif
 
 $(TARBALLS)/speex-$(SPEEX_HASH).tar.gz:
 	$(call download,$(SPEEX_GITURL))

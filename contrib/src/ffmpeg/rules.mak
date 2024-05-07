@@ -3,12 +3,6 @@ FFMPEG_URL := https://github.com/FFmpeg/FFmpeg/archive/refs/tags/$(FFMPEG_HASH).
 
 PKGS+=ffmpeg
 
-ifndef HAVE_LINUX
-ifeq ($(call need_pkg,"libavutil >= 55.75.100 libavcodec >= 57.106.101 libavformat >= 57.82.100 libavdevice >= 57.8.101 libavfilter >= 6.105.100 libswscale >= 4.7.103 libswresample >= 2.9.100"),)
-PKGS_FOUND += ffmpeg
-endif
-endif
-
 DEPS_ffmpeg = iconv zlib vpx opus speex x264
 
 FFMPEGCONF = \

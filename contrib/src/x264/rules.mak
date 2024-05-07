@@ -2,10 +2,6 @@
 X264_HASH := ed0f7a634050a62c1da27c99eea710824d4c3705
 X264_GITURL := https://code.videolan.org/videolan/x264.git
 
-ifeq ($(call need_pkg,"x264 >= 0.86"),)
-PKGS_FOUND += x264
-endif
-
 X264CONF = --prefix="$(PREFIX)" \
            --host="$(HOST)"     \
            --enable-static      \

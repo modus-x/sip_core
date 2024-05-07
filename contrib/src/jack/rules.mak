@@ -5,9 +5,6 @@ JACK_URL := https://github.com/jackaudio/jack1/archive/$(JACK_VERSION).tar.gz
 
 # disabled by default for now
 #PKGS += jack
-ifeq ($(call need_pkg,"jack"),)
-PKGS_FOUND += jack
-endif
 
 $(TARBALLS)/jack1-$(JACK_VERSION).tar.gz:
 	$(call download,$(JACK_URL))

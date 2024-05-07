@@ -5,9 +5,6 @@ OPUS_VERSION := 1.3
 OPUS_URL := https://archive.mozilla.org/pub/opus/opus-$(OPUS_VERSION).tar.gz
 
 PKGS += opus
-ifeq ($(call need_pkg,"opus >= 0.9.14"),)
-PKGS_FOUND += opus
-endif
 
 $(TARBALLS)/opus-$(OPUS_VERSION).tar.gz:
 	$(call download,$(OPUS_URL))

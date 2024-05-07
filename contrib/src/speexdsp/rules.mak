@@ -4,9 +4,6 @@ SPEEXDSP_HASH := SpeexDSP-1.2.0
 SPEEXDSP_GITURL := https://gitlab.xiph.org/xiph/speexdsp/-/archive/$(SPEEXDSP_HASH)/speexdsp-$(SPEEXDSP_HASH).tar.gz
 
 PKGS += speexdsp
-ifeq ($(call need_pkg,"speexdsp"),)
-PKGS_FOUND += speexdsp
-endif
 
 $(TARBALLS)/speexdsp-$(SPEEXDSP_HASH).tar.gz:
 	$(call download,$(SPEEXDSP_GITURL))
