@@ -26,8 +26,17 @@
 #include "noncopyable.h"
 #include "observer.h"
 #include "socket_pair.h"
+#include <queue>
 
 namespace sip_core {
+
+// converted from simple char, unsigned int for fastest work
+struct dtmf
+{
+    unsigned int event;
+    unsigned int duration;
+    unsigned int eBitRetransmissions; /**< # of E bit transmissions   */
+};
 
 class AudioInput;
 class MediaEncoder;
@@ -52,8 +61,26 @@ public:
     void update(Observable<std::shared_ptr<sip_core::MediaFrame>>*,
                 const std::shared_ptr<sip_core::MediaFrame>&) override;
 
+    bool sendRtpEvents(const std::string& events);
+
 private:
     NON_COPYABLE(AudioSender);
+
+    /**
+     * Declaration for DTMF telephony-events (RFC2833, 32 bytes)
+     */
+    struct RtpDtmfPayload
+    {
+        uint8_t event;     /**< Event type ID.	    */
+        uint8_t volume;    /**< Event volume.	    */
+        uint16_t duration; /**< Event duration.    */
+    };
+
+    void createDtmfPayload(RtpDtmfPayload* payload, bool *first, bool *last);
+
+    /* RFC 2833 DTMF transmission FIFO queue */
+    std::mutex dtmfQueueMutex_;
+    std::queue<dtmf> txDtmfQueue_;
 
     bool setup(SocketPair& socketPair);
 

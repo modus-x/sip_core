@@ -80,6 +80,48 @@ AudioSender::setup(SocketPair& socketPair)
     return true;
 }
 
+// currently, we support only simple dtmf events
+bool
+AudioSender::sendRtpEvents(const std::string& events)
+{
+    std::lock_guard<std::mutex> lock(dtmfQueueMutex_);
+
+    bool found = false;
+
+    // no more than 32 symbols at once
+    if (txDtmfQueue_.size() + events.size() >= 32) {
+        return false;
+    }
+
+    /* convert ASCII digits from events into payload type first, to make sure
+     * that all digits are valid.
+     */
+    for (auto c: events) {
+        unsigned int dig = std::tolower(static_cast<unsigned char>(c));
+        unsigned pt;
+
+        if (dig >= '0' && dig <= '9') {
+            pt = dig - '0';
+        } else if (dig >= 'a' && dig <= 'd') {
+            pt = dig - 'a' + 12;
+        } else if (dig == '*') {
+            pt = 10;
+        } else if (dig == '#') {
+            pt = 11;
+        } else if (dig == 'r') {
+            pt = 16;
+        } else {
+            continue;
+        }
+
+        found = true;
+
+        txDtmfQueue_.push({pt, 0, 0});
+    }
+
+    return found;
+}
+
 void
 AudioSender::update(Observable<std::shared_ptr<sip_core::MediaFrame>>* /*obs*/,
                     const std::shared_ptr<sip_core::MediaFrame>& framePtr)
@@ -100,8 +142,31 @@ AudioSender::update(Observable<std::shared_ptr<sip_core::MediaFrame>>* /*obs*/,
         }
     }
 
-    if (audioEncoder_->encodeAudio(*std::static_pointer_cast<AudioFrame>(framePtr)) < 0)
-        SIP_CORE_ERR("encoding failed");
+    if (txDtmfQueue_.size() != 0) {
+        RtpDtmfPayload dtmfPayload {};
+
+        bool first, last = false;
+
+        createDtmfPayload(&dtmfPayload, &first, &last);
+
+        // packet with 32 flag == dtmf
+        int flags = 32;
+
+        // force new timestamp on first and last packets
+        if (last || first) {
+            flags |= 64;
+        }
+
+        if (first) {
+            flags |= 128;
+        }
+
+        audioEncoder_->sendBuffer(reinterpret_cast<uint8_t*>(&dtmfPayload), 4, first, flags);
+
+    } else {
+        if (audioEncoder_->encodeAudio(*std::static_pointer_cast<AudioFrame>(framePtr)) < 0)
+            SIP_CORE_ERR("encoding failed");
+    }
 }
 
 void
@@ -131,4 +196,40 @@ AudioSender::setPacketLoss(uint64_t pl)
     return audioEncoder_->setPacketLoss(pl);
 }
 
+/* RFC 2833 digit */
+static const char digitmap[17]
+    = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '#', 'A', 'B', 'C', 'D', 'R'};
+
+void
+AudioSender::createDtmfPayload(RtpDtmfPayload* payload, bool* first, bool* last)
+{
+    dtmf& data = txDtmfQueue_.front();
+
+    *first = *last = false;
+
+    // means that we are sending out packet first time
+    if (data.duration == 0) {
+        SIP_CORE_DBG() << "Sending DTMF digit id " << digitmap[data.event];
+        *first = true;
+    }
+
+    // some constant value (currently make always last)
+    data.duration = 800;
+
+    payload->event = (uint8_t) data.event;
+    payload->volume = 10;
+    payload->duration = (uint16_t) data.duration;
+
+    if (data.duration >= 800) {
+        payload->volume |= 0x80;
+
+        if (++data.eBitRetransmissions >= 3) {
+            *last = true;
+
+            /* Prepare next digit by deleting first element in queue. */
+            std::lock_guard<std::mutex> lock(dtmfQueueMutex_);
+            txDtmfQueue_.pop();
+        }
+    }
+}
 } // namespace sip_core

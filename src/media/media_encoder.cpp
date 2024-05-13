@@ -36,7 +36,6 @@ extern "C" {
 
 #include <algorithm>
 #include <fstream>
-#include <iostream>
 #include <json/json.h>
 #include <sstream>
 #include <thread> // hardware_concurrency
@@ -1377,6 +1376,22 @@ MediaEncoder::resetStreams(int width, int height)
         }
     } catch (...) {
     }
+}
+
+bool
+MediaEncoder::sendBuffer(uint8_t* buf1, int len, bool m, int flags)
+{
+    AVPacket pkt;
+    av_init_packet(&pkt);
+    pkt.data = buf1;
+    pkt.size = len;
+    pkt.flags = flags;
+
+    if (m) {
+        pkt.flags |= 128;
+    }
+
+    return send(pkt, -1);
 }
 
 } // namespace sip_core

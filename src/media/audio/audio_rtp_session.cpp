@@ -70,6 +70,14 @@ AudioRtpSession::~AudioRtpSession()
 }
 
 void
+AudioRtpSession::sendRtpEvents(const std::string& events)
+{
+    if (sender_) {
+        sender_->sendRtpEvents(events);
+    }
+}
+
+void
 AudioRtpSession::startSender()
 {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
@@ -385,8 +393,7 @@ AudioRtpSession::initRecorder()
         receiveThread_->setRecorderCallback(
             [this](const MediaStream& ms) { attachRemoteRecorder(ms); });
     if (audioInput_)
-        audioInput_->setRecorderCallback(
-            [this](const MediaStream& ms) { attachLocalRecorder(ms); });
+        audioInput_->setRecorderCallback([this](const MediaStream& ms) { attachLocalRecorder(ms); });
 }
 
 void

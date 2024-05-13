@@ -25,6 +25,8 @@
 #include "config.h"
 #endif
 
+#include "audio/audio_sender.h"
+
 #ifdef ENABLE_VIDEO
 #include "video/video_base.h"
 #include "video/video_scaler.h"
@@ -80,7 +82,12 @@ public:
     void setIOContext(AVIOContext* ioctx) { ioCtx_ = ioctx; }
     void resetStreams(int width, int height);
 
+    void encodeAndSendDtmf(dtmf* data);
+
     bool send(AVPacket& packet, int streamIdx = -1);
+
+    // send raw data
+    bool sendBuffer(uint8_t *buf1, int len, bool m, int flags);
 
 #ifdef ENABLE_VIDEO
     int encode(const std::shared_ptr<VideoFrame>& input, bool is_keyframe, int64_t frame_number);
@@ -121,6 +128,7 @@ public:
 
 private:
     NON_COPYABLE(MediaEncoder);
+
     AVCodecContext* prepareEncoderContext(const AVCodec* outputCodec, bool is_video);
     void forcePresetX2645(AVCodecContext* encoderCtx);
     void extractProfileLevelID(const std::string& parameters, AVCodecContext* ctx);

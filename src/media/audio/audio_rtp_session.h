@@ -63,6 +63,8 @@ public:
     void initRecorder() override;
     void deinitRecorder() override;
 
+    void sendRtpEvents(const std::string& events);
+
     std::shared_ptr<AudioInput>& getAudioLocal() { return audioInput_; }
     std::unique_ptr<AudioReceiveThread>& getAudioReceive() { return receiveThread_; }
 

@@ -140,9 +140,3 @@ html-output/
 clang-tidy-report.txt
 sonar-project.properties.save
 compile_commands.json
-
-# sip core standalone builds
-sip-core-*
-sip_core_build
-cmake-build-debug-visual-studio/
-

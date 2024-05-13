@@ -455,13 +455,15 @@ getConferenceInfos(const std::string& accountId, const std::string& confId)
 }
 
 void
-playDTMF(const std::string& accountId, const std::string& callId, const std::string& key)
+playDTMF(const std::string& accountId, const std::string& callId, const std::string& dtmfEvents)
 {
     if (const auto account = sip_core::Manager::instance().getAccount(accountId)) {
         if (auto call = account->getCall(callId)) {
-            auto code = key.data()[0];
-            sip_core::Manager::instance().playDtmf(code);
-            call->carryingDTMFdigits(code);
+            // play sound
+//            for (auto s: dtmfEvents) {
+//                sip_core::Manager::instance().playDtmf(s);
+//            }
+            call->carryingDTMFdigits(dtmfEvents);
         }
     }
 }
