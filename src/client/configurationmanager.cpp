@@ -89,8 +89,9 @@ getVolatileAccountDetails(const std::string& accountID)
     return sip_core::Manager::instance().getVolatileAccountDetails(accountID);
 }
 
-bool 
-isInitialized() {
+bool
+isInitialized()
+{
     return sip_core::Manager::initialized;
 }
 
@@ -104,6 +105,13 @@ void
 setAccountActive(const std::string& accountID, bool enable, bool shutdownConnections)
 {
     sip_core::Manager::instance().setAccountActive(accountID, enable, shutdownConnections);
+}
+
+void
+playDigitSound(const std::string& digit)
+{
+    // play first
+    sip_core::Manager::instance().playDtmf(*digit.c_str());
 }
 
 void
@@ -123,9 +131,11 @@ switchTransport(const std::string& accountID, Account::Transport type)
 {
     switch (type) {
     case Account::Transport::UDP:
-        return sip_core::Manager::instance().switchTransport(accountID, sip_core::TransportType::UDP);
+        return sip_core::Manager::instance().switchTransport(accountID,
+                                                             sip_core::TransportType::UDP);
     case Account::Transport::TCP:
-        return sip_core::Manager::instance().switchTransport(accountID, sip_core::TransportType::TCP);
+        return sip_core::Manager::instance().switchTransport(accountID,
+                                                             sip_core::TransportType::TCP);
     default:
         return false;
     }
@@ -240,7 +250,7 @@ setDND(const std::string& accountID, bool isDND)
         SIP_CORE_ERR("Could not find account %s. can not set codec details", accountID.c_str());
         return;
     }
-    
+
     acc->setDND(isDND);
 }
 

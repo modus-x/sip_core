@@ -68,6 +68,7 @@ LIBSIP_CORE_PUBLIC std::string addAccount(const std::map<std::string, std::strin
 LIBSIP_CORE_PUBLIC void monitor(bool continuous);
 
 LIBSIP_CORE_PUBLIC void removeAccount(const std::string& accountID);
+LIBSIP_CORE_PUBLIC void playDigitSound(const std::string& digit);
 LIBSIP_CORE_PUBLIC std::vector<std::string> getAccountList();
 LIBSIP_CORE_PUBLIC void sendRegister(const std::string& accountID, bool enable);
 LIBSIP_CORE_PUBLIC void registerAllAccounts(void);
