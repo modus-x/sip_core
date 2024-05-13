@@ -2061,9 +2061,10 @@ Manager::getHomePath()
 void
 Manager::startAudio()
 {
-    SIP_CORE_INFO("START AUDIO!!!!!!!!!!");
-    // if (!pimpl_->audiodriver_)
-    pimpl_->audiodriver_.reset(pimpl_->base_.audioPreference.createAudioLayer());
+    SIP_CORE_INFO("ios -> startAudio");
+    if (!pimpl_->audiodriver_)
+        pimpl_->audiodriver_.reset(pimpl_->base_.audioPreference.createAudioLayer());
+
     constexpr std::array<AudioDeviceType, 3> TYPES {AudioDeviceType::CAPTURE};
 
     for (const auto& type : TYPES)

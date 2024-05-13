@@ -27,7 +27,7 @@
 #include <mutex>
 
 #define checkErr(err) \
-    if (err) { \
+    if (err) {        \
         SIP_CORE_ERR("CoreAudio Error: %ld", static_cast<long>(err)); \
     }
 
