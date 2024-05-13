@@ -41,12 +41,15 @@
 
 namespace libsip_core {
 
+const char* SIP_CORE_VERSION = "0.8.8";
+
 const char*
 version() noexcept
 {
-    return SIP_CORE_REVISION[0] and SIP_CORE_DIRTY_REPO[0]
-               ? PACKAGE_VERSION "-" SIP_CORE_REVISION "-" SIP_CORE_DIRTY_REPO
-               : (SIP_CORE_REVISION[0] ? PACKAGE_VERSION "-" SIP_CORE_REVISION : PACKAGE_VERSION);
+    return SIP_CORE_VERSION;
+//    return SIP_CORE_REVISION[0] and SIP_CORE_DIRTY_REPO[0]
+//               ? PACKAGE_VERSION "-" SIP_CORE_REVISION "-" SIP_CORE_DIRTY_REPO
+//               : (SIP_CORE_REVISION[0] ? PACKAGE_VERSION "-" SIP_CORE_REVISION : PACKAGE_VERSION);
 }
 
 const char*
