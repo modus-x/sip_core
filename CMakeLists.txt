@@ -174,42 +174,45 @@ if (NOT MSVC)
                 set(REAL_TARGET ${TARGET})
             endif ()
 
+            if (NOT EXISTS ${CONTRIB_BUILD_PATH})
+                file(MAKE_DIRECTORY ${CONTRIB_BUILD_PATH})
+                execute_process(
+                        COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/contrib/bootstrap
+                        --prefix=${CMAKE_CURRENT_SOURCE_DIR}/contrib/${TARGET}
+                        --host=${REAL_TARGET}
+                        WORKING_DIRECTORY ${CONTRIB_BUILD_PATH}
+                        RESULT_VARIABLE CMD_RESULT)
 
-            execute_process(
-                    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/contrib/bootstrap
-                    --prefix=${CMAKE_CURRENT_SOURCE_DIR}/contrib/${TARGET}
-                    --host=${REAL_TARGET}
-                    WORKING_DIRECTORY ${CONTRIB_BUILD_PATH}
-                    RESULT_VARIABLE CMD_RESULT)
+                if (CMD_RESULT)
+                    message(
+                            FATAL_ERROR
+                            "Bootstrap for target ${TARGET} failed with code ${CMD_RESULT}")
+                endif ()
 
-            if (CMD_RESULT)
-                message(
-                        FATAL_ERROR
-                        "Bootstrap for target ${TARGET} failed with code ${CMD_RESULT}")
-            endif ()
+                execute_process(
+                        COMMAND make list
+                        WORKING_DIRECTORY ${CONTRIB_BUILD_PATH}
+                        RESULT_VARIABLE CMD_RESULT)
 
-            execute_process(
-                    COMMAND make list
-                    WORKING_DIRECTORY ${CONTRIB_BUILD_PATH}
-                    RESULT_VARIABLE CMD_RESULT)
+                if (CMD_RESULT)
+                    message(
+                            FATAL_ERROR
+                            "Make native deps list for target ${TARGET} failed with code ${CMD_RESULT}"
+                    )
+                endif ()
+            else ()
 
-            if (CMD_RESULT)
-                message(
-                        FATAL_ERROR
-                        "Make native deps list for target ${TARGET} failed with code ${CMD_RESULT}"
-                )
-            endif ()
+                execute_process(
+                        COMMAND make
+                        WORKING_DIRECTORY ${CONTRIB_BUILD_PATH}
+                        RESULT_VARIABLE CMD_RESULT)
 
-            execute_process(
-                    COMMAND make
-                    WORKING_DIRECTORY ${CONTRIB_BUILD_PATH}
-                    RESULT_VARIABLE CMD_RESULT)
-
-            if (CMD_RESULT)
-                message(
-                        FATAL_ERROR
-                        "Make native deps for target ${TARGET} failed with code ${CMD_RESULT}"
-                )
+                if (CMD_RESULT)
+                    message(
+                            FATAL_ERROR
+                            "Make native deps for target ${TARGET} failed with code ${CMD_RESULT}"
+                    )
+                endif ()
             endif ()
         endforeach ()
     endif ()
