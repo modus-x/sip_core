@@ -6,7 +6,9 @@
     "patches": [
         "0009-add-config-site.patch",
         "0001-win-config.patch",
-        "0002-win-vs-gnutls.patch"
+        "0002-win-vs-gnutls.patch",
+        "0011-presence-reg.patch",
+        "0012-remove-extra-headers-evsub.patch"
     ],
     "project_paths": [
         "pjlib-util/build/pjlib_util.vcxproj",
