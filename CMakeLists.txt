@@ -198,19 +198,19 @@ if (NOT MSVC)
                             "Make native deps list for target ${TARGET} failed with code ${CMD_RESULT}"
                     )
                 endif ()
-            else ()
 
-                execute_process(
-                        COMMAND make
-                        WORKING_DIRECTORY ${CONTRIB_BUILD_PATH}
-                        RESULT_VARIABLE CMD_RESULT)
+            endif ()
 
-                if (CMD_RESULT)
-                    message(
-                            FATAL_ERROR
-                            "Make native deps for target ${TARGET} failed with code ${CMD_RESULT}"
-                    )
-                endif ()
+            execute_process(
+                    COMMAND make
+                    WORKING_DIRECTORY ${CONTRIB_BUILD_PATH}
+                    RESULT_VARIABLE CMD_RESULT)
+
+            if (CMD_RESULT)
+                message(
+                        FATAL_ERROR
+                        "Make native deps for target ${TARGET} failed with code ${CMD_RESULT}"
+                )
             endif ()
         endforeach ()
     endif ()
