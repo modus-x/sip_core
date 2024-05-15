@@ -182,10 +182,6 @@ STRIP=xcrun strip
 RANLIB=xcrun ranlib
 
 EXTRA_CFLAGS=-arch $(ARCH) -isysroot $(IOS_SDK)
-ifeq ($(IOS_TARGET_PLATFORM),iPhoneOS)
-else
-EXTRA_CFLAGS += -mios-simulator-version-min=$(MIN_IOS_VERSION)
-endif
 
 EXTRA_CXXFLAGS=$(EXTRA_CFLAGS) -stdlib=libc++
 EXTRA_LDFLAGS=$(EXTRA_CFLAGS)
