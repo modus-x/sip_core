@@ -1,10 +1,10 @@
 # Ignore contrib-generated files and directories
 i386*
-x86_64-*
 arm*
 aarch64*
 i686*
 x86_64*
-tarballs/
-native-*
 win32*
+
+tarballs
+build*
