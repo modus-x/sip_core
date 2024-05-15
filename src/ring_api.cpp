@@ -41,27 +41,24 @@ namespace libsip_core {
 bool
 init(enum InitFlag flags) noexcept
 {
-    sip_core::Logger::setDebugMode(LIBSIP_CORE_FLAG_DEBUG == (flags & LIBSIP_CORE_FLAG_DEBUG));
-
-    sip_core::Logger::setSysLog(true);
-    sip_core::Logger::setConsoleLog(LIBSIP_CORE_FLAG_CONSOLE_LOG == (flags & LIBSIP_CORE_FLAG_CONSOLE_LOG));
-
-    const char* log_file = getenv("SIP_CORE_INFO_FILE");
-
-    if (log_file) {
-        sip_core::Logger::setFileLog(log_file);
-    }
-
-    // Following function create a local static variable inside
-    // This var must have the same live as Manager.
-    // So we call it now to create this var.
-    sip_core::getSignalHandlers();
-
     try {
-#if TARGET_OS_IOS
-        if (flags & LIBSIP_CORE_FLAG_IOS_EXTENSION)
-            manager.isIOSExtension = true;
-#endif
+        sip_core::Logger::setDebugMode(LIBSIP_CORE_FLAG_DEBUG == (flags & LIBSIP_CORE_FLAG_DEBUG));
+
+        sip_core::Logger::setSysLog(true);
+        sip_core::Logger::setConsoleLog(LIBSIP_CORE_FLAG_CONSOLE_LOG
+                                        == (flags & LIBSIP_CORE_FLAG_CONSOLE_LOG));
+
+        const char* log_file = getenv("SIP_CORE_INFO_FILE");
+
+        if (log_file) {
+            sip_core::Logger::setFileLog(log_file);
+        }
+
+        // Following function create a local static variable inside
+        // This var must have the same live as Manager.
+        // So we call it now to create this var.
+        sip_core::getSignalHandlers();
+
         return true;
     } catch (...) {
         return false;
