@@ -154,8 +154,6 @@ if (NOT MSVC)
             set(CONTRIB_BUILD_PATH
                     ${CMAKE_CURRENT_SOURCE_DIR}/contrib/build-${TARGET})
 
-            file(MAKE_DIRECTORY ${CONTRIB_BUILD_PATH})
-
             # pass some args from cmake to dependencies
             if (APPLE)
                 if (NOT IOS)
