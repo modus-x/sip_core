@@ -14,10 +14,6 @@ add_compile_definitions(PACKAGE="ru.svetets.sip-core"
 option(ENABLE_VIDEO "Build with video support" ON)
 option(BUILD_DEPS "Build deps" ON)
 
-message(STATUS "Working")
-
-message(FATAL_ERROR ${CMAKE_OSX_ARCHITECTURES})
-
 if (ANDROID)
     # fix NDK25 ffmpeg link error
     set(CMAKE_SHARED_LINKER_FLAGS "-Wl,-Bsymbolic")
