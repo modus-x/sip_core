@@ -7,7 +7,7 @@
         "0009-add-config-site.patch",
         "0001-win-config.patch",
         "0002-win-vs-gnutls.patch",
-        "0011-presence-reg.patch",
+        "0011-presence-notify.patch",
         "0012-remove-extra-headers-evsub.patch"
     ],
     "project_paths": [
