@@ -8,7 +8,8 @@
         "0001-win-config.patch",
         "0002-win-vs-gnutls.patch",
         "0011-presence-notify.patch",
-        "0012-remove-extra-headers-evsub.patch"
+        "0012-remove-extra-headers-evsub.patch",
+        "0013-regc-tsx-cb.patch"
     ],
     "project_paths": [
         "pjlib-util/build/pjlib_util.vcxproj",

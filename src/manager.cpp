@@ -105,7 +105,6 @@
 #include <list>
 #include <random>
 
-
 namespace sip_core {
 
 /** To store uniquely a list of Call ids */
@@ -307,8 +306,7 @@ struct Manager::ManagerPimpl
     std::unique_ptr<SIPVoIPLink> sipLink_;
 };
 
-Manager::ManagerPimpl::
-ManagerPimpl(Manager& base)
+Manager::ManagerPimpl::ManagerPimpl(Manager& base)
     : base_(base)
     , toneCtrl_(base.preferences)
     , dtmfBuf_(0, AudioFormat::MONO())
@@ -572,8 +570,7 @@ Manager::instance()
     return instance;
 }
 
-Manager::
-Manager()
+Manager::Manager()
     : preferences()
     , voipPreferences()
     , audioPreference()
@@ -586,9 +583,7 @@ Manager()
     , pimpl_(new ManagerPimpl(*this))
 {}
 
-Manager::~
-Manager()
-{}
+Manager::~Manager() {}
 
 void
 Manager::setAutoAnswer(const std::string& accountId, bool enable) const
@@ -694,6 +689,8 @@ Manager::finish() noexcept
         return;
 
     try {
+        SIP_CORE_DBG("Finishing started");
+
         // Forbid call creation
         // callFactory.forbid();
 
@@ -705,14 +702,17 @@ Manager::finish() noexcept
 
         saveConfig();
 
+        SIP_CORE_DBG("Unregistering accounts started");
         // Disconnect accounts, close link stacks and free allocated ressources
         unregisterAccounts();
+        SIP_CORE_DBG("Unregistering accounts completed");
+
+        SIP_CORE_DBG("Resetting audio layer started");
         {
             std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
             pimpl_->audiodriver_.reset();
         }
-
-        SIP_CORE_DBG("Stopping schedulers and worker threads");
+        SIP_CORE_DBG("Resetting audio layer completed");
 
         // Flush remaining tasks (free lambda' with capture)
         // pimpl_->scheduler_.stop();
@@ -721,13 +721,19 @@ Manager::finish() noexcept
         // sipTransportBroker->shutdown(); which will call Manager::instance().sipVoIPLink()
         // so the pointer MUST NOT be resetted at this point
         if (pimpl_->sipLink_) {
+            SIP_CORE_DBG("Shutting down sip voiplink");
             pimpl_->sipLink_->shutdown();
+            SIP_CORE_DBG("Resetting sip voiplink");
             pimpl_->sipLink_.reset();
         }
 
         accountFactory.clear();
 
+        SIP_CORE_DBG("pj_shutdown");
+
         pj_shutdown();
+
+        SIP_CORE_DBG("Finishing completed");
 
     } catch (const VoipLinkException& err) {
         SIP_CORE_ERR("%s", err.what());
@@ -815,8 +821,8 @@ Manager::outgoingCall(const std::string& account_id,
                       const std::string& to,
                       const std::vector<libsip_core::MediaMap>& mediaList)
 {
-    SIP_CORE_DBG() << "try outgoing call to '" << to << "'"
-                   << " with account '" << account_id << "'";
+    SIP_CORE_DBG() << "try outgoing call to '" << to << "'" << " with account '" << account_id
+                   << "'";
 
     std::shared_ptr<Call> call;
 
@@ -2071,8 +2077,7 @@ Manager::startAudio()
             pimpl_->audiodriver_->startStream(type);
 }
 
-AudioDeviceGuard::
-AudioDeviceGuard(Manager& manager, AudioDeviceType type)
+AudioDeviceGuard::AudioDeviceGuard(Manager& manager, AudioDeviceType type)
     : manager_(manager)
     , type_(type)
 {
@@ -2085,8 +2090,7 @@ AudioDeviceGuard(Manager& manager, AudioDeviceType type)
     }
 }
 
-AudioDeviceGuard::~
-AudioDeviceGuard()
+AudioDeviceGuard::~AudioDeviceGuard()
 {
     auto streamId = (unsigned) type_;
     if (--manager_.pimpl_->audioStreamUsers_[streamId] == 0) {

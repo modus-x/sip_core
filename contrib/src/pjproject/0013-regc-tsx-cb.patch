@@ -1,0 +1,39 @@
+diff --git a/pjsip/src/pjsip-ua/sip_reg.c b/pjsip/src/pjsip-ua/sip_reg.c
+index a5132ad..a131018 100644
+--- a/pjsip/src/pjsip-ua/sip_reg.c
++++ b/pjsip/src/pjsip-ua/sip_reg.c
+@@ -1111,22 +1111,26 @@ static void regc_tsx_callback(void *token, pjsip_event *event)
+ 	}
+     }
+ 
+-    if (regc->_delete_flag == 0 && regc->tsx_cb &&
+-        regc->current_op == REGC_REGISTERING)
+-    {
+-        struct pjsip_regc_tsx_cb_param param;
++    struct pjsip_regc_tsx_cb_param param;
++    param.contact_cnt = -1;
+ 
+-        param.contact_cnt = -1;
++    if (regc->tsx_cb) {
+         cbparam_init(&param.cbparam, regc, PJ_SUCCESS, tsx->status_code,
+-		     &tsx->status_text,
+-                     (event->body.tsx_state.type==PJSIP_EVENT_RX_MSG) ? 
+-	              event->body.tsx_state.src.rdata : NULL,
++                     &tsx->status_text,
++                     (event->body.tsx_state.type==PJSIP_EVENT_RX_MSG) ?
++                     event->body.tsx_state.src.rdata : NULL,
+                      NOEXP, 0, NULL, PJ_FALSE);
+ 
+         /* Call regc tsx callback before handling any response */
+         pj_lock_release(regc->lock);
+         (*regc->tsx_cb)(&param);
+         pj_lock_acquire(regc->lock);
++    }
++
++
++    if (regc->_delete_flag == 0 && regc->tsx_cb &&
++        regc->current_op == REGC_REGISTERING)
++    {
+ 
+         if (param.contact_cnt >= 0) {
+             /* Since we receive non-2xx response, it means that (some) contact

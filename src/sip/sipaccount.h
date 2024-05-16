@@ -413,6 +413,8 @@ public:
     unsigned rfc5626_flowtmr {}; /**< SIP outbound flow timer.      */
     unsigned ka_target_len {};   /**< Length of ka_target.           */
 
+    void reportUnregister();
+
 private:
     void doRegister1_();
     void doRegister2_();
@@ -462,6 +464,10 @@ private:
 
     void scheduleReregistration();
     void autoReregTimerCb();
+
+    std::mutex unregisterLock_;
+    std::condition_variable unregisterCheck_;
+    bool unregisterSend_ = false;
 
     std::shared_ptr<SipTransport> transport_ {};
 

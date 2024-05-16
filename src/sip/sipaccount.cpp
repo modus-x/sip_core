@@ -1015,6 +1015,19 @@ SIPAccount::onRegister(pjsip_regc_cbparam* param)
     }
 }
 
+static void
+tsx_cb(struct pjsip_regc_tsx_cb_param* param)
+{
+    SIP_CORE_DBG() << "regc_tsx_cb -> " << param->cbparam.code << " " << param->cbparam.status;
+    auto account = static_cast<SIPAccount*>(param->cbparam.token);
+    if (!account) {
+        SIP_CORE_ERR("account doesn't exist in tsx_cb callback");
+        return;
+    } else {
+        account->reportUnregister();
+    }
+}
+
 void
 SIPAccount::sendUnregister()
 {
@@ -1026,6 +1039,7 @@ SIPAccount::sendUnregister()
 
     bRegister_ = false;
     pjsip_regc* regc = getRegistrationInfo();
+
     if (!regc)
         throw VoipLinkException("Registration structure is NULL");
 
@@ -1040,13 +1054,33 @@ SIPAccount::sendUnregister()
     if (tp_sel.u.transport)
         setUpTransmissionData(tdata, tp_sel.u.transport->key.type);
 
+    std::unique_lock<std::mutex> locker(unregisterLock_);
+
+    unregisterSend_ = false;
+
+    pjsip_regc_set_reg_tsx_cb(regc, tsx_cb);
+
     pj_status_t status;
+
     if ((status = pjsip_regc_send(regc, tdata)) != PJ_SUCCESS) {
         SIP_CORE_ERR("pjsip_regc_send failed with error %d: %s",
                      status,
                      sip_utils::sip_strerror(status).c_str());
         throw VoipLinkException("Unable to send request to unregister sip account");
     }
+
+    while (!unregisterSend_) // avoid spurious wakeups
+        unregisterCheck_.wait(locker);
+
+    SIP_CORE_DBG() << "Unregister was guaranteed to be already sent";
+}
+
+void
+SIPAccount::reportUnregister()
+{
+    std::unique_lock<std::mutex> locker(unregisterLock_);
+    unregisterSend_ = true;
+    unregisterCheck_.notify_one();
 }
 
 void
@@ -1318,8 +1352,7 @@ SIPAccount::printContactHeader(const std::string& username,
 #elif defined(__Apple__)
             << ";pn-provider=" << PN_APNS
 #endif
-            << ";pn-param="
-            << ";pn-prid=" << deviceKey;
+            << ";pn-param=" << ";pn-prid=" << deviceKey;
     }
     contact << ">";
 
