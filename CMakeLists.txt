@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 
 project(
         sip_core
-        VERSION 0.8.8
+        VERSION 0.8.9
         LANGUAGES C CXX)
 
 add_compile_definitions(PACKAGE="ru.svetets.sip-core"
