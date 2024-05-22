@@ -99,7 +99,7 @@ if (NOT MSVC)
             if (CMAKE_OSX_ARCHITECTURES STREQUAL "" OR NOT DEFINED CMAKE_OSX_ARCHITECTURES)
                 set(CMAKE_OSX_ARCHITECTURES ${ARCH})
             endif()
-            if (NOT IOS AND DEFINED CMAKE_OSX_ARCHITECTURES)
+            if (NOT IOS)
                 # create list of passed-in architectures, add them to targets,
                 # because we need to build contrib for every darwin arch!
                 string(REPLACE ";" " " OSX_ARCH "${CMAKE_OSX_ARCHITECTURES}")
