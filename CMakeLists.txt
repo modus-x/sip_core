@@ -360,6 +360,7 @@ target_compile_definitions(
         LIBSIP_CORE_BUILD
         # define exports Conditionally add compile definitions based on platform
         $<$<OR:$<BOOL:${LINUX}>,$<BOOL:${MSVC}>,$<BOOL:${ANDROID}>>:HAVE_WEBRTC_AP>
+        $<$<OR:$<BOOL:${LINUX}>,$<BOOL:${MSVC}>,$<BOOL:${ANDROID}>>:HAVE_SPEEXDSP>
         # Building shared library
         SIP_CORE_EXPORTS)
 

@@ -653,24 +653,6 @@ Manager::init(const std::string& config_file, const std::string& data_path)
         no_errors = false;
     }
 
-    // always back up last error-free configuration
-    // if (no_errors) {
-    //     make_backup(pimpl_->path_);
-    // } else {
-    //     // restore previous configuration
-    //     SIP_CORE_WARN("Restoring last working configuration");
-
-    //     try {
-    //         // remove accounts from broken configuration
-    //         removeAccounts();
-    //         restore_backup(pimpl_->path_);
-    //         pimpl_->parseConfiguration();
-    //     } catch (const YAML::Exception& e) {
-    //         SIP_CORE_ERR("%s", e.what());
-    //         SIP_CORE_WARN("Restoring backup failed");
-    //     }
-    // }
-
     {
         std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
         pimpl_->initAudioDriver();
@@ -2233,6 +2215,12 @@ Manager::getAudioManager() const
     return audioPreference.getAudioApi();
 }
 
+std::string
+Manager::getAudioProcessor() const
+{
+    return audioPreference.getAudioProcessor();
+}
+
 int
 Manager::getAudioInputDeviceIndex(const std::string& name)
 {
@@ -2274,7 +2262,14 @@ Manager::getNoiseSuppressState() const
 void
 Manager::setNoiseSuppressState(const std::string& state)
 {
-    audioPreference.setNoiseReduce(state);
+    {
+        std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
+        audioPreference.setNoiseReduce(state);
+        pimpl_->audiodriver_.reset();
+        pimpl_->initAudioDriver();
+    }
+    
+    saveConfig();
 }
 
 std::string
@@ -2286,7 +2281,14 @@ Manager::getEchoCancellerState() const
 void
 Manager::setEchoCancellerState(const std::string& state)
 {
-    audioPreference.setEchoCancel(state);
+    {
+        std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
+        audioPreference.setEchoCancel(state);
+        pimpl_->audiodriver_.reset();
+        pimpl_->initAudioDriver();
+    }
+
+    saveConfig();
 }
 
 bool
@@ -2298,7 +2300,14 @@ Manager::isAGCEnabled() const
 void
 Manager::setAGCState(bool state)
 {
-    audioPreference.setAGCState(state);
+    {
+        std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
+        audioPreference.setAGCState(state);
+        pimpl_->audiodriver_.reset();
+        pimpl_->initAudioDriver();
+    }
+
+    saveConfig();
 }
 
 bool
@@ -2308,9 +2317,29 @@ Manager::isVADEnabled() const
 }
 
 void
+Manager::setAudioProcessor(const std::string& processor) {
+    {
+        std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
+        audioPreference.setAudioProcessor(processor);
+        pimpl_->audiodriver_.reset();
+        pimpl_->initAudioDriver();
+    }
+
+    saveConfig();
+
+}
+
+void
 Manager::setVADState(bool state)
 {
-    audioPreference.setVad(state);
+    {
+        std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
+        audioPreference.setVad(state);
+        pimpl_->audiodriver_.reset();
+        pimpl_->initAudioDriver();
+    }
+
+    saveConfig();
 }
 
 /**

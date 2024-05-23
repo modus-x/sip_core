@@ -133,10 +133,6 @@ AudioLayer::recordChanged(bool started)
 static inline bool
 shouldUseAudioProcessorEchoCancel(bool hasNativeAEC, const std::string& echoCancellerPref)
 {
-    SIP_CORE_INFO(
-        "[audiolayer] shouldUseAudioProcessorEchoCancel setHasNativeAEC: %d, echoCancellerPref: %s",
-        hasNativeAEC,
-        echoCancellerPref.c_str());
     return
         // user doesn't care which and there is not a system AEC
         (echoCancellerPref == "auto" && !hasNativeAEC)
@@ -148,10 +144,6 @@ shouldUseAudioProcessorEchoCancel(bool hasNativeAEC, const std::string& echoCanc
 static inline bool
 shouldUseAudioProcessorNoiseSuppression(bool hasNativeNS, const std::string& noiseSuppressionPref)
 {
-    SIP_CORE_INFO(
-        "[audiolayer] shouldUseAudioProcessorEchoCancel hasNativeNS: %d, noiseSuppressionPref: %s",
-        hasNativeNS,
-        noiseSuppressionPref.c_str());
     return
         // user doesn't care which and there is no system noise suppression
         (noiseSuppressionPref == "auto" && !hasNativeNS)

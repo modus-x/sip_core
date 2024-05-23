@@ -116,6 +116,7 @@ LIBSIP_CORE_PUBLIC int32_t getAudioInputDeviceIndex(const std::string& name);
 LIBSIP_CORE_PUBLIC int32_t getAudioOutputDeviceIndex(const std::string& name);
 LIBSIP_CORE_PUBLIC std::string getCurrentAudioOutputPlugin();
 
+LIBSIP_CORE_PUBLIC void setAudioProcessor(const std::string& processor);
 LIBSIP_CORE_PUBLIC std::string getNoiseSuppressState();
 LIBSIP_CORE_PUBLIC void setNoiseSuppressState(const std::string& state);
 LIBSIP_CORE_PUBLIC std::string getEchoCancellerState();
@@ -140,6 +141,7 @@ LIBSIP_CORE_PUBLIC void muteRingtone(bool mute);
 
 LIBSIP_CORE_PUBLIC std::vector<std::string> getSupportedAudioManagers();
 LIBSIP_CORE_PUBLIC std::string getAudioManager();
+LIBSIP_CORE_PUBLIC std::string getAudioProcessor();
 LIBSIP_CORE_PUBLIC bool setAudioManager(const std::string& api);
 LIBSIP_CORE_PUBLIC bool isInitialized();
 

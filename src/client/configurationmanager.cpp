@@ -423,6 +423,12 @@ getCurrentAudioOutputPlugin()
     return plugin;
 }
 
+void
+setAudioProcessor(const std::string& processor)
+{
+    sip_core::Manager::instance().setAudioProcessor(processor);
+}
+
 std::string
 getNoiseSuppressState()
 {
@@ -580,6 +586,13 @@ getAudioManager()
 {
     return sip_core::Manager::instance().getAudioManager();
 }
+
+std::string
+getAudioProcessor()
+{
+    return sip_core::Manager::instance().getAudioProcessor();
+}
+
 
 void
 setVolume(const std::string& device, double value)

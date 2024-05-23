@@ -6,14 +6,18 @@ list(
   Source_Files__media__audio__audio_processing
   "${CMAKE_CURRENT_SOURCE_DIR}/audio_processor.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/null_audio_processor.h"
-  "${CMAKE_CURRENT_SOURCE_DIR}/null_audio_processor.cpp"
-  "${CMAKE_CURRENT_SOURCE_DIR}/speex.h"
-  "${CMAKE_CURRENT_SOURCE_DIR}/speex.cpp")
+  "${CMAKE_CURRENT_SOURCE_DIR}/null_audio_processor.cpp")
 
-if(LINUX OR MSVC OR ANDROID)
-  list(APPEND Source_Files__media__audio__audio_processing
-       "${CMAKE_CURRENT_SOURCE_DIR}/webrtc.h"
-       "${CMAKE_CURRENT_SOURCE_DIR}/webrtc.cpp")
+if(LINUX
+   OR MSVC
+   OR ANDROID)
+  list(
+    APPEND
+    Source_Files__media__audio__audio_processing
+    "${CMAKE_CURRENT_SOURCE_DIR}/speex.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/speex.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/webrtc.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/webrtc.cpp")
 endif()
 
 set(Source_Files__media__audio__audio_processing

@@ -206,7 +206,7 @@ protected:
 
     void playbackChanged(bool started);
     void recordChanged(bool started);
-    void setHasNativeAEC(bool hasEAC);
+    void setHasNativeAEC(bool hasAEC);
     void setHasNativeNS(bool hasNS);
 
     std::shared_ptr<AudioFrame> getToPlay(AudioFormat format, size_t writableSamples);
@@ -239,7 +239,11 @@ protected:
 
     bool playbackStarted_ {false};
     bool recordStarted_ {false};
-    bool hasNativeAEC_ {true};
+
+    /**
+     * Currently assume that we have no builtin AEC/NS
+    */
+    bool hasNativeAEC_ {false};
     bool hasNativeNS_ {false};
 
     /**

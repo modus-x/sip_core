@@ -515,6 +515,8 @@ public:
 
     void setVADState(bool state);
 
+    void setAudioProcessor(const std::string& processor);
+
     std::string getDataPath() const;
 
     std::string getConfigPath() const;
@@ -584,6 +586,15 @@ public:
      *          "pulseaudio"
      */
     std::string getAudioManager() const;
+
+    /**
+     * Get the audio processor
+     * @return int The audio manager
+     *          "null"
+     *          "speex"
+     *          "webrtc"
+     */
+    std::string getAudioProcessor() const;
 
     /**
      * Set the audio manager
