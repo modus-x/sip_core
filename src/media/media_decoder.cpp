@@ -48,7 +48,7 @@
 namespace sip_core {
 
 // maximum number of packets the jitter buffer can queue
-const unsigned jitterBufferMaxSize_ {0};
+const unsigned jitterBufferMaxSize_ {1500};
 // maximum time a packet can be queued
 const constexpr auto jitterBufferMaxDelay_ = std::chrono::milliseconds(50);
 // maximum number of times accelerated decoding can fail in a row before falling back to software

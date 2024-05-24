@@ -357,10 +357,16 @@ AudioLayer::getToPlay(AudioFormat format, size_t writableSamples)
 void
 AudioLayer::adjustVolume(std::shared_ptr<AudioFrame>& frame, bool playback)
 {
+
     AVFrame* pFrame = frame->pointer();
     if (!pFrame) {
         return;
     }
+
+    if ((playback && int(playbackGain_) == 1) || (!playback && int(captureGain_) == 1)) {
+        return;
+    }
+
     auto* data = pFrame->data[0];
 
     if (!data) {
