@@ -293,6 +293,28 @@ public:
     void removeAudio(Call& call);
 
     /**
+     * Set capture stream gain (microphone)
+     * Range should be [-1.0, 1.0]
+     */
+    void setCaptureGain(double gain);
+
+    /**
+     * Get capture stream gain (microphone)
+     */
+    double getCaptureGain() const;
+
+    /**
+     * Set playback stream gain (speaker)
+     * Range should be [-1.0, 1.0]
+     */
+    void setPlaybackGain(double gain);
+
+    /**
+     * Get playback stream gain (speaker)
+     */
+    double getPlaybackGain() const;
+
+    /**
      * Save config to file
      */
     void saveConfig();

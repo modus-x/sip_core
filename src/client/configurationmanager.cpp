@@ -50,9 +50,9 @@
 #include <dirent.h>
 #endif
 
-#include <cerrno>
 #include <cstring>
 #include <sstream>
+#include <math.h>
 
 #ifdef _WIN32
 #undef interface
@@ -593,36 +593,23 @@ getAudioProcessor()
     return sip_core::Manager::instance().getAudioProcessor();
 }
 
-
 void
-setVolume(const std::string& device, double value)
+setVolume(const std::string& device, int value)
 {
-    if (auto audiolayer = sip_core::Manager::instance().getAudioDriver()) {
-        SIP_CORE_DBG("set volume for %s: %f", device.c_str(), value);
-
-        if (device == "speaker")
-            audiolayer->setPlaybackGain(value);
-        else if (device == "mic")
-            audiolayer->setCaptureGain(value);
-
-        sip_core::emitSignal<ConfigurationSignal::VolumeChanged>(device, value);
-    } else {
-        SIP_CORE_ERR("Audio layer not valid while updating volume");
-    }
+    double realValue = static_cast<double>(value) / 100;
+    realValue = std::round(realValue * 100) / 100;
+    if (device == "speaker")
+        sip_core::Manager::instance().setPlaybackGain(realValue);
+    else
+        sip_core::Manager::instance().setCaptureGain(realValue);
 }
 
-double
+int
 getVolume(const std::string& device)
 {
-    if (auto audiolayer = sip_core::Manager::instance().getAudioDriver()) {
-        if (device == "speaker")
-            return audiolayer->getPlaybackGain();
-        if (device == "mic")
-            return audiolayer->getCaptureGain();
-    }
-
-    SIP_CORE_ERR("Audio layer not valid while updating volume");
-    return 0.0;
+    if (device == "speaker")
+        return int(sip_core::Manager::instance().getPlaybackGain() * 100);
+    return int(sip_core::Manager::instance().getCaptureGain() * 100);
 }
 
 // FIXME: we should store "muteDtmf" instead of "playDtmf"

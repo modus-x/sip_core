@@ -65,11 +65,12 @@
 
 #include "config/yamlparser.h"
 #include "connectivity/sip_utils.h"
-#include <sstream>
 #include <algorithm>
 #include <stdexcept>
 #include "fileutils.h"
 #include "string_utils.h"
+#include <iomanip>
+#include <sstream>
 
 namespace sip_core {
 
@@ -415,8 +416,15 @@ AudioPreference::serialize(YAML::Emitter& out) const
 
     // more common options!
     out << YAML::Key << RECORDPATH_KEY << YAML::Value << recordpath_;
-    out << YAML::Key << VOLUMEMIC_KEY << YAML::Value << volumemic_;
-    out << YAML::Key << VOLUMESPKR_KEY << YAML::Value << volumespkr_;
+    std::stringstream stream;
+
+    stream << std::fixed << std::setprecision(2) << volumemic_;
+    out << YAML::Key << VOLUMEMIC_KEY << YAML::Value << stream.str();
+
+    stream.str("");
+
+    stream << std::fixed << std::setprecision(2) << volumespkr_;
+    out << YAML::Key << VOLUMESPKR_KEY << YAML::Value << stream.str();
 
     // audio processor options, not in a submap
     out << YAML::Key << AUDIO_PROCESSOR_KEY << YAML::Value << audioProcessor_;

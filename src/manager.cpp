@@ -1531,6 +1531,31 @@ Manager::saveConfig(const std::shared_ptr<Account>& acc)
     saveConfig();
 }
 
+
+
+void Manager::setCaptureGain(double gain){
+    audioPreference.setVolumemic(gain);
+    pimpl_->audiodriver_->setCaptureGain(gain);
+    saveConfig();
+}
+
+double Manager::getCaptureGain() const
+{
+    return audioPreference.getVolumemic();
+}
+
+
+void Manager::setPlaybackGain(double gain) {
+    audioPreference.setVolumespkr(gain);
+    pimpl_->audiodriver_->setPlaybackGain(gain);
+    saveConfig();
+}
+
+double Manager::getPlaybackGain() const {
+    return audioPreference.getVolumespkr();
+}
+
+
 void
 Manager::saveConfig()
 {

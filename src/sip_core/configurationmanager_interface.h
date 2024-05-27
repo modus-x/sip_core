@@ -173,8 +173,8 @@ LIBSIP_CORE_PUBLIC std::string getAddrFromInterfaceName(const std::string& iface
 LIBSIP_CORE_PUBLIC std::vector<std::string> getAllIpInterface();
 LIBSIP_CORE_PUBLIC std::vector<std::string> getAllIpInterfaceByName();
 
-LIBSIP_CORE_PUBLIC void setVolume(const std::string& device, double value);
-LIBSIP_CORE_PUBLIC double getVolume(const std::string& device);
+LIBSIP_CORE_PUBLIC void setVolume(const std::string& device, int value);
+LIBSIP_CORE_PUBLIC int getVolume(const std::string& device);
 
 /*
  * Network connectivity
