@@ -21,6 +21,7 @@
  *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301 USA.
  */
 #include "instant_messaging.h"
+#include <string_view>
 
 #include "logger.h"
 #include "connectivity/sip_utils.h"
@@ -213,6 +214,12 @@ im::parseSipMessage(const pjsip_msg* msg)
 
     if (!msg->body) {
         SIP_CORE_WARN("message body is empty");
+        auto* header = pjsip_msg_find_hdr(msg, PJSIP_H_CONTENT_TYPE, NULL);
+        if (header) {
+            pjsip_ctype_hdr* genericHeader = (pjsip_ctype_hdr*) header;
+            ret.emplace(sip_utils::as_view(genericHeader->media.type) + "/"
+                         + sip_utils::as_view(genericHeader->media.subtype), "");
+        }
         return ret;
     }
 
