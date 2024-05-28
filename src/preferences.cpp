@@ -268,11 +268,11 @@ AudioPreference::AudioPreference()
     , alwaysRecording_(false)
     , volumemic_(1.0)
     , volumespkr_(1.0)
-    , audioProcessor_("webrtc")
-    , denoise_("auto")
+    , audioProcessor_("null")
+    , denoise_("off")
     , agcEnabled_(false)
-    , vadEnabled_(true)
-    , echoCanceller_("auto")
+    , vadEnabled_(false)
+    , echoCanceller_("off")
     , captureMuted_(false)
     , playbackMuted_(false)
 {}
@@ -488,6 +488,9 @@ AudioPreference::unserialize(const YAML::Node& in)
     parseValue(node, VOLUMEMIC_KEY, volumemic_);
     parseValue(node, VOLUMESPKR_KEY, volumespkr_);
     parseValue(node, AUDIO_PROCESSOR_KEY, audioProcessor_);
+    if (audioProcessor_ == "webrtc") {
+        audioProcessor_ = "null";
+    }
     parseValue(node, VAD_KEY, vadEnabled_);
     parseValue(node, ECHO_CANCEL_KEY, echoCanceller_);
 }
