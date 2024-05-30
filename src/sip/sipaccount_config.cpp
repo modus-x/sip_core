@@ -144,6 +144,7 @@ SipAccountConfig::toMap() const
     a.emplace(Conf::CONFIG_PUBLISHED_ADDRESS, publishedIp);
     a.emplace(Conf::CONFIG_KEEP_ALIVE_INTERVAL, std::to_string(keepAliveInterval));
     a.emplace(Conf::CONFIG_ACCOUNT_ROUTESET, serviceRoute);
+    a.emplace(Conf::CONFIG_ACCOUNT_REGISTRATION_EXPIRE, std::to_string(registrationExpire));
 
     std::string password {};
     std::string hash {};
@@ -179,6 +180,7 @@ SipAccountConfig::fromMap(const std::map<std::string, std::string>& details)
     parseBool(details, Conf::CONFIG_PRESENCE_ENABLED, presenceEnabled);
     parseString(details, Conf::CONFIG_ACCOUNT_DTMF_TYPE, dtmfType);
     parseInt(details, Conf::CONFIG_KEEP_ALIVE_INTERVAL, keepAliveInterval);
+    parseInt(details, Conf::CONFIG_ACCOUNT_REGISTRATION_EXPIRE, registrationExpire);
 
     // srtp settings
     parseBool(details, Conf::CONFIG_SRTP_RTP_FALLBACK, srtpFallback);
