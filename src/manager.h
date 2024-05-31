@@ -543,6 +543,8 @@ public:
 
     void setWebRtcParams(const libsip_core::WebRtcParams& params);
 
+    const libsip_core::WebRtcParams& getWebRtcParams();
+
     std::string getDataPath() const;
 
     std::string getConfigPath() const;

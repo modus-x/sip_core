@@ -71,6 +71,12 @@ setWebRtcParams(const WebRtcParams& params)
     sip_core::Manager::instance().setWebRtcParams(params);
 }
 
+const libsip_core::WebRtcParams&
+getWebRtcParams()
+{
+    return sip_core::Manager::instance().getWebRtcParams();
+}
+
 void
 registerConfHandlers(const std::map<std::string, std::shared_ptr<CallbackWrapperBase>>& handlers)
 {

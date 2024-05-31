@@ -230,6 +230,8 @@ public:
 
     void setWebRtcParams(const libsip_core::WebRtcParams& params) { webRtcParams_ = params; };
 
+    const libsip_core::WebRtcParams& getWebRtcParams() { return webRtcParams_; };
+
     bool getVadEnabled() const { return vadEnabled_; }
 
     void setVad(bool enable) { vadEnabled_ = enable; }
@@ -272,7 +274,7 @@ private:
     std::string echoCanceller_;
 
     // webrtc params
-    libsip_core::WebRtcParams webRtcParams_ = {0, 0, false, false};
+    libsip_core::WebRtcParams webRtcParams_ = {0, 0, false, false, false};
 
     bool captureMuted_;
     bool playbackMuted_;
@@ -294,7 +296,8 @@ public:
     {
         if (decodingAccelerated_ != decodingAccelerated) {
             decodingAccelerated_ = decodingAccelerated;
-            emitSignal<libsip_core::ConfigurationSignal::HardwareDecodingChanged>(decodingAccelerated_);
+            emitSignal<libsip_core::ConfigurationSignal::HardwareDecodingChanged>(
+                decodingAccelerated_);
             return true;
         }
         return false;
@@ -306,7 +309,8 @@ public:
     {
         if (encodingAccelerated_ != encodingAccelerated) {
             encodingAccelerated_ = encodingAccelerated;
-            emitSignal<libsip_core::ConfigurationSignal::HardwareEncodingChanged>(encodingAccelerated_);
+            emitSignal<libsip_core::ConfigurationSignal::HardwareEncodingChanged>(
+                encodingAccelerated_);
             return true;
         }
         return false;

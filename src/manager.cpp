@@ -2329,6 +2329,12 @@ Manager::setWebRtcParams(const libsip_core::WebRtcParams& params)
     // do not save it now
 }
 
+const libsip_core::WebRtcParams&
+Manager::getWebRtcParams()
+{
+    return audioPreference.getWebRtcParams();
+}
+
 bool
 Manager::isAGCEnabled() const
 {

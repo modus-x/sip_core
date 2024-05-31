@@ -59,9 +59,11 @@ struct LIBSIP_CORE_PUBLIC WebRtcParams
     int compressionGainDb;
     bool limiter;
     bool experimentalNs;
+    bool noiseGen;
 };
 
 LIBSIP_CORE_PUBLIC void setWebRtcParams(const WebRtcParams& params);
+LIBSIP_CORE_PUBLIC const libsip_core::WebRtcParams& getWebRtcParams();
 
 LIBSIP_CORE_PUBLIC std::map<std::string, std::string> getAccountDetails(const std::string& accountID);
 LIBSIP_CORE_PUBLIC bool switchTransport(const std::string& accountID, Account::Transport type);
