@@ -228,6 +228,8 @@ public:
 
     void setAudioProcessor(const std::string& ap) { audioProcessor_ = ap; }
 
+    void setWebRtcParams(const libsip_core::WebRtcParams& params) { webRtcParams_ = params; };
+
     bool getVadEnabled() const { return vadEnabled_; }
 
     void setVad(bool enable) { vadEnabled_ = enable; }
@@ -268,6 +270,9 @@ private:
     bool agcEnabled_;
     bool vadEnabled_;
     std::string echoCanceller_;
+
+    // webrtc params
+    libsip_core::WebRtcParams webRtcParams_ = {0, 0, false, false};
 
     bool captureMuted_;
     bool playbackMuted_;

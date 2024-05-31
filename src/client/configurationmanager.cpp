@@ -66,6 +66,12 @@ using sip_core::SIPAccount;
 using sip_core::AudioDeviceType;
 
 void
+setWebRtcParams(const WebRtcParams& params)
+{
+    sip_core::Manager::instance().setWebRtcParams(params);
+}
+
+void
 registerConfHandlers(const std::map<std::string, std::shared_ptr<CallbackWrapperBase>>& handlers)
 {
     registerSignalHandlers(handlers);

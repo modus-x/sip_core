@@ -47,6 +47,8 @@
 #include <vector>
 #include "connectivity/transport.h"
 
+#include "sip_core/configurationmanager_interface.h"
+
 #include "trace-tools.h"
 
 namespace sip_core {
@@ -538,6 +540,8 @@ public:
     void setVADState(bool state);
 
     void setAudioProcessor(const std::string& processor);
+
+    void setWebRtcParams(const libsip_core::WebRtcParams& params);
 
     std::string getDataPath() const;
 

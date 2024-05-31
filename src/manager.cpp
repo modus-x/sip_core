@@ -2316,6 +2316,19 @@ Manager::setEchoCancellerState(const std::string& state)
     saveConfig();
 }
 
+void
+Manager::setWebRtcParams(const libsip_core::WebRtcParams& params)
+{
+    {
+        std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
+        audioPreference.setWebRtcParams(params);
+        pimpl_->audiodriver_.reset();
+        pimpl_->initAudioDriver();
+    }
+
+    // do not save it now
+}
+
 bool
 Manager::isAGCEnabled() const
 {

@@ -53,6 +53,16 @@ struct LIBSIP_CORE_PUBLIC Message
     uint64_t received;
 };
 
+struct LIBSIP_CORE_PUBLIC WebRtcParams
+{
+    int targetLevelDbfs;
+    int compressionGainDb;
+    bool limiter;
+    bool experimentalNs;
+};
+
+LIBSIP_CORE_PUBLIC void setWebRtcParams(const WebRtcParams& params);
+
 LIBSIP_CORE_PUBLIC std::map<std::string, std::string> getAccountDetails(const std::string& accountID);
 LIBSIP_CORE_PUBLIC bool switchTransport(const std::string& accountID, Account::Transport type);
 LIBSIP_CORE_PUBLIC std::map<std::string, std::string> getVolatileAccountDetails(
