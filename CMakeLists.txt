@@ -430,10 +430,9 @@ if (MSVC)
     # ############################################################################
     # Compile definitions
     # ############################################################################
-    if ("${CMAKE_VS_PLATFORM_NAME}" STREQUAL "x64")
         target_compile_definitions(
                 ${PROJECT_NAME}
-                PRIVATE "_WIN32_WINNT=0x0601"
+                PRIVATE "_WIN32_WINNT=0x0601;"
                 "_USE_MATH_DEFINES;"
                 "_SCL_SECURE_NO_WARNINGS;"
                 "_CRT_SECURE_NO_WARNINGS;"
@@ -443,7 +442,6 @@ if (MSVC)
                 "WEBRTC_WIN;"
                 "WEBRTC_AUDIO_PROCESSING_ONLY_BUILD;"
                 "WEBRTC_NS_FLOAT;")
-    endif ()
 
     # ############################################################################
     # Compile and link options
@@ -457,9 +455,8 @@ if (MSVC)
                 /sdl-;
                 /W0;
                 /FC;
-                /FS
+                /FS;
                 /nologo;
-                /Zi;
                 /wd4996;
                 /wd4503;
                 /wd4180;

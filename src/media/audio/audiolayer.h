@@ -27,6 +27,7 @@
 #include "noncopyable.h"
 #include "audio_frame_resizer.h"
 #include "audio-processing/audio_processor.h"
+#include "configurationmanager_interface.h"
 
 #include <chrono>
 #include <mutex>
@@ -96,6 +97,12 @@ public:
     virtual int getIndexCapture() const = 0;
     virtual int getIndexPlayback() const = 0;
     virtual int getIndexRingtone() const = 0;
+
+    void setWebRtcParams(const libsip_core::WebRtcParams params);
+
+    inline const AudioProcessor* getAudioProcessor() const { 
+        return audioProcessor ? audioProcessor.get() : nullptr;
+    }
 
     /**
      * Determine whether or not the audio layer is active (i.e. playback opened)

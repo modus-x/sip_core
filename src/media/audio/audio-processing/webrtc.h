@@ -19,6 +19,7 @@
 #pragma once
 
 #include "audio_processor.h"
+#include "configurationmanager_interface.h";
 
 namespace webrtc {
 class AudioProcessing;
@@ -29,7 +30,7 @@ namespace sip_core {
 class WebRTCAudioProcessor final : public AudioProcessor
 {
 public:
-    WebRTCAudioProcessor(AudioFormat format, unsigned frameSize);
+    WebRTCAudioProcessor(AudioFormat format, unsigned frameSize, bool eNS);
     ~WebRTCAudioProcessor() = default;
 
     // Inherited via AudioProcessor
@@ -39,6 +40,7 @@ public:
     void enableNoiseSuppression(bool enabled) override;
     void enableAutomaticGainControl(bool enabled) override;
     void enableVoiceActivityDetection(bool enabled) override;
+    void setWebRtcParams(const libsip_core::WebRtcParams& params);
 
 private:
     std::unique_ptr<webrtc::AudioProcessing> apm;
@@ -49,5 +51,9 @@ private:
     AudioBuffer iRecordBuffer_;
     AudioBuffer iPlaybackBuffer_;
     int analogLevel_ {0};
+    int targetLevelDbfs_ {0};
+    bool limiter_ {false};
+    int compressionGainDb_ {0};
+    bool agc_ {false};
 };
 } // namespace sip_core

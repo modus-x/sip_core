@@ -2318,15 +2318,34 @@ Manager::setEchoCancellerState(const std::string& state)
 
 void
 Manager::setWebRtcParams(const libsip_core::WebRtcParams& params)
+
 {
+ 
     {
         std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
-        audioPreference.setWebRtcParams(params);
-        pimpl_->audiodriver_.reset();
-        pimpl_->initAudioDriver();
+
+        // check if active && type
+        if (pimpl_->audiodriver_->getAudioProcessor()
+            && audioPreference.getAudioProcessor() == "webrtc") {
+            // needs reload
+            if (params.experimentalNs != audioPreference.getWebRtcParams().experimentalNs) {
+                // save prefs
+                audioPreference.setWebRtcParams(params);
+                pimpl_->audiodriver_.reset();
+                pimpl_->initAudioDriver();
+
+            } else {
+                // live update
+                pimpl_->audiodriver_->setWebRtcParams(params);
+               
+            }
+        }
+
     }
 
-    // do not save it now
+    audioPreference.setWebRtcParams(params);
+
+    // TODO do not save it now
 }
 
 const libsip_core::WebRtcParams&

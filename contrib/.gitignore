@@ -4,7 +4,7 @@ arm*
 aarch64*
 i686*
 x86_64*
-win32*
+*win32*
 
 tarballs
 build*

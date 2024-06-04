@@ -208,7 +208,7 @@ AudioLayer::createAudioProcessor()
     if (pref_.getAudioProcessor() == "webrtc") {
 #if HAVE_WEBRTC_AP
         SIP_CORE_WARN("[audiolayer] using WebRTCAudioProcessor");
-        audioProcessor.reset(new WebRTCAudioProcessor(formatForProcessor, frame_size));
+        audioProcessor.reset(new WebRTCAudioProcessor(formatForProcessor, frame_size, pref_.getWebRtcParams().experimentalNs));
 #else
         SIP_CORE_ERR("[audiolayer] audioProcessor preference is webrtc, but library not linked! "
                      "using NullAudioProcessor instead");
@@ -242,7 +242,14 @@ AudioLayer::createAudioProcessor()
         shouldUseAudioProcessorEchoCancel(hasNativeAEC_, pref_.getEchoCanceller()));
 
     audioProcessor->enableVoiceActivityDetection(pref_.getVadEnabled());
-}
+
+        if (pref_.getAudioProcessor() == "webrtc") {
+#if HAVE_WEBRTC_AP
+           WebRTCAudioProcessor* proc = static_cast < WebRTCAudioProcessor*> (audioProcessor.get());
+            proc->setWebRtcParams(pref_.getWebRtcParams());
+#endif
+    }
+    }
 
 // must acquire lock beforehand
 void
@@ -406,6 +413,16 @@ AudioLayer::putRecorded(std::shared_ptr<AudioFrame>&& frame)
     }
 
     sip_core_tracepoint(audio_layer_put_recorded_end, );
+}
+
+void
+AudioLayer::setWebRtcParams(const libsip_core::WebRtcParams params)
+{
+    if (pref_.getAudioProcessor() == "webrtc") {
+        auto* processor = audioProcessor.get();
+        WebRTCAudioProcessor* webRtc = static_cast<WebRTCAudioProcessor*>(processor);
+        webRtc->setWebRtcParams(params);
+    }
 }
 
 } // namespace sip_core

@@ -24,7 +24,8 @@ namespace sip_core {
 
 constexpr int webrtcNoError = webrtc::AudioProcessing::kNoError;
 
-WebRTCAudioProcessor::WebRTCAudioProcessor(AudioFormat format, unsigned frameSize)
+WebRTCAudioProcessor::WebRTCAudioProcessor(AudioFormat format,
+                                           unsigned frameSize, bool eNS)
     : AudioProcessor(format, frameSize)
     , fRecordBuffer_(format.nb_channels, std::vector<float>(frameSize_, 0))
     , fPlaybackBuffer_(format.nb_channels, std::vector<float>(frameSize_, 0))
@@ -38,6 +39,10 @@ WebRTCAudioProcessor::WebRTCAudioProcessor(AudioFormat format, unsigned frameSiz
     webrtc::Config config;
     config.Set<webrtc::ExtendedFilter>(new webrtc::ExtendedFilter(true));
     config.Set<webrtc::DelayAgnostic>(new webrtc::DelayAgnostic(true));
+
+    if (eNS) {
+        config.Set<webrtc::ExperimentalNs>(new webrtc::ExperimentalNs(true));
+    }
 
     apm.reset(webrtc::AudioProcessing::Create(config));
 
@@ -78,7 +83,7 @@ WebRTCAudioProcessor::enableAutomaticGainControl(bool enabled)
     if (apm->gain_control()->Enable(enabled) != webrtcNoError) {
         SIP_CORE_ERR("[webrtc-ap] [audiolayer] Error enabling automatic gain control");
     }
-    if (apm->gain_control()->set_analog_level_limits(0, 65535) != webrtcNoError) {
+    if (apm->gain_control()->set_analog_level_limits(0, 255) != webrtcNoError) {
         SIP_CORE_ERR("[webrtc-ap] [audiolayer] Error setting automatic gain control analog level limits");
     }
     if (apm->gain_control()->set_mode(webrtc::GainControl::kAdaptiveAnalog) != webrtcNoError) {
@@ -119,6 +124,17 @@ WebRTCAudioProcessor::enableVoiceActivityDetection(bool enabled)
     if (apm->voice_detection()->set_frame_size_ms(10) != webrtcNoError) {
         SIP_CORE_ERR("[webrtc-ap] [audiolayer] Error setting voice detection frame size");
     }
+}
+
+void
+WebRTCAudioProcessor::setWebRtcParams(const libsip_core::WebRtcParams& params)
+{
+    if (apm->gain_control()->is_enabled()) {
+        apm->gain_control()->enable_limiter(params.limiter);
+        apm->gain_control()->set_target_level_dbfs(params.targetLevelDbfs);
+        apm->gain_control()->set_compression_gain_db(params.compressionGainDb);
+    }
+
 }
 
 std::shared_ptr<AudioFrame>

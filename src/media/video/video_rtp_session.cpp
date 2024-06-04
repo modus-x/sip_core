@@ -300,7 +300,7 @@ VideoRtpSession::startSender()
             }
             else {
                 // start keep alive timer
-                setupKaTimer();
+                // setupKaTimer();
             }
 
         } catch (const MediaEncoderException& e) {
@@ -542,7 +542,7 @@ VideoRtpSession::setMuted(bool mute, Direction dir)
     if (dir == Direction::SEND) {
         if (mute) {
             stopSender();
-            setupKaTimer();
+            // setupKaTimer();
         } else {
             cancelKeepAliveTimer();
             restartSender();
@@ -716,7 +716,7 @@ VideoRtpSession::exitConference()
         videoMixer_.reset();
     }
 
-    setupKaTimer();
+    // setupKaTimer();
 
     conference_ = nullptr;
 }

@@ -230,7 +230,7 @@ public:
 
     void setWebRtcParams(const libsip_core::WebRtcParams& params) { webRtcParams_ = params; };
 
-    const libsip_core::WebRtcParams& getWebRtcParams() { return webRtcParams_; };
+    const libsip_core::WebRtcParams& getWebRtcParams() const { return webRtcParams_; };
 
     bool getVadEnabled() const { return vadEnabled_; }
 
