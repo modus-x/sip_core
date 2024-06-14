@@ -418,11 +418,13 @@ AudioLayer::putRecorded(std::shared_ptr<AudioFrame>&& frame)
 void
 AudioLayer::setWebRtcParams(const libsip_core::WebRtcParams params)
 {
+#if HAVE_WEBRTC_AP
     if (pref_.getAudioProcessor() == "webrtc") {
         auto* processor = audioProcessor.get();
         WebRTCAudioProcessor* webRtc = static_cast<WebRTCAudioProcessor*>(processor);
         webRtc->setWebRtcParams(params);
     }
+#endif
 }
 
 } // namespace sip_core
