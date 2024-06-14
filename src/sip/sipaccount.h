@@ -311,7 +311,7 @@ public:
     /**
      * Try to register a new keepalive registration timer (only for UDP!)
      */
-    void registerKeepAliveTimer(bool start, struct pjsip_regc_cbparam* param);
+    void registerKeepAliveTimer(struct pjsip_regc_cbparam* param);
 
     /**
      * Abort currently registered timer if any

@@ -234,110 +234,103 @@ SIPAccount::~SIPAccount() noexcept
 }
 
 void
-SIPAccount::registerKeepAliveTimer(bool start, struct pjsip_regc_cbparam* param)
+SIPAccount::registerKeepAliveTimer(struct pjsip_regc_cbparam* param)
 {
     uint32_t seconds = config().keepAliveInterval;
     SIP_CORE_DEBUG("Register new keep-alive timer with delay {:d}", seconds);
 
     pjsip_transport* transport = nullptr;
 
+    // do not set if no transport
     if (transport_) {
         transport = transport_->get();
+    } else {
+        return;
     }
 
     /* In all cases, stop keep-alive timer if it's running. */
-    if (ka_timer.id != PJ_FALSE) {
-        cancelKeepAliveTimer();
-        ka_timer.id = PJ_FALSE;
+    cancelKeepAliveTimer();
 
-        if (transport) {
-            pjsip_transport_dec_ref(transport);
-        }
+    pj_time_val delay;
+    pj_status_t status;
+    pjsip_generic_string_hdr* hsr = NULL;
+    unsigned delay_initial;
+    unsigned lower_bound;
+
+    hsr = (pjsip_generic_string_hdr*) pjsip_msg_find_hdr_by_name(param->rdata->msg_info.msg,
+                                                                 &FLOW_HEADER,
+                                                                 hsr);
+    if (hsr != 0) {
+        rfc5626_flowtmr = pj_strtoul(&hsr->hvalue);
+    }
+    /* Only do keep-alive if:
+     *  - REGISTER response contain Flow-Timer header, otherwise
+     *  - keepAliveInterval of SipAccountConfig is not zero, and
+     *  - transport is UDP.
+     *
+     * Note that this applies only for UDP. For TCP/TLS, the keep-alive
+     * is done by the transport layer.
+     */
+    if (/*pjsua_var.stun_srv.ipv4.sin_family == 0 ||*/
+        ((seconds == 0) && (rfc5626_flowtmr == 0))
+        || (!hsr
+            && ((param->rdata->tp_info.transport->key.type & ~PJSIP_TRANSPORT_IPV6)
+                != PJSIP_TRANSPORT_UDP))) {
+        /* Keep alive is not necessary */
+        return;
     }
 
-    if (start) {
-        pj_time_val delay;
-        pj_status_t status;
-        pjsip_generic_string_hdr* hsr = NULL;
-        unsigned delay_initial;
-        unsigned lower_bound;
+    /* Save transport and destination address. */
+    pjsip_transport_add_ref(transport);
 
-        hsr = (pjsip_generic_string_hdr*) pjsip_msg_find_hdr_by_name(param->rdata->msg_info.msg,
-                                                                     &FLOW_HEADER,
-                                                                     hsr);
-        if (hsr != 0) {
-            rfc5626_flowtmr = pj_strtoul(&hsr->hvalue);
-        }
-        /* Only do keep-alive if:
-         *  - REGISTER response contain Flow-Timer header, otherwise
-         *  - keepAliveInterval of SipAccountConfig is not zero, and
-         *  - transport is UDP.
-         *
-         * Note that this applies only for UDP. For TCP/TLS, the keep-alive
-         * is done by the transport layer.
-         */
-        if (/*pjsua_var.stun_srv.ipv4.sin_family == 0 ||*/
-            ((seconds == 0) && (rfc5626_flowtmr == 0))
-            || (!hsr
-                && ((param->rdata->tp_info.transport->key.type & ~PJSIP_TRANSPORT_IPV6)
-                    != PJSIP_TRANSPORT_UDP))) {
-            /* Keep alive is not necessary */
-            return;
-        }
+    /* https://github.com/pjsip/pjproject/issues/1607:
+     * Calculate the destination address from the original request. Some
+     * (broken) servers send the response using different source address
+     * than the one that receives the request, which is forbidden by RFC
+     * 3581.
+     */
+    {
+        pjsip_transaction* tsx;
+        pjsip_tx_data* req;
 
-        /* Save transport and destination address. */
-        pjsip_transport_add_ref(transport);
+        tsx = pjsip_rdata_get_tsx(param->rdata);
+        PJ_ASSERT_ON_FAIL(tsx, return);
 
-        /* https://github.com/pjsip/pjproject/issues/1607:
-         * Calculate the destination address from the original request. Some
-         * (broken) servers send the response using different source address
-         * than the one that receives the request, which is forbidden by RFC
-         * 3581.
-         */
-        {
-            pjsip_transaction* tsx;
-            pjsip_tx_data* req;
+        req = tsx->last_tx;
 
-            tsx = pjsip_rdata_get_tsx(param->rdata);
-            PJ_ASSERT_ON_FAIL(tsx, return);
+        pj_memcpy(&ka_target, &req->tp_info.dst_addr, req->tp_info.dst_addr_len);
+        ka_target_len = req->tp_info.dst_addr_len;
+    }
 
-            req = tsx->last_tx;
+    /* Setup and start the timer */
+    ka_timer.cb = &keep_alive_timer_cb;
+    ka_timer.user_data = (void*) this;
 
-            pj_memcpy(&ka_target, &req->tp_info.dst_addr, req->tp_info.dst_addr_len);
-            ka_target_len = req->tp_info.dst_addr_len;
-        }
+    delay_initial = rfc5626_flowtmr != 0 ? rfc5626_flowtmr : seconds;
 
-        /* Setup and start the timer */
-        ka_timer.cb = &keep_alive_timer_cb;
-        ka_timer.user_data = (void*) this;
+    lower_bound = (unsigned) ((float) delay_initial * 0.8f);
+    delay.sec = pj_rand() % (delay_initial - lower_bound) + lower_bound;
+    delay.msec = 0;
+    status = pjsip_endpt_schedule_timer(link_.getEndpoint(), &ka_timer, &delay);
+    SIP_CORE_DEBUG("Keep-alive rfc5626_flowtmr is {:d}, delay_initial is {:d}, lower_bound is {:d}",
+                   rfc5626_flowtmr,
+                   delay_initial,
+                   lower_bound);
+    if (status == PJ_SUCCESS) {
+        char addr[PJ_INET6_ADDRSTRLEN + 10];
+        pj_str_t input_str = pj_str(param->rdata->pkt_info.src_name);
+        ka_timer.id = PJ_TRUE;
 
-        delay_initial = rfc5626_flowtmr != 0 ? rfc5626_flowtmr : seconds;
-
-        lower_bound = (unsigned) ((float) delay_initial * 0.8f);
-        delay.sec = pj_rand() % (delay_initial - lower_bound) + lower_bound;
-        delay.msec = 0;
-        status = pjsip_endpt_schedule_timer(link_.getEndpoint(), &ka_timer, &delay);
-        SIP_CORE_DEBUG(
-            "Keep-alive rfc5626_flowtmr is {:d}, delay_initial is {:d}, lower_bound is {:d}",
-            rfc5626_flowtmr,
-            delay_initial,
-            lower_bound);
-        if (status == PJ_SUCCESS) {
-            char addr[PJ_INET6_ADDRSTRLEN + 10];
-            pj_str_t input_str = pj_str(param->rdata->pkt_info.src_name);
-            ka_timer.id = PJ_TRUE;
-
-            pj_addr_str_print(&input_str, param->rdata->pkt_info.src_port, addr, sizeof(addr), 1);
-            SIP_CORE_DEBUG("Keep-alive timer started for acc {:s}, "
-                           "destination:{:s}, interval:{:d}s",
-                           getContactHeader(),
-                           addr,
-                           delay.sec);
-        } else {
-            ka_timer.id = PJ_FALSE;
-            pjsip_transport_dec_ref(transport);
-            SIP_CORE_ERR("Error starting keep-alive timer: {:d}", status);
-        }
+        pj_addr_str_print(&input_str, param->rdata->pkt_info.src_port, addr, sizeof(addr), 1);
+        SIP_CORE_DEBUG("Keep-alive timer started for acc {:s}, "
+                       "destination:{:s}, interval:{:d}s",
+                       getContactHeader(),
+                       addr,
+                       delay.sec);
+    } else {
+        ka_timer.id = PJ_FALSE;
+        pjsip_transport_dec_ref(transport);
+        SIP_CORE_ERR("Error starting keep-alive timer: {:d}", status);
     }
 }
 
@@ -348,6 +341,7 @@ SIPAccount::cancelKeepAliveTimer()
         pjsip_endpt_cancel_timer(link_.getEndpoint(), &ka_timer);
         rfc5626_flowtmr = 0;
         ka_target_len = 0;
+        ka_timer.id = PJ_FALSE;
     }
 }
 
@@ -750,6 +744,8 @@ SIPAccount::doUnregister(std::function<void(bool)> released_cb)
 {
     std::unique_lock<std::recursive_mutex> lock(configurationMutex_);
 
+    cancelKeepAliveTimer();
+
     tcpListener_.reset();
 
     try {
@@ -908,11 +904,15 @@ SIPAccount::onRegister(pjsip_regc_cbparam* param)
         return;
 
     if (param->status != PJ_SUCCESS) {
+        // cancel ka timer if everything is BAD
+        cancelKeepAliveTimer();
         SIP_CORE_ERR("SIP registration error %d", param->status);
         destroyRegistrationInfo();
         setRegistrationState(RegistrationState::ERROR_GENERIC, param->code);
-        registerKeepAliveTimer(false, param);
     } else if (param->code < 0 || param->code >= 300) {
+        // if code is wrong cancel ka timer
+        cancelKeepAliveTimer();
+
         if (param->code == 503) {
             return;
         }
@@ -920,7 +920,6 @@ SIPAccount::onRegister(pjsip_regc_cbparam* param)
                      param->code,
                      (int) param->reason.slen,
                      param->reason.ptr);
-        registerKeepAliveTimer(false, param);
         destroyRegistrationInfo();
         switch (param->code) {
         case PJSIP_SC_FORBIDDEN:
@@ -945,13 +944,16 @@ SIPAccount::onRegister(pjsip_regc_cbparam* param)
         auto fakeSubstr = sip_utils::CONST_PJ_STR("fake");
 
         if (pj_stristr(&param->reason, &fakeSubstr) != NULL) {
+            // if fake cancel ka timer
+            cancelKeepAliveTimer();
             setRegistrationState(RegistrationState::ERROR_FAKE, 500);
         } else {
             if (param->expiration < 1) {
+                // if unregister check that ka timer is already destroyed
+                cancelKeepAliveTimer();
                 destroyRegistrationInfo();
                 SIP_CORE_DBG("Unregistration success");
                 setRegistrationState(RegistrationState::UNREGISTERED, param->code);
-                registerKeepAliveTimer(false, param);
             } else {
                 const pj_str_t applicationProxy = CONST_PJ_STR("Application-Proxy");
                 auto* applicationProxyHdr = (pjsip_generic_string_hdr*)
@@ -979,7 +981,8 @@ SIPAccount::onRegister(pjsip_regc_cbparam* param)
 
                 setRegistrationState(RegistrationState::REGISTERED, param->code);
 
-                registerKeepAliveTimer(true, param);
+                // only now set timer
+                registerKeepAliveTimer(param);
             }
         }
     }
@@ -1352,7 +1355,8 @@ SIPAccount::printContactHeader(const std::string& username,
 #elif defined(__Apple__)
             << ";pn-provider=" << PN_APNS
 #endif
-            << ";pn-param=" << ";pn-prid=" << deviceKey;
+            << ";pn-param="
+            << ";pn-prid=" << deviceKey;
     }
     contact << ">";
 
