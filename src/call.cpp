@@ -87,26 +87,6 @@ Call::Call(const std::shared_ptr<Account>& account,
                     call->checkAudio();
             });
 
-            // if call just started ringing, schedule call timeout
-            if (type_ == CallType::INCOMING and cnx_state == ConnectionState::RINGING) {
-                auto timeout = Manager::instance().getRingingTimeout();
-                SIP_CORE_DBG("Scheduling call timeout in %d seconds", timeout);
-
-                Manager::instance().scheduler().scheduleIn(
-                    [callWkPtr = weak()] {
-                        if (auto callShPtr = callWkPtr.lock()) {
-                            if (callShPtr->getConnectionState() == Call::ConnectionState::RINGING) {
-                                SIP_CORE_DBG(
-                                    "Call %s is still ringing after timeout, setting state to BUSY",
-                                    callShPtr->getCallId().c_str());
-                                callShPtr->hangup(PJSIP_SC_BUSY_HERE);
-                                Manager::instance().callFailure(*callShPtr);
-                            }
-                        }
-                    },
-                    std::chrono::seconds(timeout));
-            }
-
             if (!isSubcall()) {
                 if (cnx_state == ConnectionState::CONNECTED && duration_start_ == time_point::min())
                     duration_start_ = clock::now();
