@@ -77,7 +77,8 @@ public:
     /**
      * Configure the AudioUnit
      */
-    bool initAudioLayerIO(AudioDeviceType stream);
+    bool initAudioLayerIO();
+    void configureAudioForCall();
     void setupOutputBus();
     void setupInputBus();
     void bindCallbacks();

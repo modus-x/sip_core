@@ -105,6 +105,10 @@
 #include <list>
 #include <random>
 
+#if (defined(TARGET_OS_IOS) && TARGET_OS_IOS)
+#include "media/audio/coreaudio/ios/corelayer.h"
+#endif
+
 namespace sip_core {
 
 /** To store uniquely a list of Call ids */
@@ -1531,30 +1535,33 @@ Manager::saveConfig(const std::shared_ptr<Account>& acc)
     saveConfig();
 }
 
-
-
-void Manager::setCaptureGain(double gain){
+void
+Manager::setCaptureGain(double gain)
+{
     audioPreference.setVolumemic(gain);
     pimpl_->audiodriver_->setCaptureGain(gain);
     saveConfig();
 }
 
-double Manager::getCaptureGain() const
+double
+Manager::getCaptureGain() const
 {
     return audioPreference.getVolumemic();
 }
 
-
-void Manager::setPlaybackGain(double gain) {
+void
+Manager::setPlaybackGain(double gain)
+{
     audioPreference.setVolumespkr(gain);
     pimpl_->audiodriver_->setPlaybackGain(gain);
     saveConfig();
 }
 
-double Manager::getPlaybackGain() const {
+double
+Manager::getPlaybackGain() const
+{
     return audioPreference.getVolumespkr();
 }
-
 
 void
 Manager::saveConfig()
@@ -1996,6 +2003,8 @@ Manager::setAudioPlugin(const std::string& audioPlugin)
 void
 Manager::setAudioDevice(int index, AudioDeviceType type)
 {
+    SIP_CORE_INFO() << "Setting audio device " << index << " type " << static_cast<int>(type);
+
     std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
 
     if (not pimpl_->audiodriver_) {
@@ -2073,15 +2082,29 @@ Manager::getHomePath()
 void
 Manager::startAudio()
 {
+#if (defined(TARGET_OS_IOS) && TARGET_OS_IOS)
     SIP_CORE_INFO("ios -> startAudio");
-    if (!pimpl_->audiodriver_)
-        pimpl_->audiodriver_.reset(pimpl_->base_.audioPreference.createAudioLayer());
 
     constexpr std::array<AudioDeviceType, 3> TYPES {AudioDeviceType::CAPTURE};
 
     for (const auto& type : TYPES)
         if (pimpl_->audioStreamUsers_[(unsigned) type])
             pimpl_->audiodriver_->startStream(type);
+#endif
+}
+
+void
+Manager::configureAudioForCall()
+{
+#if (defined(TARGET_OS_IOS) && TARGET_OS_IOS)
+    SIP_CORE_INFO("ios -> configureAudioForCall");
+
+    if (pimpl_->audiodriver_ == nullptr)
+        return;
+
+    auto iosDriver = std::static_pointer_cast<CoreLayer>(pimpl_->audiodriver_);
+    iosDriver->configureAudioForCall();
+#endif
 }
 
 AudioDeviceGuard::AudioDeviceGuard(Manager& manager, AudioDeviceType type)
@@ -2293,7 +2316,7 @@ Manager::setNoiseSuppressState(const std::string& state)
         pimpl_->audiodriver_.reset();
         pimpl_->initAudioDriver();
     }
-    
+
     saveConfig();
 }
 
@@ -2320,7 +2343,6 @@ void
 Manager::setWebRtcParams(const libsip_core::WebRtcParams& params)
 
 {
- 
     {
         std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
 
@@ -2337,10 +2359,8 @@ Manager::setWebRtcParams(const libsip_core::WebRtcParams& params)
             } else {
                 // live update
                 pimpl_->audiodriver_->setWebRtcParams(params);
-               
             }
         }
-
     }
 
     audioPreference.setWebRtcParams(params);
@@ -2380,7 +2400,8 @@ Manager::isVADEnabled() const
 }
 
 void
-Manager::setAudioProcessor(const std::string& processor) {
+Manager::setAudioProcessor(const std::string& processor)
+{
     {
         std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
         audioPreference.setAudioProcessor(processor);
@@ -2389,7 +2410,6 @@ Manager::setAudioProcessor(const std::string& processor) {
     }
 
     saveConfig();
-
 }
 
 void

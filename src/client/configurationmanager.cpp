@@ -71,6 +71,12 @@ setWebRtcParams(const WebRtcParams& params)
     sip_core::Manager::instance().setWebRtcParams(params);
 }
 
+void
+configureAudioForCall()
+{
+    sip_core::Manager::instance().configureAudioForCall();
+}
+
 const libsip_core::WebRtcParams&
 getWebRtcParams()
 {

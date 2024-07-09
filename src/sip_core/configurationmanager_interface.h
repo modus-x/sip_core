@@ -120,6 +120,7 @@ LIBSIP_CORE_PUBLIC void setAudioPlugin(const std::string& audioPlugin);
 LIBSIP_CORE_PUBLIC std::vector<std::string> getAudioOutputDeviceList();
 LIBSIP_CORE_PUBLIC void setAudioOutputDevice(int32_t index);
 LIBSIP_CORE_PUBLIC void startAudio();
+LIBSIP_CORE_PUBLIC void configureAudioForCall();
 LIBSIP_CORE_PUBLIC void setAudioInputDevice(int32_t index);
 LIBSIP_CORE_PUBLIC void setAudioRingtoneDevice(int32_t index);
 LIBSIP_CORE_PUBLIC std::vector<std::string> getAudioInputDeviceList();

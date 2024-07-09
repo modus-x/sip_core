@@ -101,7 +101,7 @@ CoreLayer::getAudioDeviceName(int index, AudioDeviceType type) const
 }
 
 bool
-CoreLayer::initAudioLayerIO(AudioDeviceType stream)
+CoreLayer::initAudioLayerIO()
 {
     SIP_CORE_DBG("iOS CoreLayer initAudioLayerIO started");
 
@@ -130,18 +130,11 @@ CoreLayer::initAudioLayerIO(AudioDeviceType stream)
                                            error:&error];
     if (error) {
         const char* errorDesc = [[error localizedDescription] UTF8String];
-        SIP_CORE_ERR() << "iOS CoreLayer initAudioLayerIO cannot setCategory: error code " << int([error code])  << ", description: " << errorDesc;
+        SIP_CORE_ERR() << "iOS CoreLayer initAudioLayerIO cannot setCategory: error code "
+                       << int([error code]) << ", description: " << errorDesc;
         return false;
     }
-    [[AVAudioSession sharedInstance]
-          setActive:true
-        withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation
-              error:&error];
-    if (error) {
-        const char* errorDesc = [[error localizedDescription] UTF8String];
-        SIP_CORE_ERR() << "iOS CoreLayer initAudioLayerIO cannot setActive: error code " << int([error code])  << ", description: " << errorDesc;
-        return false;
-    }
+
     auto playBackDeviceList = getPlaybackDeviceList();
     SIP_CORE_DBG("iOS CoreLayer initAudioLayerIO setting playback device: %s",
                  playBackDeviceList[indexOut_].c_str());
@@ -333,35 +326,73 @@ CoreLayer::bindCallbacks()
                                   sizeof(AURenderCallbackStruct)));
 }
 
+// deviceType if not used here :)
 void
 CoreLayer::startStream(AudioDeviceType stream)
 {
     dispatch_async(audioConfigurationQueueIOS(), ^{
+        SIP_CORE_DBG("iOS CoreLayer startStream");
         const std::lock_guard<std::mutex> lock(layerLock_);
 
         // if started, exit
-        if (status_ != Status::Idle) {
+        if (status_ == Status::Started) {
+            SIP_CORE_DBG("iOS CoreLayer startStream already started, exiting");
             return;
         }
-        
-        SIP_CORE_DBG("iOS CoreLayer startStream for device type %d", stream);
 
-        // destroyAudioLayer must be safely destroyed if something is wrong
-        if (!initAudioLayerIO(stream) || AudioUnitInitialize(ioUnit_)
-            || AudioOutputUnitStart(ioUnit_)) {
+        // if idle, configure
+        if (status_ == Status::Idle) {
+            SIP_CORE_DBG("iOS CoreLayer startStream layer is not configured, fix it");
+            bool result = initAudioLayerIO();
+
+            if (result) {
+                SIP_CORE_DBG("iOS CoreLayer startStream initAudioLayer OK");
+            } else {
+                SIP_CORE_ERR("iOS CoreLayer startStream initAudioLayer ERROR, exiting");
+                return;
+            }
+
+            status_ = Status::Starting;
+        }
+
+        // if starting, try to load ioUnit
+        if (AudioUnitInitialize(ioUnit_) || AudioOutputUnitStart(ioUnit_)) {
+            SIP_CORE_ERR("iOS CoreLayer - startStream ERROR! Deleting ioUnit_, exiting");
             AudioOutputUnitStop(ioUnit_);
             AudioUnitUninitialize(ioUnit_);
             AudioComponentInstanceDispose(ioUnit_);
-            [[AVAudioSession sharedInstance]
-                  setActive:false
-                withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation
-                      error:nil];
+            status_ = Status::Idle;
             return;
         } else {
-            SIP_CORE_DBG("iOS CoreLayer - Start Stream %d FINISHED OK", stream);
+            SIP_CORE_DBG("iOS CoreLayer - startStream OK");
         }
 
         status_ = Status::Started;
+    });
+}
+
+void
+CoreLayer::configureAudioForCall()
+{
+    dispatch_async(audioConfigurationQueueIOS(), ^{
+        SIP_CORE_DBG("iOS CoreLayer configureAudioForCall");
+
+        const std::lock_guard<std::mutex> lock(layerLock_);
+
+        if (status_ == Status::Idle) {
+            bool result = initAudioLayerIO();
+
+            if (result) {
+                SIP_CORE_DBG("iOS CoreLayer configureAudioForCall initAudioLayer OK");
+            } else {
+                SIP_CORE_ERR("iOS CoreLayer configureAudioForCall initAudioLayer ERROR, exiting");
+                return;
+            }
+
+            status_ = Status::Starting;
+        } else {
+            SIP_CORE_DBG("iOS CoreLayer configureAudioForCall not in idle state, exiting");
+        }
     });
 }
 
@@ -372,25 +403,24 @@ CoreLayer::destroyAudioLayer()
 
     // if not started, exit
     if (status_ != Status::Started) {
+        SIP_CORE_DBG("iOS CoreLayer - destroyAudioLayer not in started state, exiting");
         return;
     }
 
     AudioOutputUnitStop(ioUnit_);
     AudioUnitUninitialize(ioUnit_);
     AudioComponentInstanceDispose(ioUnit_);
-    [[AVAudioSession sharedInstance]
-          setActive:false
-        withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation
-              error:nil];
     status_ = Status::Idle;
+    SIP_CORE_DBG("iOS CoreLayer - destroyAudioLayer now in idle state");
 }
 
 void
 CoreLayer::stopStream(AudioDeviceType stream)
 {
     dispatch_async(audioConfigurationQueueIOS(), ^{
-        SIP_CORE_DBG("iOS CoreLayer - Stop Stream %d", stream);
+        SIP_CORE_DBG("iOS CoreLayer - Stop Stream START");
         destroyAudioLayer();
+        SIP_CORE_DBG("iOS CoreLayer - Stop Stream COMPLETE");
     });
     /* Flush the ring buffers */
     flushUrgent();
