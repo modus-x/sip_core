@@ -371,10 +371,9 @@ CoreLayer::startStream(AudioDeviceType stream)
     });
 }
 
-void
-CoreLayer::configureAudioForCall()
+void CoreLayer::()
 {
-    dispatch_async(audioConfigurationQueueIOS(), ^{
+    dispatch_sync(audioConfigurationQueueIOS(), ^{
         SIP_CORE_DBG("iOS CoreLayer configureAudioForCall");
 
         const std::lock_guard<std::mutex> lock(layerLock_);
