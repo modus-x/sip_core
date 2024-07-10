@@ -371,7 +371,8 @@ CoreLayer::startStream(AudioDeviceType stream)
     });
 }
 
-void CoreLayer::()
+void
+CoreLayer::configureAudioForCall()
 {
     dispatch_sync(audioConfigurationQueueIOS(), ^{
         SIP_CORE_DBG("iOS CoreLayer configureAudioForCall");
