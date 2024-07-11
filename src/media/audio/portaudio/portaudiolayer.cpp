@@ -46,7 +46,7 @@ struct PortAudioLayer::PortAudioLayerImpl
     void initOutput(PortAudioLayer&);
     void terminate() const;
     bool initInputStream(PortAudioLayer&);
-    bool initOutputStream(PortAudioLayer&);
+    bool initOutputStream(PortAudioLayer&, bool ringtone = false);
     bool initFullDuplexStream(PortAudioLayer&);
     bool apiInitialised_ {false};
 
@@ -172,7 +172,7 @@ PortAudioLayer::startStream(AudioDeviceType stream)
         return;
     }
 
-    auto startPlayback = [this](bool fullDuplexMode = false) -> bool {
+    auto startPlayback = [this](bool fullDuplexMode = false, bool ringtone = false) -> bool {
         std::unique_lock<std::mutex> lock(mutex_);
         if (status_.load() != Status::Idle)
             return false;
@@ -180,7 +180,7 @@ PortAudioLayer::startStream(AudioDeviceType stream)
         if (fullDuplexMode)
             ret = pimpl_->initFullDuplexStream(*this);
         else
-            ret = pimpl_->initOutputStream(*this);
+            ret = pimpl_->initOutputStream(*this, ringtone);
         if (ret) {
             status_.store(Status::Started);
             lock.unlock();
@@ -201,8 +201,10 @@ PortAudioLayer::startStream(AudioDeviceType stream)
         pimpl_->initInputStream(*this);
         break;
     case AudioDeviceType::PLAYBACK:
-    case AudioDeviceType::RINGTONE:
         startPlayback();
+        break;
+    case AudioDeviceType::RINGTONE:
+        startPlayback(false, true);
         break;
     }
 }
@@ -630,11 +632,11 @@ PortAudioLayer::PortAudioLayerImpl::initInputStream(PortAudioLayer& parent)
 }
 
 bool
-PortAudioLayer::PortAudioLayerImpl::initOutputStream(PortAudioLayer& parent)
+PortAudioLayer::PortAudioLayerImpl::initOutputStream(PortAudioLayer& parent, bool ringtone)
 {
     SIP_CORE_DBG("Open PortAudio Output Stream");
     auto& stream = streams_[Direction::Output];
-    auto apiIndex = getApiIndexByType(AudioDeviceType::PLAYBACK);
+    auto apiIndex = getApiIndexByType(ringtone == false ? AudioDeviceType::PLAYBACK : AudioDeviceType::RINGTONE);
     if (apiIndex != paNoDevice) {
         openStreamDevice(
             &stream,
