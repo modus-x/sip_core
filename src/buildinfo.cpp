@@ -41,7 +41,7 @@
 
 namespace libsip_core {
 
-const char* SIP_CORE_VERSION = "0.9.7";
+const char* SIP_CORE_VERSION = "0.9.8";
 
 const char*
 version() noexcept
