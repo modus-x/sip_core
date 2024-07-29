@@ -2490,8 +2490,10 @@ Manager::ManagerPimpl::processIncomingCall(const std::string& accountId, Call& i
     if (not base_.hasCurrentCall()) {
         incomCall.setState(Call::ConnectionState::RINGING);
 #if !defined(RING_UWP) && !(defined(TARGET_OS_IOS) && TARGET_OS_IOS)
-        if (not account->isRendezVous())
+        if (not account->isRendezVous() && incomCall.getPeerNumber().find("__callback") == -1 && incomCall.getPeerNumber().find("_supervise") == -1) {
             base_.playRingtone(accountId);
+        }
+            
 #endif
     }
 
