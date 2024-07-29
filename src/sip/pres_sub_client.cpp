@@ -454,6 +454,8 @@ PresSubClient::enable(bool flag)
                  flag ? "" : "NOT");
     if (flag and not monitored_)
         pres_->addPresSubClient(this);
+    if (!flag and not monitored_)
+        pres_->removePresSubClient(this);
     monitored_ = flag;
 }
 

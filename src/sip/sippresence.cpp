@@ -35,8 +35,8 @@
 #include <thread>
 #include <sstream>
 
-#define MAX_N_SUB_SERVER 50
-#define MAX_N_SUB_CLIENT 50
+#define MAX_N_SUB_SERVER 100
+#define MAX_N_SUB_CLIENT 100
 
 namespace sip_core {
 
