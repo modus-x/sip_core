@@ -114,9 +114,18 @@ VideoReceiveThread::setup()
             recorderCallback_(getInfo());
     });
     videoDecoder_->setResolutionChangedCallback([this](int width, int height) {
+
+        SIP_CORE_ERR("[%p] VideoReceiveThread decoder changed resolution from %dx%d -> %dx%d", this, dstWidth_, dstHeight_, width, height);
+
         dstWidth_ = width;
         dstHeight_ = height;
-        sink_->setFrameSize(dstWidth_, dstHeight_);
+
+        if (useSink_ && sink_ && width > 0 && height > 0) {
+            if (!startSink()) {
+                // just report resolution change
+                sink_->setFrameSize(dstWidth_, dstHeight_);
+            }
+        }
     });
 
     dstWidth_ = args_.width;
@@ -229,19 +238,21 @@ VideoReceiveThread::decodeFrame()
             SIP_CORE_DBG("[%p] VideoReceiveThread decoder configured, starting decoding", this);
         }
     }
+    SIP_CORE_DBG("started frame decoding");
     auto status = videoDecoder_->decode();
+    SIP_CORE_DBG("finished frame decoding");
     if (status == MediaDemuxer::Status::EndOfFile) {
         SIP_CORE_DBG("[{:p}] End of file", fmt::ptr(this));
         loop_.stop();
-    }
-    else if (status == MediaDemuxer::Status::ReadError) {
-        SIP_CORE_ERROR("[{:p}] Decoding error: %s", fmt::ptr(this), MediaDemuxer::getStatusStr(status));
-    }
-    else if (status == MediaDemuxer::Status::FallBack) {
+    } else if (status == MediaDemuxer::Status::ReadError) {
+        SIP_CORE_ERROR("[{:p}] Decoding error: %d",
+                       fmt::ptr(this),
+                       MediaDemuxer::getStatusStr(status));
+    } else if (status == MediaDemuxer::Status::FallBack) {
+        SIP_CORE_DBG("[{:p}] fallback", fmt::ptr(this));
         if (keyFrameRequestCallback_)
             keyFrameRequestCallback_();
     }
-
 
     frameCount_++;
 }
@@ -279,8 +290,8 @@ VideoReceiveThread::configureVideoOutput()
         return false;
     }
 
-    if (useSink_)
-        startSink();
+    // try to start sink. but 
+    startSink();
 
     if (onSuccessfulSetup_)
         onSuccessfulSetup_(MEDIA_VIDEO, 1);
@@ -300,16 +311,36 @@ VideoReceiveThread::stopSink()
     sink_->setFrameSize(0, 0);
 }
 
-void
+bool
 VideoReceiveThread::startSink()
 {
-    SIP_CORE_DBG("VideoReceiveThread [%p] Starting sink", this);
+    std::lock_guard<std::mutex> l(sinkMtx_);
 
-    if (!loop_.isRunning())
-        return;
+    if (!useSink_) {
+        return false;
+    }
 
-    if (dstWidth_ > 0 and dstHeight_ > 0 and attach(sink_.get()))
-        sink_->setFrameSize(dstWidth_, dstHeight_);
+    if (!loop_.isRunning()) {
+        SIP_CORE_ERR(
+            "VideoReceiveThread [%p] cannot start sink beacuse main decoding loop is not running",
+            this);
+        return false;
+    }
+
+    if (dstHeight_ > 0 && dstWidth_ > 0) {
+        SIP_CORE_DBG("VideoReceiveThread [%p] Starting sink", this);
+        if (attach(sink_.get())) {
+            sink_->setFrameSize(dstWidth_, dstHeight_);
+            return true;
+        } else {
+            SIP_CORE_DBG("VideoReceiveThread [%p] sink already attached", this);
+        }
+    } else {
+        SIP_CORE_ERR(
+            "VideoReceiveThread [%p] cannot start sink beacuse width or height is not > 0",
+            this);
+    }
+    return false;
 }
 
 int

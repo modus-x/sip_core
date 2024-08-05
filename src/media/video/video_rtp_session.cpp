@@ -173,6 +173,7 @@ VideoRtpSession::updateMedia(const MediaDescription& send, const MediaDescriptio
 {
     BaseType::updateMedia(send, receive);
     setupVideoBitrateInfo();
+    socketPair_.reset(new SocketPair(getRemoteRtpUri().c_str(), receive_.addr.getPort()));
 }
 
 void
@@ -375,13 +376,19 @@ VideoRtpSession::startReceiver()
             if (socketPair_)
                 socketPair_->setReadBlockingMode(false);
         }
-            SIP_CORE_WARN("[%p] Already has a receiver, restarting", this);
+          
         receiveThread_.reset(
             new VideoReceiveThread(callId_, !conference_, receive_.receiving_sdp, mtu_));
 
         // XXX keyframe requests can timeout if unanswered
         receiveThread_->addIOContext(*socketPair_);
-        receiveThread_->setSuccessfulSetupCb(onSuccessfulSetup_);
+        receiveThread_->setSuccessfulSetupCb(
+            [this](MediaType media, bool success) { 
+                if (receiveThread_) {
+                    if (socketPair_)
+                        socketPair_->setReadBlockingMode(true);
+                    }
+                onSuccessfulSetup_(media, success); });
         receiveThread_->setResolutionChangedCallback([this]() { restartSender(); });
         receiveThread_->setDeviceParams(remoteVideoParams_);
         receiveThread_->startLoop();
@@ -412,8 +419,7 @@ VideoRtpSession::startReceiver()
                 videoMixer_->setActiveStream(audioId_);
         }
     }
-    if (socketPair_)
-        socketPair_->setReadBlockingMode(true);
+
 }
 
 void
@@ -467,7 +473,7 @@ VideoRtpSession::start()
     }
 
     try {
-        socketPair_.reset(new SocketPair(getRemoteRtpUri().c_str(), receive_.addr.getPort()));
+        
 
         last_REMB_inc_ = clock::now();
         last_REMB_dec_ = clock::now();
@@ -485,8 +491,6 @@ VideoRtpSession::start()
         SIP_CORE_ERR("VideoRtpSession [%p] Socket creation failed: %s", this, e.what());
         return;
     }
-
-    startReceiver();
 
     startSender();
 
@@ -548,24 +552,6 @@ VideoRtpSession::setMuted(bool mute, Direction dir)
             restartSender();
         }
         return;
-    }
-
-    // Receiver, mostly never used with video
-    if (mute) {
-        if (receiveThread_) {
-            auto ms = receiveThread_->getInfo();
-            if (auto ob = recorder_->getStream(ms.name)) {
-                receiveThread_->detach(ob);
-                recorder_->removeStream(ms);
-            }
-        }
-        stopReceiver();
-    } else {
-        startReceiver();
-        // if not on hold and binded to conference re-create pipeline
-        if (conference_ and not receive_.onHold) {
-            setupConferenceVideoPipeline(*conference_, Direction::RECV);
-        }
     }
 }
 

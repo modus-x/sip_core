@@ -67,7 +67,7 @@ public:
     {
         keyFrameRequestCallback_ = std::move(cb);
     };
-    void startSink();
+    bool startSink();
     void stopSink();
     std::shared_ptr<SinkClient>& getSink() { return sink_; }
 
@@ -117,6 +117,7 @@ private:
     int rotation_ {0};
 
     std::mutex rotationMtx_;
+    std::mutex sinkMtx_;
     libav_utils::AVBufferPtr displayMatrix_;
 
     static int interruptCb(void* ctx);

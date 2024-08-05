@@ -250,6 +250,7 @@ SIPCall::configureRtpSession(const std::shared_ptr<RtpSession>& rtpSession,
             if (auto thisPtr = w.lock())
                 thisPtr->sendObjectJson("videoDeviceParams", newParams.toJson());
         });
+        videoRtp->startReceiver();
     }
 #endif
 }
@@ -2249,7 +2250,6 @@ SIPCall::onMediaNegotiationComplete()
                 SIP_CORE_WARN("[call:%s] ICE media disabled, using default media ports",
                               this_->getCallId().c_str());
                 // Start the media.
-                this_->stopAllMedia();
                 this_->startAllMedia();
             }
 
