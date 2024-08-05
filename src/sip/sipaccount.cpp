@@ -1262,11 +1262,15 @@ SIPAccount::updateContactHeader()
         return;
     }
 
+    const pj_str_t *transportName = &pj_str(transport_->get()->type_name);
+
+    bool isTCP = pjsip_transport_get_type_from_name(transportName) == PJSIP_TRANSPORT_TCP;
+
     auto contactHdr = printContactHeader(config().username,
                                          config().displayName,
                                          contactAddress_.toString(false, true),
                                          contactAddress_.getPort(),
-                                         PJSIP_TRANSPORT_IS_SECURE(transport_->get()),
+                                         isTCP,
                                          config().deviceKey);
 
     contactHeader_ = std::move(contactHdr);
@@ -1330,7 +1334,7 @@ SIPAccount::printContactHeader(const std::string& username,
                                const std::string& displayName,
                                const std::string& address,
                                pj_uint16_t port,
-                               bool secure,
+                               bool tcp,
                                const std::string& deviceKey)
 {
     // This method generates SIP contact header field, with push
@@ -1343,8 +1347,8 @@ SIPAccount::printContactHeader(const std::string& username,
     std::string quotedDisplayName = displayName.empty() ? "" : "\"" + displayName + "\" ";
 
     std::ostringstream contact;
-    auto scheme = secure ? "sips" : "sip";
-    auto transport = secure ? ";transport=tls" : "";
+    auto scheme = "sip";
+    auto transport = tcp ? ";transport=TCP" : "";
 
     contact << quotedDisplayName << "<" << scheme << ":" << username
             << (username.empty() ? "" : "@") << address << ":" << port << transport;
@@ -1639,11 +1643,15 @@ SIPAccount::checkNATAddress(pjsip_regc_cbparam* param, pj_pool_t* pool)
      * Build new Contact header
      */
     {
+        const pj_str_t* transportName = &pj_str(tp->type_name);
+
+        bool isTCP = pjsip_transport_get_type_from_name(transportName) == PJSIP_TRANSPORT_TCP;
+
         auto tempContact = printContactHeader(config().username,
                                               config().displayName,
                                               via_addrstr,
                                               rport,
-                                              PJSIP_TRANSPORT_IS_SECURE(tp),
+                                              isTCP,
                                               config().deviceKey);
 
         if (tempContact.empty()) {

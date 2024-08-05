@@ -496,7 +496,7 @@ private:
                                           const std::string& displayName,
                                           const std::string& address,
                                           pj_uint16_t port,
-                                          bool secure,
+                                          bool tcp,
                                           const std::string& deviceKey = {});
 
     /**
