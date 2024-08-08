@@ -72,8 +72,6 @@ public:
     // TODO LIBSIP_CORE_PUBLIC only if tests
     static LIBSIP_CORE_TESTABLE Manager& instance();
 
-    void setAutoAnswer(const std::string& accountId, bool enable) const;
-
     /**
      * General preferences configuration
      */
@@ -118,6 +116,16 @@ public:
     std::string getHomePath();
 
     void monitor(bool continuous);
+
+    void setAutoAnswer(const std::string& accountId, bool enable) const;
+
+    bool setRingtone(const std::string& accountId, const std::string& ringtone);
+
+    std::string getRingtonePath(const std::string& accountId);
+
+    bool getRingtoneEnabled(const std::string& accountId);
+
+    void setRingtoneEnabled(const std::string& accountId, bool enabled);
 
     /**
      * Accessor to audiodriver.

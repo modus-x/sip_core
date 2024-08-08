@@ -288,8 +288,15 @@ public:
         MediaType mediaType) const;
     std::shared_ptr<AccountCodecInfo> searchCodecByPayload(unsigned payload, MediaType mediaType);
 
+    // get full ringtone path
     std::string getRingtonePath() const { return ringtonePath_; }
-    bool getRingtoneEnabled() const { return config().ringtoneEnabled; }
+
+    // set ringtone (pass just name, full path will generated depending on data folder)
+    bool setRingtone(const std::string& ringtone);
+
+    // is playing ringtone?
+    bool getRingtoneEnabled() const { return ringtoneEnabled_; }
+    void setRingtoneEnabled(bool enabled);
     std::string getDisplayName() const { return config().displayName; }
     std::string getMailBox() const { return config().mailbox; }
 
@@ -451,9 +458,14 @@ protected:
     std::vector<std::shared_ptr<AccountCodecInfo>> accountCodecInfoList_;
 
     /**
-     * Ringtone .au file used for this account
+     * Ringtone .file used for this account
      */
     std::string ringtonePath_;
+
+    /**
+     * is ringtone enabled???
+     */
+    bool ringtoneEnabled_;
 
     bool iceForMediaEnabled_ {false};
     bool iceCompIdRfc5245Compliant_ {false};

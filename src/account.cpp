@@ -59,7 +59,7 @@ using namespace std::literals;
 
 namespace sip_core {
 
-// For portability, do not specify the absolute file name of the ringtone. 
+// For portability, do not specify the absolute file name of the ringtone.
 // Instead, specify its base name to be looked in
 // SIP_CORE_DATADIR/ringtones/, where SIP_CORE_DATADIR is a preprocessor macro denoting
 // the data directory prefix that must be set at build time.
@@ -101,9 +101,9 @@ Account::setRegistrationState(RegistrationState state,
                          detail_str,
                          details = getVolatileAccountDetails()] {
             emitSignal<libsip_core::ConfigurationSignal::RegistrationStateChanged>(accountId,
-                                                                             state,
-                                                                             detail_code,
-                                                                             detail_str);
+                                                                                   state,
+                                                                                   detail_code,
+                                                                                   detail_str);
 
             emitSignal<libsip_core::ConfigurationSignal::VolatileDetailsChanged>(accountId, details);
         });
@@ -137,15 +137,54 @@ Account::loadDefaultCodecs()
 void
 Account::loadConfig()
 {
+    // load codecs
     setActiveCodecs(config_->activeCodecs);
-    auto ringtoneDir = fmt::format("{}/{}", Manager::instance().getDataPath(), "ringtones");
-    ringtonePath_ = fileutils::getFullPath(ringtoneDir, config_->ringtonePath);
+
+    // play or not play ringtone?
+    ringtoneEnabled_ = config().ringtoneEnabled;
+
+    // But, anyway, set the actual ringtone
     // If the user defined a custom ringtone, the file may not exists
     // In this case, fallback on the default ringtone path
-    if (!fileutils::isFile(ringtonePath_)) {
-        SIP_CORE_WARNING("Ringtone {} is not a valid file", ringtonePath_);
-        ringtonePath_ = fileutils::getFullPath(ringtoneDir, DEFAULT_RINGTONE_PATH);
+    if (!setRingtone(config_->ringtonePath)) {
+        SIP_CORE_WARNING("Could not found ringtone {} in {}, trying default...",
+                         config_->ringtonePath,
+                         Manager::instance().getDataPath());
+
+        if (!setRingtone(DEFAULT_RINGTONE_PATH)) {
+            SIP_CORE_WARNING(
+                "Could not found default ringtone {} in {}, disabling ringtone playback",
+                DEFAULT_RINGTONE_PATH,
+                Manager::instance().getDataPath());
+            ringtoneEnabled_ = false;
+        }
     }
+}
+
+bool
+Account::setRingtone(const std::string& ringtone)
+{
+    auto ringtonePath = ringtone;
+    // if relative, assume that this is relative to ringtones folder!
+    if (fileutils::isPathRelative(ringtone)) {
+        auto ringtoneDir = fmt::format("{}/{}", Manager::instance().getDataPath(), "ringtones");
+        ringtonePath = fileutils::getFullPath(ringtoneDir, ringtone);
+    }
+    if (fileutils::isFile(ringtonePath)) {
+        ringtonePath_ = ringtonePath;
+        editConfig([&](AccountConfig& config) { config.ringtonePath = ringtone; });
+        return true;
+    } else {
+        SIP_CORE_WARNING("Ringtone path {} is not a valid file", ringtonePath);
+        return false;
+    }
+}
+
+void
+Account::setRingtoneEnabled(bool enabled)
+{
+    ringtoneEnabled_ = enabled;
+    editConfig([&](AccountConfig& config) { config.ringtoneEnabled = enabled; });
 }
 
 void
@@ -247,7 +286,6 @@ Account::getDefaultCodecDetails(const unsigned& codecId)
     }
     return {};
 }
-
 
 /*
  * private account codec searching functions
@@ -374,7 +412,10 @@ Account::getUserAgentName()
 std::string
 Account::getDefaultUserAgent()
 {
-    return fmt::format("{:s} {:s} ({:s})", "Svetets Svetophone", libsip_core::version(), libsip_core::platform());
+    return fmt::format("{:s} {:s} ({:s})",
+                       "Svetets Svetophone",
+                       libsip_core::version(),
+                       libsip_core::platform());
 }
 
 void

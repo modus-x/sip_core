@@ -597,6 +597,41 @@ Manager::setAutoAnswer(const std::string& accountId, bool enable) const
     }
 }
 
+bool
+Manager::setRingtone(const std::string& accountId, const std::string& ringtone)
+{
+    if (auto account = getAccount(accountId)) {
+        return account->setRingtone(ringtone);
+    }
+    return false;
+}
+
+std::string
+Manager::getRingtonePath(const std::string& accountId)
+{
+    if (auto account = getAccount(accountId)) {
+        return account->getRingtonePath();
+    }
+    return "";
+}
+
+bool
+Manager::getRingtoneEnabled(const std::string& accountId)
+{
+    if (auto account = getAccount(accountId)) {
+        return account->getRingtoneEnabled();
+    }
+    return false;
+}
+
+void
+Manager::setRingtoneEnabled(const std::string& accountId, bool enabled)
+{
+    if (auto account = getAccount(accountId)) {
+        return account->setRingtoneEnabled(enabled);
+    }
+}
+
 void
 Manager::init(const std::string& config_file, const std::string& data_path)
 {
@@ -2490,10 +2525,11 @@ Manager::ManagerPimpl::processIncomingCall(const std::string& accountId, Call& i
     if (not base_.hasCurrentCall()) {
         incomCall.setState(Call::ConnectionState::RINGING);
 #if !defined(RING_UWP) && !(defined(TARGET_OS_IOS) && TARGET_OS_IOS)
-        if (not account->isRendezVous() && incomCall.getPeerNumber().find("__callback") == -1 && incomCall.getPeerNumber().find("_supervise") == -1) {
+        if (not account->isRendezVous() && incomCall.getPeerNumber().find("__callback") == -1
+            && incomCall.getPeerNumber().find("_supervise") == -1) {
             base_.playRingtone(accountId);
         }
-            
+
 #endif
     }
 

@@ -123,6 +123,17 @@ LIBSIP_CORE_PUBLIC void startAudio();
 LIBSIP_CORE_PUBLIC void configureAudioForCall();
 LIBSIP_CORE_PUBLIC void setAudioInputDevice(int32_t index);
 LIBSIP_CORE_PUBLIC void setAudioRingtoneDevice(int32_t index);
+LIBSIP_CORE_PUBLIC bool setRingtone(const std::string& accountId, const std::string& ringtone);
+LIBSIP_CORE_PUBLIC std::string getRingtonePath(const std::string& accountId);
+
+// global mute
+LIBSIP_CORE_PUBLIC bool isRingtoneMuted();
+LIBSIP_CORE_PUBLIC void muteRingtone(bool mute);
+
+// per - account mute
+LIBSIP_CORE_PUBLIC bool getRingtoneEnabled(const std::string& accountId);
+LIBSIP_CORE_PUBLIC void setRingtoneEnabled(const std::string& accountId, bool enabled);
+
 LIBSIP_CORE_PUBLIC std::vector<std::string> getAudioInputDeviceList();
 LIBSIP_CORE_PUBLIC std::vector<int> getCurrentAudioDevicesIndex();
 LIBSIP_CORE_PUBLIC int32_t getAudioInputDeviceIndex(const std::string& name);
@@ -141,7 +152,6 @@ LIBSIP_CORE_PUBLIC bool isVADEnabled();
 LIBSIP_CORE_PUBLIC void setVADState(bool enabled);
 
 LIBSIP_CORE_PUBLIC void setAutoAnswer(const std::string& accountId, bool enable);
-
 LIBSIP_CORE_PUBLIC void muteDtmf(bool mute);
 LIBSIP_CORE_PUBLIC bool isDtmfMuted();
 
@@ -149,8 +159,7 @@ LIBSIP_CORE_PUBLIC bool isCaptureMuted();
 LIBSIP_CORE_PUBLIC void muteCapture(bool mute);
 LIBSIP_CORE_PUBLIC bool isPlaybackMuted();
 LIBSIP_CORE_PUBLIC void mutePlayback(bool mute);
-LIBSIP_CORE_PUBLIC bool isRingtoneMuted();
-LIBSIP_CORE_PUBLIC void muteRingtone(bool mute);
+
 
 LIBSIP_CORE_PUBLIC std::vector<std::string> getSupportedAudioManagers();
 LIBSIP_CORE_PUBLIC std::string getAudioManager();

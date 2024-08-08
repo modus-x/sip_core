@@ -1262,9 +1262,9 @@ SIPAccount::updateContactHeader()
         return;
     }
 
-    const pj_str_t *transportName = &pj_str(transport_->get()->type_name);
+    const auto transportName = pj_str(transport_->get()->type_name);
 
-    bool isTCP = pjsip_transport_get_type_from_name(transportName) == PJSIP_TRANSPORT_TCP;
+    bool isTCP = pjsip_transport_get_type_from_name(&transportName) == PJSIP_TRANSPORT_TCP;
 
     auto contactHdr = printContactHeader(config().username,
                                          config().displayName,
@@ -1643,9 +1643,9 @@ SIPAccount::checkNATAddress(pjsip_regc_cbparam* param, pj_pool_t* pool)
      * Build new Contact header
      */
     {
-        const pj_str_t* transportName = &pj_str(tp->type_name);
+        const auto transportName = pj_str(tp->type_name);
 
-        bool isTCP = pjsip_transport_get_type_from_name(transportName) == PJSIP_TRANSPORT_TCP;
+        bool isTCP = pjsip_transport_get_type_from_name(&transportName) == PJSIP_TRANSPORT_TCP;
 
         auto tempContact = printContactHeader(config().username,
                                               config().displayName,

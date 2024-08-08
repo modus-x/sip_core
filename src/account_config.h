@@ -27,7 +27,7 @@ using namespace std::literals;
 
 namespace sip_core {
 
-constexpr const char* const DEFAULT_RINGTONE_PATH = "default.opus";
+constexpr const char* const DEFAULT_RINGTONE_PATH = "default.mp3";
 
 struct AccountConfig: public Serializable {
     AccountConfig(const std::string& type_, const std::string& id_, const std::string& path_ = {}): type(type_), id(id_), path(path_) {}

@@ -95,6 +95,32 @@ setAutoAnswer(const std::string& accountId, bool enable)
     sip_core::Manager::instance().setAutoAnswer(accountId, enable);
 }
 
+bool
+setRingtone(const std::string& accountId, const std::string& ringtone)
+{
+    return sip_core::Manager::instance().setRingtone(accountId, ringtone);
+}
+
+std::string
+getRingtonePath(const std::string& accountId)
+{
+    return sip_core::Manager::instance().getRingtonePath(accountId);
+}
+
+bool
+getRingtoneEnabled(const std::string& accountID)
+{
+    return sip_core::Manager::instance().getRingtoneEnabled(accountID);
+}
+
+void
+setRingtoneEnabled(const std::string& accountID, bool enabled)
+{
+    sip_core::Manager::instance().setRingtoneEnabled(accountID, enabled);
+}
+
+LIBSIP_CORE_PUBLIC
+
 std::map<std::string, std::string>
 getAccountDetails(const std::string& accountID)
 {
