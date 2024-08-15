@@ -416,21 +416,6 @@ transaction_request_cb(pjsip_rx_data* rdata)
         return PJ_FALSE;
     }
 
-    std::map<std::string, std::string> extraHeaders;
-
-    for (hdr = rdata->msg_info.msg->hdr.next; hdr != &rdata->msg_info.msg->hdr; hdr = hdr->next) {
-        auto type = hdr->type;
-        if (type == PJSIP_H_OTHER) {
-            pjsip_generic_string_hdr* genericHeader = (pjsip_generic_string_hdr*) hdr;
-            std::string_view headerValue(genericHeader->hvalue.ptr, genericHeader->hvalue.slen);
-            std::string_view headerName(genericHeader->name.ptr, genericHeader->name.slen);
-            SIP_CORE_DBG() << "Found custom header in incoming call: " << headerName << " -> "
-                           << headerValue;
-            extraHeaders.emplace(headerName, headerValue);
-        }
-    }
-
-    call->setExtraSipHeaders(extraHeaders);
 
     call->setPeerUaVersion(sip_utils::getPeerUserAgent(rdata));
     // The username can be used to join specific calls in conversations
@@ -583,6 +568,31 @@ transaction_request_cb(pjsip_rx_data* rdata)
     }
 
     call->setState(Call::ConnectionState::RINGING);
+
+
+    std::map<std::string, std::string> extraHeaders;
+
+    if (dialog->call_id) {
+        auto callId = sip_core::sip_utils::as_string(dialog->call_id->id);
+
+        std::string_view callIdHeaderName(dialog->call_id->name.ptr, dialog->call_id->name.slen);
+
+        extraHeaders.emplace(callIdHeaderName, callId);
+    }
+
+    for (hdr = rdata->msg_info.msg->hdr.next; hdr != &rdata->msg_info.msg->hdr; hdr = hdr->next) {
+        auto type = hdr->type;
+        if (type == PJSIP_H_OTHER) {
+            pjsip_generic_string_hdr* genericHeader = (pjsip_generic_string_hdr*) hdr;
+            std::string_view headerValue(genericHeader->hvalue.ptr, genericHeader->hvalue.slen);
+            std::string_view headerName(genericHeader->name.ptr, genericHeader->name.slen);
+            SIP_CORE_DBG() << "Found custom header in incoming call: " << headerName << " -> "
+                           << headerValue;
+            extraHeaders.emplace(headerName, headerValue);
+        }
+    }
+
+    call->setExtraSipHeaders(extraHeaders);
 
     Manager::instance().incomingCall(account->getAccountID(), *call);
 
