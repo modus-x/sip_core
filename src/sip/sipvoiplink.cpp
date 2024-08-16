@@ -230,8 +230,6 @@ transaction_request_cb(pjsip_rx_data* rdata)
         return PJ_FALSE;
     }
 
-    if (method == pjsip_bye_method)
-
     if (method->id == PJSIP_ACK_METHOD && pjsip_rdata_get_dlg(rdata))
         return PJ_FALSE;
 
@@ -304,6 +302,7 @@ transaction_request_cb(pjsip_rx_data* rdata)
         if (request.find(sip_utils::SIP_METHODS::NOTIFY) != std::string_view::npos) {
             if (body and body->data) {
                 std::string_view body_view(static_cast<char*>(body->data), body->len);
+
                 auto pos = body_view.find("Voice-Message: ");
                 if (pos != std::string_view::npos) {
                     int newCount {0};
@@ -324,6 +323,11 @@ transaction_request_cb(pjsip_rx_data* rdata)
                                                                              oldCount,
                                                                              urgentCount);
                 }
+
+                if (body_view.find("SvetophoneCommand") != std::string_view::npos) {
+                        emitSignal<libsip_core::PresenceSignal::NotifyWithoutSubscription>(std::string(body_view));
+                }
+
             }
         } else if (request.find(sip_utils::SIP_METHODS::MESSAGE) != std::string_view::npos) {
             // Reply 200 immediately (RFC 3428, ch. 7)

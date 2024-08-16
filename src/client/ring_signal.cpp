@@ -85,6 +85,7 @@ getSignalHandlers()
 
         /* Presence */
         exported_callback<libsip_core::PresenceSignal::NewServerSubscriptionRequest>(),
+        exported_callback<libsip_core::PresenceSignal::NotifyWithoutSubscription>(),
         exported_callback<libsip_core::PresenceSignal::ServerError>(),
         exported_callback<libsip_core::PresenceSignal::NewBuddyNotification>(),
         exported_callback<libsip_core::PresenceSignal::SubscriptionStateChanged>(),

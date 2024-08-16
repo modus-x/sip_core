@@ -54,6 +54,12 @@ LIBSIP_CORE_PUBLIC void setSubscriptions(const std::string& accountID,
 // Presence signal type definitions
 struct LIBSIP_CORE_PUBLIC PresenceSignal
 {
+    struct LIBSIP_CORE_PUBLIC NotifyWithoutSubscription
+    {
+        constexpr static const char* name = "NotifyWithoutSubscription";
+        using cb_type = void(const std::string& /*remote*/);
+    };
+
     struct LIBSIP_CORE_PUBLIC NewServerSubscriptionRequest
     {
         constexpr static const char* name = "NewServerSubscriptionRequest";
