@@ -249,11 +249,6 @@ struct LIBSIP_CORE_PUBLIC CallSignal
                              const std::string&,
                              const std::map<std::string, std::string>&);
     };
-    struct LIBSIP_CORE_PUBLIC ExtraHeadersUpdated
-    {
-        constexpr static const char* name = "ExtraHeadersUpdated";
-        using cb_type = void(const std::string&, const std::map<std::string, std::string>&);
-    };
     struct LIBSIP_CORE_PUBLIC IncomingCall
     {
         constexpr static const char* name = "IncomingCall";
@@ -265,7 +260,8 @@ struct LIBSIP_CORE_PUBLIC CallSignal
         using cb_type = void(const std::string&,
                              const std::string&,
                              const std::string&,
-                             const std::vector<std::map<std::string, std::string>>&);
+                             const std::vector<std::map<std::string, std::string>>&,
+                             const std::map<std::string, std::string>&);
     };
     struct LIBSIP_CORE_PUBLIC MediaChangeRequested
     {

@@ -40,7 +40,6 @@ getSignalHandlers()
         exported_callback<libsip_core::CallSignal::IncomingMessage>(),
         exported_callback<libsip_core::CallSignal::IncomingCall>(),
         exported_callback<libsip_core::CallSignal::IncomingCallWithMedia>(),
-        exported_callback<libsip_core::CallSignal::ExtraHeadersUpdated>(),
         exported_callback<libsip_core::CallSignal::MediaChangeRequested>(),
         exported_callback<libsip_core::CallSignal::RecordPlaybackFilepath>(),
         exported_callback<libsip_core::CallSignal::ConferenceCreated>(),

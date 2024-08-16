@@ -686,7 +686,6 @@ void
 SIPCall::setExtraSipHeaders(std::map<std::string, std::string> extraHeaders)
 {
     extraHeaders_.merge(extraHeaders);
-    emitSignal<libsip_core::CallSignal::ExtraHeadersUpdated>(getCallId(), extraHeaders_);
 }
 
 void

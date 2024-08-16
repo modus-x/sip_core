@@ -598,9 +598,7 @@ transaction_request_cb(pjsip_rx_data* rdata)
         }
     }
 
-    call->setExtraSipHeaders(extraHeaders);
-
-    Manager::instance().incomingCall(account->getAccountID(), *call);
+    Manager::instance().incomingCall(account->getAccountID(), *call, extraHeaders);
 
     if (replaced_dlg) {
         // Get the INVITE session associated with the replaced dialog.

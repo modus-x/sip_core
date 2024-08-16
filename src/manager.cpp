@@ -229,7 +229,7 @@ struct Manager::ManagerPimpl
 
     void initAudioDriver();
 
-    void processIncomingCall(const std::string& accountId, Call& incomCall);
+    void processIncomingCall(const std::string& accountId, Call& incomCall, const std::map<std::string, std::string>& headers = {});
     static void stripSipPrefix(Call& incomCall);
 
     Manager& base_; // pimpl back-pointer
@@ -1721,7 +1721,7 @@ Manager::checkIfDND(const std::string& accountId) const
 }
 
 void
-Manager::incomingCall(const std::string& accountId, Call& call)
+Manager::incomingCall(const std::string& accountId, Call& call, const std::map<std::string, std::string>& headers)
 {
     if (not accountId.empty()) {
         pimpl_->stripSipPrefix(call);
@@ -1738,7 +1738,7 @@ Manager::incomingCall(const std::string& accountId, Call& call)
     }
 
     // Process the call.
-    pimpl_->processIncomingCall(accountId, call);
+    pimpl_->processIncomingCall(accountId, call, headers);
 }
 
 void
@@ -2492,7 +2492,7 @@ Manager::ManagerPimpl::stripSipPrefix(Call& incomCall)
 
 // Internal helper method
 void
-Manager::ManagerPimpl::processIncomingCall(const std::string& accountId, Call& incomCall)
+Manager::ManagerPimpl::processIncomingCall(const std::string& accountId, Call& incomCall, const std::map<std::string, std::string>& headers)
 {
     base_.stopTone();
 
@@ -2520,7 +2520,7 @@ Manager::ManagerPimpl::processIncomingCall(const std::string& accountId, Call& i
     emitSignal<libsip_core::CallSignal::IncomingCallWithMedia>(accountId,
                                                                incomCallId,
                                                                incomCall.getPeerNumber(),
-                                                               mediaList);
+                                                               mediaList, headers);
 
     if (not base_.hasCurrentCall()) {
         incomCall.setState(Call::ConnectionState::RINGING);

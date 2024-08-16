@@ -166,7 +166,7 @@ public:
      * @param accountId an account id
      * @param call A call pointer
      */
-    void incomingCall(const std::string& accountId, Call& call);
+    void incomingCall(const std::string& accountId, Call& call, const std::map<std::string, std::string>& headers = {});
 
     /**
      * Functions which occur with a user's action
