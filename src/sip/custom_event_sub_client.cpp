@@ -73,7 +73,9 @@ CustomEventSubClient::client_evsub_on_state(pjsip_evsub* sub, pjsip_event* event
         return;
     }
 
-    SIP_CORE_DBG("Subscription for event_client '%.*s' is '%s'",
+    SIP_CORE_DBG("Subscription for [%.*s] '%.*s' is '%s'",
+                 (int) event_client->getEvent().size(),
+                 event_client->getEvent().data(),
                  (int) event_client->getURI().size(),
                  event_client->getURI().data(),
                  pjsip_evsub_get_state_name(sub) ? pjsip_evsub_get_state_name(sub) : "null");
@@ -426,7 +428,9 @@ CustomEventSubClient::rescheduleTimer(bool reschedule, unsigned msec)
 void
 CustomEventSubClient::enable(bool flag)
 {
-    SIP_CORE_DBG("event_client %.*s is %s monitored.",
+    SIP_CORE_DBG("event_client [%.*s] %.*s is %s monitored.",
+                 (int) getEvent().size(),
+                 getEvent().data(),
                  (int) getURI().size(),
                  getURI().data(),
                  flag ? "" : "NOT");
@@ -566,7 +570,7 @@ CustomEventSubClient::subscribe()
     event_callback.on_rx_notify = &client_evsub_on_rx_notify;
 
     SIPAccount* acc = manager_->getAccount();
-    SIP_CORE_DBG("CustomEventSubClient %.*s: subscribing ", (int) uri_.slen, uri_.ptr);
+    SIP_CORE_DBG("CustomEventSubClient [%.*s] %.*s => subscribing ", (int) event_.slen, event_.ptr, (int) uri_.slen, uri_.ptr);
 
     /* Create UAC dialog */
     pj_str_t from = pj_strdup3(pool_, acc->getFromUri().c_str());

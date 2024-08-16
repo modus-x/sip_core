@@ -129,7 +129,7 @@ SIPEvents::registerEventPkg(const std::string& event)
         return PJ_SUCCESS;
     }
     pj_status_t status;
-    pj_str_t accept[3];
+    pj_str_t accept[4];
 
     auto endpoint = Manager::instance().sipVoIPLink().getEndpoint();
 
@@ -148,8 +148,9 @@ SIPEvents::registerEventPkg(const std::string& event)
         return status;
 
     accept[0] = CONST_PJ_STR("application/pidf+xml");
-    accept[1] = CONST_PJ_STR("application/xpidf+xml");
-    accept[2] = CONST_PJ_STR("text/plain");
+    accept[1] = CONST_PJ_STR("application/xml");
+    accept[2] = CONST_PJ_STR("application/xpidf+xml");
+    accept[3] = CONST_PJ_STR("text/plain");
 
     status = pjsip_evsub_register_pkg(new_module,
                                       &pj_event,

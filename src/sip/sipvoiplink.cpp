@@ -230,6 +230,8 @@ transaction_request_cb(pjsip_rx_data* rdata)
         return PJ_FALSE;
     }
 
+    if (method == pjsip_bye_method)
+
     if (method->id == PJSIP_ACK_METHOD && pjsip_rdata_get_dlg(rdata))
         return PJ_FALSE;
 
