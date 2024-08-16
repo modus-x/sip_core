@@ -547,8 +547,12 @@ openStreamDevice(PaStream** stream,
                              callback,
                              user_data);
 
-    if (err != paNoError)
-        SIP_CORE_ERR("PortAudioLayer error : %s", Pa_GetErrorText(err));
+    if (err != paNoError) {
+        auto error = Pa_GetErrorText(err);
+        SIP_CORE_ERR("PortAudioLayer error : %s. Reporting it!", error);
+        emitSignal<libsip_core::ConfigurationSignal::DeviceOpenError>(error, is_out);
+    }
+        
 }
 
 static void

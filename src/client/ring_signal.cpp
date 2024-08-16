@@ -60,6 +60,7 @@ getSignalHandlers()
         exported_callback<libsip_core::CallSignal::MediaNegotiationStatus>(),
 
         /* Configuration */
+        exported_callback<libsip_core::ConfigurationSignal::DeviceOpenError>(),
         exported_callback<libsip_core::ConfigurationSignal::VolumeChanged>(),
         exported_callback<libsip_core::ConfigurationSignal::AccountsChanged>(),
         exported_callback<libsip_core::ConfigurationSignal::AccountDetailsChanged>(),

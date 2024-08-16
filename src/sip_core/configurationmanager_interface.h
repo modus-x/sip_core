@@ -288,6 +288,11 @@ struct LIBSIP_CORE_PUBLIC AudioSignal
 // Configuration signal type definitions
 struct LIBSIP_CORE_PUBLIC ConfigurationSignal
 {
+    struct LIBSIP_CORE_PUBLIC DeviceOpenError
+    {
+        constexpr static const char* name = "DeviceOpenError";
+        using cb_type = void(const std::string& /*account_id*/, bool isOut);
+    };
     struct LIBSIP_CORE_PUBLIC VolumeChanged
     {
         constexpr static const char* name = "VolumeChanged";
