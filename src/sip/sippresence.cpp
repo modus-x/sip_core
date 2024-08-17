@@ -425,6 +425,9 @@ SIPPresence::send_publish(SIPPresence* pres)
     pj_str_t entity;
 
     status = pjsip_publishc_publish(pres->publish_sess_, PJ_TRUE, &tdata);
+    const pjsip_tpselector tp_sel = acc->getTransportSelector();
+    pjsip_tx_data_set_transport(tdata, &tp_sel);
+
     pj_str_t from = pj_strdup3(pres->pool_, acc->getFromUri().c_str());
 
     if (status != PJ_SUCCESS) {
