@@ -708,6 +708,8 @@ PresSubClient::subscribe()
 
     //    pjsua_process_msg_data(tdata, NULL);
 
+    sip_utils::addUserAgentHeader(acc->getUserAgentName(), tdata);
+
     status = pjsip_pres_send_request(sub_, tdata);
 
     if (status != PJ_SUCCESS) {
