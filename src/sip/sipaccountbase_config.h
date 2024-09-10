@@ -49,7 +49,7 @@ struct SipAccountBaseConfig: public AccountConfig {
     /*
      * Port range for audio RTP ports
      */
-    std::pair<uint16_t, uint16_t> audioPortRange {16384, 32766};
+    std::pair<uint16_t, uint16_t> audioPortRange {60000, 61000};
 
     /**
      * Port range for video RTP ports
