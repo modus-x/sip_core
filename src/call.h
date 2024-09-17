@@ -450,14 +450,6 @@ public:
 
     int conferenceProtocolVersion() const { return peerConfProtocol_; }
 
-    void setControlledByRemote();
-
-    bool isControlledByRemote() const
-    {
-        std::lock_guard<std::recursive_mutex> lk {callMutex_};
-        return isControlledByRemote_;
-    }
-
 protected:
     using clock = std::chrono::steady_clock;
     using time_point = clock::time_point;
@@ -545,8 +537,6 @@ protected:
     /// Supported conference protocol version
     int peerConfProtocol_ {0};
     std::string toUsername_ {};
-
-    bool isControlledByRemote_ {false};
 };
 
 // Helpers

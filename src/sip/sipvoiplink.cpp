@@ -925,11 +925,13 @@ invite_session_state_changed_cb(pjsip_inv_session* inv, pjsip_event* ev)
 
     switch (inv->state) {
     case PJSIP_INV_STATE_EARLY:
-        if (status_code == PJSIP_SC_RINGING || status_code == PJSIP_SC_PROGRESS) {
-            if (status_code == PJSIP_SC_PROGRESS) {
-                call->setControlledByRemote();
-            }
+        if (status_code == PJSIP_SC_RINGING) {
             call->onPeerRinging();
+        }
+
+        // svetets call manager gives us this when we should start receiving the media
+        if (status_code == PJSIP_SC_PROGRESS) {
+            call->onAnswered();
         }
         break;
 

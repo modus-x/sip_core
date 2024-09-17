@@ -701,12 +701,4 @@ Call::resetConfInfo()
 {
     sendConfInfo("{}");
 }
-
-void
-Call::setControlledByRemote()
-{
-    isControlledByRemote_ = true;
-    Manager::instance().addAudio(*this);
-}
-
 } // namespace sip_core

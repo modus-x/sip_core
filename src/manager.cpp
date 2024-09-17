@@ -1851,7 +1851,7 @@ Manager::peerRingingCall(Call& call)
 {
     SIP_CORE_DBG("[call:%s] Peer ringing!!!", call.getCallId().c_str());
 
-    if (!hasCurrentCall() && !call.isControlledByRemote())
+    if (!hasCurrentCall())
         ringback();
 }
 
