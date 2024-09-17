@@ -430,6 +430,8 @@ AudioPreference::serialize(YAML::Emitter& out) const
     out << YAML::Key << AUDIO_PROCESSOR_KEY << YAML::Value << audioProcessor_;
     out << YAML::Key << NOISE_REDUCE_KEY << YAML::Value << denoise_;
     out << YAML::Key << ECHO_CANCEL_KEY << YAML::Value << echoCanceller_;
+    out << YAML::Key << VAD_KEY << YAML::Value << vadEnabled_;
+    out << YAML::Key << AGC_KEY << YAML::Value << agcEnabled_;
     out << YAML::EndMap;
 }
 
@@ -466,7 +468,6 @@ AudioPreference::unserialize(const YAML::Node& in)
     parseValue(node, AUDIO_API_KEY, audioApi_);
 
     parseValue(node, CAPTURE_MUTED_KEY, captureMuted_);
-    parseValue(node, NOISE_REDUCE_KEY, denoise_);
     parseValue(node, PLAYBACK_MUTED_KEY, playbackMuted_);
 
     // pulse submap
@@ -486,7 +487,9 @@ AudioPreference::unserialize(const YAML::Node& in)
     parseValue(node, VOLUMEMIC_KEY, volumemic_);
     parseValue(node, VOLUMESPKR_KEY, volumespkr_);
     parseValue(node, AUDIO_PROCESSOR_KEY, audioProcessor_);
-
+    parseValue(node, NOISE_REDUCE_KEY, denoise_);
+    parseValue(node, VAD_KEY, vadEnabled_);
+    parseValue(node, AGC_KEY, agcEnabled_);
     parseValue(node, ECHO_CANCEL_KEY, echoCanceller_);
 }
 
