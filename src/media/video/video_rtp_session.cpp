@@ -173,7 +173,6 @@ VideoRtpSession::updateMedia(const MediaDescription& send, const MediaDescriptio
 {
     BaseType::updateMedia(send, receive);
     setupVideoBitrateInfo();
-    socketPair_.reset(new SocketPair(getRemoteRtpUri().c_str(), receive_.addr.getPort()));
 }
 
 void
@@ -473,8 +472,9 @@ VideoRtpSession::start()
     }
 
     try {
-        
 
+        socketPair_.reset(new SocketPair(getRemoteRtpUri().c_str(), receive_.addr.getPort()));
+        
         last_REMB_inc_ = clock::now();
         last_REMB_dec_ = clock::now();
 
