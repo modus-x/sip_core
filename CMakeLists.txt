@@ -5,6 +5,8 @@ project(
         VERSION 0.8.9
         LANGUAGES C CXX)
 
+set(BUILD_NUMBER 1)
+
 add_compile_definitions(PACKAGE="ru.svetets.sip-core"
         PACKAGE_NAME="sv-sip-core")
 
@@ -726,6 +728,32 @@ else ()
                     PRIVATE PkgConfig::webrtcap_${TARGET})
         endif ()
     endforeach ()
+
+    if (CMAKE_GENERATOR STREQUAL "Xcode")
+        if (IOS)
+            set_target_properties(
+                    ${PROJECT_NAME}
+                    PROPERTIES FRAMEWORK TRUE
+                    XCODE_ATTRIBUTE_DEFINES_MODULE NO
+                    XCODE_ATTRIBUTE_DWARF_DSYM_FOLDER_PATH ${CMAKE_INSTALL_PREFIX}
+                    MACOSX_FRAMEWORK_IDENTIFIER ru.svetets.sip-core
+                    BUILD_WITH_INSTALL_RPATH YES
+                    INSTALL_NAME_DIR "@rpath"
+
+                    # release version
+                    MACOSX_FRAMEWORK_SHORT_VERSION_STRING ${PROJECT_VERSION}
+
+                    # build version
+                    MACOSX_FRAMEWORK_BUNDLE_VERSION ${BUILD_NUMBER}
+
+                    # build version
+                    VERSION ${PROJECT_VERSION}
+                    # compatibility version
+                    SO ${PROJECT_VERSION_MAJOR})
+
+        endif ()
+
+    endif ()
 
     if (APPLE)
         if (IOS)
