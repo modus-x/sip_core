@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 
 project(
         sip_core
-        VERSION 0.8.9
+        VERSION 0.9.17
         LANGUAGES C CXX)
 
 set(BUILD_NUMBER 1)
