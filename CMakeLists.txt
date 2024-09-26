@@ -8,6 +8,19 @@ project(
 add_compile_definitions(PACKAGE="ru.svetets.sip-core"
         PACKAGE_NAME="sv-sip-core")
 
+# Generate a version header file
+configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/version.h.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/version.h"
+)
+
+include_directories(BEFORE ${CMAKE_CURRENT_BINARY_DIR})
+
+if (CMAKE_GENERATOR STREQUAL "Xcode")
+    set(CMAKE_XCODE_ATTRIBUTE_DEBUG_INFORMATION_FORMAT "dwarf-with-dsym")
+    add_compile_options(-g)
+endif ()
+
 # ##############################################################################
 # Build options
 # ##############################################################################

@@ -1,0 +1,10 @@
+//
+// Created by Modus Operandi on 26.09.2024.
+//
+
+#ifndef SIP_CORE_VERSION_H
+#define SIP_CORE_VERSION_H
+
+#define SIP_CORE_VERSION "@sip_core_VERSION@"
+
+#endif // SIP_CORE_BINDINGS_VERSION_H_IN_H
