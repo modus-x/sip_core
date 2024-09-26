@@ -1549,6 +1549,12 @@ SIPCall::sendKeyframe(int streamIdx)
 }
 
 void
+SIPCall::setInviteCallId(std::string_view inviteCallId)
+{
+    inviteCallId_ = inviteCallId;
+}
+
+void
 SIPCall::setPeerUaVersion(std::string_view ua)
 {
     if (peerUserAgent_ == ua or ua.empty()) {
@@ -2489,6 +2495,7 @@ SIPCall::getDetails() const
     auto details = Call::getDetails();
 
     details.emplace(libsip_core::Call::Details::PEER_HOLDING, peerHolding_ ? TRUE_STR : FALSE_STR);
+    details.emplace(libsip_core::Call::Details::INVITE_CALL_ID, inviteCallId_);
 
     for (auto const& stream : rtpStreams_) {
         if (stream.mediaAttribute_->type_ == MediaType::MEDIA_VIDEO) {

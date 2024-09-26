@@ -883,6 +883,9 @@ invite_session_state_changed_cb(pjsip_inv_session* inv, pjsip_event* ev)
         return;
     }
 
+    auto callId = sip_core::sip_utils::as_string(inv->dlg->call_id->id);
+    call->setInviteCallId(callId);
+
     decltype(pjsip_transaction::status_code) status_code = 0;
 
     if (ev->type == PJSIP_EVENT_TSX_STATE) {
@@ -917,6 +920,7 @@ invite_session_state_changed_cb(pjsip_inv_session* inv, pjsip_event* ev)
     }
     if (rdata != nullptr) {
         call->setPeerUaVersion(sip_utils::getPeerUserAgent(rdata));
+
         auto methods = sip_utils::getPeerAllowMethods(rdata);
         if (not methods.empty()) {
             call->setPeerAllowMethods(std::move(methods));

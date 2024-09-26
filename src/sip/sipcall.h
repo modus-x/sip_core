@@ -170,6 +170,11 @@ public:
     void setPeerUaVersion(std::string_view ua);
 
     /**
+     * Set peer's User-Agent found in the message header
+     */
+    void setInviteCallId(std::string_view inviteCallId);
+
+    /**
      * Set peer's allowed methods
      */
     void setPeerAllowMethods(std::vector<std::string> methods);
@@ -355,7 +360,9 @@ private:
 
     // Peer's User-Agent.
     std::string peerUserAgent_ {};
-    // Flag to indicate if the peer's Daemon version supports multi-stream.
+
+    // callId from invite
+    std::string inviteCallId_ {};
 
     // Peer's allowed methods.
     std::vector<std::string> peerAllowedMethods_;
