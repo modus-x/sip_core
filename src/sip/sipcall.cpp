@@ -250,7 +250,6 @@ SIPCall::configureRtpSession(const std::shared_ptr<RtpSession>& rtpSession,
             if (auto thisPtr = w.lock())
                 thisPtr->sendObjectJson("videoDeviceParams", newParams.toJson());
         });
-        videoRtp->startReceiver();
     }
 #endif
 }

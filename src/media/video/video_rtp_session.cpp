@@ -494,6 +494,8 @@ VideoRtpSession::start()
 
     startSender();
 
+    startReceiver();
+
     if (conference_) {
         if (send_.enabled and not send_.onHold) {
             setupConferenceVideoPipeline(*conference_, Direction::SEND);
