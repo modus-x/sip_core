@@ -56,11 +56,12 @@ AudioFile::onBufferFinish()
     updatePlaybackScale_++;
 }
 
-AudioFile::AudioFile(const std::string& fileName, unsigned int sampleRate)
+AudioFile::AudioFile(const std::string& fileName, unsigned int sampleRate, bool onlyOnce)
     : AudioLoop(sampleRate)
     , filepath_(fileName)
     , updatePlaybackScale_(0)
 {
+    onlyOnce_ = onlyOnce;
     const auto& format = getFormat();
     auto buf = std::make_unique<AudioBuffer>(0, format);
     Resampler r {};

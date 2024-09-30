@@ -75,7 +75,7 @@ ToneControl::getTelephoneFile(void)
 }
 
 bool
-ToneControl::setAudioFile(const std::string& file)
+ToneControl::setAudioFile(const std::string& file, bool onlyOnce)
 {
     std::lock_guard<std::mutex> lk(mutex_);
 
@@ -85,7 +85,7 @@ ToneControl::setAudioFile(const std::string& file)
     }
 
     try {
-        audioFile_.reset(new AudioFile(file, sampleRate_));
+        audioFile_.reset(new AudioFile(file, sampleRate_, onlyOnce));
     } catch (const AudioFileException& e) {
         SIP_CORE_WARN("Audio file error: %s", e.what());
     }

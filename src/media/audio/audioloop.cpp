@@ -57,6 +57,10 @@ AudioLoop::getNext(AudioBuffer& output, double gain)
         return;
     }
 
+    if (onlyOnce_ && firstDone_) {
+        return;
+    }
+
     const size_t buf_samples = buffer_->frames();
     size_t pos = pos_;
     size_t total_samples = output.frames();
@@ -75,6 +79,10 @@ AudioLoop::getNext(AudioBuffer& output, double gain)
         output.copy(*buffer_, samples, pos, output_pos);
         output_pos += samples;
         pos = (pos + samples) % buf_samples;
+
+        if (pos == 0) {
+            firstDone_ = true;
+        }
         total_samples -= samples;
     }
 

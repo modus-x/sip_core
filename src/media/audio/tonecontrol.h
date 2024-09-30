@@ -47,7 +47,7 @@ public:
     void setSampleRate(unsigned rate);
     std::shared_ptr<AudioLoop> getTelephoneTone();
     std::shared_ptr<AudioLoop> getTelephoneFile(void);
-    bool setAudioFile(const std::string& file);
+    bool setAudioFile(const std::string& file, bool onlyOnce = false);
     void stopAudioFile();
     void stop();
     void play(Tone::ToneId toneId);

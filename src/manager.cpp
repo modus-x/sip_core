@@ -2203,7 +2203,9 @@ Manager::toggleRecordingCall(const std::string& accountId, const std::string& id
 bool
 Manager::startRecordedFilePlayback(const std::string& filepath)
 {
-    SIP_CORE_DBG("Start recorded file playback %s", filepath.c_str());
+    auto soundDir = fmt::format("{}/{}", Manager::instance().getDataPath(), "sounds");
+    auto sound = fileutils::getFullPath(soundDir, filepath);
+    SIP_CORE_DBG("Start recorded file playback %s", sound.c_str());
 
     {
         std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
@@ -2214,11 +2216,11 @@ Manager::startRecordedFilePlayback(const std::string& filepath)
         }
 
         auto oldGuard = std::move(pimpl_->toneDeviceGuard_);
-        pimpl_->toneDeviceGuard_ = startAudioStream(AudioDeviceType::RINGTONE);
+        pimpl_->toneDeviceGuard_ = startAudioStream(AudioDeviceType::PLAYBACK);
         pimpl_->toneCtrl_.setSampleRate(pimpl_->audiodriver_->getSampleRate());
     }
 
-    return pimpl_->toneCtrl_.setAudioFile(filepath);
+    return pimpl_->toneCtrl_.setAudioFile(sound, true);
 }
 
 void

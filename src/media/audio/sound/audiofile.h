@@ -43,7 +43,7 @@ public:
 class AudioFile : public AudioLoop
 {
 public:
-    AudioFile(const std::string& filepath, unsigned int sampleRate);
+    AudioFile(const std::string& filepath, unsigned int sampleRate, bool onlyOnce = false);
 
     std::string getFilePath() const { return filepath_; }
 

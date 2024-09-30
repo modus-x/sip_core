@@ -66,6 +66,8 @@ public:
      */
     void reset() { pos_ = 0; }
 
+    inline void setOnlyOnce(bool onlyOnce) { onlyOnce_ = onlyOnce; };
+
     /**
      * Accessor to the size of the buffer
      * @return unsigned int The size
@@ -80,9 +82,14 @@ protected:
     /** current position, set to 0, when initialize */
     size_t pos_ {0};
 
+    /** stop after first play */
+    bool onlyOnce_ {false};
+
 private:
     NON_COPYABLE(AudioLoop);
     virtual void onBufferFinish();
+
+    bool firstDone_ {false};
 };
 
 } // namespace sip_core
