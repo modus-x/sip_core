@@ -106,4 +106,16 @@ AudioLoop::getNext(size_t samples)
     return buff.toAVFrame();
 }
 
+std::unique_ptr<AudioBuffer>
+AudioLoop::getNextBuffer(size_t samples)
+{
+    if (samples == 0) {
+        samples = buffer_->getSampleRate() / 50;
+    }
+    auto res = std::make_unique<AudioBuffer>(samples, buffer_->getFormat());
+    getNext(*res.get(), 1);
+
+    return res;
+}
+
 } // namespace sip_core
