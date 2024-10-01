@@ -57,6 +57,9 @@ public:
      * @param gain The gain [-1.0, 1.0]
      */
     void getNext(AudioBuffer& output, double gain);
+
+    std::unique_ptr<AudioBuffer> getNextBuffer(size_t samples = 0);
+
     std::unique_ptr<AudioFrame> getNext(size_t samples = 0);
 
     void seek(double relative_position);
@@ -74,6 +77,8 @@ public:
      */
     size_t getSize() const { return buffer_->frames(); }
     AudioFormat getFormat() const { return buffer_->getFormat(); }
+
+    inline AudioBuffer* getBuffer() { return buffer_; }
 
 protected:
     /** The data buffer */

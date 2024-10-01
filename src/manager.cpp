@@ -260,6 +260,9 @@ struct Manager::ManagerPimpl
     /** Buffer to generate DTMF */
     AudioBuffer dtmfBuf_;
 
+    /** Buffer to play local files */
+    std::unique_ptr<AudioFile> currentFile_;
+
     // To handle volume control
     // short speakerVolume_;
     // short micVolume_;
@@ -2207,20 +2210,29 @@ Manager::startRecordedFilePlayback(const std::string& filepath)
     auto sound = fileutils::getFullPath(soundDir, filepath);
     SIP_CORE_DBG("Start recorded file playback %s", sound.c_str());
 
-    {
-        std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
+    std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
 
-        if (not pimpl_->audiodriver_) {
-            SIP_CORE_ERR("No audio layer in start recorded file playback");
-            return false;
-        }
-
-        auto oldGuard = std::move(pimpl_->toneDeviceGuard_);
-        pimpl_->toneDeviceGuard_ = startAudioStream(AudioDeviceType::PLAYBACK);
-        pimpl_->toneCtrl_.setSampleRate(pimpl_->audiodriver_->getSampleRate());
+    if (not pimpl_->audiodriver_) {
+        SIP_CORE_ERR("No audio layer in start recorded file playback");
+        return false;
     }
 
-    return pimpl_->toneCtrl_.setAudioFile(sound, true);
+    std::shared_ptr<AudioDeviceGuard> audioGuard = startAudioStream(AudioDeviceType::PLAYBACK);
+
+    if (not pimpl_->audiodriver_->waitForStart(std::chrono::seconds(1))) {
+        SIP_CORE_ERR("Failed to start audio layer...");
+        return false;
+    }
+
+    pimpl_->currentFile_.reset(new AudioFile(sound, pimpl_->audiodriver_->getSampleRate(), true));
+
+    pimpl_->audiodriver_->putUrgent(*pimpl_->currentFile_->getBuffer());
+
+    // todo: wait autio stop, then stop audio layer
+    scheduler().scheduleIn([audioGuard] { SIP_CORE_WARN("End of dtmf"); },
+                        std::chrono::seconds(3));
+
+    return true;
 }
 
 void
