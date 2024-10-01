@@ -164,6 +164,13 @@ void
 RingBuffer::put(std::shared_ptr<AudioFrame>&& data)
 {
     std::lock_guard<std::mutex> l(writeLock_);
+    resizer_.enqueue(resampler_.resample(std::move(data), format_));
+}
+
+void
+RingBuffer::putNoResize(std::shared_ptr<AudioFrame>&& data)
+{
+    std::lock_guard<std::mutex> l(writeLock_);
     putToBuffer(std::move(data));
 }
 

@@ -2226,7 +2226,7 @@ Manager::startRecordedFilePlayback(const std::string& filepath)
 
     pimpl_->currentFile_.reset(new AudioFile(sound, pimpl_->audiodriver_->getSampleRate(), true));
 
-    pimpl_->audiodriver_->putUrgent(*pimpl_->currentFile_->getBuffer());
+    pimpl_->audiodriver_->putUrgentNoResize(*pimpl_->currentFile_->getBuffer());
 
     // todo: wait autio stop, then stop audio layer
     scheduler().scheduleIn([audioGuard] { SIP_CORE_WARN("End of dtmf"); },

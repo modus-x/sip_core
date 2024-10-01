@@ -98,6 +98,8 @@ public:
      */
     void put(std::shared_ptr<AudioFrame>&& data);
 
+    void putNoResize(std::shared_ptr<AudioFrame>&& data);
+
     /**
      * To get how much samples are available in the buffer to read in
      * @return int The available (multichannel) samples number

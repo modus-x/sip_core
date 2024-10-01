@@ -124,6 +124,8 @@ public:
      */
     void putUrgent(AudioBuffer& buffer);
 
+    void putUrgentNoResize(AudioBuffer& buffer);
+
     /**
      * Start/Stop playing the incoming call notification sound (beep)
      * while playing back audio (typically during an ongoing call).

@@ -265,6 +265,12 @@ AudioLayer::putUrgent(AudioBuffer& buffer)
     urgentRingBuffer_.put(buffer.toAVFrame());
 }
 
+void
+AudioLayer::putUrgentNoResize(AudioBuffer& buffer)
+{
+    urgentRingBuffer_.putNoResize(buffer.toAVFrame());
+}
+
 // Notify (with a beep) an incoming call when there is already a call in progress
 void
 AudioLayer::notifyIncomingCall()
