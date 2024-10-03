@@ -83,18 +83,7 @@ emitSignal(Args... args)
         try {
             sip_core_tracepoint(emit_signal_begin_callback, wrap.file_, wrap.linum_);
             auto cb = *wrap;
-#if defined(__ANDROID__)
             cb(args...);
-#else
-            runOnEventThread(
-                [args = std::make_tuple(std::forward<Args>(args)...), callback = cb]() mutable {
-                    std::apply(
-                        [&callback](auto&&... arguments) {
-                            callback(std::forward<decltype(arguments)>(arguments)...);
-                        },
-                        std::move(args));
-                });
-#endif
             sip_core_tracepoint(emit_signal_end_callback);
         } catch (std::exception& e) {
             SIP_CORE_ERR("Exception during emitting signal %s:\n%s", Ts::name, e.what());
