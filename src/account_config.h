@@ -41,7 +41,7 @@ struct AccountConfig: public Serializable {
     virtual void fromMap(const std::map<std::string, std::string>&);
 
     /** Account type */
-    const std::string type;
+    std::string type;
 
     /** Account id */
     const std::string id;

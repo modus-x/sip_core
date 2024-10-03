@@ -55,8 +55,8 @@ void
 AccountConfig::serializeDiff(YAML::Emitter& out, const AccountConfig& DEFAULT_CONFIG) const
 {
     std::string tmp = sip_utils::getTransportTypeName(transport);
+    out << YAML::Key << TYPE_KEY << YAML::Value << type;
     SERIALIZE_CONFIG(ACCOUNT_ENABLE_KEY, enabled);
-    SERIALIZE_CONFIG(TYPE_KEY, type);
     SERIALIZE_CONFIG(ALIAS_KEY, alias);
     SERIALIZE_CONFIG(HOSTNAME_KEY, hostname);
     SERIALIZE_CONFIG(USERNAME_KEY, username);
@@ -86,7 +86,7 @@ AccountConfig::unserialize(const YAML::Node& node)
 {
     parseValueOptional(node, ALIAS_KEY, alias);
 
-    // parseValueOptional(node, TYPE_KEY, type);
+    yaml_utils::parseValue(node, TYPE_KEY, type);
     parseValueOptional(node, ACCOUNT_ENABLE_KEY, enabled);
     parseValueOptional(node, HOSTNAME_KEY, hostname);
     parseValueOptional(node, ACCOUNT_AUTOANSWER_KEY, autoAnswerEnabled);

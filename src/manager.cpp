@@ -489,7 +489,7 @@ Manager::ManagerPimpl::loadAccount(const YAML::Node& node, int& errorCount)
     parseValue(node, "id", accountid);
 
     std::string accountType(ACCOUNT_TYPE_SIP);
-    parseValueOptional(node, "type", accountType);
+    parseValue(node, "type", accountType);
 
     if (!accountid.empty()) {
         if (auto a = base_.accountFactory.createAccount(accountType, accountid)) {
@@ -1604,7 +1604,7 @@ Manager::getPlaybackGain() const
 void
 Manager::saveConfig()
 {
-    SIP_CORE_DBG("Saving Configuration to XDG directory %s", pimpl_->path_.c_str());
+    SIP_CORE_DBG("Saving Configuration to DATA directory %s", pimpl_->path_.c_str());
 
     if (pimpl_->audiodriver_) {
         audioPreference.setVolumemic(pimpl_->audiodriver_->getCaptureGain());
@@ -2717,10 +2717,8 @@ Manager::addAccount(const std::map<std::string, std::string>& details, const std
     }
 
     newAccount->setAccountDetails(details);
-    saveConfig(newAccount);
-    // newAccount->doRegister();
-
     preferences.addAccount(newAccountID);
+
     saveConfig();
 
     emitSignal<libsip_core::ConfigurationSignal::AccountsChanged>();
@@ -2832,7 +2830,6 @@ Manager::sendRegister(const std::string& accountID, bool enable)
         return;
 
     acc->setEnabled(enable);
-    saveConfig(acc);
 
     if (acc->isEnabled()) {
         acc->doRegister();
