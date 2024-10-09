@@ -65,6 +65,16 @@ constexpr unsigned CODECS_NOT_LOADED = 0x1000; /** Codecs not found */
 using sip_core::SIPAccount;
 using sip_core::AudioDeviceType;
 
+int
+getKeepAliveInterval(const std::string& accountId) {
+    return sip_core::Manager::instance().getKeepAliveInterval(accountId);
+
+}
+
+void setKeepAliveInterval(const std::string& accountId, int interval) {
+    sip_core::Manager::instance().setKeepAliveInterval(accountId, interval);
+}
+
 void
 setWebRtcParams(const WebRtcParams& params)
 {

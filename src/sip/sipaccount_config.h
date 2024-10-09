@@ -43,7 +43,7 @@ struct SipAccountConfig : public SipAccountBaseConfig {
     uint16_t publishedPort {sip_utils::DEFAULT_SIP_PORT};
 
 
-    uint32_t keepAliveInterval {0};
+    uint32_t keepAliveInterval {15};
 
     /**
      * interface name on which this account is bound

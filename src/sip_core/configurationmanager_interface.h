@@ -62,6 +62,9 @@ struct LIBSIP_CORE_PUBLIC WebRtcParams
     bool noiseGen;
 };
 
+LIBSIP_CORE_PUBLIC int getKeepAliveInterval(const std::string& accountId);
+LIBSIP_CORE_PUBLIC void setKeepAliveInterval(const std::string& accountId, int interval);
+
 LIBSIP_CORE_PUBLIC void setWebRtcParams(const WebRtcParams& params);
 LIBSIP_CORE_PUBLIC const libsip_core::WebRtcParams& getWebRtcParams();
 

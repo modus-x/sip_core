@@ -118,8 +118,6 @@ keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
     pj_time_val delay;
     char addrtxt[PJ_INET6_ADDRSTRLEN];
     pj_status_t status;
-    unsigned ka_timer;
-    unsigned lower_bound;
 
     PJ_UNUSED_ARG(th);
 
@@ -127,23 +125,33 @@ keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
 
     acc = (SIPAccount*) te->user_data;
 
+
+    auto contactHeader = acc->getContactHeader();
+
     pjsip_transport* transport = acc->getTransport()->get();
 
     /* Check if the account is still active. It might have just been deleted
      * while the keep-alive timer was about to be called (race condition).
      */
-    if (acc->getTransport() == NULL)
+    if (acc->getTransport() == NULL) {
+        SIP_CORE_ERR() << "KA: no transport is available for contact " << contactHeader;
         return;
+    }
+
+    if (acc->kaTarget.length == 0) {
+        SIP_CORE_ERR() << "KA: no target is available for contact " << contactHeader;
+        return;
+    }
 
     /* Select the transport to send the packet */
     pj_bzero(&tp_sel, sizeof(tp_sel));
     tp_sel.type = PJSIP_TPSELECTOR_TRANSPORT;
     tp_sel.u.transport = transport;
 
-    SIP_CORE_DEBUG("Sending {:d} bytes keep-alive packet for acc {:s} to {:s}",
+    SIP_CORE_DEBUG("KA: Sending {:d} bytes keep-alive packet for acc {:s} to {:s}",
                    KA_DATA.slen,
-                   acc->getContactHeader(),
-                   pj_sockaddr_print(&acc->ka_target, addrtxt, sizeof(addrtxt), 3));
+                   contactHeader,
+                   pj_sockaddr_print(&acc->kaTarget.socket, addrtxt, sizeof(addrtxt), 3));
 
     /* Send raw packet */
     status = pjsip_tpmgr_send_raw(pjsip_endpt_get_tpmgr(acc->getVoipLink().getEndpoint()),
@@ -152,28 +160,23 @@ keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
                                   NULL,
                                   KA_DATA.ptr,
                                   KA_DATA.slen,
-                                  &acc->ka_target,
-                                  acc->ka_target_len,
+                                  &acc->kaTarget.socket,
+                                  acc->kaTarget.length,
                                   NULL,
                                   NULL);
 
     if (status != PJ_SUCCESS && status != PJ_EPENDING) {
-        SIP_CORE_ERROR("Error sending keep-alive packet: {:d}", status);
+        SIP_CORE_ERROR("KA: Error sending keep-alive packet: {:d}", status);
     }
 
-    /* Check just in case keep-alive has been disabled. This shouldn't happen
-     * though as when ka_interval is changed this timer should have been
-     * cancelled.
-     *
-     * Also check if Flow Timer (rfc5626) is not set.
-     */
-    if (acc->config().keepAliveInterval == 0 && acc->rfc5626_flowtmr == 0)
+    uint32_t seconds = acc->config().keepAliveInterval;
+
+    if (seconds == 0) {
+        SIP_CORE_INFO() << "KA: 0 seconds is set, skipping keep-alive for contact " << contactHeader;
         return;
+    }
 
-    ka_timer = acc->rfc5626_flowtmr ? acc->rfc5626_flowtmr : acc->config().keepAliveInterval;
-
-    lower_bound = (unsigned) ((float) ka_timer * 0.8f);
-    delay.sec = pj_rand() % (ka_timer - lower_bound) + lower_bound;
+    delay.sec = seconds;
     delay.msec = 0;
 
     /* Reschedule next timer */
@@ -181,7 +184,7 @@ keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
     if (status == PJ_SUCCESS) {
         te->id = PJ_TRUE;
     } else {
-        SIP_CORE_ERROR("Error starting keep-alive timer from callback: {:d}", status);
+        SIP_CORE_ERROR("KA: Error starting keep-alive timer from callback: {:d}", status);
     }
 }
 
@@ -234,10 +237,19 @@ SIPAccount::~SIPAccount() noexcept
 }
 
 void
-SIPAccount::registerKeepAliveTimer(struct pjsip_regc_cbparam* param)
+SIPAccount::registerKeepAliveTimer()
 {
+    /* In all cases, stop keep-alive timer if it's running. */
+    cancelKeepAliveTimer();
+
+    auto contactHeader = getContactHeader();
+
     uint32_t seconds = config().keepAliveInterval;
-    SIP_CORE_DEBUG("Register new keep-alive timer with delay {:d}", seconds);
+
+    if (seconds == 0) {
+        SIP_CORE_INFO() << "KA: 0 seconds is set, skipping keep-alive for contact " << contactHeader;
+        return;
+    }
 
     pjsip_transport* transport = nullptr;
 
@@ -245,103 +257,46 @@ SIPAccount::registerKeepAliveTimer(struct pjsip_regc_cbparam* param)
     if (transport_) {
         transport = transport_->get();
     } else {
+        SIP_CORE_ERR() << "KA: no transport is available for contact " << contactHeader;
         return;
     }
 
-    /* In all cases, stop keep-alive timer if it's running. */
-    cancelKeepAliveTimer();
+    if (kaTarget.length == 0) {
+        SIP_CORE_ERR() << "KA: no target is available for contact " << contactHeader;
+        return;
+    }
+
+    pjsip_transport_add_ref(transport);
 
     pj_time_val delay;
     pj_status_t status;
-    pjsip_generic_string_hdr* hsr = NULL;
-    unsigned delay_initial;
-    unsigned lower_bound;
-
-    hsr = (pjsip_generic_string_hdr*) pjsip_msg_find_hdr_by_name(param->rdata->msg_info.msg,
-                                                                 &FLOW_HEADER,
-                                                                 hsr);
-    if (hsr != 0) {
-        rfc5626_flowtmr = pj_strtoul(&hsr->hvalue);
-    }
-    /* Only do keep-alive if:
-     *  - REGISTER response contain Flow-Timer header, otherwise
-     *  - keepAliveInterval of SipAccountConfig is not zero, and
-     *  - transport is UDP.
-     *
-     * Note that this applies only for UDP. For TCP/TLS, the keep-alive
-     * is done by the transport layer.
-     */
-    if (/*pjsua_var.stun_srv.ipv4.sin_family == 0 ||*/
-        ((seconds == 0) && (rfc5626_flowtmr == 0))
-        || (!hsr
-            && ((param->rdata->tp_info.transport->key.type & ~PJSIP_TRANSPORT_IPV6)
-                != PJSIP_TRANSPORT_UDP))) {
-        /* Keep alive is not necessary */
-        return;
-    }
-
-    /* Save transport and destination address. */
-    pjsip_transport_add_ref(transport);
-
-    /* https://github.com/pjsip/pjproject/issues/1607:
-     * Calculate the destination address from the original request. Some
-     * (broken) servers send the response using different source address
-     * than the one that receives the request, which is forbidden by RFC
-     * 3581.
-     */
-    {
-        pjsip_transaction* tsx;
-        pjsip_tx_data* req;
-
-        tsx = pjsip_rdata_get_tsx(param->rdata);
-        PJ_ASSERT_ON_FAIL(tsx, return);
-
-        req = tsx->last_tx;
-
-        pj_memcpy(&ka_target, &req->tp_info.dst_addr, req->tp_info.dst_addr_len);
-        ka_target_len = req->tp_info.dst_addr_len;
-    }
 
     /* Setup and start the timer */
-    ka_timer.cb = &keep_alive_timer_cb;
-    ka_timer.user_data = (void*) this;
+    kaTarget.timer.cb = &keep_alive_timer_cb;
+    kaTarget.timer.user_data = (void*) this;
 
-    delay_initial = rfc5626_flowtmr != 0 ? rfc5626_flowtmr : seconds;
-
-    lower_bound = (unsigned) ((float) delay_initial * 0.8f);
-    delay.sec = pj_rand() % (delay_initial - lower_bound) + lower_bound;
+    delay.sec = seconds;
     delay.msec = 0;
-    status = pjsip_endpt_schedule_timer(link_.getEndpoint(), &ka_timer, &delay);
-    SIP_CORE_DEBUG("Keep-alive rfc5626_flowtmr is {:d}, delay_initial is {:d}, lower_bound is {:d}",
-                   rfc5626_flowtmr,
-                   delay_initial,
-                   lower_bound);
+    status = pjsip_endpt_schedule_timer(link_.getEndpoint(), &kaTarget.timer, &delay);
     if (status == PJ_SUCCESS) {
-        char addr[PJ_INET6_ADDRSTRLEN + 10];
-        pj_str_t input_str = pj_str(param->rdata->pkt_info.src_name);
-        ka_timer.id = PJ_TRUE;
-
-        pj_addr_str_print(&input_str, param->rdata->pkt_info.src_port, addr, sizeof(addr), 1);
-        SIP_CORE_DEBUG("Keep-alive timer started for acc {:s}, "
-                       "destination:{:s}, interval:{:d}s",
-                       getContactHeader(),
-                       addr,
-                       delay.sec);
+        kaTarget.timer.id = PJ_TRUE;
+        SIP_CORE_INFO() << "KA: Timer is set for " << contactHeader << " with delay " << seconds;
     } else {
-        ka_timer.id = PJ_FALSE;
+        kaTarget.timer.id = PJ_FALSE;
         pjsip_transport_dec_ref(transport);
-        SIP_CORE_ERR("Error starting keep-alive timer: {:d}", status);
+        SIP_CORE_ERR() << "KA: error starting keep-alive timer for contact " << contactHeader << ", status: " << status;
     }
 }
 
 void
 SIPAccount::cancelKeepAliveTimer()
 {
-    if (ka_timer.id != PJ_FALSE) {
-        pjsip_endpt_cancel_timer(link_.getEndpoint(), &ka_timer);
-        rfc5626_flowtmr = 0;
-        ka_target_len = 0;
-        ka_timer.id = PJ_FALSE;
+    auto contactHeader = getContactHeader();
+    if (kaTarget.timer.id != PJ_FALSE) {
+        SIP_CORE_INFO() << "KA: Timer is removed for " << contactHeader;
+
+        pjsip_endpt_cancel_timer(link_.getEndpoint(), &kaTarget.timer);
+        kaTarget.timer = {};
     }
 }
 
@@ -981,8 +936,27 @@ SIPAccount::onRegister(pjsip_regc_cbparam* param)
 
                 setRegistrationState(RegistrationState::REGISTERED, param->code);
 
+                /* https://github.com/pjsip/pjproject/issues/1607:
+                 * Calculate the destination address from the original request. Some
+                 * (broken) servers send the response using different source address
+                 * than the one that receives the request, which is forbidden by RFC
+                 * 3581.
+                 */
+                {
+                    pjsip_transaction* tsx;
+                    pjsip_tx_data* req;
+
+                    tsx = pjsip_rdata_get_tsx(param->rdata);
+                    PJ_ASSERT_ON_FAIL(tsx, return);
+
+                    req = tsx->last_tx;
+
+                    kaTarget.length = req->tp_info.dst_addr_len;
+                    pj_memcpy(&kaTarget.socket, &req->tp_info.dst_addr, req->tp_info.dst_addr_len);
+                }
+
                 // only now set timer
-                registerKeepAliveTimer(param);
+                registerKeepAliveTimer();
             }
         }
     }

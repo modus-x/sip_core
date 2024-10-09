@@ -609,6 +609,27 @@ Manager::setRingtone(const std::string& accountId, const std::string& ringtone)
     return false;
 }
 
+int Manager::getKeepAliveInterval(const std::string& accountId) {
+    if (auto account = getAccount(accountId)) {
+        if (account->config().type == ACCOUNT_TYPE_SIP) {
+            auto sipAccount = std::static_pointer_cast<SIPAccount>(account);
+            return sipAccount->config().keepAliveInterval;
+        }
+    }
+    return 0;
+}
+
+void Manager::setKeepAliveInterval(const std::string& accountId, int interval) {
+        if (auto account = getAccount(accountId)) {
+        if (account->config().type == ACCOUNT_TYPE_SIP) {
+            auto sipAccount = std::static_pointer_cast<SIPAccount>(account);
+            sipAccount->editConfig([&](SipAccountConfig& config) { config.keepAliveInterval = interval; });
+            sipAccount->registerKeepAliveTimer();
+        }
+    }
+
+}
+
 std::string
 Manager::getRingtonePath(const std::string& accountId)
 {

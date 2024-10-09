@@ -309,15 +309,14 @@ public:
     bool switchTransport(TransportType type) override;
 
     /**
-     * Try to register a new keepalive registration timer (only for UDP!)
+     * Try to register a new keepalive registration timer (only for UDP!) with current KA interval from config!
      */
-    void registerKeepAliveTimer(struct pjsip_regc_cbparam* param);
+    void registerKeepAliveTimer();
 
     /**
      * Abort currently registered timer if any
      */
     void cancelKeepAliveTimer();
-
 
     // current transport
     virtual inline std::shared_ptr<SipTransport> getTransport() { return transport_; }
@@ -408,12 +407,15 @@ public:
     void pushNotificationReceived(const std::string& from,
                                   const std::map<std::string, std::string>& data);
 
-    pj_sockaddr ka_target;       /**< Destination address for K-A, this will be filled before first usage */
-    pj_timer_entry ka_timer {};  /**<  Timer for K-A  */
-    unsigned rfc5626_flowtmr {}; /**< SIP outbound flow timer.      */
-    unsigned ka_target_len {};   /**< Length of ka_target.           */
-
     void reportUnregister();
+
+
+    struct
+    {
+        pj_sockaddr socket;
+        unsigned length {};
+        pj_timer_entry timer;
+    } kaTarget;
 
 private:
     void doRegister1_();
@@ -593,6 +595,7 @@ private:
      * configured port is already used by another client
      */
     pj_uint16_t publishedPortUsed_ {sip_utils::DEFAULT_SIP_PORT};
+
 };
 
 } // namespace sip_core

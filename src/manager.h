@@ -127,6 +127,10 @@ public:
 
     void setRingtoneEnabled(const std::string& accountId, bool enabled);
 
+    int getKeepAliveInterval(const std::string& accountId);
+
+    void setKeepAliveInterval(const std::string& accountId, int interval);
+
     /**
      * Accessor to audiodriver.
      * it's multi-thread and use mutex internally
