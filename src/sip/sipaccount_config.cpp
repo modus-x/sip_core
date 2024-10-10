@@ -14,6 +14,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, see <https://www.gnu.org/licenses/>.
  */
+
 #include "sipaccount_config.h"
 #include "account_const.h"
 #include "account_schema.h"
@@ -76,9 +77,6 @@ SipAccountConfig::serialize(YAML::Emitter& out) const
 
     out << YAML::Key << Conf::USERNAME_KEY << YAML::Value << username;
 
-    // each credential is a map, and we can have multiple credentials
-    out << YAML::Key << Conf::CRED_KEY << YAML::Value << getCredentials();
-
     // out << YAML::Key << PRESENCE_MODULE_ENABLED_KEY << YAML::Value
     //     << (presence_ and presence_->isEnabled());
 
@@ -115,13 +113,6 @@ SipAccountConfig::unserialize(const YAML::Node& node)
     parseValueOptional(node, Conf::PRESENCE_MODULE_ENABLED_KEY, presenceEnabled);
     parseValueOptional(node, Conf::PRESENCE_PUBLISH_SUPPORTED_KEY, publishSupported);
     parseValueOptional(node, Conf::PRESENCE_SUBSCRIBE_SUPPORTED_KEY, subscribeSupported);
-
-    const auto& credsNode = node[Conf::CRED_KEY];
-    setCredentials(parseVectorMap(credsNode,
-                                  {Conf::CONFIG_ACCOUNT_REALM,
-                                   Conf::CONFIG_ACCOUNT_USERNAME,
-                                   Conf::CONFIG_ACCOUNT_PASSWORD,
-                                   Conf::CONFIG_ACCOUNT_HASH}));
 
     // get srtp submap
     const auto& srtpMap = node[Conf::SRTP_KEY];
