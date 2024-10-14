@@ -632,12 +632,16 @@ PresSubClient::subscribe()
 
     const pjsip_tpselector tp_sel = acc->getTransportSelector();
     if (pjsip_dlg_set_transport(dlg_, &tp_sel) != PJ_SUCCESS) {
+        sub_ = NULL;
         SIP_CORE_ERR("Unable to associate transport for invite session dialog");
         emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(pres_->getAccount()
                                                                               ->getAccountID(),
                                                                           std::string(getURI()),
                                                                           "presence",
                                                                           PJ_FALSE);
+        if (dlg_) {
+            pjsip_dlg_dec_lock(dlg_);
+        }
         return false;
     }
 

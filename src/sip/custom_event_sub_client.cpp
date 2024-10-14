@@ -605,6 +605,20 @@ CustomEventSubClient::subscribe()
      */
     pjsip_dlg_inc_lock(dlg_);
 
+    const pjsip_tpselector tp_sel = acc->getTransportSelector();
+    if (pjsip_dlg_set_transport(dlg_, &tp_sel) != PJ_SUCCESS) {
+        sub_ = NULL;
+        SIP_CORE_ERR("Unable to associate transport for invite session dialog");
+                emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(acc->getAccountID(),
+                                                                          std::string(getURI()),
+                                                                          std::string(getEvent()),
+                                                                          PJ_FALSE);
+        if (dlg_) {
+            pjsip_dlg_dec_lock(dlg_);
+        }
+        return false;
+    }
+
     /* Create event subscription */
     status = pjsip_evsub_create_uac(dlg_, &event_callback, &event_, PJSIP_EVSUB_NO_EVENT_ID, &sub_);
 
