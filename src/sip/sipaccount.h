@@ -414,7 +414,7 @@ public:
     {
         pj_sockaddr socket;
         unsigned length {};
-        pj_timer_entry timer;
+        pj_timer_entry timer {};
     } kaTarget;
 
 private:
