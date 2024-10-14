@@ -191,25 +191,7 @@ AudioStream::moved(pa_stream* s)
             context,
             name,
             [](pa_context* /*c*/, const pa_source_info* i, int /*eol*/, void* userdata) {
-                AudioStream* thisPtr = (AudioStream*) userdata;
-                // this whole closure gets called twice by pulse for some reason
-                // the 2nd time, i is invalid
-                if (!i) {
-                    // SIP_CORE_ERR("[audiostream] source info not found for %s", realName);
-                    return;
-                }
-
-                // string compare
-                bool usingEchoCancel = std::string_view(i->driver) == "module-echo-cancel.c";
-                SIP_CORE_WARN("[audiostream] capture stream using pulse echo cancel module? %s (%s)",
-                          usingEchoCancel ? "yes" : "no",
-                          i->name);
-                if (!thisPtr) {
-                    SIP_CORE_ERR("[audiostream] AudioStream pointer became invalid during "
-                             "pa_source_info_cb_t callback!");
-                    return;
-                }
-                thisPtr->echoCancelCb(usingEchoCancel);
+                return;
             },
             this);
 

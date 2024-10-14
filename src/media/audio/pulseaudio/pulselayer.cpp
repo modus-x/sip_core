@@ -457,9 +457,6 @@ PulseLayer::startStream(AudioDeviceType type)
     } else if (type == AudioDeviceType::CAPTURE) {
         if (auto dev_infos = getDeviceInfos(sourceList_, getPreferredCaptureDevice())) {
             createStream(record_, type, *dev_infos, ec, std::bind(&PulseLayer::readFromMic, this));
-
-            // whenever the stream is moved, it will call this cb
-            record_->setEchoCancelCb([this](bool echoCancel) { });
         }
     }
     pa_threaded_mainloop_signal(mainloop_.get(), 0);
