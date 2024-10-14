@@ -181,6 +181,11 @@ AudioLayer::setHasNativeNS(bool hasNativeNS)
 void
 AudioLayer::createAudioProcessor()
 {
+
+    if (audioProcessor) {
+        return;
+    }
+
     auto nb_channels = std::max(audioFormat_.nb_channels, audioInputFormat_.nb_channels);
     auto sample_rate = std::max(audioFormat_.sample_rate, audioInputFormat_.sample_rate);
 
