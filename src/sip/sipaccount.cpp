@@ -261,6 +261,12 @@ SIPAccount::registerKeepAliveTimer()
         return;
     }
 
+    if (pjsip_transport_get_type_from_flag(transport->flag) != PJSIP_TRANSPORT_UDP) {
+        SIP_CORE_INFO() << "KA: ka won'be send for non UDP transport";
+        return;
+    }
+
+
     if (kaTarget.length == 0) {
         SIP_CORE_ERR() << "KA: no target is available for contact " << contactHeader;
         return;
