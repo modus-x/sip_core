@@ -50,6 +50,7 @@ static const char* const CONFIG_PRESENCE_SUBSCRIBE_SUPPORTED = "Account.presence
 static const char* const CONFIG_PRESENCE_STATUS = "Account.presenceStatus";
 static const char* const CONFIG_PRESENCE_NOTE = "Account.presenceNote";
 static const char* const CONFIG_KEEP_ALIVE_INTERVAL = "Account.keepAliveInterval";
+static const char* const CONFIG_KEEP_ALIVE_TYPE = "Account.keepAliveType";
 
 static const char* const CONFIG_ACCOUNT_HOSTNAME = "Account.hostname";
 static const char* const CONFIG_ACCOUNT_HASH = "Account.hash";

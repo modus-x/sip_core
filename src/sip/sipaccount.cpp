@@ -92,8 +92,7 @@ static constexpr unsigned REGISTRATION_FIRST_RETRY_INTERVAL = 60; // seconds
 static constexpr unsigned REGISTRATION_RETRY_INTERVAL = 300;      // seconds
 
 // keep-alive const values
-const pj_str_t KA_DATA = CONST_PJ_STR("ping!");
-const pj_str_t FLOW_HEADER = CONST_PJ_STR("Flow-Timer");
+static constexpr pj_str_t KA_DATA = CONST_PJ_STR("ping!");
 
 static char*
 randomSvAuthString(int length)
@@ -114,7 +113,6 @@ static void
 keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
 {
     SIPAccount* acc;
-    pjsip_tpselector tp_sel;
     pj_time_val delay;
     char addrtxt[PJ_INET6_ADDRSTRLEN];
     pj_status_t status;
@@ -124,7 +122,6 @@ keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
     te->id = PJ_FALSE;
 
     acc = (SIPAccount*) te->user_data;
-
 
     auto contactHeader = acc->getContactHeader();
 
@@ -143,36 +140,75 @@ keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
         return;
     }
 
-    /* Select the transport to send the packet */
-    pj_bzero(&tp_sel, sizeof(tp_sel));
-    tp_sel.type = PJSIP_TPSELECTOR_TRANSPORT;
-    tp_sel.u.transport = transport;
+    const pjsip_tpselector tp_sel = acc->getTransportSelector();
 
-    SIP_CORE_DEBUG("KA: Sending {:d} bytes keep-alive packet for acc {:s} to {:s}",
-                   KA_DATA.slen,
-                   contactHeader,
-                   pj_sockaddr_print(&acc->kaTarget.socket, addrtxt, sizeof(addrtxt), 3));
+    /* Send keep-alive packet options */
 
-    /* Send raw packet */
-    status = pjsip_tpmgr_send_raw(pjsip_endpt_get_tpmgr(acc->getVoipLink().getEndpoint()),
-                                  static_cast<pjsip_transport_type_e>(transport->key.type),
-                                  &tp_sel,
-                                  NULL,
-                                  KA_DATA.ptr,
-                                  KA_DATA.slen,
-                                  &acc->kaTarget.socket,
-                                  acc->kaTarget.length,
-                                  NULL,
-                                  NULL);
+    if (acc->config().keepAliveType == KeepAliveType::Options) {
+        /* Send SIP Options packet */
+        pjsip_tx_data* tdata;
+        auto to = CONST_PJ_STR(acc->getServerUri());
+
+        auto from = CONST_PJ_STR(acc->getFromUri());
+
+        auto contact = CONST_PJ_STR(contactHeader);
+
+        SIP_CORE_DEBUG("KA: Sending OPTIONS keep-alive message for acc {:s} to {:s}",
+                       contactHeader,
+                       acc->getServerUri());
+
+        status = pjsip_endpt_create_request(acc->getVoipLink().getEndpoint(),
+                                            &pjsip_options_method,
+                                            &to,
+                                            &contact,
+                                            &contact,
+                                            NULL,
+                                            NULL,
+                                            -1,
+                                            NULL,
+                                            &tdata);
+        SIP_CORE_DEBUG("pjsip_endpt_create_request");
+        if (status == PJ_SUCCESS) {
+            status = pjsip_tx_data_set_transport(tdata, &tp_sel);
+            SIP_CORE_DEBUG("pjsip_tx_data_set_transport");
+
+            if (status == PJ_SUCCESS) {
+                status = pjsip_endpt_send_request(acc->getVoipLink().getEndpoint(),
+                                                  tdata,
+                                                  -1,
+                                                  NULL,
+                                                  NULL);
+                SIP_CORE_DEBUG("pjsip_endpt_send_request");
+            }
+        }
+
+    } else {
+        /* Send raw packet */
+        SIP_CORE_DEBUG("KA: Sending {:d} bytes keep-alive packet for acc {:s} to {:s}",
+                       KA_DATA.slen,
+                       contactHeader,
+                       pj_sockaddr_print(&acc->kaTarget.socket, addrtxt, sizeof(addrtxt), 3));
+        status = pjsip_tpmgr_send_raw(pjsip_endpt_get_tpmgr(acc->getVoipLink().getEndpoint()),
+                                      static_cast<pjsip_transport_type_e>(transport->key.type),
+                                      &tp_sel,
+                                      NULL,
+                                      KA_DATA.ptr,
+                                      KA_DATA.slen,
+                                      &acc->kaTarget.socket,
+                                      acc->kaTarget.length,
+                                      NULL,
+                                      NULL);
+    }
 
     if (status != PJ_SUCCESS && status != PJ_EPENDING) {
-        SIP_CORE_ERROR("KA: Error sending keep-alive packet: {:d}", status);
+        SIP_CORE_ERROR("KA: Error sending keep-alive: {:d}", status);
     }
 
     uint32_t seconds = acc->config().keepAliveInterval;
 
     if (seconds == 0) {
-        SIP_CORE_INFO() << "KA: 0 seconds is set, skipping keep-alive for contact " << contactHeader;
+        SIP_CORE_INFO() << "KA: 0 seconds is set, skipping keep-alive for contact "
+                        << contactHeader;
         return;
     }
 
@@ -247,7 +283,8 @@ SIPAccount::registerKeepAliveTimer()
     uint32_t seconds = config().keepAliveInterval;
 
     if (seconds == 0) {
-        SIP_CORE_INFO() << "KA: 0 seconds is set, skipping keep-alive for contact " << contactHeader;
+        SIP_CORE_INFO() << "KA: 0 seconds is set, skipping keep-alive for contact "
+                        << contactHeader;
         return;
     }
 
@@ -265,7 +302,6 @@ SIPAccount::registerKeepAliveTimer()
         SIP_CORE_INFO() << "KA: ka won'be send for non UDP transport";
         return;
     }
-
 
     if (kaTarget.length == 0) {
         SIP_CORE_ERR() << "KA: no target is available for contact " << contactHeader;
@@ -290,7 +326,8 @@ SIPAccount::registerKeepAliveTimer()
     } else {
         kaTarget.timer.id = PJ_FALSE;
         pjsip_transport_dec_ref(transport);
-        SIP_CORE_ERR() << "KA: error starting keep-alive timer for contact " << contactHeader << ", status: " << status;
+        SIP_CORE_ERR() << "KA: error starting keep-alive timer for contact " << contactHeader
+                       << ", status: " << status;
     }
 }
 

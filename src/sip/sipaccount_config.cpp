@@ -26,8 +26,19 @@ extern "C" {
 
 namespace sip_core {
 
+static KeepAliveType getKeepAliveType(const std::string& value) {
+    return value == "sip-options" ? KeepAliveType::Options : KeepAliveType::Packet;
+}
+
+static constexpr const char*
+getKeepAliveTypeName(KeepAliveType type)
+{
+    return type == KeepAliveType::Options ? "sip-options" : "packet";
+}
+
 namespace Conf {
 constexpr const char* ID_KEY = "id";
+constexpr const char* REGISTRATION_EXPIRE = "registrationExpire";
 constexpr const char* USERNAME_KEY = "username";
 constexpr const char* BIND_ADDRESS_KEY = "bindAddress";
 constexpr const char* INTERFACE_KEY = "interface";
@@ -45,6 +56,7 @@ constexpr const char* PRESENCE_STATUS_KEY = "presenceStatus";
 constexpr const char* PRESENCE_NOTE_KEY = "presenceNote";
 constexpr const char* PRESENCE_MODULE_ENABLED_KEY = "presenceModuleEnabled";
 constexpr const char* KEEP_ALIVE_INTERVAL = "keepAliveInterval";
+constexpr const char* KEEP_ALIVE_TYPE = "keepAliveType";
 constexpr const char* TRANSPORT = "hash";
 
 
@@ -73,14 +85,14 @@ SipAccountConfig::serialize(YAML::Emitter& out) const
     out << YAML::Key << Conf::PORT_KEY << YAML::Value << localPort;
     out << YAML::Key << Conf::PUBLISH_PORT_KEY << YAML::Value << publishedPort;
 
+    // keep alive interval
     out << YAML::Key << Conf::KEEP_ALIVE_INTERVAL << YAML::Value << keepAliveInterval;
-
-    out << YAML::Key << Conf::USERNAME_KEY << YAML::Value << username;
+    out << YAML::Key << Conf::KEEP_ALIVE_TYPE << YAML::Value << getKeepAliveTypeName(keepAliveType);
 
     // out << YAML::Key << PRESENCE_MODULE_ENABLED_KEY << YAML::Value
     //     << (presence_ and presence_->isEnabled());
 
-    out << YAML::Key << Conf::CONFIG_ACCOUNT_REGISTRATION_EXPIRE << YAML::Value
+    out << YAML::Key << Conf::REGISTRATION_EXPIRE << YAML::Value
         << registrationExpire;
     out << YAML::Key << Conf::SERVICE_ROUTE_KEY << YAML::Value << serviceRoute;
     out << YAML::Key << Conf::ALLOW_IP_AUTO_REWRITE << YAML::Value << allowIPAutoRewrite;
@@ -103,9 +115,13 @@ SipAccountConfig::unserialize(const YAML::Node& node)
     parseValueOptional(node, Conf::BIND_ADDRESS_KEY, bindAddress);
     parseValueOptional(node, Conf::PORT_KEY, localPort);
     parseValueOptional(node, Conf::PUBLISH_PORT_KEY, publishedPort);
-    parseValueOptional(node, Conf::KEEP_ALIVE_INTERVAL, keepAliveInterval);
 
-    parseValueOptional(node, Conf::CONFIG_ACCOUNT_REGISTRATION_EXPIRE, registrationExpire);
+    parseValueOptional(node, Conf::KEEP_ALIVE_INTERVAL, keepAliveInterval);
+    std::string tmpKeyKaType;
+    parseValueOptional(node, Conf::KEEP_ALIVE_TYPE, tmpKeyKaType);
+    keepAliveType = getKeepAliveType(tmpKeyKaType);
+
+    parseValueOptional(node, Conf::REGISTRATION_EXPIRE, registrationExpire);
     registrationExpire = std::max(MIN_REGISTRATION_TIME, registrationExpire);
     parseValueOptional(node, Conf::SERVICE_ROUTE_KEY, serviceRoute);
     parseValueOptional(node, Conf::ALLOW_IP_AUTO_REWRITE, allowIPAutoRewrite);
@@ -134,6 +150,7 @@ SipAccountConfig::toMap() const
     a.emplace(Conf::CONFIG_PUBLISHED_SAMEAS_LOCAL, publishedSameasLocal ? TRUE_STR : FALSE_STR);
     a.emplace(Conf::CONFIG_PUBLISHED_ADDRESS, publishedIp);
     a.emplace(Conf::CONFIG_KEEP_ALIVE_INTERVAL, std::to_string(keepAliveInterval));
+    a.emplace(Conf::CONFIG_KEEP_ALIVE_TYPE, getKeepAliveTypeName(keepAliveType));
     a.emplace(Conf::CONFIG_ACCOUNT_ROUTESET, serviceRoute);
     a.emplace(Conf::CONFIG_ACCOUNT_REGISTRATION_EXPIRE, std::to_string(registrationExpire));
 
@@ -170,14 +187,19 @@ SipAccountConfig::fromMap(const std::map<std::string, std::string>& details)
     parseInt(details, Conf::CONFIG_PUBLISHED_PORT, publishedPort);
     parseBool(details, Conf::CONFIG_PRESENCE_ENABLED, presenceEnabled);
     parseString(details, Conf::CONFIG_ACCOUNT_DTMF_TYPE, dtmfType);
-    parseInt(details, Conf::CONFIG_KEEP_ALIVE_INTERVAL, keepAliveInterval);
     parseInt(details, Conf::CONFIG_ACCOUNT_REGISTRATION_EXPIRE, registrationExpire);
 
     // srtp settings
     parseBool(details, Conf::CONFIG_SRTP_RTP_FALLBACK, srtpFallback);
-    auto iter = details.find(Conf::CONFIG_SRTP_KEY_EXCHANGE);
-    if (iter != details.end())
-        srtpKeyExchange = sip_utils::getKeyExchangeProtocol(iter->second);
+    auto iterSrtp = details.find(Conf::CONFIG_SRTP_KEY_EXCHANGE);
+    if (iterSrtp != details.end())
+        srtpKeyExchange = sip_utils::getKeyExchangeProtocol(iterSrtp->second);
+
+    // keepalive settings
+    parseInt(details, Conf::CONFIG_KEEP_ALIVE_INTERVAL, keepAliveInterval);
+    auto iterKaType = details.find(Conf::CONFIG_KEEP_ALIVE_TYPE);
+    if (iterKaType != details.end())
+        keepAliveType = getKeepAliveType(iterKaType->second);
 
     SIP_CORE_WARN("No credentials set, inferring them...");
     std::map<std::string, std::string> map;

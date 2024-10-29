@@ -20,6 +20,15 @@
 namespace sip_core {
 constexpr static std::string_view ACCOUNT_TYPE_SIP = "SIP";
 
+enum class KeepAliveType : unsigned {
+
+    // simple UDP packet with ping!
+    Packet,
+
+    // full SIP OPTIONS message
+    Options,
+};
+
 struct SipAccountConfig : public SipAccountBaseConfig {
     SipAccountConfig(const std::string& id = {}, const std::string& path = {}): SipAccountBaseConfig(std::string(ACCOUNT_TYPE_SIP), id, path) {}
     void serialize(YAML::Emitter& out) const override;
@@ -43,7 +52,15 @@ struct SipAccountConfig : public SipAccountBaseConfig {
     uint16_t publishedPort {sip_utils::DEFAULT_SIP_PORT};
 
 
+    /**
+     * How often should be ka called?
+     */
     uint32_t keepAliveInterval {15};
+
+    /**
+     * What should be send
+     */
+    KeepAliveType keepAliveType {KeepAliveType::Packet};
 
     /**
      * interface name on which this account is bound
