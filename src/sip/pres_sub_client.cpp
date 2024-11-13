@@ -554,6 +554,7 @@ PresSubClient::unsubscribe()
     retStatus = pjsip_pres_initiate(sub_, 0, &tdata);
 
     if (retStatus == PJ_SUCCESS) {
+        sip_utils::addUserAgentHeader(pres_->getAccount()->getUserAgentName(), tdata);
         pres_->fillDoc(tdata, NULL);
         retStatus = pjsip_pres_send_request(sub_, tdata);
     }
@@ -709,8 +710,6 @@ PresSubClient::subscribe()
         SIP_CORE_WARN("Unable to create initial SUBSCRIBE (%d)", status);
         return false;
     }
-
-    //    pjsua_process_msg_data(tdata, NULL);
 
     sip_utils::addUserAgentHeader(acc->getUserAgentName(), tdata);
 

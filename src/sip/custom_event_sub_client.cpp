@@ -528,6 +528,9 @@ CustomEventSubClient::unsubscribe()
     retStatus = pjsip_evsub_initiate(sub_, pjsip_get_subscribe_method(), 0, &tdata);
 
     if (retStatus == PJ_SUCCESS) {
+        // Add user-agent header
+        sip_utils::addUserAgentHeader(manager_->getAccount()->getUserAgentName(), tdata);
+
         retStatus = pjsip_evsub_send_request(sub_, tdata);
     }
 
@@ -683,6 +686,9 @@ CustomEventSubClient::subscribe()
         SIP_CORE_WARN("Unable to create initial SUBSCRIBE (%d)", status);
         return false;
     }
+
+    // Add user-agent header
+    sip_utils::addUserAgentHeader(manager_->getAccount()->getUserAgentName(), tdata);
 
     status = pjsip_evsub_send_request(sub_, tdata);
 
