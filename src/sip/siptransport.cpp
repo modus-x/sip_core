@@ -62,31 +62,31 @@ static bool brokerDestroying {false};
 void
 UDPTransport::deleteTransport(pjsip_transport* t)
 {
-    pjsip_transport_dec_ref(t);
+    // pjsip_transport_dec_ref(t);
 }
 
 UDPTransport::UDPTransport(pjsip_transport* t)
     : SipTransport()
     , transport_(nullptr, deleteTransport)
 {
-    if (not t or pjsip_transport_add_ref(t) != PJ_SUCCESS)
-        throw std::runtime_error("invalid transport for UDP, because cannot add ref");
+    //    if (not t or pjsip_transport_add_ref(t) != PJ_SUCCESS)
+    //        throw std::runtime_error("invalid transport for UDP, because cannot add ref");
 
     // Set pointer here, right after the successful pjsip_transport_add_ref
     transport_.reset(t);
-
-    SIP_CORE_DEBUG("UDPTransport@{} tr={} rc={:d}",
-                   fmt::ptr(this),
-                   fmt::ptr(transport_.get()),
-                   pj_atomic_get(transport_->ref_cnt));
+    //
+    //    SIP_CORE_DEBUG("UDPTransport@{} tr={} rc={:d}",
+    //                   fmt::ptr(this),
+    //                   fmt::ptr(transport_.get()),
+    //                   pj_atomic_get(transport_->ref_cnt));
 }
 
 UDPTransport::~UDPTransport()
 {
-    SIP_CORE_DEBUG("~UDPTransport@{} tr={} rc={:d}",
-                   fmt::ptr(this),
-                   fmt::ptr(transport_.get()),
-                   pj_atomic_get(transport_->ref_cnt));
+    //    SIP_CORE_DEBUG("~UDPTransport@{} tr={} rc={:d}",
+    //                   fmt::ptr(this),
+    //                   fmt::ptr(transport_.get()),
+    //                   pj_atomic_get(transport_->ref_cnt));
 }
 
 TCPTransport::TCPTransport(pjsip_tpfactory* factory)
@@ -225,13 +225,13 @@ SipTransportBroker::shutdown()
     brokerDestroying = true;
 
     // stop all transports that still exist
-    if (auto udp = udpTransport_.lock()) {
-        pjsip_transport_shutdown(udp->get());
-    }
-
-    if (auto tcp = tcpTransport_.lock()) {
-        tcp->get_factory()->destroy(tcp->get_factory());
-    }
+    //    if (auto udp = udpTransport_.lock()) {
+    //        pjsip_transport_shutdown(udp->get());
+    //    }
+    //
+    //    if (auto tcp = tcpTransport_.lock()) {
+    //        tcp->get_factory()->destroy(tcp->get_factory());
+    //    }
 }
 
 std::shared_ptr<UDPTransport>
