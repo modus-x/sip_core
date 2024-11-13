@@ -21,104 +21,110 @@
 
 #pragma once
 
+#include <atomic>
+#include <cstdint>
+#include <functional>
+#include <map>
+#include <memory>
+#include <mutex>
+
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
 
-#include "connectivity/sip_utils.h"
-
 #include "noncopyable.h"
-#include "logger.h"
 
-#include <pjsip.h>
-#include <pjnath/stun_config.h>
+#include <pjsip/sip_transport.h>
+#include <pjsip/sip_types.h>
 
-#include <functional>
-#include <mutex>
-#include <condition_variable>
-#include <map>
-#include <string>
-#include <vector>
-#include <list>
-#include <memory>
+#include "configurationmanager_interface.h"
+#include <transport.h>
 
 namespace sip_core {
 
-class ChannelSocket;
+using namespace libsip_core;
+
 class SIPAccountBase;
-using onShutdownCb = std::function<void(void)>;
-
-// TCP local listener
-struct TcpListener
-{
-    TcpListener() {}
-    TcpListener(pjsip_tpfactory* f)
-        : listener(f)
-    {}
-    virtual ~TcpListener()
-    {
-        SIP_CORE_DBG("Destroying listener for TCP");
-        listener->destroy(listener);
-    }
-    pjsip_tpfactory* get() { return listener; }
-
-private:
-    NON_COPYABLE(TcpListener);
-    pjsip_tpfactory* listener {nullptr};
-};
 
 using SipTransportStateCallback
     = std::function<void(pjsip_transport_state, const pjsip_transport_state_info*)>;
 
 /**
- * SIP transport wraps pjsip_transport.
+ * SIP transport wraps some pjsip transport.
  */
-class SipTransport
+class SipTransport : public Transport
 {
 public:
-    SipTransport(pjsip_transport*);
-    SipTransport(pjsip_transport*, const std::shared_ptr<TcpListener>&);
-    // If the SipTransport is a channeled transport, we are already connected to the peer,
-    // so, we can directly set tlsInfos_.peerCert and avoid any copy
+    SipTransport() {}
 
-    ~SipTransport();
+    virtual ~SipTransport() {}
 
     static const char* stateToStr(pjsip_transport_state state);
 
     void stateCallback(pjsip_transport_state state, const pjsip_transport_state_info* info);
 
-    pjsip_transport* get() { return transport_.get(); }
+    /* what pjsip type transport is this */
+    pjsip_transport_type_e getPjSipTransportType() const;
 
-    void addStateListener(uintptr_t lid, SipTransportStateCallback cb);
+    void addStateListener(uintptr_t lid, const SipTransportStateCallback& cb);
     bool removeStateListener(uintptr_t lid);
-
-    bool isSecure() const { return PJSIP_TRANSPORT_IS_SECURE(transport_); }
 
     static bool isAlive(pjsip_transport_state state);
 
-    /** Only makes sense for connection-oriented transports */
-    bool isConnected() const noexcept { return connected_; }
-
-    inline void setDeviceId(const std::string& deviceId) { deviceId_ = deviceId; }
-    inline std::string_view deviceId() const { return deviceId_; }
-    inline void setAccount(const std::shared_ptr<SIPAccountBase>& account) { account_ = account; }
-    inline const std::weak_ptr<SIPAccountBase>& getAccount() const { return account_; }
-
+    int getAddressFamily() const { return pjsip_transport_type_get_af(getPjSipTransportType()); };
 
 private:
     NON_COPYABLE(SipTransport);
 
-    // this will be called in DEstructor of SipTransport
-    static void deleteTransport(pjsip_transport* t);
-
-    std::unique_ptr<pjsip_transport, decltype(deleteTransport)&> transport_;
-    std::shared_ptr<TcpListener> tcpListener_;
+    // delete / add listeners safely
     std::mutex stateListenersMutex_;
     std::map<uintptr_t, SipTransportStateCallback> stateListeners_;
-    std::weak_ptr<SIPAccountBase> account_ {};
+};
 
-    bool connected_ {false};
-    std::string deviceId_ {};
+class UDPTransport : public SipTransport
+{
+public:
+    UDPTransport(pjsip_transport*);
+
+    ~UDPTransport();
+
+    inline pjsip_transport* get() const { return transport_.get(); }
+
+    inline TransportType getTransportType() const override { return TransportType::UDP; };
+
+    inline bool isSecure() const override { return false; }
+
+private:
+    NON_COPYABLE(UDPTransport);
+
+    // this will be called in Destructor of UDPTransport
+    static void deleteTransport(pjsip_transport* t);
+
+    // here we store the transport
+    // before storing transport, we need to add ref to it because we are using bare pjsip struct
+    std::unique_ptr<pjsip_transport, decltype(deleteTransport)&> transport_;
+};
+
+class TCPTransport : public SipTransport
+{
+public:
+    TCPTransport(pjsip_tpfactory*);
+
+    ~TCPTransport();
+
+    inline pjsip_tpfactory* get_factory() const { return connection_factory_; }
+
+    inline TransportType getTransportType() const override { return TransportType::TCP; };
+
+    inline bool isSecure() const override { return false; }
+
+private:
+    NON_COPYABLE(TCPTransport);
+
+    // here we store the transport
+    // before storing transport, we need to add ref to it because we are using bare pjsip struct
+    // this is manager by transport manager of PJSIP!
+    pjsip_tpfactory* connection_factory_;
 };
 
 class IpAddr;
@@ -132,15 +138,9 @@ public:
     SipTransportBroker(pjsip_endpoint* endpt);
     ~SipTransportBroker();
 
-    std::shared_ptr<SipTransport> getUdpTransport(const IpAddr&);
+    std::shared_ptr<UDPTransport> getUdpTransport(const IpAddr&);
 
-    std::shared_ptr<SipTransport> getTcpTransport(
-        const std::shared_ptr<TcpListener>& l, const IpAddr& remote, const std::string& remote_name);
-    
-    std::shared_ptr<TcpListener>
-        getTcpListener(const IpAddr& ipAddress);
-
-    std::shared_ptr<SipTransport> addTransport(pjsip_transport*);
+    std::shared_ptr<TCPTransport> getTcpTransport(const IpAddr&);
 
     /**
      * Start graceful shutdown procedure for all transports
@@ -155,30 +155,32 @@ private:
     NON_COPYABLE(SipTransportBroker);
 
     /**
-     * Create SIP UDP transport from account's setting
-     * @param account The account for which a transport must be created.
-     * @param IP protocol version to use, can be pj_AF_INET() or pj_AF_INET6()
-     * @return a pointer to the new transport
+     * Create UDPTransport wrapper without any saving into any maps
      */
-    std::shared_ptr<SipTransport> createUdpTransport(const IpAddr&);
-
-    pjsip_tpfactory* createTcpTransport(const IpAddr&);
+    std::shared_ptr<UDPTransport> createUdpTransport(const IpAddr&);
 
     /**
-     * List of transports so we can bubble the events up. Transports are destroyed then there are no refs
+     * Create TCPTransport wrapper without any saving into any maps
      */
-    std::map<pjsip_transport*, std::weak_ptr<SipTransport>> transports_ {};
+    std::shared_ptr<TCPTransport> createTcpTransport(const IpAddr&);
+
+    /**
+     * Mutex to protect concurrent map modification
+     */
     std::mutex transportMapMutex_ {};
 
     /**
-     * Transports are stored in this map in order to retrieve them in case
-     * several accounts would share the same port number.
+     * UDP transport currently used
      */
-    std::map<IpAddr, pjsip_transport*> udpTransports_;
+    std::weak_ptr<UDPTransport> udpTransport_;
 
-    std::map<IpAddr, pjsip_transport*> tcpTransports_;
+    /**
+     * TCP transport currently used
+     */
+    std::weak_ptr<TCPTransport> tcpTransport_;
 
     pjsip_endpoint* endpt_;
+
     std::atomic_bool isDestroying_ {false};
 };
 

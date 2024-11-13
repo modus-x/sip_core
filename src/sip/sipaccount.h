@@ -99,8 +99,6 @@ public:
 
     std::string_view getAccountType() const override { return ACCOUNT_TYPE; }
 
-    pjsip_host_port getHostPortFromSTUN(pj_pool_t* pool);
-
     void setRegistrationStateDetailed(const std::pair<int, std::string>& details)
     {
         registrationStateDetailed_ = details;
@@ -306,7 +304,7 @@ public:
 
     void setTransport(const std::shared_ptr<SipTransport>& = nullptr);
 
-    bool switchTransport(TransportType type) override;
+    bool switchTransport(libsip_core::TransportType transportType) override;
 
     /**
      * Try to register a new keepalive registration timer (only for UDP!) with current KA interval from config!
@@ -322,7 +320,10 @@ public:
     virtual inline std::shared_ptr<SipTransport> getTransport() { return transport_; }
 
     // current transport type
-    inline pjsip_transport_type_e getTransportType() const { return transportType_; }
+    inline pjsip_transport_type_e getTransportType() const
+    {
+        return transport_->getPjSipTransportType();
+    }
 
     /**
      * Shortcut for SipTransport::getTransportSelector(account.getTransport()).
@@ -428,7 +429,7 @@ private:
 
     void setCredentials(const std::vector<SipAccountConfig::Credentials>& creds);
 
-    void setUpTransmissionData(pjsip_tx_data* tdata, long transportKeyType);
+    void setUpTransmissionData(pjsip_tx_data* tdata, pjsip_transport_type_e transportType);
 
     NON_COPYABLE(SIPAccount);
 
@@ -471,17 +472,10 @@ private:
     std::condition_variable unregisterCheck_;
     bool unregisterSend_ = false;
 
-    std::shared_ptr<SipTransport> transport_ {};
-
-    std::shared_ptr<TcpListener> tcpListener_ {};
-
     /**
-     * Transport type used for this sip account. Currently supported types:
-     *    PJSIP_TRANSPORT_UNSPECIFIED
-     *    PJSIP_TRANSPORT_UDP
-     *    PJSIP_TRANSPORT_TCP
+     * Current transport
      */
-    pjsip_transport_type_e transportType_ {PJSIP_TRANSPORT_UNSPECIFIED};
+    std::shared_ptr<SipTransport> transport_ {};
 
     /**
      * If username is not provided, as it happens for Direct ip calls,
@@ -494,11 +488,10 @@ private:
     /**
      * Print contact header in certain format
      */
-    static std::string printContactHeader(const std::string& username,
-                                          const std::string& displayName,
+    std::string printContactHeader(const std::string& username,
+                                   const std::string& displayName,
                                           const std::string& address,
                                           pj_uint16_t port,
-                                          bool tcp,
                                           const std::string& deviceKey = {});
 
     /**
@@ -540,7 +533,7 @@ private:
     /**
      * The STUN server port
      */
-    pj_uint16_t stunPort_ {PJ_STUN_PORT};
+    pj_uint16_t stunPort_ {};
 
     /**
      * Send Request Callback

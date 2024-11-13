@@ -42,8 +42,6 @@ enum class MessageStates : int {
 };
 
 // binds to enum in connectivity/transport.h
-enum class Transport { TCP, UDP };
-
 namespace ProtocolNames {
 
 constexpr static const char SIP[] = "SIP";

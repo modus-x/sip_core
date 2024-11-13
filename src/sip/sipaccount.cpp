@@ -125,16 +125,22 @@ keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
 
     auto contactHeader = acc->getContactHeader();
 
-    pjsip_transport* transport = acc->getTransport()->get();
+    auto transport = acc->getTransport();
 
     /* Check if the account is still active. It might have just been deleted
      * while the keep-alive timer was about to be called (race condition).
      */
-    if (acc->getTransport() == NULL) {
+    if (transport == NULL) {
         SIP_CORE_ERR() << "KA: no transport is available for contact " << contactHeader;
         return;
     }
 
+    // ignore if not udp
+    if (acc->getTransportType() != PJSIP_TRANSPORT_UDP) {
+        return;
+    }
+
+    // check if target is available
     if (acc->kaTarget.length == 0) {
         SIP_CORE_ERR() << "KA: no target is available for contact " << contactHeader;
         return;
@@ -189,7 +195,7 @@ keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
                        contactHeader,
                        pj_sockaddr_print(&acc->kaTarget.socket, addrtxt, sizeof(addrtxt), 3));
         status = pjsip_tpmgr_send_raw(pjsip_endpt_get_tpmgr(acc->getVoipLink().getEndpoint()),
-                                      static_cast<pjsip_transport_type_e>(transport->key.type),
+                                      transport->getPjSipTransportType(),
                                       &tp_sel,
                                       NULL,
                                       KA_DATA.ptr,
@@ -255,8 +261,8 @@ registration_cb(pjsip_regc_cbparam* param)
 SIPAccount::SIPAccount(const std::string& accountID, bool presenceEnabled)
     : SIPAccountBase(accountID)
     , ciphers_(100)
-    , sip_events_(new SIPEvents(this))
     , presence_(presenceEnabled ? new SIPPresence(this) : nullptr)
+    , sip_events_(new SIPEvents(this))
 {
     via_addr_.host.ptr = 0;
     via_addr_.host.slen = 0;
@@ -288,17 +294,13 @@ SIPAccount::registerKeepAliveTimer()
         return;
     }
 
-    pjsip_transport* transport = nullptr;
-
     // do not set if no transport
-    if (transport_) {
-        transport = transport_->get();
-    } else {
+    if (!transport_) {
         SIP_CORE_ERR() << "KA: no transport is available for contact " << contactHeader;
         return;
     }
 
-    if (pjsip_transport_get_type_from_flag(transport->flag) != PJSIP_TRANSPORT_UDP) {
+    if (getTransportType() != PJSIP_TRANSPORT_UDP) {
         SIP_CORE_INFO() << "KA: ka won'be send for non UDP transport";
         return;
     }
@@ -307,8 +309,6 @@ SIPAccount::registerKeepAliveTimer()
         SIP_CORE_ERR() << "KA: no target is available for contact " << contactHeader;
         return;
     }
-
-    pjsip_transport_add_ref(transport);
 
     pj_time_val delay;
     pj_status_t status;
@@ -325,7 +325,6 @@ SIPAccount::registerKeepAliveTimer()
         SIP_CORE_INFO() << "KA: Timer is set for " << contactHeader << " with delay " << seconds;
     } else {
         kaTarget.timer.id = PJ_FALSE;
-        pjsip_transport_dec_ref(transport);
         SIP_CORE_ERR() << "KA: error starting keep-alive timer for contact " << contactHeader
                        << ", status: " << status;
     }
@@ -497,10 +496,9 @@ SIPAccount::setTransport(const std::shared_ptr<SipTransport>& t)
 }
 
 bool
-SIPAccount::switchTransport(TransportType type)
+SIPAccount::switchTransport(libsip_core::TransportType transportType)
 {
-    // save value to config immediately
-    editConfig([&](SipAccountConfig& config) { config.transport = type; });
+    SIP_CORE_WARN("Switching transport of account if possible");
 
     IpAddr bindAddress = createBindingAddress();
     if (not bindAddress) {
@@ -508,24 +506,15 @@ SIPAccount::switchTransport(TransportType type)
         return false;
     }
 
-    transportType_ = type == TransportType::TCP ? PJSIP_TRANSPORT_TCP : PJSIP_TRANSPORT_UDP;
-
-    transport_.reset();
-
-    if (type == TransportType::UDP) {
+    if (transportType == libsip_core::TransportType::UDP) {
         setTransport(link_.sipTransportBroker->getUdpTransport(bindAddress));
-    } else {
-        tcpListener_.reset();
-
-        tcpListener_ = link_.sipTransportBroker->getTcpListener(bindAddress);
-        if (!tcpListener_) {
-            SIP_CORE_ERR("Error creating local TCP listener.");
-            return false;
-        }
-
-        setTransport(
-            link_.sipTransportBroker->getTcpTransport(tcpListener_, hostIp_, config().hostname));
+    } else if (transportType == libsip_core::TransportType::TCP) {
+        setTransport(link_.sipTransportBroker->getTcpTransport(bindAddress));
     }
+
+    // save value to config immediately
+    editConfig([&](SipAccountConfig& config) { config.transport = transportType; });
+
     if (transport_ != nullptr) {
         return true;
     }
@@ -539,7 +528,7 @@ SIPAccount::getTransportSelector()
 {
     if (!transport_)
         return SIPVoIPLink::getTransportSelector(nullptr);
-    return SIPVoIPLink::getTransportSelector(transport_->get());
+    return SIPVoIPLink::getTransportSelector(transport_);
 }
 
 bool
@@ -593,7 +582,7 @@ SIPAccount::SIPStartCall(std::shared_ptr<SIPCall>& call)
         return false;
     }
 
-    const pjsip_tpselector tp_sel = link_.getTransportSelector(transport->get());
+    const pjsip_tpselector tp_sel = link_.getTransportSelector(transport);
     if (pjsip_dlg_set_transport(dialog, &tp_sel) != PJ_SUCCESS) {
         SIP_CORE_ERR("Unable to associate transport for invite session dialog");
         return false;
@@ -721,8 +710,6 @@ SIPAccount::doRegister2_()
     }
 
     try {
-        // always try to create transport. If it gets the same as before, then it will be just ignored
-        SIP_CORE_WARN("Creating transport");
         bool result = switchTransport(config().transport);
         if (!result) {
             setRegistrationState(RegistrationState::ERROR_GENERIC);
@@ -743,8 +730,6 @@ SIPAccount::doUnregister(std::function<void(bool)> released_cb)
     std::unique_lock<std::recursive_mutex> lock(configurationMutex_);
 
     cancelKeepAliveTimer();
-
-    tcpListener_.reset();
 
     try {
         sendUnregister();
@@ -804,23 +789,6 @@ SIPAccount::sendRegister()
 
     SIP_CORE_DBG("Using contact header %s in registration", contact.c_str());
 
-    if (transport_) {
-        if (not getPublishedSameasLocal()
-            or (not received.empty() and received != getPublishedAddress())) {
-            pjsip_host_port* via = getViaAddr();
-            SIP_CORE_DBG("Setting VIA sent-by to %.*s:%d",
-                         (int) via->host.slen,
-                         via->host.ptr,
-                         via->port);
-
-            if (pjsip_regc_set_via_sent_by(regc, via, transport_->get()) != PJ_SUCCESS)
-                throw VoipLinkException("Unable to set the \"sent-by\" field");
-        } else if (isStunEnabled()) {
-            if (pjsip_regc_set_via_sent_by(regc, getViaAddr(), transport_->get()) != PJ_SUCCESS)
-                throw VoipLinkException("Unable to set the \"sent-by\" field");
-        }
-    }
-
     pj_status_t status = PJ_SUCCESS;
     pj_str_t pjContact = sip_utils::CONST_PJ_STR(contact);
 
@@ -832,6 +800,10 @@ SIPAccount::sendRegister()
                      sip_utils::sip_strerror(status).c_str());
         throw VoipLinkException("Unable to initialize account registration structure");
     }
+
+    const pjsip_tpselector tp_sel = getTransportSelector();
+    if (pjsip_regc_set_transport(regc, &tp_sel) != PJ_SUCCESS)
+        throw VoipLinkException("Unable to set transport");
 
     if (hasServiceRoute())
         pjsip_regc_set_route_set(regc,
@@ -863,12 +835,6 @@ SIPAccount::sendRegister()
     if (pjsip_regc_register(regc, isRegistrationRefreshEnabled(), &tdata) != PJ_SUCCESS)
         throw VoipLinkException("Unable to initialize transaction data for account registration");
 
-    const pjsip_tpselector tp_sel = getTransportSelector();
-    if (pjsip_regc_set_transport(regc, &tp_sel) != PJ_SUCCESS)
-        throw VoipLinkException("Unable to set transport");
-
-    if (tp_sel.u.transport)
-        setUpTransmissionData(tdata, tp_sel.u.transport->key.type);
 
     // pjsip_regc_send increment the transport ref count by one,
     if ((status = pjsip_regc_send(regc, tdata)) != PJ_SUCCESS) {
@@ -882,13 +848,13 @@ SIPAccount::sendRegister()
 }
 
 void
-SIPAccount::setUpTransmissionData(pjsip_tx_data* tdata, long transportKeyType)
+SIPAccount::setUpTransmissionData(pjsip_tx_data* tdata, pjsip_transport_type_e transportType)
 {
     if (hostIp_) {
         auto ai = &tdata->dest_info;
         ai->name = pj_strdup3(tdata->pool, config().hostname.c_str());
         ai->addr.count = 1;
-        ai->addr.entry[0].type = (pjsip_transport_type_e) transportKeyType;
+        ai->addr.entry[0].type = transportType;
         pj_memcpy(&ai->addr.entry[0].addr, hostIp_.pjPtr(), sizeof(pj_sockaddr));
         ai->addr.entry[0].addr_len = hostIp_.getLength();
         ai->cur_addr = 0;
@@ -1071,9 +1037,6 @@ SIPAccount::sendUnregister()
     if (pjsip_regc_set_transport(regc, &tp_sel) != PJ_SUCCESS)
         throw VoipLinkException("Unable to set transport");
 
-    if (tp_sel.u.transport)
-        setUpTransmissionData(tdata, tp_sel.u.transport->key.type);
-
     std::unique_lock<std::mutex> locker(unregisterLock_);
 
     unregisterSend_ = false;
@@ -1109,7 +1072,6 @@ SIPAccount::loadConfig()
     SIPAccountBase::loadConfig();
     setCredentials(config().credentials);
     enablePresence(config().presenceEnabled);
-    transportType_ = PJSIP_TRANSPORT_UDP;
 }
 
 bool
@@ -1166,7 +1128,7 @@ SIPAccount::getLoginName()
 std::string
 SIPAccount::getFromUri() const
 {
-    std::string scheme;
+    std::string scheme = "sip:";
     std::string transport;
 
     // Get login name if username is not specified
@@ -1175,11 +1137,9 @@ SIPAccount::getFromUri() const
     std::string hostname(conf.hostname);
 
     // UDP does not require the transport specification
-    if (transportType_ == PJSIP_TRANSPORT_TLS || transportType_ == PJSIP_TRANSPORT_TLS6) {
-        scheme = "sips:";
-        transport = ";transport=" + std::string(pjsip_transport_get_type_name(transportType_));
-    } else
-        scheme = "sip:";
+    if (getTransportType() == PJSIP_TRANSPORT_TCP) {
+        transport = ";transport=tcp";
+    }
 
     // Get machine hostname if not provided
     if (hostname.empty()) {
@@ -1202,12 +1162,7 @@ SIPAccount::getToUri(const std::string& username) const
     std::string transport;
     std::string hostname;
 
-    // UDP does not require the transport specification
-    if (transportType_ == PJSIP_TRANSPORT_TLS || transportType_ == PJSIP_TRANSPORT_TLS6) {
-        scheme = "sips:";
-        transport = ";transport=" + std::string(pjsip_transport_get_type_name(transportType_));
-    } else
-        scheme = "sip:";
+    scheme = "sip:";
 
     // Check if scheme is already specified
     if (username.find("sip") != std::string::npos)
@@ -1230,15 +1185,12 @@ SIPAccount::getToUri(const std::string& username) const
 std::string
 SIPAccount::getServerUri() const
 {
-    std::string scheme;
+    std::string scheme = "sip:";
     std::string transport;
 
     // UDP does not require the transport specification
-    if (transportType_ == PJSIP_TRANSPORT_TLS || transportType_ == PJSIP_TRANSPORT_TLS6) {
-        scheme = "sips:";
-        transport = ";transport=" + std::string(pjsip_transport_get_type_name(transportType_));
-    } else {
-        scheme = "sip:";
+    if (getTransportType() == PJSIP_TRANSPORT_TCP) {
+        transport = ";transport=tcp";
     }
 
     std::string host;
@@ -1269,7 +1221,7 @@ SIPAccount::updateContactHeader()
 {
     std::lock_guard<std::mutex> lock(contactMutex_);
 
-    if (not transport_ or not transport_->get()) {
+    if (not transport_) {
         SIP_CORE_ERR("Transport not created yet");
         return;
     }
@@ -1278,16 +1230,10 @@ SIPAccount::updateContactHeader()
         SIP_CORE_ERR("Invalid contact address: %s", contactAddress_.toString(true).c_str());
         return;
     }
-
-    const auto transportName = pj_str(transport_->get()->type_name);
-
-    bool isTCP = pjsip_transport_get_type_from_name(&transportName) == PJSIP_TRANSPORT_TCP;
-
     auto contactHdr = printContactHeader(config().username,
                                          config().displayName,
                                          contactAddress_.toString(false, true),
                                          contactAddress_.getPort(),
-                                         isTCP,
                                          config().deviceKey);
 
     contactHeader_ = std::move(contactHdr);
@@ -1302,24 +1248,16 @@ SIPAccount::initContactAddress()
     // registration using information sent by the registrar in the SIP
     // messages (see checkNATAddress).
 
-    if (not transport_ or not transport_->get()) {
+    if (not transport_) {
         SIP_CORE_ERR("Transport not created yet");
         return {};
     }
-
-    // The transport type must be specified, in our case START_OTHER refers to stun transport
-    pjsip_transport_type_e transportType = transportType_;
-
-    if (transportType == PJSIP_TRANSPORT_START_OTHER)
-        transportType = PJSIP_TRANSPORT_UDP;
 
     std::string address;
     pj_uint16_t port;
 
     // Init the address to the local address.
-    link_.findLocalAddressFromTransport(transport_->get(),
-                                        transportType,
-                                        config().hostname,
+    link_.findLocalAddressFromTransport(transport_, config().hostname,
                                         address,
                                         port);
 
@@ -1351,7 +1289,6 @@ SIPAccount::printContactHeader(const std::string& username,
                                const std::string& displayName,
                                const std::string& address,
                                pj_uint16_t port,
-                               bool tcp,
                                const std::string& deviceKey)
 {
     // This method generates SIP contact header field, with push
@@ -1365,7 +1302,9 @@ SIPAccount::printContactHeader(const std::string& username,
 
     std::ostringstream contact;
     auto scheme = "sip";
-    auto transport = tcp ? ";transport=TCP" : "";
+    auto transport = transport_->getTransportType() == libsip_core::TransportType::TCP
+                         ? ";transport=TCP"
+                         : "";
 
     contact << quotedDisplayName << "<" << scheme << ":" << username
             << (username.empty() ? "" : "@") << address << ":" << port << transport;
@@ -1382,24 +1321,6 @@ SIPAccount::printContactHeader(const std::string& username,
     contact << ">";
 
     return contact.str();
-}
-
-pjsip_host_port
-SIPAccount::getHostPortFromSTUN(pj_pool_t* pool)
-{
-    std::string addr;
-    pj_uint16_t port;
-    auto success = link_.findLocalAddressFromSTUN(transport_ ? transport_->get() : nullptr,
-                                                  &stunServerName_,
-                                                  stunPort_,
-                                                  addr,
-                                                  port);
-    if (not success)
-        emitSignal<libsip_core::ConfigurationSignal::StunStatusFailed>(getAccountID());
-    pjsip_host_port result;
-    pj_strdup2(pool, &result.host, addr.c_str());
-    result.port = port;
-    return result;
 }
 
 void
@@ -1660,15 +1581,10 @@ SIPAccount::checkNATAddress(pjsip_regc_cbparam* param, pj_pool_t* pool)
      * Build new Contact header
      */
     {
-        const auto transportName = pj_str(tp->type_name);
-
-        bool isTCP = pjsip_transport_get_type_from_name(&transportName) == PJSIP_TRANSPORT_TCP;
-
         auto tempContact = printContactHeader(config().username,
                                               config().displayName,
                                               via_addrstr,
                                               rport,
-                                              isTCP,
                                               config().deviceKey);
 
         if (tempContact.empty()) {

@@ -27,12 +27,9 @@
 #endif
 
 #include "configurationmanager_interface.h"
-#include "account_schema.h"
 #include "manager.h"
 #include "logger.h"
-#include "fileutils.h"
 #include "connectivity/ip_utils.h"
-#include "connectivity/transport.h"
 #include "sip/sipaccount.h"
 #include "sip/sipaccount_config.h"
 #include "audio/audiolayer.h"
@@ -181,18 +178,9 @@ registerAllAccounts()
 }
 
 bool
-switchTransport(const std::string& accountID, Account::Transport type)
+switchTransport(const std::string& accountID, TransportType transportType)
 {
-    switch (type) {
-    case Account::Transport::UDP:
-        return sip_core::Manager::instance().switchTransport(accountID,
-                                                             sip_core::TransportType::UDP);
-    case Account::Transport::TCP:
-        return sip_core::Manager::instance().switchTransport(accountID,
-                                                             sip_core::TransportType::TCP);
-    default:
-        return false;
-    }
+    return sip_core::Manager::instance().switchTransport(accountID, transportType);
 }
 
 uint64_t

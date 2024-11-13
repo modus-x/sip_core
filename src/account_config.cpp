@@ -16,10 +16,9 @@
  */
 #include "account_config.h"
 #include "account_schema.h"
-#include "string_utils.h"
 #include "fileutils.h"
 #include "config/account_config_utils.h"
-#include "string_utils.h"
+#include "transport.h"
 
 #include <fmt/compile.h>
 
@@ -54,13 +53,12 @@ using yaml_utils::parseValueOptional;
 void
 AccountConfig::serializeDiff(YAML::Emitter& out, const AccountConfig& DEFAULT_CONFIG) const
 {
-    std::string tmp = sip_utils::getTransportTypeName(transport);
     out << YAML::Key << TYPE_KEY << YAML::Value << type;
     SERIALIZE_CONFIG(ACCOUNT_ENABLE_KEY, enabled);
     SERIALIZE_CONFIG(ALIAS_KEY, alias);
     SERIALIZE_CONFIG(HOSTNAME_KEY, hostname);
     SERIALIZE_CONFIG(USERNAME_KEY, username);
-    out << YAML::Key << TRANSPORT_KEY << YAML::Value << sip_utils::getTransportTypeName(transport);
+    out << YAML::Key << TRANSPORT_KEY << YAML::Value << getTransportTypeName(transport);
     SERIALIZE_CONFIG(MAILBOX_KEY, mailbox);
     out << YAML::Key << ACTIVE_CODEC_KEY << YAML::Value
         << fmt::format(FMT_COMPILE("{}"), fmt::join(activeCodecs, "/"sv));
@@ -118,7 +116,7 @@ AccountConfig::unserialize(const YAML::Node& node)
 
     std::string tmpKey;
     parseValueOptional(node, TRANSPORT_KEY, tmpKey);
-    transport = sip_utils::getTransportType(tmpKey);
+    transport = getTransportType(tmpKey);
 }
 
 std::map<std::string, std::string>
@@ -130,7 +128,7 @@ AccountConfig::toMap() const
             {Conf::CONFIG_ACCOUNT_TYPE, type},
             {Conf::CONFIG_ACCOUNT_USERNAME, username},
             {Conf::CONFIG_ACCOUNT_HOSTNAME, hostname},
-            {Conf::CONFIG_ACCOUNT_TRANSPORT, sip_utils::getTransportTypeName(transport)},
+            {Conf::CONFIG_ACCOUNT_TRANSPORT, getTransportTypeName(transport)},
             {Conf::CONFIG_ACCOUNT_MAILBOX, mailbox},
             {Conf::CONFIG_ACCOUNT_USERAGENT, customUserAgent},
             {Conf::CONFIG_ACCOUNT_AUTOANSWER, autoAnswerEnabled ? TRUE_STR : FALSE_STR},
@@ -173,7 +171,7 @@ AccountConfig::fromMap(const std::map<std::string, std::string>& details)
 
     std::string tmpKey;
     parseString(details, Conf::CONFIG_ACCOUNT_TRANSPORT, tmpKey);
-    transport = sip_utils::getTransportType(tmpKey);
+    transport = getTransportType(tmpKey);
 }
 
 void

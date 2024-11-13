@@ -127,7 +127,7 @@ Conference::Conference(const std::shared_ptr<Account>& account,
                         uri = call->getPeerNumber();
                         isLocalMuted = call->isPeerMuted();
                         isPeerRecording = call->isPeerRecording();
-                        if (auto* transport = call->getTransport())
+                        if (auto transport = call->getTransport())
                             deviceId = transport->deviceId();
                     }
                     std::string_view peerId = string_remove_suffix(uri, '@');
@@ -172,7 +172,7 @@ Conference::Conference(const std::shared_ptr<Account>& account,
                             uri = call->getPeerNumber();
                             isLocalMuted = call->isPeerMuted();
                             isPeerRecording = call->isPeerRecording();
-                            if (auto* transport = call->getTransport())
+                            if (auto transport = call->getTransport())
                                 deviceId = transport->deviceId();
                         }
                     } else {
@@ -267,7 +267,7 @@ Conference::Conference(const std::shared_ptr<Account>& account,
         [&](const auto& participantId, bool state) { muteParticipant(participantId, state); });
     parser_.onRaiseHandUri([&](const auto& uri, bool state) {
         if (auto call = std::dynamic_pointer_cast<SIPCall>(getCallFromPeerID(uri)))
-            if (auto* transport = call->getTransport())
+            if (auto transport = call->getTransport())
                 setHandRaised(std::string(transport->deviceId()), state);
     });
 
@@ -816,7 +816,7 @@ Conference::removeParticipant(const std::string& participant_id)
     if (auto call = std::dynamic_pointer_cast<SIPCall>(getCall(participant_id))) {
         const auto& peerId = getRemoteId(call);
         participantsMuted_.erase(call->getCallId());
-        if (auto* transport = call->getTransport())
+        if (auto transport = call->getTransport())
             handsRaised_.erase(std::string(transport->deviceId()));
 #ifdef ENABLE_VIDEO
         auto sinkId = getConfId() + peerId;
@@ -1177,7 +1177,7 @@ Conference::setHandRaised(const std::string& deviceId, const bool& state)
             if (auto call = std::dynamic_pointer_cast<SIPCall>(getCall(p))) {
                 auto isPeerRequiringAttention = isHandRaised(deviceId);
                 std::string callDeviceId;
-                if (auto* transport = call->getTransport())
+                if (auto transport = call->getTransport())
                     callDeviceId = transport->deviceId();
                 if (deviceId == callDeviceId) {
                     if (state and not isPeerRequiringAttention) {
@@ -1713,7 +1713,7 @@ Conference::getCallWith(const std::string& accountUri, const std::string& device
 {
     for (const auto& p : getParticipantList()) {
         if (auto call = std::dynamic_pointer_cast<SIPCall>(getCall(p))) {
-            auto* transport = call->getTransport();
+            auto transport = call->getTransport();
             if (accountUri == string_remove_suffix(call->getPeerNumber(), '@') && transport
                 && deviceId == transport->deviceId()) {
                 return call;

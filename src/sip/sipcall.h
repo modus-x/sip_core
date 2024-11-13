@@ -227,7 +227,7 @@ public:
     void setSipTransport(const std::shared_ptr<SipTransport>& transport,
                          const std::string& contactHdr = {});
 
-    SipTransport* getTransport() { return sipTransport_.get(); }
+    std::shared_ptr<SipTransport> getTransport() { return sipTransport_; }
 
     void sendSIPInfo(std::string_view body, std::string_view subtype);
 

@@ -16,8 +16,10 @@
  */
 #pragma once
 #include "connectivity/sip_utils.h"
+#include "configurationmanager_interface.h"
 #include "config/serializable.h"
 #include "account_const.h"
+#include "transport.h"
 
 #include <string>
 #include <string_view>
@@ -58,8 +60,6 @@ struct AccountConfig: public Serializable {
 
     /** SIP hostname (SIP account) or DHT bootstrap nodes (sip_core account) */
     std::string hostname {};
-
-    TransportType transport {TransportType::UDP};
 
     /** True if the account is enabled. */
     bool enabled {true};
@@ -133,7 +133,8 @@ struct AccountConfig: public Serializable {
      */
     std::string notificationTopic {};
 
-    void setTransport(TransportType newTransport) { transport = newTransport; }
+    /** Transport type, default is UDP */
+    libsip_core::TransportType transport {TransportType::UDP};
 };
 
 inline void parseString(const std::map<std::string, std::string>& details, const char* key, std::string& s)

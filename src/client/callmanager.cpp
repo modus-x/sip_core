@@ -667,7 +667,7 @@ raiseParticipantHand(const std::string& accountId,
         if (auto conf = account->getConference(confId)) {
             if (auto call = std::static_pointer_cast<sip_core::SIPCall>(
                     conf->getCallFromPeerID(peerId))) {
-                if (auto* transport = call->getTransport())
+                if (auto transport = call->getTransport())
                     conf->setHandRaised(std::string(transport->deviceId()), state);
             }
         } else if (auto call = account->getCall(confId)) {

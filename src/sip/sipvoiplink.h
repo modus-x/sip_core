@@ -52,9 +52,10 @@
 namespace sip_core {
 
 class SIPCall;
-class SIPAccountBase;
 class SIPVoIPLink;
 class SipTransportBroker;
+class SipTransport;
+class SIPAccount;
 
 /**
  * @file sipvoiplink.h
@@ -105,8 +106,8 @@ public:
     /**
      * Guess the account related to an incoming SIP call.
      */
-    std::shared_ptr<SIPAccountBase> guessAccount(std::string_view userName,
-                                                 std::string_view server,
+    std::shared_ptr<SIPAccount> guessAccount(std::string_view userName,
+                                             std::string_view server,
                                                  std::string_view fromUri) const;
 
     int getModId();
@@ -124,20 +125,20 @@ public:
      * @param uri The uri from which we want to discover the address to use
      * @param transport The transport to use to discover the address
      */
-    void findLocalAddressFromTransport(pjsip_transport* transport,
-                                       pjsip_transport_type_e transportType,
+    void findLocalAddressFromTransport(std::shared_ptr<SipTransport> transport,
                                        const std::string& host,
                                        std::string& address,
                                        pj_uint16_t& port) const;
 
-    bool findLocalAddressFromSTUN(pjsip_transport* transport,
-                                  pj_str_t* stunServerName,
-                                  int stunPort,
-                                  std::string& address,
-                                  pj_uint16_t& port) const;
+    /**
+     * Initialize the transport selector from our SipTransport class
+     * @param transport     A transport associated with an account
+     * @return          	A transport selector structure
+     */
+    static pjsip_tpselector getTransportSelector(std::shared_ptr<SipTransport> transport);
 
     /**
-     * Initialize the transport selector
+     * Initialize the transport selector from pjsip structure
      * @param transport     A transport associated with an account
      * @return          	A transport selector structure
      */

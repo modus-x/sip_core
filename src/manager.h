@@ -45,7 +45,6 @@
 #include <optional>
 #include <string>
 #include <vector>
-#include "connectivity/transport.h"
 
 #include "sip_core/configurationmanager_interface.h"
 
@@ -478,7 +477,7 @@ public:
 
     void removeAccounts();
 
-    bool switchTransport(const std::string& accountId, TransportType type);
+    bool switchTransport(const std::string& accountId, libsip_core::TransportType transportType);
 
     /**
      * Set input audio plugin

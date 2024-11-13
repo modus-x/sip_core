@@ -57,7 +57,6 @@ constexpr const char* PRESENCE_NOTE_KEY = "presenceNote";
 constexpr const char* PRESENCE_MODULE_ENABLED_KEY = "presenceModuleEnabled";
 constexpr const char* KEEP_ALIVE_INTERVAL = "keepAliveInterval";
 constexpr const char* KEEP_ALIVE_TYPE = "keepAliveType";
-constexpr const char* TRANSPORT = "hash";
 
 
 constexpr const char* CRED_KEY = "credential";

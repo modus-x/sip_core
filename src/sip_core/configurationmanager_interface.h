@@ -62,6 +62,8 @@ struct LIBSIP_CORE_PUBLIC WebRtcParams
     bool noiseGen;
 };
 
+enum class LIBSIP_CORE_PUBLIC TransportType : uint8_t { TCP, UDP, TLS };
+
 LIBSIP_CORE_PUBLIC int getKeepAliveInterval(const std::string& accountId);
 LIBSIP_CORE_PUBLIC void setKeepAliveInterval(const std::string& accountId, int interval);
 
@@ -69,7 +71,7 @@ LIBSIP_CORE_PUBLIC void setWebRtcParams(const WebRtcParams& params);
 LIBSIP_CORE_PUBLIC const libsip_core::WebRtcParams& getWebRtcParams();
 
 LIBSIP_CORE_PUBLIC std::map<std::string, std::string> getAccountDetails(const std::string& accountID);
-LIBSIP_CORE_PUBLIC bool switchTransport(const std::string& accountID, Account::Transport type);
+LIBSIP_CORE_PUBLIC bool switchTransport(const std::string& accountID, TransportType transportType);
 LIBSIP_CORE_PUBLIC std::map<std::string, std::string> getVolatileAccountDetails(
     const std::string& accountID);
 LIBSIP_CORE_PUBLIC void setAccountDetails(const std::string& accountID,

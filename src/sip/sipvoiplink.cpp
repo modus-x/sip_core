@@ -29,26 +29,26 @@
 #endif
 
 #include "sdp.h"
-#include "sip/sipcall.h"
 #include "sip/sipaccount.h"
+#include "sip/sipcall.h"
 
 #include "manager.h"
 
+#include "audio/audio_rtp_session.h"
 #include "im/instant_messaging.h"
 #include "system_codec_container.h"
-#include "audio/audio_rtp_session.h"
 
 #ifdef ENABLE_VIDEO
-#include "video/video_rtp_session.h"
 #include "client/videomanager.h"
+#include "video/video_rtp_session.h"
 #endif
 
 #include "pres_sub_server.h"
 
 #include "connectivity/ip_utils.h"
 #include "connectivity/sip_utils.h"
-#include "string_utils.h"
 #include "logger.h"
+#include "string_utils.h"
 
 #include <pjsip/sip_endpoint.h>
 #include <pjsip/sip_uri.h>
@@ -61,8 +61,8 @@
 #error "Unsupported PJSIP version (requires version 2.10+)"
 #endif
 
-#include <istream>
 #include <algorithm>
+#include <istream>
 #include <regex>
 
 namespace sip_core {
@@ -270,27 +270,14 @@ transaction_request_cb(pjsip_rx_data* rdata)
 
     fromHeader = std::string(rdata->msg_info.msg_buf, rdata->msg_info.len);
 
-    auto transport = Manager::instance().sipVoIPLink().sipTransportBroker->addTransport(
-        rdata->tp_info.transport);
+    std::shared_ptr<SIPAccount> account
+        = Manager::instance().sipVoIPLink().guessAccount(toUsername, viaHostname, remote_hostname);
+    if (not account)
+        return PJ_FALSE;
 
-    std::shared_ptr<SIPAccountBase> account;
-    // If transport account is default-constructed, guessing account is allowed
-    const auto& waccount = transport ? transport->getAccount() : std::weak_ptr<SIPAccountBase> {};
-    if (is_uninitialized(waccount)) {
-        account = Manager::instance().sipVoIPLink().guessAccount(toUsername,
-                                                                 viaHostname,
-                                                                 remote_hostname);
-        if (not account)
-            return PJ_FALSE;
-        if (not transport and account->getAccountType() == SIPAccount::ACCOUNT_TYPE) {
-            if (not(transport = std::static_pointer_cast<SIPAccount>(account)->getTransport())) {
-                SIP_CORE_ERR("No suitable transport to answer this call.");
-                return PJ_FALSE;
-            }
-            SIP_CORE_WARN("Using transport from account.");
-        }
-    } else if (!(account = waccount.lock())) {
-        SIP_CORE_ERR("Dropping SIP request: account is expired.");
+    auto transport = account->getTransport();
+
+    if (not transport) {
         return PJ_FALSE;
     }
 
@@ -325,9 +312,9 @@ transaction_request_cb(pjsip_rx_data* rdata)
                 }
 
                 if (body_view.find("SvetophoneCommand") != std::string_view::npos) {
-                        emitSignal<libsip_core::PresenceSignal::NotifyWithoutSubscription>(std::string(body_view));
+                    emitSignal<libsip_core::PresenceSignal::NotifyWithoutSubscription>(
+                        std::string(body_view));
                 }
-
             }
         } else if (request.find(sip_utils::SIP_METHODS::MESSAGE) != std::string_view::npos) {
             // Reply 200 immediately (RFC 3428, ch. 7)
@@ -422,14 +409,11 @@ transaction_request_cb(pjsip_rx_data* rdata)
         return PJ_FALSE;
     }
 
-
     call->setPeerUaVersion(sip_utils::getPeerUserAgent(rdata));
     // The username can be used to join specific calls in conversations
     call->toUsername(std::string(toUsername));
 
-    // FIXME : for now, use the same address family as the SIP transport
-    auto family = pjsip_transport_type_get_af(
-        pjsip_transport_get_type_from_flag(transport->get()->flag));
+    auto family = transport->getAddressFamily();
 
     IpAddr addrSdp;
 
@@ -477,7 +461,7 @@ transaction_request_cb(pjsip_rx_data* rdata)
         return PJ_FALSE;
     }
 
-    pjsip_tpselector tp_sel = SIPVoIPLink::getTransportSelector(transport->get());
+    pjsip_tpselector tp_sel = SIPVoIPLink::getTransportSelector(transport);
     if (!dialog or pjsip_dlg_set_transport(dialog, &tp_sel) != PJ_SUCCESS) {
         SIP_CORE_ERR("Could not set transport for dialog");
         if (dialog)
@@ -574,7 +558,6 @@ transaction_request_cb(pjsip_rx_data* rdata)
     }
 
     call->setState(Call::ConnectionState::RINGING);
-
 
     std::map<std::string, std::string> extraHeaders;
 
@@ -805,7 +788,7 @@ SIPVoIPLink::shutdown()
     SIP_CORE_DBG("SIPVoIPLink@%p is shutdown", this);
 }
 
-std::shared_ptr<SIPAccountBase>
+std::shared_ptr<SIPAccount>
 SIPVoIPLink::guessAccount(std::string_view userName,
                           std::string_view server,
                           std::string_view fromUri) const
@@ -819,8 +802,8 @@ SIPVoIPLink::guessAccount(std::string_view userName,
                  fromUri.data());
     // Try to find the account id from username and server name by full match
 
-    std::shared_ptr<SIPAccountBase> result;
-    std::shared_ptr<SIPAccountBase> IP2IPAccount;
+    std::shared_ptr<SIPAccount> result;
+    std::shared_ptr<SIPAccount> IP2IPAccount;
     MatchRank best = MatchRank::NONE;
 
     // SIP accounts
@@ -1579,12 +1562,13 @@ SIPVoIPLink::resolveSrvName(const std::string& name,
     }
 
 void
-SIPVoIPLink::findLocalAddressFromTransport(pjsip_transport* transport,
-                                           pjsip_transport_type_e transportType,
+SIPVoIPLink::findLocalAddressFromTransport(std::shared_ptr<SipTransport> transport,
                                            const std::string& host,
                                            std::string& addr,
                                            pj_uint16_t& port) const
 {
+    auto transportType = transport->getPjSipTransportType();
+
     // Initialize the sip port with the default SIP port
     port = pjsip_transport_get_default_port_for_type(transportType);
 
@@ -1623,75 +1607,33 @@ SIPVoIPLink::findLocalAddressFromTransport(pjsip_transport* transport,
     port = param.ret_port;
 }
 
-bool
-SIPVoIPLink::findLocalAddressFromSTUN(pjsip_transport* transport,
-                                      pj_str_t* stunServerName,
-                                      int stunPort,
-                                      std::string& addr,
-                                      pj_uint16_t& port) const
+pjsip_tpselector
+SIPVoIPLink::getTransportSelector(std::shared_ptr<SipTransport> transport)
 {
-    // WARN: this code use pjstun_get_mapped_addr2 that works
-    // in IPv4 only.
-    // WARN: this function is blocking (network request).
+    pjsip_tpselector tp;
 
-    // Initialize the sip port with the default SIP port
-    port = sip_utils::DEFAULT_SIP_PORT;
+    auto type = transport->getTransportType();
 
-    // Get Local IP address
-    auto localIp = ip_utils::getLocalAddr(pj_AF_INET());
-    if (not localIp) {
-        SIP_CORE_WARN("Failed to find local IP");
-        return false;
+    switch (type) {
+    case TransportType::TCP:
+        // connection oriented. will be managed by pjsip transport manager
+        tp.type = PJSIP_TPSELECTOR_LISTENER;
+        tp.u.listener = std::static_pointer_cast<TCPTransport>(transport)->get_factory();
+        tp.disable_connection_reuse = PJ_FALSE;
+        break;
+    case TransportType::UDP:
+        // handled by us when socket is opened
+        tp.type = PJSIP_TPSELECTOR_TRANSPORT;
+        tp.u.transport = std::static_pointer_cast<UDPTransport>(transport)->get();
+        break;
+    default:
+        // Handle the case when the transport type is not recognized
+        break;
     }
 
-    addr = localIp.toString();
-
-    // Update address and port with active transport
-    RETURN_FALSE_IF_NULL(transport,
-                         "Transport is NULL in findLocalAddress, using local address %s:%u",
-                         addr.c_str(),
-                         port);
-
-    SIP_CORE_DBG("STUN mapping of '%s:%u'", addr.c_str(), port);
-
-    pj_sockaddr_in mapped_addr;
-    pj_sock_t sipSocket = pjsip_udp_transport_get_socket(transport);
-    const pjstun_setting stunOpt
-        = {PJ_TRUE, localIp.getFamily(), *stunServerName, stunPort, *stunServerName, stunPort};
-    const pj_status_t stunStatus = pjstun_get_mapped_addr2(&cp_.factory,
-                                                           &stunOpt,
-                                                           1,
-                                                           &sipSocket,
-                                                           &mapped_addr);
-
-    switch (stunStatus) {
-    case PJLIB_UTIL_ESTUNNOTRESPOND:
-        SIP_CORE_ERR("No response from STUN server %.*s",
-                     (int) stunServerName->slen,
-                     stunServerName->ptr);
-        return false;
-
-    case PJLIB_UTIL_ESTUNSYMMETRIC:
-        SIP_CORE_ERR("Different mapped addresses are returned by servers.");
-        return false;
-
-    case PJ_SUCCESS:
-        port = pj_sockaddr_in_get_port(&mapped_addr);
-        addr = IpAddr((const sockaddr_in&) mapped_addr).toString();
-        SIP_CORE_DBG("STUN server %.*s replied '%s:%u'",
-                     (int) stunServerName->slen,
-                     stunServerName->ptr,
-                     addr.c_str(),
-                     port);
-        return true;
-
-    default: // use given address, silent any not handled error
-        SIP_CORE_WARN("Error from STUN server %.*s, using source address",
-                      (int) stunServerName->slen,
-                      stunServerName->ptr);
-        return false;
-    }
+    return tp;
 }
+
 #undef RETURN_IF_NULL
 #undef RETURN_FALSE_IF_NULL
 } // namespace sip_core

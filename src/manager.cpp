@@ -903,10 +903,10 @@ Manager::answerCall(const std::string& accountId,
 }
 
 bool
-Manager::switchTransport(const std::string& accountId, TransportType type)
+Manager::switchTransport(const std::string& accountId, libsip_core::TransportType transportType)
 {
     if (auto account = getAccount(accountId)) {
-        return account->switchTransport(type);
+        return account->switchTransport(transportType);
     }
 }
 

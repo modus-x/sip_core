@@ -32,7 +32,6 @@
 #include "registration_states.h"
 #include "im/message_engine.h"
 #include "connectivity/ip_utils.h"
-#include "connectivity/transport.h"
 #include "media_codec.h"
 #include "media/media_attribute.h"
 #include "logger.h"
@@ -110,9 +109,9 @@ public:
     virtual void loadConfig();
 
     /**
-     * Every account type will support transport types listed in account_const.
+     * Every account type will support different transports.
      */
-    virtual bool switchTransport(TransportType type) = 0;
+    virtual bool switchTransport(libsip_core::TransportType transportType) = 0;
 
     const AccountConfig& config() const
     {
