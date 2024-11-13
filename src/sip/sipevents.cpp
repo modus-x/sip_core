@@ -153,9 +153,7 @@ SIPEvents::registerEventPkg(const std::string& event)
     accept[3] = CONST_PJ_STR("text/plain");
 
     status = pjsip_evsub_register_pkg(new_module,
-                                      &pj_event,
-                                      DEFAULT_EVENT_EXPIRE,
-                                      PJ_ARRAY_SIZE(accept),
+                                      &pj_event, 300, PJ_ARRAY_SIZE(accept),
                                       accept);
     if (status != PJ_SUCCESS) {
         pjsip_endpt_unregister_module(endpoint, new_module);
