@@ -1136,11 +1136,6 @@ SIPAccount::getFromUri() const
     std::string username(conf.username.empty() ? getLoginName() : conf.username);
     std::string hostname(conf.hostname);
 
-    // UDP does not require the transport specification
-    if (getTransportType() == PJSIP_TRANSPORT_TCP) {
-        transport = ";transport=tcp";
-    }
-
     // Get machine hostname if not provided
     if (hostname.empty()) {
         hostname = sip_utils::as_view(*pj_gethostname());
@@ -1187,11 +1182,6 @@ SIPAccount::getServerUri() const
 {
     std::string scheme = "sip:";
     std::string transport;
-
-    // UDP does not require the transport specification
-    if (getTransportType() == PJSIP_TRANSPORT_TCP) {
-        transport = ";transport=tcp";
-    }
 
     std::string host;
     if (IpAddr::isIpv6(config().hostname))
