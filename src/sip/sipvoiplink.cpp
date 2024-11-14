@@ -99,6 +99,45 @@ static std::shared_ptr<SIPCall> getCallFromInvite(pjsip_inv_session* inv);
 static void processInviteResponseHelper(pjsip_inv_session* inv, pjsip_event* e);
 #endif
 
+bool
+SIPVoIPLink::registerEventPackage(const std::string& eventPackage, int expires)
+{
+    if (std::find(registeredModules_.begin(), registeredModules_.end(), eventPackage)
+        != registeredModules_.end()) {
+        return PJ_SUCCESS;
+    }
+    pj_status_t status;
+    pj_str_t accept[2];
+
+    auto endpoint = Manager::instance().sipVoIPLink().getEndpoint();
+
+    pjsip_module* new_module = PJ_POOL_ZALLOC_T(pool_.get(), pjsip_module);
+
+    auto modName = string_join({eventPackage, "mod"}, "-");
+    new_module->name = CONST_PJ_STR(modName);
+    new_module->id = -1;
+    new_module->priority = PJSIP_MOD_PRIORITY_DIALOG_USAGE;
+
+    auto pj_event = CONST_PJ_STR(eventPackage);
+
+    status = pjsip_endpt_register_module(endpoint, new_module);
+
+    if (status != PJ_SUCCESS)
+        return status;
+
+    accept[0] = CONST_PJ_STR("application/xml");
+    accept[1] = CONST_PJ_STR("text/plain");
+
+    status = pjsip_evsub_register_pkg(new_module, &pj_event, expires, PJ_ARRAY_SIZE(accept), accept);
+    if (status != PJ_SUCCESS) {
+        pjsip_endpt_unregister_module(endpoint, new_module);
+        return status;
+    }
+
+    registeredModules_.push_back(eventPackage);
+    return status;
+}
+
 static pj_bool_t
 handleIncomingOptions(pjsip_rx_data* rdata)
 {

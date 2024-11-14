@@ -1243,6 +1243,12 @@ Manager::ManagerPimpl::hangupConference(Conference& conference)
 }
 
 bool
+Manager::registerEventPackage(const std::string& eventPackage, int expires)
+{
+    return pimpl_->sipLink_->registerEventPackage(eventPackage, expires);
+}
+
+bool
 Manager::addMainParticipant(const std::string& accountId, const std::string& conferenceId)
 {
     SIP_CORE_INFO("Add main participant to conference %s", conferenceId.c_str());

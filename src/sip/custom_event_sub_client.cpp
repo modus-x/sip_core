@@ -664,8 +664,7 @@ CustomEventSubClient::subscribe()
     pjsip_regc* regc = acc->getRegistrationInfo();
     if (regc and acc->hasServiceRoute())
         pjsip_regc_set_route_set(regc,
-                                 sip_utils::createRouteSet(acc->getServiceRoute(),
-                                                           manager_->getPool()));
+                                 sip_utils::createRouteSet(acc->getServiceRoute(), pool_));
 
     // attach the client data to the sub
     pjsip_evsub_set_mod_data(sub_, modId_, this);

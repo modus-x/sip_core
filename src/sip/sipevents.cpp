@@ -40,21 +40,11 @@ namespace sip_core {
 
 using sip_utils::CONST_PJ_STR;
 
-static std::vector<std::string> REGISTERED_MODULES = {};
 
 SIPEvents::SIPEvents(SIPAccount* acc)
     : enabled_(true)
-    , sub_list_()
-    , cp_()
-    , pool_()
     , acc_(acc)
-{
-    /* init pool */
-    pj_caching_pool_init(&cp_, &pj_pool_factory_default_policy, 0);
-    pool_ = pj_pool_create(&cp_.factory, "events", 1000, 1000, NULL);
-    if (!pool_)
-        throw std::runtime_error("Could not allocate pool for SipEvents");
-}
+{}
 
 SIPEvents::~SIPEvents()
 {
@@ -64,9 +54,6 @@ SIPEvents::~SIPEvents()
     // for (const auto & c : sub_client_list_)
     //    delete(c);
     sub_list_.clear();
-
-    pj_pool_release(pool_);
-    pj_caching_pool_destroy(&cp_);
 }
 
 SIPAccount*
@@ -81,12 +68,6 @@ SIPEvents::getModId() const
     return Manager::instance().sipVoIPLink().getModId();
 }
 
-pj_pool_t*
-SIPEvents::getPool() const
-{
-    return pool_;
-}
-
 void
 SIPEvents::enable(bool enabled)
 {
@@ -96,11 +77,6 @@ SIPEvents::enable(bool enabled)
 void
 SIPEvents::subscribeClient(const std::string& uri, const std::string& event, bool flag)
 {
-    if (registerEventPkg(event) != PJ_SUCCESS) {
-        SIP_CORE_WARN("Failed to register event.");
-        return;
-    }
-
     /* Check if the buddy was already subscribed */
     for (const auto& c : sub_list_) {
         if (c->getURI() == uri && c->getEvent() == event) {
@@ -120,48 +96,6 @@ SIPEvents::subscribeClient(const std::string& uri, const std::string& event, boo
         }
         // the uri has to be accepted before being added in the list
     }
-}
-pj_status_t
-SIPEvents::registerEventPkg(const std::string& event)
-{
-    if (std::find(REGISTERED_MODULES.begin(), REGISTERED_MODULES.end(), event)
-        != REGISTERED_MODULES.end()) {
-        return PJ_SUCCESS;
-    }
-    pj_status_t status;
-    pj_str_t accept[4];
-
-    auto endpoint = Manager::instance().sipVoIPLink().getEndpoint();
-
-    pjsip_module* new_module = PJ_POOL_ZALLOC_T(pool_, pjsip_module);
-
-    auto modName = string_join({event, "mod"}, "-");
-    new_module->name = CONST_PJ_STR(modName);
-    new_module->id = -1;
-    new_module->priority = PJSIP_MOD_PRIORITY_DIALOG_USAGE;
-
-    auto pj_event = CONST_PJ_STR(event);
-
-    status = pjsip_endpt_register_module(endpoint, new_module);
-
-    if (status != PJ_SUCCESS)
-        return status;
-
-    accept[0] = CONST_PJ_STR("application/pidf+xml");
-    accept[1] = CONST_PJ_STR("application/xml");
-    accept[2] = CONST_PJ_STR("application/xpidf+xml");
-    accept[3] = CONST_PJ_STR("text/plain");
-
-    status = pjsip_evsub_register_pkg(new_module,
-                                      &pj_event, 300, PJ_ARRAY_SIZE(accept),
-                                      accept);
-    if (status != PJ_SUCCESS) {
-        pjsip_endpt_unregister_module(endpoint, new_module);
-        return status;
-    }
-
-    REGISTERED_MODULES.push_back(event);
-    return status;
 }
 
 void

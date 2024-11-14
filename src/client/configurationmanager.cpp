@@ -62,6 +62,12 @@ constexpr unsigned CODECS_NOT_LOADED = 0x1000; /** Codecs not found */
 using sip_core::SIPAccount;
 using sip_core::AudioDeviceType;
 
+bool
+registerEventPackage(const std::string& eventPackage, int expires)
+{
+    return sip_core::Manager::instance().registerEventPackage(eventPackage, expires);
+}
+
 int
 getKeepAliveInterval(const std::string& accountId) {
     return sip_core::Manager::instance().getKeepAliveInterval(accountId);

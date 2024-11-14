@@ -114,6 +114,8 @@ public:
 
     std::string getHomePath();
 
+    bool registerEventPackage(const std::string& eventPackage, int expires);
+
     void monitor(bool continuous);
 
     void setAutoAnswer(const std::string& accountId, bool enable) const;

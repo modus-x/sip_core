@@ -69,6 +69,11 @@ public:
     ~SIPVoIPLink();
 
     /**
+     * Register module for custom event subscription
+     */
+    bool registerEventPackage(const std::string& eventPackage, int expire);
+
+    /**
      * Destroy structures
      */
     void shutdown();
@@ -77,7 +82,6 @@ public:
      * Event listener. Each event send by the call manager is received and handled from here
      */
     void handleEvents();
-
 
 
     /**
@@ -157,6 +161,8 @@ private:
     std::unique_ptr<pj_pool_t, decltype(pj_pool_release)&> pool_;
     std::atomic_bool running_ {true};
     std::thread sipThread_;
+
+    std::vector<std::string> registeredModules_;
 
     friend class SIPTest;
 };

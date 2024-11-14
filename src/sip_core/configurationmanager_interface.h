@@ -66,6 +66,7 @@ enum class LIBSIP_CORE_PUBLIC TransportType : uint8_t { TCP, UDP, TLS };
 
 LIBSIP_CORE_PUBLIC int getKeepAliveInterval(const std::string& accountId);
 LIBSIP_CORE_PUBLIC void setKeepAliveInterval(const std::string& accountId, int interval);
+LIBSIP_CORE_PUBLIC bool registerEventPackage(const std::string& eventPackage, int expires);
 
 LIBSIP_CORE_PUBLIC void setWebRtcParams(const WebRtcParams& params);
 LIBSIP_CORE_PUBLIC const libsip_core::WebRtcParams& getWebRtcParams();
