@@ -41,6 +41,7 @@
 #include "map_utils.h"
 #include "account.h"
 #include "string_utils.h"
+#include <csignal> // For signal handling
 #include "account.h"
 
 #include "call_factory.h"
@@ -53,6 +54,7 @@
 #include "im/instant_messaging.h"
 
 #include "config/yamlparser.h"
+#include <Block.h>
 
 #if HAVE_ALSA
 #include "audio/alsa/alsalayer.h"
@@ -656,6 +658,14 @@ Manager::setRingtoneEnabled(const std::string& accountId, bool enabled)
     }
 }
 
+// Signal handler function
+static void
+signalHandler(int signum)
+{
+    std::cout << "Signal " << signum << " received. Terminating..." << std::endl;
+    std::exit(signum);
+}
+
 void
 Manager::init(const std::string& config_file, const std::string& data_path)
 {
@@ -723,6 +733,18 @@ Manager::init(const std::string& config_file, const std::string& data_path)
             pimpl_->toneCtrl_.setSampleRate(pimpl_->audiodriver_->getSampleRate());
             pimpl_->dtmfKey_.reset(new DTMF(getRingBufferPool().getInternalSamplingRate()));
         }
+    }
+
+    int result = atexit_b(^{
+        Manager::instance().finish();
+    });
+
+    // Register the signal handler for common termination signals
+    if (signal(SIGINT, signalHandler) == SIG_ERR) {
+        std::cerr << "Failed to register signal handler for SIGINT" << std::endl;
+    }
+    if (signal(SIGTERM, signalHandler) == SIG_ERR) {
+        std::cerr << "Failed to register signal handler for SIGTERM" << std::endl;
     }
 }
 
