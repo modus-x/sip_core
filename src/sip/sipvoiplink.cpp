@@ -113,12 +113,12 @@ SIPVoIPLink::registerEventPackage(const std::string& eventPackage, int expires)
 
     pjsip_module* new_module = PJ_POOL_ZALLOC_T(pool_.get(), pjsip_module);
 
-    auto modName = string_join({eventPackage, "mod"}, "-");
-    new_module->name = CONST_PJ_STR(modName);
+    // mod name won't be copied
+    auto module_name = CONST_PJ_STR("mod-" + eventPackage);
+    pj_strdup(pool_.get(), &new_module->name, &module_name);
+
     new_module->id = -1;
     new_module->priority = PJSIP_MOD_PRIORITY_DIALOG_USAGE;
-
-    auto pj_event = CONST_PJ_STR(eventPackage);
 
     status = pjsip_endpt_register_module(endpoint, new_module);
 
@@ -128,7 +128,14 @@ SIPVoIPLink::registerEventPackage(const std::string& eventPackage, int expires)
     accept[0] = CONST_PJ_STR("application/xml");
     accept[1] = CONST_PJ_STR("text/plain");
 
-    status = pjsip_evsub_register_pkg(new_module, &pj_event, expires, PJ_ARRAY_SIZE(accept), accept);
+    auto event_name = CONST_PJ_STR(eventPackage);
+
+    // event name will be copied
+    status = pjsip_evsub_register_pkg(new_module,
+                                      &event_name,
+                                      expires,
+                                      PJ_ARRAY_SIZE(accept),
+                                      accept);
     if (status != PJ_SUCCESS) {
         pjsip_endpt_unregister_module(endpoint, new_module);
         return status;
