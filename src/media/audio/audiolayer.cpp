@@ -359,7 +359,7 @@ AudioLayer::getToPlay(AudioFormat format, size_t writableSamples)
             std::lock_guard<std::mutex> lock(audioProcessorMutex);
 
 #if defined(_WIN32) || defined(__linux__)
-            adjustVolume(resampled, false);
+            adjustVolume(resampled, true);
 #endif
 
             if (audioProcessor) {
