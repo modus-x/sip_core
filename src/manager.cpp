@@ -751,6 +751,11 @@ Manager::init(const std::string& config_file, const std::string& data_path)
 void
 Manager::finish() noexcept
 {
+    // return if not initialized
+    if (not initialized)
+        return;
+
+    // return if already finished
     bool expected = false;
     if (not pimpl_->finished_.compare_exchange_strong(expected, true))
         return;
@@ -782,7 +787,7 @@ Manager::finish() noexcept
         SIP_CORE_DBG("Resetting audio layer completed");
 
         // Flush remaining tasks (free lambda' with capture)
-        // pimpl_->scheduler_.stop();
+        pimpl_->scheduler_.stop();
 
         // NOTE: sipLink_->shutdown() is needed because this will perform
         // sipTransportBroker->shutdown(); which will call Manager::instance().sipVoIPLink()
