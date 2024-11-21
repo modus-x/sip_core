@@ -181,7 +181,6 @@ AudioLayer::setHasNativeNS(bool hasNativeNS)
 void
 AudioLayer::createAudioProcessor()
 {
-
     if (audioProcessor) {
         return;
     }
@@ -213,7 +212,9 @@ AudioLayer::createAudioProcessor()
     if (pref_.getAudioProcessor() == "webrtc") {
 #if HAVE_WEBRTC_AP
         SIP_CORE_WARN("[audiolayer] using WebRTCAudioProcessor");
-        audioProcessor.reset(new WebRTCAudioProcessor(formatForProcessor, frame_size, pref_.getWebRtcParams().experimentalNs));
+        audioProcessor.reset(new WebRTCAudioProcessor(formatForProcessor,
+                                                      frame_size,
+                                                      pref_.getWebRtcParams().experimentalNs));
 #else
         SIP_CORE_ERR("[audiolayer] audioProcessor preference is webrtc, but library not linked! "
                      "using NullAudioProcessor instead");
@@ -248,13 +249,13 @@ AudioLayer::createAudioProcessor()
 
     audioProcessor->enableVoiceActivityDetection(pref_.getVadEnabled());
 
-        if (pref_.getAudioProcessor() == "webrtc") {
+    if (pref_.getAudioProcessor() == "webrtc") {
 #if HAVE_WEBRTC_AP
-           WebRTCAudioProcessor* proc = static_cast < WebRTCAudioProcessor*> (audioProcessor.get());
-            proc->setWebRtcParams(pref_.getWebRtcParams());
+        WebRTCAudioProcessor* proc = static_cast<WebRTCAudioProcessor*>(audioProcessor.get());
+        proc->setWebRtcParams(pref_.getWebRtcParams());
 #endif
     }
-    }
+}
 
 // must acquire lock beforehand
 void
@@ -357,7 +358,9 @@ AudioLayer::getToPlay(AudioFormat format, size_t writableSamples)
         if (resampled) {
             std::lock_guard<std::mutex> lock(audioProcessorMutex);
 
-            adjustVolume(resampled, true);
+#if defined(_WIN32) || defined(__linux__)
+            adjustVolume(resampled, false);
+#endif
 
             if (audioProcessor) {
                 audioProcessor->putPlayback(resampled);
@@ -375,7 +378,6 @@ AudioLayer::getToPlay(AudioFormat format, size_t writableSamples)
 void
 AudioLayer::adjustVolume(std::shared_ptr<AudioFrame>& frame, bool playback)
 {
-
     AVFrame* pFrame = frame->pointer();
     if (!pFrame) {
         return;
@@ -415,11 +417,15 @@ AudioLayer::putRecorded(std::shared_ptr<AudioFrame>&& frame)
     if (audioProcessor && playbackStarted_ && recordStarted_) {
         audioProcessor->putRecorded(std::move(frame));
         while (auto rec = audioProcessor->getProcessed()) {
+#if defined(_WIN32) || defined(__linux__)
             adjustVolume(rec, false);
+#endif
             mainRingBuffer_->put(std::move(rec));
         }
     } else {
+#if defined(_WIN32) || defined(__linux__)
         adjustVolume(frame, false);
+#endif
         mainRingBuffer_->put(std::move(frame));
     }
 

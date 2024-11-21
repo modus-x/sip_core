@@ -21,10 +21,13 @@
 #include "corelayer.h"
 #include "manager.h"
 #include "audiodevice.h"
+#include <Accelerate/Accelerate.h>
 
 namespace sip_core {
 
-dispatch_queue_t audioConfigurationQueueMacOS() {
+dispatch_queue_t
+audioConfigurationQueueMacOS()
+{
     static dispatch_once_t queueCreationGuard;
     static dispatch_queue_t queue;
     dispatch_once(&queueCreationGuard, ^{
@@ -161,8 +164,9 @@ CoreLayer::initAudioLayerIO(AudioDeviceType stream)
     if (stream == AudioDeviceType::CAPTURE || stream == AudioDeviceType::ALL) {
         auto captureList = getDeviceList(true);
         bool useFallbackDevice = true;
-        // try to set the device selected by the user. Otherwise, the default device will be set automatically.
-        if(indexIn_ < captureList.size()) {
+        // try to set the device selected by the user. Otherwise, the default device will be set
+        // automatically.
+        if (indexIn_ < captureList.size()) {
             inputDeviceID = captureList[indexIn_].id_;
 
             auto error = AudioUnitSetProperty(ioUnit_,
@@ -176,8 +180,8 @@ CoreLayer::initAudioLayerIO(AudioDeviceType stream)
         // get a fallback capture device id so we could listen when the device disconnect.
         if (useFallbackDevice) {
             const AudioObjectPropertyAddress inputInfo = {kAudioHardwarePropertyDefaultInputDevice,
-                kAudioObjectPropertyScopeGlobal,
-                kAudioObjectPropertyElementMaster};
+                                                          kAudioObjectPropertyScopeGlobal,
+                                                          kAudioObjectPropertyElementMaster};
             auto status = AudioObjectGetPropertyData(kAudioObjectSystemObject,
                                                      &inputInfo,
                                                      0,
@@ -191,11 +195,12 @@ CoreLayer::initAudioLayerIO(AudioDeviceType stream)
         }
     }
 
-    if (stream == AudioDeviceType::PLAYBACK || stream == AudioDeviceType::ALL || stream == AudioDeviceType::RINGTONE) {
+    if (stream == AudioDeviceType::PLAYBACK || stream == AudioDeviceType::ALL
+        || stream == AudioDeviceType::RINGTONE) {
         auto playbackList = getDeviceList(false);
         auto index = stream == AudioDeviceType::RINGTONE ? indexRing_ : indexOut_;
         bool useFallbackDevice = true;
-        if(index < playbackList.size()) {
+        if (index < playbackList.size()) {
             playbackDeviceID = playbackList[index].id_;
             auto error = AudioUnitSetProperty(ioUnit_,
                                               kAudioOutputUnitProperty_CurrentDevice,
@@ -208,8 +213,8 @@ CoreLayer::initAudioLayerIO(AudioDeviceType stream)
         // get fallback output device id.
         if (useFallbackDevice) {
             const AudioObjectPropertyAddress outputInfo = {kAudioHardwarePropertyDefaultOutputDevice,
-                kAudioObjectPropertyScopeGlobal,
-                kAudioObjectPropertyElementMaster};
+                                                           kAudioObjectPropertyScopeGlobal,
+                                                           kAudioObjectPropertyElementMaster};
             auto status = AudioObjectGetPropertyData(kAudioObjectSystemObject,
                                                      &outputInfo,
                                                      0,
@@ -232,9 +237,12 @@ CoreLayer::initAudioLayerIO(AudioDeviceType stream)
 
     // add listener to detect when devices changed
     const AudioObjectPropertyAddress changedAddress = {kAudioHardwarePropertyDevices,
-                                                     kAudioObjectPropertyScopeGlobal,
-                                                     kAudioObjectPropertyElementMaster};
-    AudioObjectAddPropertyListener(kAudioObjectSystemObject, &changedAddress, &devicesChangedCallback, this);
+                                                       kAudioObjectPropertyScopeGlobal,
+                                                       kAudioObjectPropertyElementMaster};
+    AudioObjectAddPropertyListener(kAudioObjectSystemObject,
+                                   &changedAddress,
+                                   &devicesChangedCallback,
+                                   this);
 
     // Set stream format
     AudioStreamBasicDescription info;
@@ -405,9 +413,9 @@ CoreLayer::deviceIsAliveCallback(AudioObjectID inObjectID,
 
 OSStatus
 CoreLayer::devicesChangedCallback(AudioObjectID inObjectID,
-                                 UInt32 inNumberAddresses,
-                                 const AudioObjectPropertyAddress inAddresses[],
-                                 void* inRefCon)
+                                  UInt32 inNumberAddresses,
+                                  const AudioObjectPropertyAddress inAddresses[],
+                                  void* inRefCon)
 {
     if (static_cast<CoreLayer*>(inRefCon)->status_ != Status::Started)
         return kAudioServicesNoError;
@@ -438,12 +446,21 @@ CoreLayer::write(AudioUnitRenderActionFlags* ioActionFlags,
                  UInt32 inNumberFrames,
                  AudioBufferList* ioData)
 {
+    float desiredGain = playbackGain_;
+
     auto format = audioFormat_;
     format.sample_rate = outSampleRate_;
     format.nb_channels = outChannelsPerFrame_;
     format.sampleFormat = AV_SAMPLE_FMT_FLTP;
     if (auto toPlay = getPlayback(format, inNumberFrames)) {
         for (int i = 0; i < format.nb_channels; ++i) {
+            // adjust volume
+            vDSP_vsmul((float*) toPlay->pointer()->extended_data[i],
+                       1,
+                       &desiredGain,
+                       (float*) toPlay->pointer()->extended_data[i],
+                       1,
+                       inNumberFrames);
             std::copy_n((Float32*) toPlay->pointer()->extended_data[i],
                         inNumberFrames,
                         (Float32*) ioData->mBuffers[i].mData);
@@ -481,6 +498,7 @@ CoreLayer::read(AudioUnitRenderActionFlags* ioActionFlags,
         SIP_CORE_WARN("No frames for input.");
         return;
     }
+
     auto format = audioInputFormat_;
     format.sampleFormat = AV_SAMPLE_FMT_FLTP;
     auto inBuff = std::make_shared<AudioFrame>(format, inNumberFrames);
@@ -494,16 +512,23 @@ CoreLayer::read(AudioUnitRenderActionFlags* ioActionFlags,
         buffer.mBuffers[i].mData = inBuff->pointer()->extended_data[i];
     }
 
-    // Write the mic samples in our buffer
-    checkErr(AudioUnitRender(ioUnit_,
-                             ioActionFlags,
-                             inTimeStamp,
-                             inBusNumber,
-                             inNumberFrames, &buffer));
-
     if (isCaptureMuted_) {
         libav_utils::fillWithSilence(inBuff->pointer());
+    } else {
+        // Write the mic samples in our buffer
+        checkErr(AudioUnitRender(ioUnit_,
+                                 ioActionFlags,
+                                 inTimeStamp,
+                                 inBusNumber,
+                                 inNumberFrames,
+                                 &buffer));
+        float desiredGain = captureGain_;
+        for (UInt32 bufferIndex = 0; bufferIndex < inChannelsPerFrame_; ++bufferIndex) {
+            float* rawBuffer = (float*) buffer.mBuffers[bufferIndex].mData;
+            vDSP_vsmul(rawBuffer, 1, &desiredGain, rawBuffer, 1, inNumberFrames);
+        }
     }
+
     putRecorded(std::move(inBuff));
 }
 
@@ -555,13 +580,13 @@ CoreLayer::getDeviceList(bool getCapture) const
     for (int i = 0; i < nDevices; ++i) {
         auto dev = AudioDevice {devids[i], getCapture};
         if (dev.channels_ > 0) { // Channels < 0 if inactive.
-            //There is additional stream under the built-in device - the raw streams enabled by AUVP.
+            // There is additional stream under the built-in device - the raw streams enabled by AUVP.
             if (dev.name_.find("VPAUAggregateAudioDevice") != std::string::npos) {
-                //ignore VPAUAggregateAudioDevice
+                // ignore VPAUAggregateAudioDevice
                 continue;
             }
-            //for input device check if it not speaker
-            //since the speaker device has input stream for echo cancellation.
+            // for input device check if it not speaker
+            // since the speaker device has input stream for echo cancellation.
             if (getCapture) {
                 auto devOutput = AudioDevice {devids[i], !getCapture};
                 // it is output device
