@@ -465,6 +465,9 @@ SIPCall::SIPSessionReinvite(const std::vector<MediaAttribute>& mediaAttrList)
         // Add user-agent header
         sip_utils::addUserAgentHeader(acc->getUserAgentName(), tdata);
 
+        // Add out contact header
+        sip_utils::addContactHeader(contactHeader_, tdata);
+
         result = pjsip_inv_send_msg(inviteSession_.get(), tdata);
         if (result == PJ_SUCCESS)
             return PJ_SUCCESS;
