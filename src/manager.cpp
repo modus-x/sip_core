@@ -54,7 +54,6 @@
 #include "im/instant_messaging.h"
 
 #include "config/yamlparser.h"
-#include <Block.h>
 
 #if HAVE_ALSA
 #include "audio/alsa/alsalayer.h"
@@ -666,6 +665,10 @@ signalHandler(int signum)
     std::exit(signum);
 }
 
+static void beforeExit() {
+	Manager::instance().finish();
+}
+
 void
 Manager::init(const std::string& config_file, const std::string& data_path)
 {
@@ -734,10 +737,8 @@ Manager::init(const std::string& config_file, const std::string& data_path)
             pimpl_->dtmfKey_.reset(new DTMF(getRingBufferPool().getInternalSamplingRate()));
         }
     }
-
-    int result = atexit_b(^{
-        Manager::instance().finish();
-    });
+	
+	atexit(beforeExit);
 
     // Register the signal handler for common termination signals
     if (signal(SIGINT, signalHandler) == SIG_ERR) {
