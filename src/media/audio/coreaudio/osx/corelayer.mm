@@ -33,13 +33,41 @@ dispatch_queue_t audioConfigurationQueueMacOS() {
     return queue;
 }
 
+enum AVSampleFormat
+getFormatFromStreamDescription(const AudioStreamBasicDescription& descr)
+{
+    if (descr.mFormatID == kAudioFormatLinearPCM) {
+        BOOL isPlanar = descr.mFormatFlags & kAudioFormatFlagIsNonInterleaved;
+        if (descr.mBitsPerChannel == 16) {
+            if (descr.mFormatFlags & kAudioFormatFlagIsSignedInteger) {
+                return isPlanar ? AV_SAMPLE_FMT_S16P : AV_SAMPLE_FMT_S16;
+            }
+        } else if (descr.mBitsPerChannel == 32) {
+            if (descr.mFormatFlags & kAudioFormatFlagIsFloat) {
+                return isPlanar ? AV_SAMPLE_FMT_FLTP : AV_SAMPLE_FMT_FLT;
+            } else if (descr.mFormatFlags & kAudioFormatFlagIsSignedInteger) {
+                return isPlanar ? AV_SAMPLE_FMT_S32P : AV_SAMPLE_FMT_S32;
+            }
+        }
+    }
+    NSLog(@"Unsupported core audio format");
+    return AV_SAMPLE_FMT_NONE;
+}
+
+AudioFormat
+audioFormatFromDescription(const AudioStreamBasicDescription& descr)
+{
+    return AudioFormat {static_cast<unsigned int>(descr.mSampleRate),
+                        static_cast<unsigned int>(descr.mChannelsPerFrame),
+                        getFormatFromStreamDescription(descr)};
+}
+
 // AudioLayer implementation.
 CoreLayer::CoreLayer(const AudioPreference& pref)
     : AudioLayer(pref)
     , indexIn_(pref.getAlsaCardin())
     , indexOut_(pref.getAlsaCardout())
     , indexRing_(pref.getAlsaCardRingtone())
-    , playbackBuff_(0, audioFormat_)
 {}
 
 CoreLayer::~CoreLayer()
@@ -211,6 +239,8 @@ CoreLayer::initAudioLayerIO(AudioDeviceType stream)
     // Set stream format
     AudioStreamBasicDescription info;
     size = sizeof(info);
+
+    // get properties of stream that will be played from AU to playback device
     checkErr(AudioUnitGetProperty(ioUnit_,
                                   kAudioUnitProperty_StreamFormat,
                                   kAudioUnitScope_Output,
@@ -218,19 +248,20 @@ CoreLayer::initAudioLayerIO(AudioDeviceType stream)
                                   &info,
                                   &size));
 
+    // save sample rate that will be used
     outSampleRate_ = info.mSampleRate;
+
+    // get properties of stream that our app will send to AU
     checkErr(AudioUnitGetProperty(ioUnit_,
                                   kAudioUnitProperty_StreamFormat,
                                   kAudioUnitScope_Input,
                                   outputBus,
                                   &info,
                                   &size));
-
     audioFormat_ = {static_cast<unsigned int>(outSampleRate_),
-                    static_cast<unsigned int>(info.mChannelsPerFrame)};
-
+                    static_cast<unsigned int>(info.mChannelsPerFrame),
+                    getFormatFromStreamDescription(info)};
     outChannelsPerFrame_ = info.mChannelsPerFrame;
-
     info.mSampleRate = audioFormat_.sample_rate; // Only change sample rate.
 
     checkErr(AudioUnitSetProperty(ioUnit_,
@@ -262,7 +293,8 @@ CoreLayer::initAudioLayerIO(AudioDeviceType stream)
                                   &size));
 
     audioInputFormat_ = {static_cast<unsigned int>(inSampleRate_),
-                         static_cast<unsigned int>(info.mChannelsPerFrame)};
+                         static_cast<unsigned int>(info.mChannelsPerFrame),
+                         getFormatFromStreamDescription(info)};
     hardwareInputFormatAvailable(audioInputFormat_);
     // Keep everything else and change only sample rate (or else SPLOSION!!!)
     info.mSampleRate = audioInputFormat_.sample_rate;
@@ -286,19 +318,6 @@ CoreLayer::initAudioLayerIO(AudioDeviceType stream)
                                   outputBus,
                                   &bufferSizeFrames,
                                   &size));
-
-    UInt32 bufferSizeBytes = bufferSizeFrames * sizeof(Float32);
-    size = offsetof(AudioBufferList, mBuffers) + (sizeof(AudioBuffer) * info.mChannelsPerFrame);
-    rawBuff_.reset(new Byte[size + bufferSizeBytes * info.mChannelsPerFrame]);
-    captureBuff_ = reinterpret_cast<::AudioBufferList*>(rawBuff_.get());
-    captureBuff_->mNumberBuffers = info.mChannelsPerFrame;
-
-    auto bufferBasePtr = rawBuff_.get() + size;
-    for (UInt32 i = 0; i < captureBuff_->mNumberBuffers; ++i) {
-        captureBuff_->mBuffers[i].mNumberChannels = 1;
-        captureBuff_->mBuffers[i].mDataByteSize = bufferSizeBytes;
-        captureBuff_->mBuffers[i].mData = bufferBasePtr + bufferSizeBytes * i;
-    }
 
     // Input callback setup.
     AURenderCallbackStruct inputCall;
@@ -334,8 +353,6 @@ CoreLayer::startStream(AudioDeviceType stream)
         if (status_ != Status::Idle)
             return;
         status_ = Status::Started;
-
-        dcblocker_.reset();
 
         initAudioLayerIO(stream);
 
@@ -464,26 +481,28 @@ CoreLayer::read(AudioUnitRenderActionFlags* ioActionFlags,
         SIP_CORE_WARN("No frames for input.");
         return;
     }
+    auto format = audioInputFormat_;
+    format.sampleFormat = AV_SAMPLE_FMT_FLTP;
+    auto inBuff = std::make_shared<AudioFrame>(format, inNumberFrames);
+
+    AudioBufferList buffer;
+    UInt32 bufferSize = inNumberFrames * sizeof(Float32);
+    buffer.mNumberBuffers = inChannelsPerFrame_;
+    for (UInt32 i = 0; i < buffer.mNumberBuffers; ++i) {
+        buffer.mBuffers[i].mNumberChannels = 1;
+        buffer.mBuffers[i].mDataByteSize = bufferSize;
+        buffer.mBuffers[i].mData = inBuff->pointer()->extended_data[i];
+    }
 
     // Write the mic samples in our buffer
     checkErr(AudioUnitRender(ioUnit_,
                              ioActionFlags,
                              inTimeStamp,
                              inBusNumber,
-                             inNumberFrames,
-                             captureBuff_));
+                             inNumberFrames, &buffer));
 
-    auto format = audioInputFormat_;
-    format.sampleFormat = AV_SAMPLE_FMT_FLTP;
-    auto inBuff = std::make_shared<AudioFrame>(format, inNumberFrames);
     if (isCaptureMuted_) {
         libav_utils::fillWithSilence(inBuff->pointer());
-    } else {
-        auto& in = *inBuff->pointer();
-        for (unsigned i = 0; i < inChannelsPerFrame_; ++i)
-            std::copy_n((Float32*) captureBuff_->mBuffers[i].mData,
-                        inNumberFrames,
-                        (Float32*) in.extended_data[i]);
     }
     putRecorded(std::move(inBuff));
 }
