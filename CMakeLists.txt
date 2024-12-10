@@ -826,6 +826,6 @@ else()
   # Install the .pdb file
   install(
     FILES $<TARGET_PDB_FILE:${PROJECT_NAME}>
-    DESTINATION lib
+    DESTINATION bin
     OPTIONAL)
 endif()
