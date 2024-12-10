@@ -313,8 +313,8 @@ if(APPLE)
 endif()
 
 if(MSVC)
-  # needed on latest windows
-  add_definitions(-D_WIN32=1)
+  # use unicode
+  add_definitions(-DUNICODE -D_UNICODE)
 
   if(WINDOWS_STORE)
     source_group("Source Files\\media\\video\\uwpvideo"
