@@ -291,7 +291,6 @@ source_group("Source Files\\connectivity" FILES ${Source_Files__connectivity})
 source_group("Source Files\\connectivity\\security"
              FILES ${Source_Files__security})
 source_group("Source Files\\sip" FILES ${Source_Files__sip})
-source_group("Source Files\\sip_core" FILES ${Source_Files__sip_core})
 source_group("Source Files\\im" FILES ${Source_Files__im})
 source_group("Source Files\\media" FILES ${Source_Files__media})
 source_group("Source Files\\media\\audio" FILES ${Source_Files__media__audio})
@@ -300,6 +299,11 @@ source_group("Source Files\\media\\audio\\audio-processing"
 source_group("Source Files\\media\\audio\\sound"
              FILES ${Source_Files__media__audio__sound})
 source_group("Source Files\\media\\video" FILES ${Source_Files__media__video})
+
+file(GLOB_RECURSE Source_Files__sip_core
+     ${CMAKE_CURRENT_SOURCE_DIR}/src/sip_core/*.h)
+
+source_group("Source Files\\sip_core" FILES ${Source_Files__sip_core})
 
 if(APPLE)
   source_group("Source Files\\media\\audio\\coreaudio"
@@ -330,7 +334,6 @@ list(
   ${Source_Files__client}
   ${Source_Files__config}
   ${Source_Files__connectivity}
-  ${Source_Files__sip_core}
   ${Source_Files__im}
   ${Source_Files__media}
   ${Source_Files__media__audio}
@@ -379,6 +382,9 @@ add_library(${PROJECT_NAME} SHARED ${ALL_FILES})
 set_target_properties(${PROJECT_NAME} PROPERTIES FOLDER "sip_core")
 set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 17
                                                  CMAKE_CXX_STANDARD_REQUIRED ON)
+
+target_sources(${PROJECT_NAME} PUBLIC FILE_SET HEADERS BASE_DIRS src FILES
+                                      ${Source_Files__sip_core})
 
 # compat, src source group + create deps with proper configuration
 if(MSVC)
@@ -439,7 +445,6 @@ target_include_directories(
           "${CMAKE_CURRENT_SOURCE_DIR}/src/client;"
           "${CMAKE_CURRENT_SOURCE_DIR}/src/im;"
           "${CMAKE_CURRENT_SOURCE_DIR}/src/media;"
-  PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src;"
          "${CMAKE_CURRENT_SOURCE_DIR}/src/sip_core;")
 
 if(MSVC)
@@ -751,13 +756,10 @@ else()
   endforeach()
 
   if(CMAKE_GENERATOR STREQUAL "Xcode")
-    if(IOS)
       set_target_properties(
         ${PROJECT_NAME}
         PROPERTIES FRAMEWORK TRUE
                    XCODE_ATTRIBUTE_DEFINES_MODULE NO
-                   XCODE_ATTRIBUTE_DWARF_DSYM_FOLDER_PATH
-                   ${CMAKE_INSTALL_PREFIX}
                    MACOSX_FRAMEWORK_IDENTIFIER ru.svetets.sip-core
                    BUILD_WITH_INSTALL_RPATH YES
                    INSTALL_NAME_DIR "@rpath"
@@ -769,7 +771,6 @@ else()
                    VERSION ${PROJECT_VERSION}
                    # compatibility version
                    SO ${PROJECT_VERSION_MAJOR})
-    endif()
   endif()
 
   if(APPLE)
@@ -801,4 +802,17 @@ else()
   if(APPLE)
     target_compile_definitions(${PROJECT_NAME} PRIVATE HAVE_COREAUDIO)
   endif()
+endif()
+
+# install
+
+# if apple, install as framework
+if (APPLE AND CMAKE_GENERATOR STREQUAL "Xcode")
+  install(TARGETS ${PROJECT_NAME} DESTINATION .)
+  # TODO: may be some better way to install dSYM???
+  install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/$<TARGET_FILE_NAME:${PROJECT_NAME}>.framework.dSYM DESTINATION . OPTIONAL)
+else()
+  install(TARGETS ${PROJECT_NAME} FILE_SET HEADERS)
+    # Install the .pdb file
+  install(FILES $<TARGET_PDB_FILE:${PROJECT_NAME}> DESTINATION lib OPTIONAL)
 endif()
