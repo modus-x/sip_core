@@ -823,9 +823,8 @@ if(APPLE AND CMAKE_GENERATOR STREQUAL "Xcode")
     OPTIONAL)
 else()
   install(TARGETS ${PROJECT_NAME} FILE_SET HEADERS)
-  # Install the .pdb file
-  install(
-    FILES $<TARGET_PDB_FILE:${PROJECT_NAME}>
-    DESTINATION bin
-    OPTIONAL)
+  # Install the .pdb file, which must be created in every configuration
+  if(MSVC)
+    install(FILES $<TARGET_PDB_FILE:${PROJECT_NAME}> DESTINATION bin)
+  endif()
 endif()
