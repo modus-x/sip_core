@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 
 project(
   sip_core
-  VERSION 0.10.0
+  VERSION 0.10.1
   LANGUAGES C CXX)
 
 set(BUILD_NUMBER 1)
@@ -445,7 +445,7 @@ target_include_directories(
           "${CMAKE_CURRENT_SOURCE_DIR}/src/client;"
           "${CMAKE_CURRENT_SOURCE_DIR}/src/im;"
           "${CMAKE_CURRENT_SOURCE_DIR}/src/media;"
-         "${CMAKE_CURRENT_SOURCE_DIR}/src/sip_core;")
+          "${CMAKE_CURRENT_SOURCE_DIR}/src/sip_core;")
 
 if(MSVC)
   # Supress generation of ZERO_CHECK
@@ -756,21 +756,21 @@ else()
   endforeach()
 
   if(CMAKE_GENERATOR STREQUAL "Xcode")
-      set_target_properties(
-        ${PROJECT_NAME}
-        PROPERTIES FRAMEWORK TRUE
-                   XCODE_ATTRIBUTE_DEFINES_MODULE NO
-                   MACOSX_FRAMEWORK_IDENTIFIER ru.svetets.sip-core
-                   BUILD_WITH_INSTALL_RPATH YES
-                   INSTALL_NAME_DIR "@rpath"
-                   # release version
-                   MACOSX_FRAMEWORK_SHORT_VERSION_STRING ${PROJECT_VERSION}
-                   # build version
-                   MACOSX_FRAMEWORK_BUNDLE_VERSION ${BUILD_NUMBER}
-                   # build version
-                   VERSION ${PROJECT_VERSION}
-                   # compatibility version
-                   SO ${PROJECT_VERSION_MAJOR})
+    set_target_properties(
+      ${PROJECT_NAME}
+      PROPERTIES FRAMEWORK TRUE
+                 XCODE_ATTRIBUTE_DEFINES_MODULE NO
+                 MACOSX_FRAMEWORK_IDENTIFIER ru.svetets.sip-core
+                 BUILD_WITH_INSTALL_RPATH YES
+                 INSTALL_NAME_DIR "@rpath"
+                 # release version
+                 MACOSX_FRAMEWORK_SHORT_VERSION_STRING ${PROJECT_VERSION}
+                 # build version
+                 MACOSX_FRAMEWORK_BUNDLE_VERSION ${BUILD_NUMBER}
+                 # build version
+                 VERSION ${PROJECT_VERSION}
+                 # compatibility version
+                 SO ${PROJECT_VERSION_MAJOR})
   endif()
 
   if(APPLE)
