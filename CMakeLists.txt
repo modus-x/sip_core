@@ -519,6 +519,12 @@ if(MSVC)
               /Zc:__cplusplus)
   endif()
 
+  # always store debug symbols in pdb files
+  set_property(
+    TARGET ${PROJECT_NAME}
+    PROPERTY MSVC_DEBUG_INFORMATION_FORMAT
+             "$<$<CONFIG:Debug,RelWithDebInfo,Release,MinSizeRel>:ProgramDatabase>")
+
   if("${CMAKE_VS_PLATFORM_NAME}" STREQUAL "x64")
     target_link_options(
       ${PROJECT_NAME}
@@ -807,12 +813,19 @@ endif()
 # install
 
 # if apple, install as framework
-if (APPLE AND CMAKE_GENERATOR STREQUAL "Xcode")
+if(APPLE AND CMAKE_GENERATOR STREQUAL "Xcode")
   install(TARGETS ${PROJECT_NAME} DESTINATION .)
   # TODO: may be some better way to install dSYM???
-  install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/$<TARGET_FILE_NAME:${PROJECT_NAME}>.framework.dSYM DESTINATION . OPTIONAL)
+  install(
+    DIRECTORY
+      ${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/$<TARGET_FILE_NAME:${PROJECT_NAME}>.framework.dSYM
+    DESTINATION .
+    OPTIONAL)
 else()
   install(TARGETS ${PROJECT_NAME} FILE_SET HEADERS)
-    # Install the .pdb file
-  install(FILES $<TARGET_PDB_FILE:${PROJECT_NAME}> DESTINATION lib OPTIONAL)
+  # Install the .pdb file
+  install(
+    FILES $<TARGET_PDB_FILE:${PROJECT_NAME}>
+    DESTINATION lib
+    OPTIONAL)
 endif()
