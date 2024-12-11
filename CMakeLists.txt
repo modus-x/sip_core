@@ -473,6 +473,7 @@ if(MSVC)
     PUBLIC
       $<$<CONFIG:Debug>:${DEPS_DEBUG}/include>
       $<$<CONFIG:Release>:${DEPS_RELEASE}/include>
+	  $<$<CONFIG:RelWithDebInfo>:${DEPS_RELEASE}/include>
       "${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/pjproject/pjlib/include;"
       "${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/pjproject/pjnath/include;"
       "${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/pjproject/pjlib-util/include;"
