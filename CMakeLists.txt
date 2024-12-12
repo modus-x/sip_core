@@ -824,8 +824,8 @@ if(APPLE AND CMAKE_GENERATOR STREQUAL "Xcode")
     OPTIONAL)
 else()
   install(TARGETS ${PROJECT_NAME} FILE_SET HEADERS)
-  # Install the .pdb file, which must be created in every configuration
+  # Install the .pdb file, which will be created only in Debug / RelWihDebInfo
   if(MSVC)
-    install(FILES $<TARGET_PDB_FILE:${PROJECT_NAME}> DESTINATION bin)
+    install(FILES $<TARGET_PDB_FILE:${PROJECT_NAME}> DESTINATION bin OPTIONAL)
   endif()
 endif()
