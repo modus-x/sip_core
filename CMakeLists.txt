@@ -473,7 +473,7 @@ if(MSVC)
     PUBLIC
       $<$<CONFIG:Debug>:${DEPS_DEBUG}/include>
       $<$<CONFIG:Release>:${DEPS_RELEASE}/include>
-	  $<$<CONFIG:RelWithDebInfo>:${DEPS_RELEASE}/include>
+      $<$<CONFIG:RelWithDebInfo>:${DEPS_RELEASE}/include>
       "${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/pjproject/pjlib/include;"
       "${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/pjproject/pjnath/include;"
       "${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/pjproject/pjlib-util/include;"
@@ -523,8 +523,9 @@ if(MSVC)
   # always store debug symbols in pdb files
   set_property(
     TARGET ${PROJECT_NAME}
-    PROPERTY MSVC_DEBUG_INFORMATION_FORMAT
-             "$<$<CONFIG:Debug,RelWithDebInfo,Release,MinSizeRel>:ProgramDatabase>")
+    PROPERTY
+      MSVC_DEBUG_INFORMATION_FORMAT
+      "$<$<CONFIG:Debug,RelWithDebInfo,Release,MinSizeRel>:ProgramDatabase>")
 
   if("${CMAKE_VS_PLATFORM_NAME}" STREQUAL "x64")
     target_link_options(
@@ -827,6 +828,9 @@ else()
   install(TARGETS ${PROJECT_NAME} FILE_SET HEADERS)
   # Install the .pdb file, which will be created only in Debug / RelWihDebInfo
   if(MSVC)
-    install(FILES $<TARGET_PDB_FILE:${PROJECT_NAME}> DESTINATION bin OPTIONAL)
+    install(
+      FILES $<TARGET_PDB_FILE:${PROJECT_NAME}>
+      DESTINATION bin
+      OPTIONAL)
   endif()
 endif()
