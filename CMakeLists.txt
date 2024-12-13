@@ -101,7 +101,7 @@ if(NOT MSVC)
     set(TARGETS armv7a-linux-androideabi)
   else()
     execute_process(
-      COMMAND ${CMAKE_C_COMPILER} -dumpmachine
+      COMMAND gcc -dumpmachine
       COMMAND tr -d '\n'
       OUTPUT_VARIABLE TARGETS)
 
@@ -230,7 +230,7 @@ if(NOT MSVC)
         file(MAKE_DIRECTORY ${CONTRIB_BUILD_PATH})
         execute_process(
           COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/contrib/bootstrap
-                  --prefix=${CONTRIB_PATH} --host=${REAL_TARGET}
+                  --prefix=${CONTRIB_PATH}
           WORKING_DIRECTORY ${CONTRIB_BUILD_PATH}
           RESULT_VARIABLE CMD_RESULT)
 
@@ -682,8 +682,9 @@ else()
 
     # hack for linux when deps are built using gcc
     if(LINUX)
-      target_link_directories(${PROJECT_NAME} PUBLIC
-                              /usr/lib/gcc/x86_64-redhat-linux/4.8.5)
+      target_link_directories(
+        ${PROJECT_NAME} PRIVATE
+        /opt/rh/devtoolset-11/root/usr/lib/gcc/x86_64-redhat-linux/11)
     endif()
 
     pkg_search_module(fmt_${TARGET} REQUIRED IMPORTED_TARGET fmt)
