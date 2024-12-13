@@ -379,6 +379,20 @@ elseif(APPLE)
 endif()
 
 add_library(${PROJECT_NAME} SHARED ${ALL_FILES})
+
+if(LINUX)
+  # compile with -rtlib=compiler-rt, to include all special builtin functions
+  # into binary
+  target_link_options(${PROJECT_NAME} PRIVATE -rtlib=compiler-rt)
+  # GCC specific CXX, which was used when deps were built
+  find_library(
+    GCC_CXX libstdc++.a
+    PATHS /opt/rh/devtoolset-11/root/usr/lib/gcc/x86_64-redhat-linux/11
+          REQUIRED NO_CACHE)
+
+  target_link_libraries(${PROJECT_NAME} PRIVATE ${GCC_CXX})
+endif()
+
 set_target_properties(${PROJECT_NAME} PROPERTIES FOLDER "sip_core")
 set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 17
                                                  CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -429,10 +443,9 @@ endif()
 
 if(ANDROID)
   target_compile_definitions(${PROJECT_NAME} PRIVATE HAVE_OPENSL)
-  set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 endif()
 
-if(LINUX)
+if(LINUX OR ANDROID)
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 endif()
 
@@ -680,13 +693,6 @@ else()
 
     set(CMAKE_FIND_ROOT_PATH ${CONTRIB_PATH})
     set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
-
-    # hack for linux when deps are built using gcc
-    if(LINUX)
-      target_link_directories(
-        ${PROJECT_NAME} PRIVATE
-        /opt/rh/devtoolset-11/root/usr/lib/gcc/x86_64-redhat-linux/11)
-    endif()
 
     pkg_search_module(fmt_${TARGET} REQUIRED IMPORTED_TARGET fmt)
 
