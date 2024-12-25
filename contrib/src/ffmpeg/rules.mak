@@ -163,6 +163,7 @@ else
 FFMPEGCONF += \
 	--target-os=linux \
 	--enable-indev=v4l2 \
+	--enable-libv4l2 \
 	--enable-indev=xcbgrab 
 # End Desktop Linux:
 endif
