@@ -14,6 +14,8 @@ add_compile_definitions(PACKAGE="ru.svetets.sip-core"
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/version.h.in"
                "${CMAKE_CURRENT_BINARY_DIR}/version.h")
 
+set(CMAKE_MACOSX_RPATH 1)
+
 include_directories(BEFORE ${CMAKE_CURRENT_BINARY_DIR})
 
 if(CMAKE_GENERATOR STREQUAL "Xcode")
@@ -771,13 +773,14 @@ else()
   endforeach()
 
   if(CMAKE_GENERATOR STREQUAL "Xcode")
+    # Retrieve the target property "HEADER_SET" into variable "_header_set"
+    get_target_property(_header_set ${PROJECT_NAME} HEADER_SET)
+
     set_target_properties(
       ${PROJECT_NAME}
       PROPERTIES FRAMEWORK TRUE
                  XCODE_ATTRIBUTE_DEFINES_MODULE NO
                  MACOSX_FRAMEWORK_IDENTIFIER ru.svetets.sip-core
-                 BUILD_WITH_INSTALL_RPATH YES
-                 INSTALL_NAME_DIR "@rpath"
                  # release version
                  MACOSX_FRAMEWORK_SHORT_VERSION_STRING ${PROJECT_VERSION}
                  # build version
@@ -785,7 +788,9 @@ else()
                  # build version
                  VERSION ${PROJECT_VERSION}
                  # compatibility version
-                 SO ${PROJECT_VERSION_MAJOR})
+                 SO ${PROJECT_VERSION_MAJOR}
+                 PUBLIC_HEADER "${_header_set}")
+
   endif()
 
   if(APPLE)
