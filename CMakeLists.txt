@@ -7,6 +7,9 @@ project(
 
 set(BUILD_NUMBER 1)
 
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 add_compile_definitions(PACKAGE="ru.svetets.sip-core"
                         PACKAGE_NAME="sv-sip-core")
 
@@ -396,8 +399,6 @@ if(LINUX)
 endif()
 
 set_target_properties(${PROJECT_NAME} PROPERTIES FOLDER "sip_core")
-set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 17
-                                                 CMAKE_CXX_STANDARD_REQUIRED ON)
 
 target_sources(${PROJECT_NAME} PUBLIC FILE_SET HEADERS BASE_DIRS src FILES
                                       ${Source_Files__sip_core})
