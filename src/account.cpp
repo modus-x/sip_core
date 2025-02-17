@@ -147,15 +147,10 @@ Account::loadConfig()
     // If the user defined a custom ringtone, the file may not exists
     // In this case, fallback on the default ringtone path
     if (!setRingtone(config_->ringtonePath)) {
-        SIP_CORE_WARNING("Could not found ringtone {} in {}, trying default...",
-                         config_->ringtonePath,
-                         Manager::instance().getDataPath());
+        SIP_CORE_WARNING("Could not found ringtone {}, trying default...", config_->ringtonePath);
 
         if (!setRingtone(DEFAULT_RINGTONE_PATH)) {
-            SIP_CORE_WARNING(
-                "Could not found default ringtone {} in {}, disabling ringtone playback",
-                DEFAULT_RINGTONE_PATH,
-                Manager::instance().getDataPath());
+            SIP_CORE_WARNING("Could not found default ringtone {}, disabling ringtone playback", config_->ringtonePath);
             ringtoneEnabled_ = false;
         }
     }
@@ -164,10 +159,16 @@ Account::loadConfig()
 bool
 Account::setRingtone(const std::string& ringtone)
 {
+    auto data_path = Manager::instance().getDataPath();
+
+    if (!data_path.has_value()) {
+        return false;
+    }
+
     auto ringtonePath = ringtone;
     // if relative, assume that this is relative to ringtones folder!
     if (fileutils::isPathRelative(ringtone)) {
-        auto ringtoneDir = fmt::format("{}/{}", Manager::instance().getDataPath(), "ringtones");
+        auto ringtoneDir = fmt::format("{}/{}", data_path.value(), "ringtones");
         ringtonePath = fileutils::getFullPath(ringtoneDir, ringtone);
     }
     if (fileutils::isFile(ringtonePath)) {

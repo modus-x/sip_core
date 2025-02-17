@@ -292,7 +292,7 @@ struct Manager::ManagerPimpl
     /**
      * Path of the app assets root
      */
-    std::string data_path_;
+    std::optional<std::string> data_path_;
 
     /**
      * Instance of the RingBufferPool for the whole application
@@ -670,7 +670,7 @@ static void beforeExit() {
 }
 
 void
-Manager::init(const std::string& config_file, const std::string& data_path)
+Manager::init(const std::string& config_file, const std::optional<std::string>& data_path)
 {
     // FIXME: this is no good
 
@@ -834,7 +834,7 @@ Manager::monitor(bool continuous)
     Logger::setMonitorLog(continuous);
 }
 
-std::string
+const std::optional<std::string>&
 Manager::getDataPath() const
 {
     return pimpl_->data_path_;
@@ -2261,7 +2261,13 @@ Manager::toggleRecordingCall(const std::string& accountId, const std::string& id
 bool
 Manager::startRecordedFilePlayback(const std::string& filepath)
 {
-    auto soundDir = fmt::format("{}/{}", Manager::instance().getDataPath(), "sounds");
+    auto data_path =  Manager::instance().getDataPath();
+
+    if (!data_path.has_value()) {
+        return false;
+    }
+
+    auto soundDir = fmt::format("{}/{}", data_path.value(), "sounds");
     auto sound = fileutils::getFullPath(soundDir, filepath);
     SIP_CORE_DBG("Start recorded file playback %s", sound.c_str());
 

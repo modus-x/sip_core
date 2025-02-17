@@ -105,7 +105,7 @@ public:
      * Initialisation of thread (sound) and map.
      * Init a new VoIPLink, audio codec and audio driver
      */
-    void init(const std::string& config_file, const std::string& data_dir);
+    void init(const std::string& config_file, const std::optional<std::string>& data_path);
 
     /*
      * Terminate all threads and exit DBus loop
@@ -560,7 +560,7 @@ public:
 
     const libsip_core::WebRtcParams& getWebRtcParams();
 
-    std::string getDataPath() const;
+    const std::optional<std::string>& getDataPath() const;
 
     std::string getConfigPath() const;
 

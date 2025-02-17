@@ -29,6 +29,7 @@
 #include <map>
 #include <memory>
 #include <type_traits>
+#include <optional>
 
 #include "trace-tools.h"
 
@@ -64,7 +65,7 @@ LIBSIP_CORE_PUBLIC bool init(enum InitFlag flags) noexcept;
  * Start asynchronously daemon created by init().
  * @returns true if daemon started successfully
  */
-LIBSIP_CORE_PUBLIC bool start(const std::string& config_file, const std::string& data_path) noexcept;
+LIBSIP_CORE_PUBLIC bool start(const std::string& config_file, const std::optional<std::string>& data_path) noexcept;
 
 /**
  * Stop and freeing any resource allocated by daemon

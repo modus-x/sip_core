@@ -23,6 +23,8 @@
 #include <map>
 #include <cstdlib>
 
+#include <optional>
+
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
@@ -66,7 +68,7 @@ init(enum InitFlag flags) noexcept
 }
 
 bool
-start(const std::string& config_file, const std::string& data_path) noexcept
+start(const std::string& config_file, const std::optional<std::string>& data_path) noexcept
 {
     try {
         sip_core::Manager::instance().init(config_file, data_path);
