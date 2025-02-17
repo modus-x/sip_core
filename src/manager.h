@@ -68,6 +68,7 @@ class sip_corePluginManager;
 class LIBSIP_CORE_TESTABLE Manager
 {
 public:
+    Manager(Manager&&) = delete;
     // TODO LIBSIP_CORE_PUBLIC only if tests
     static LIBSIP_CORE_TESTABLE Manager& instance();
 
