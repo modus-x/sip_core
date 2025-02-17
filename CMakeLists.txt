@@ -380,7 +380,7 @@ elseif(APPLE)
        "${Source_Files__media__video__apple}")
 endif()
 
-add_library(${PROJECT_NAME} SHARED ${ALL_FILES})
+add_library(${PROJECT_NAME} STATIC ${ALL_FILES})
 
 if(LINUX)
   # compile with -rtlib=compiler-rt, to include all special builtin functions
@@ -436,15 +436,15 @@ target_compile_definitions(
     SIP_CORE_EXPORTS)
 
 if(IOS)
-  target_compile_definitions(${PROJECT_NAME} PRIVATE TARGET_OS_IOS)
+  target_compile_definitions(${PROJECT_NAME} PUBLIC TARGET_OS_IOS)
 endif()
 
 if(ENABLE_VIDEO)
-  target_compile_definitions(${PROJECT_NAME} PRIVATE ENABLE_VIDEO)
+  target_compile_definitions(${PROJECT_NAME} PUBLIC ENABLE_VIDEO)
 endif()
 
 if(ANDROID)
-  target_compile_definitions(${PROJECT_NAME} PRIVATE HAVE_OPENSL)
+  target_compile_definitions(${PROJECT_NAME} PUBLIC HAVE_OPENSL)
 endif()
 
 if(LINUX OR ANDROID)
@@ -453,7 +453,7 @@ endif()
 
 target_include_directories(
   ${PROJECT_NAME}
-  PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/.;"
+  PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/.;"
           "${CMAKE_CURRENT_SOURCE_DIR}/src/config;"
           "${CMAKE_CURRENT_SOURCE_DIR}/src/connectivity;"
           "${CMAKE_CURRENT_SOURCE_DIR}/src/connectivity/security;"
@@ -839,7 +839,7 @@ else()
   target_compile_definitions(${PROJECT_NAME} PRIVATE PJ_AUTOCONF=1)
 
   if(APPLE)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE HAVE_COREAUDIO)
+    target_compile_definitions(${PROJECT_NAME} PUBLIC HAVE_COREAUDIO)
   endif()
 endif()
 
