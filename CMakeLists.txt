@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 
 project(
   sip_core
-  VERSION 0.10.1
+  VERSION 0.10.2
   LANGUAGES C CXX)
 
 set(BUILD_NUMBER 1)
@@ -455,13 +455,13 @@ endif()
 target_include_directories(
   ${PROJECT_NAME}
   PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/.;"
-          "${CMAKE_CURRENT_SOURCE_DIR}/src/config;"
-          "${CMAKE_CURRENT_SOURCE_DIR}/src/connectivity;"
-          "${CMAKE_CURRENT_SOURCE_DIR}/src/connectivity/security;"
-          "${CMAKE_CURRENT_SOURCE_DIR}/src/client;"
-          "${CMAKE_CURRENT_SOURCE_DIR}/src/im;"
-          "${CMAKE_CURRENT_SOURCE_DIR}/src/media;"
-          "${CMAKE_CURRENT_SOURCE_DIR}/src/sip_core;")
+         "${CMAKE_CURRENT_SOURCE_DIR}/src/config;"
+         "${CMAKE_CURRENT_SOURCE_DIR}/src/connectivity;"
+         "${CMAKE_CURRENT_SOURCE_DIR}/src/connectivity/security;"
+         "${CMAKE_CURRENT_SOURCE_DIR}/src/client;"
+         "${CMAKE_CURRENT_SOURCE_DIR}/src/im;"
+         "${CMAKE_CURRENT_SOURCE_DIR}/src/media;"
+         "${CMAKE_CURRENT_SOURCE_DIR}/src/sip_core;")
 
 if(MSVC)
   # Supress generation of ZERO_CHECK
@@ -773,27 +773,6 @@ else()
     endif()
   endforeach()
 
-  if(CMAKE_GENERATOR STREQUAL "Xcode")
-    # Retrieve the target property "HEADER_SET" into variable "_header_set"
-    get_target_property(_header_set ${PROJECT_NAME} HEADER_SET)
-
-    set_target_properties(
-      ${PROJECT_NAME}
-      PROPERTIES FRAMEWORK TRUE
-                 XCODE_ATTRIBUTE_DEFINES_MODULE NO
-                 MACOSX_FRAMEWORK_IDENTIFIER ru.svetets.sip-core
-                 # release version
-                 MACOSX_FRAMEWORK_SHORT_VERSION_STRING ${PROJECT_VERSION}
-                 # build version
-                 MACOSX_FRAMEWORK_BUNDLE_VERSION ${BUILD_NUMBER}
-                 # build version
-                 VERSION ${PROJECT_VERSION}
-                 # compatibility version
-                 SO ${PROJECT_VERSION_MAJOR}
-                 PUBLIC_HEADER "${_header_set}")
-
-  endif()
-
   if(APPLE)
     if(IOS)
       target_link_libraries(${PROJECT_NAME} PRIVATE resolv
@@ -826,31 +805,4 @@ else()
 endif()
 
 # install
-
-# if apple, install as framework
-if(APPLE AND CMAKE_GENERATOR STREQUAL "Xcode")
-  install(TARGETS ${PROJECT_NAME} DESTINATION .)
-  # TODO: may be some better way to install dSYM???
-  install(
-    DIRECTORY
-      ${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/$<TARGET_FILE_NAME:${PROJECT_NAME}>.framework.dSYM
-    DESTINATION .
-    OPTIONAL)
-else()
-  install(TARGETS ${PROJECT_NAME} FILE_SET HEADERS)
-  # Install the .pdb file, which will be created only in Debug / RelWihDebInfo
-  if(MSVC)
-    install(
-      FILES $<TARGET_PDB_FILE:${PROJECT_NAME}>
-      DESTINATION bin
-      OPTIONAL)
-  endif()
-  # Install the .dwp file
-  if(LINUX OR ANDROID)
-    install(
-      FILES ${CMAKE_BINARY_DIR}/${out_dwp}
-      DESTINATION lib
-      OPTIONAL)
-  endif()
-
-endif()
+install(TARGETS ${PROJECT_NAME} FILE_SET HEADERS)
