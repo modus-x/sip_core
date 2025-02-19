@@ -10,14 +10,6 @@ set(BUILD_NUMBER 1)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Does this cmake process is child called from some parent cmake script?
-get_directory_property(_HAS_PARENT_DIRECTORY PARENT_DIRECTORY)
-
-if(NOT _HAS_PARENT_DIRECTORY)
-  # Indicates that this is a top-level CMake project.
-  set(IS_STANDALONE TRUE)
-endif()
-
 add_compile_definitions(PACKAGE="ru.svetets.sip-core"
                         PACKAGE_NAME="sv-sip-core")
 
@@ -39,6 +31,7 @@ endif()
 # ##############################################################################
 option(ENABLE_VIDEO "Build with video support" ON)
 option(BUILD_DEPS "Build deps" OFF)
+option(INCLUDE_INSTALL "Include installation of library" ON)
 
 set(PREBUILD_DEPS_PATHS
     ""
@@ -864,7 +857,7 @@ if(APPLE AND CMAKE_GENERATOR STREQUAL "Xcode")
     DESTINATION .
     OPTIONAL)
 else()
-  if(IS_STANDALONE)
+  if(INCLUDE_INSTALL)
     install(TARGETS ${PROJECT_NAME} FILE_SET HEADERS)
     # Install the .pdb file, which will be created only in Debug / RelWihDebInfo
     if(MSVC)
