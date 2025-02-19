@@ -10,6 +10,14 @@ set(BUILD_NUMBER 1)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Does this cmake process is child called from some parent cmake script?
+get_directory_property(_HAS_PARENT_DIRECTORY PARENT_DIRECTORY)
+
+if(NOT _HAS_PARENT_DIRECTORY)
+  # Indicates that this is a top-level CMake project.
+  set(IS_STANDALONE TRUE)
+endif()
+
 add_compile_definitions(PACKAGE="ru.svetets.sip-core"
                         PACKAGE_NAME="sv-sip-core")
 
@@ -856,20 +864,22 @@ if(APPLE AND CMAKE_GENERATOR STREQUAL "Xcode")
     DESTINATION .
     OPTIONAL)
 else()
-  install(TARGETS ${PROJECT_NAME} FILE_SET HEADERS)
-  # Install the .pdb file, which will be created only in Debug / RelWihDebInfo
-  if(MSVC)
-    install(
-      FILES $<TARGET_PDB_FILE:${PROJECT_NAME}>
-      DESTINATION bin
-      OPTIONAL)
-  endif()
-  # Install the .dwp file
-  if(LINUX OR ANDROID)
-    install(
-      FILES ${CMAKE_BINARY_DIR}/${out_dwp}
-      DESTINATION lib
-      OPTIONAL)
+  if(IS_STANDALONE)
+    install(TARGETS ${PROJECT_NAME} FILE_SET HEADERS)
+    # Install the .pdb file, which will be created only in Debug / RelWihDebInfo
+    if(MSVC)
+      install(
+        FILES $<TARGET_PDB_FILE:${PROJECT_NAME}>
+        DESTINATION bin
+        OPTIONAL)
+    endif()
+    # Install the .dwp file
+    if(LINUX OR ANDROID)
+      install(
+        FILES ${CMAKE_BINARY_DIR}/${out_dwp}
+        DESTINATION lib
+        OPTIONAL)
+    endif()
   endif()
 
 endif()
