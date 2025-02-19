@@ -809,25 +809,6 @@ else()
     target_link_libraries(${PROJECT_NAME} PRIVATE OpenSLES log)
   endif()
 
-  # debug fission on posix
-  if(LINUX OR ANDROID)
-
-    find_program(DWP_TOOL dwp)
-
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -gsplit-dwarf")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -gsplit-dwarf")
-
-    set(out_dwp ${PROJECT_NAME}.dwp)
-    add_custom_command(
-      TARGET ${PROJECT_NAME}
-      POST_BUILD
-      COMMAND ${DWP_TOOL} --exec $<TARGET_FILE:${PROJECT_NAME}> -o ${out_dwp}
-      WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-      COMMENT "Linking debug package ${out_dwp}"
-      VERBATIM)
-
-  endif()
-
   target_compile_options(
     ${PROJECT_NAME}
     PRIVATE -fvisibility=hidden
