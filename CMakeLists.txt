@@ -31,7 +31,6 @@ endif()
 # ##############################################################################
 option(ENABLE_VIDEO "Build with video support" ON)
 option(BUILD_DEPS "Build deps" OFF)
-option(INCLUDE_INSTALL "Include installation of library" ON)
 
 set(PREBUILD_DEPS_PATHS
     ""
@@ -857,22 +856,20 @@ if(APPLE AND CMAKE_GENERATOR STREQUAL "Xcode")
     DESTINATION .
     OPTIONAL)
 else()
-  if(INCLUDE_INSTALL)
-    install(TARGETS ${PROJECT_NAME} FILE_SET HEADERS)
-    # Install the .pdb file, which will be created only in Debug / RelWihDebInfo
-    if(MSVC)
-      install(
-        FILES $<TARGET_PDB_FILE:${PROJECT_NAME}>
-        DESTINATION bin
-        OPTIONAL)
-    endif()
-    # Install the .dwp file
-    if(LINUX OR ANDROID)
-      install(
-        FILES ${CMAKE_BINARY_DIR}/${out_dwp}
-        DESTINATION lib
-        OPTIONAL)
-    endif()
+  install(TARGETS ${PROJECT_NAME} FILE_SET HEADERS)
+  # Install the .pdb file, which will be created only in Debug / RelWihDebInfo
+  if(MSVC)
+    install(
+      FILES $<TARGET_PDB_FILE:${PROJECT_NAME}>
+      DESTINATION bin
+      OPTIONAL)
+  endif()
+  # Install the .dwp file
+  if(LINUX OR ANDROID)
+    install(
+      FILES ${CMAKE_BINARY_DIR}/${out_dwp}
+      DESTINATION lib
+      OPTIONAL)
   endif()
 
 endif()
