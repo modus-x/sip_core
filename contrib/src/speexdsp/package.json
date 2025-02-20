@@ -1,7 +1,7 @@
 {
     "name": "speexdsp",
     "version": "SpeexDSP-1.2.0",
-    "url": "https://github.com/xiph/speexdsp/archive/__VERSION__.tar.gz",
+    "url": "https://nexus.svetlocal.ru/repository/github-artifacts/speexdsp-__VERSION__.tar.gz",
     "deps": [],
     "patches": ["speexdsp_vs_proj.patch"],
     "win_patches": [],

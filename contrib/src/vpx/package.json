@@ -1,7 +1,7 @@
 {
     "name": "vpx",
     "version": "c01b6dc8451f09745916c079e036364ab63b93cd",
-    "url": "https://github.com/ShiftMediaProject/libvpx/archive/__VERSION__.tar.gz",
+    "url": "https://nexus.svetlocal.ru/repository/github-artifacts/libvpx-__VERSION__.tar.gz",
     "deps": [],
     "patches": [],
     "win_patches": ["windows-vpx_config.patch"],

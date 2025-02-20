@@ -1,7 +1,7 @@
 {
     "name": "iconv",
     "version": "a4d13b43f8bfc328a9d1d326b0d748d5236613be",
-    "url": "https://github.com/ShiftMediaProject/libiconv/archive/__VERSION__.tar.gz",
+    "url": "https://nexus.svetlocal.ru/repository/github-artifacts/libiconv-__VERSION__.tar.gz",
     "deps": [],
     "patches": [],
     "win_patches": [],

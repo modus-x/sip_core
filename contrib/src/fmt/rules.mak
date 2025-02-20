@@ -1,6 +1,6 @@
 # FMT
 FMT_VERSION := 9.1.0
-FMT_URL := https://github.com/fmtlib/fmt/archive/$(FMT_VERSION).tar.gz
+FMT_URL := https://nexus.svetlocal.ru/repository/github-artifacts/fmt-$(FMT_VERSION).tar.gz
 
 PKGS += fmt
 

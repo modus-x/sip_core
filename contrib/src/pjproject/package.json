@@ -1,7 +1,7 @@
 {
     "name": "pjproject",
     "version": "3b78ef1c48732d238ba284cdccb04dc6de79c54f",
-    "url": "https://github.com/savoirfairelinux/pjproject/archive/__VERSION__.tar.gz",
+    "url": "https://nexus.svetlocal.ru/repository/github-artifacts/pjproject-__VERSION__.tar.gz",
     "deps": [],
     "patches": [
         "0009-add-config-site.patch",

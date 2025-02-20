@@ -76,7 +76,7 @@ pacman -S nasm yasm gcc make pkg-config
 {
     "name": "ffmpeg",
     "version": "n5.0",
-    "url": "https://github.com/FFmpeg/FFmpeg/archive/refs/tags/__VERSION__.tar.gz",
+    "url": "https://nexus.svetlocal.ru/repository/github-artifacts/ffmpeg-__VERSION__.tar.gz",
     "deps": [
         "vpx",
         "x264",

@@ -1,7 +1,6 @@
 # JSONCPP
 JSONCPP_VERSION := 1.9.3
-
-JSONCPP_URL := https://github.com/open-source-parsers/jsoncpp/archive/$(JSONCPP_VERSION).tar.gz
+JSONCPP_URL := https://nexus.svetlocal.ru/repository/github-artifacts/jsoncpp-$(JSONCPP_VERSION).tar.gz
 
 PKGS += jsoncpp
 

@@ -1,5 +1,6 @@
+# FFMPEG
 FFMPEG_HASH := n5.0
-FFMPEG_URL := https://github.com/FFmpeg/FFmpeg/archive/refs/tags/$(FFMPEG_HASH).tar.gz
+FFMPEG_URL := https://nexus.svetlocal.ru/repository/github-artifacts/ffmpeg-$(FFMPEG_HASH).tar.gz
 
 PKGS+=ffmpeg
 

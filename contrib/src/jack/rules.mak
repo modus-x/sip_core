@@ -1,7 +1,6 @@
 # JACK
-
 JACK_VERSION := 0.121.3
-JACK_URL := https://github.com/jackaudio/jack1/archive/$(JACK_VERSION).tar.gz
+JACK_URL := https://nexus.svetlocal.ru/repository/github-artifacts/jack1-$(JACK_VERSION).tar.gz
 
 # disabled by default for now
 #PKGS += jack
