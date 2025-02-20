@@ -30,7 +30,7 @@ endif()
 # Build options
 # ##############################################################################
 option(ENABLE_VIDEO "Build with video support" ON)
-option(BUILD_DEPS "Build deps" OFF)
+option(BUILD_DEPS "Build deps" ON)
 
 set(PREBUILD_DEPS_PATHS
     ""
