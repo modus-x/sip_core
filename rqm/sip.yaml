@@ -6,7 +6,7 @@ accounts:
     transport: udp
     activeCodecs: 139/27/86076/65543/65542
     useragent: RQM client
-    bindAddress: 10.12.50.157
+    bindAddress: ""
     port: 0
     publishPort: 5060
     keepAliveInterval: 15
@@ -54,7 +54,7 @@ audio:
     plugin: default
     smplRate: 44100
   alwaysRecording: false
-  audioApi: coreaudio
+  audioApi: portaudio
   captureMuted: false
   playbackMuted: false
   pulse:
@@ -78,15 +78,15 @@ video:
   recordQuality: 0
   conferenceResolution: 1280x720
   devices:
-    - name: desktop
+    - input: desktop
       id: desktop
-      input: desktop
+      name: desktop
       video_size: 0x0
       channel: ""
       framerate: 30
-    - name: FaceTime HD Camera
-      id: EAB7A68F-EC2B-4487-AADF-D8A91C1CB782
+    - id: EAB7A68F-EC2B-4487-AADF-D8A91C1CB782
       input: EAB7A68F-EC2B-4487-AADF-D8A91C1CB782
+      name: FaceTime HD Camera
       video_size: 640x480
       channel: ""
       framerate: 30
