@@ -475,7 +475,7 @@ if(MSVC)
   # ############################################################################
   target_include_directories(
     ${PROJECT_NAME}
-    PRIVATE
+    PUBLIC
       "${CMAKE_CURRENT_SOURCE_DIR}/compat/msvc;"
       "${CMAKE_CURRENT_SOURCE_DIR}/contrib/msvc;"
       "${CMAKE_CURRENT_SOURCE_DIR}/contrib/msvc/include;"
@@ -486,7 +486,6 @@ if(MSVC)
       "${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/speexdsp/include;"
       "${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/webrtc-audio-processing;"
       "${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/portaudio/include;"
-    PUBLIC
       $<$<CONFIG:Debug>:${DEPS_DEBUG}/include>
       $<$<CONFIG:Release>:${DEPS_RELEASE}/include>
       $<$<CONFIG:RelWithDebInfo>:${DEPS_RELEASE}/include>
@@ -503,7 +502,7 @@ if(MSVC)
   # ############################################################################
   target_compile_definitions(
     ${PROJECT_NAME}
-    PRIVATE "_WIN32_WINNT=0x0601;"
+    PUBLIC "_WIN32_WINNT=0x0601;"
             "_USE_MATH_DEFINES;"
             "_SCL_SECURE_NO_WARNINGS;"
             "_CRT_SECURE_NO_WARNINGS;"
@@ -520,7 +519,7 @@ if(MSVC)
   if("${CMAKE_VS_PLATFORM_NAME}" STREQUAL "x64")
     target_compile_options(
       ${PROJECT_NAME}
-      PRIVATE /Oi;
+      PUBLIC /Oi;
               /MP;
               /Oy-;
               /sdl-;
@@ -546,7 +545,7 @@ if(MSVC)
   if("${CMAKE_VS_PLATFORM_NAME}" STREQUAL "x64")
     target_link_options(
       ${PROJECT_NAME}
-      PRIVATE
+      PUBLIC
       /MACHINE:X64
       /VERBOSE:LIB
       # all dependencies are build with /MD
