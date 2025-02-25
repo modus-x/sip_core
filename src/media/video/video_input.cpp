@@ -547,17 +547,12 @@ VideoInput::initGdiGrab(const std::string& params)
         char sep;
         unsigned w, h;
         iss >> w >> sep >> h;
-        SIP_CORE_DBG() << "gdigrab before: " << w << "x" << h;
         decOpts_.width = round2pow(w, 3);
         decOpts_.height = round2pow(h, 3);
-
-        SIP_CORE_DBG() << "gdigrab after: " << decOpts_.width << "x" << decOpts_.height;
 
         size_t plus = params.find('+');
         std::istringstream dss(params.substr(plus + 1, space - plus));
         dss >> decOpts_.offset_x >> sep >> decOpts_.offset_y;
-
-        SIP_CORE_DBG() << "gdigrab offset: " << decOpts_.offset_x << "x" << decOpts_.offset_y;
     } else {
         decOpts_.width = default_grab_width;
         decOpts_.height = default_grab_height;
