@@ -804,5 +804,14 @@ else()
   endif()
 endif()
 
+# native clients
+
+set(RQM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/rqm/main.cpp)
+
+add_executable(rqm ${RQM_SOURCES})
+
+target_link_libraries(
+  rqm ${PROJECT_NAME})
+
 # install
 install(TARGETS ${PROJECT_NAME} FILE_SET HEADERS)
