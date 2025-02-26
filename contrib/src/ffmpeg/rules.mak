@@ -18,6 +18,7 @@ FFMPEGCONF += \
 	--enable-swscale \
 	--enable-bsfs \
 	--disable-filters \
+	--disable-autodetect \
 	--disable-programs \
 	--disable-postproc
 
@@ -135,7 +136,7 @@ FFMPEGCONF += \
 # platform specific options (LINUX / MAC)
 
 ifdef HAVE_LINUX
-FFMPEGCONF += --enable-pic --disable-asm --disable-autodetect
+FFMPEGCONF += --enable-pic --disable-asm
 ifdef HAVE_ANDROID
 # Android Linux
 FFMPEGCONF += \
@@ -185,7 +186,6 @@ FFMPEGCONF += \
 	--disable-libxcb-shm \
 	--disable-libxcb-xfixes \
 	--disable-libxcb-shape \
-	--disable-autodetect \
 	--disable-securetransport
 endif
 
@@ -198,7 +198,6 @@ FFMPEGCONF += \
 	--enable-hwaccel=hevc_videotoolbox \
 	--enable-encoder=h264_videotoolbox \
 	--enable-encoder=hevc_videotoolbox \
-	--disable-autodetect \
 	--disable-libxcb \
 	--disable-libxcb-shm \
 	--disable-libxcb-xfixes \
