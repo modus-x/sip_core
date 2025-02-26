@@ -234,7 +234,7 @@ if(NOT MSVC)
         set(REAL_TARGET ${TARGET})
       endif()
 
-      message(INFO ${REAL_TARGET})
+      message(INFO "Building for TARGET: ${REAL_TARGET}")
 
       if(NOT EXISTS ${CONTRIB_BUILD_PATH})
         file(MAKE_DIRECTORY ${CONTRIB_BUILD_PATH})
