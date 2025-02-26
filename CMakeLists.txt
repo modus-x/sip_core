@@ -208,7 +208,8 @@ if(NOT MSVC)
       # append our path to list of contrib paths!
       list(APPEND CONTRIB_PATHS ${CONTRIB_PATH})
 
-      # pass some args from cmake to dependencies
+      # pass some args from cmake to dependencies. 
+      # TODO: this should be done in deps' build scripts!
       if(APPLE)
         if(NOT IOS)
           getarch(${TARGET})
@@ -225,17 +226,21 @@ if(NOT MSVC)
         endif()
       endif()
 
+      # hack for ios
+      # TODO: this should be done in deps' build scripts!
       if(IOS)
         set(REAL_TARGET "${CMAKE_OSX_ARCHITECTURES}-apple-darwin_ios")
       else()
         set(REAL_TARGET ${TARGET})
       endif()
 
+      message(INFO ${REAL_TARGET})
+
       if(NOT EXISTS ${CONTRIB_BUILD_PATH})
         file(MAKE_DIRECTORY ${CONTRIB_BUILD_PATH})
         execute_process(
           COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/contrib/bootstrap
-                  --prefix=${CONTRIB_PATH}
+                  --prefix=${CONTRIB_PATH} --build=${REAL_TARGET} --host=${REAL_TARGET}
           WORKING_DIRECTORY ${CONTRIB_BUILD_PATH}
           RESULT_VARIABLE CMD_RESULT)
 
