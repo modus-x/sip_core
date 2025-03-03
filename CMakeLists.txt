@@ -805,7 +805,7 @@ endif()
 
 # native clients
 
-set(RQM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/rqm/main.cpp)
+set(RQM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/rqm/main.cpp ${CMAKE_CURRENT_SOURCE_DIR}/rqm/directencoder.cpp)
 
 add_executable(rqm ${RQM_SOURCES})
 

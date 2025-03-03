@@ -529,8 +529,13 @@ VideoInput::initAVFoundation(const std::string& display)
         decOpts_.width = round2pow(w, 3);
         decOpts_.height = round2pow(h, 3);
     } else {
+        #ifdef __APPLE__
+        decOpts_.width = 5120;
+        decOpts_.height = 2880;
+        #else
         decOpts_.width = default_grab_width;
         decOpts_.height = default_grab_height;
+        #endif
     }
     return true;
 }

@@ -216,7 +216,7 @@ MediaRecorder::startRecording()
 #ifdef ENABLE_VIDEO
                         bool isVideo = (frame->pointer()->width > 0 && frame->pointer()->height > 0);
                         rec->encoder_->encode(frame->pointer(),
-                                              isVideo ? rec->videoIdx_ : rec->audioIdx_);
+                                              isVideo ? rec->videoIdx_ : rec->audioIdx_, false);
 #else
                         rec->encoder_->encode(frame->pointer(), rec->audioIdx_);
 #endif // ENABLE_VIDEO

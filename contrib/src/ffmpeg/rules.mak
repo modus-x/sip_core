@@ -37,6 +37,8 @@ FFMPEGCONF += \
 	--disable-demuxers \
 	--disable-muxers \
 	--enable-muxer=rtp \
+	--enable-muxer=mp4 \
+	--enable-muxer=ismv \
 	--enable-muxer=h264 \
 	--enable-muxer=webm \
 	--enable-muxer=ogg \

@@ -76,8 +76,15 @@ public:
 
     void openOutput(const std::string& filename, const std::string& format = "");
     void setMetadata(const std::string& title, const std::string& description);
+
+    // set media stream parameters (video width, height, audio sample rate, etc)
     void setOptions(const MediaStream& opts);
+
+    // set media description parameters (payload type, video mode)
     void setOptions(const MediaDescription& args);
+
+    // add steam to context with some predefined codec info
+
     int addStream(const SystemCodecInfo& codec);
     void setIOContext(AVIOContext* ioctx) { ioCtx_ = ioctx; }
     void resetStreams(int width, int height);
@@ -96,7 +103,7 @@ public:
     int encodeAudio(AudioFrame& frame);
 
     // frame should be ready to be sent to the encoder at this point
-    int encode(AVFrame* frame, int streamIdx);
+    int encode(AVFrame* frame, int streamIdx, bool is_keyframe);
 
     int flush();
     std::string print_sdp();
@@ -157,8 +164,25 @@ private:
     std::shared_ptr<VideoFrame> getScaledSWFrame(const VideoFrame& input);
 #endif
 
+    // encode data into h264 / something another
     std::vector<AVCodecContext*> encoders_;
+
+    // output from encoder. it may be rtp or file
     AVFormatContext* outputCtx_ = nullptr;
+
+    // output to mp4. only local file url
+    AVFormatContext* mp4Ctx_ = nullptr;
+
+    // codec for mp4
+    AVCodecContext* mp4CodecContext_ = nullptr;
+
+    // stream for mp4
+    AVStream *mp4Stream_ = nullptr;
+
+    std::string mp4File_;
+
+    AVDictionary *mp4Opts_;
+
     AVIOContext* ioCtx_ = nullptr;
     int currentStreamIdx_ = -1;
     unsigned sent_samples = 0;

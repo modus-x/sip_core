@@ -494,7 +494,7 @@ SIPCall::SIPSessionReinvite()
 void
 SIPCall::sendSIPInfo(std::string_view body, std::string_view subtype)
 {
-    if (subtype != "dtmf-relay") {
+    if (subtype == "media_control+xml") {
         return;
     }
     std::lock_guard<std::recursive_mutex> lk {callMutex_};

@@ -57,6 +57,15 @@ constexpr double LOGREG_PARAM_B_HEVC {-5.};
 MediaEncoder::MediaEncoder()
     : outputCtx_(avformat_alloc_context())
 {
+    auto now = std::chrono::system_clock::now();
+    auto timestamp = std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count();
+    mp4File_ = fmt::format("/Users/modus.operandi/Code/sip_core/vids/{}.mp4",
+                           std::to_string(timestamp));
+    avformat_alloc_output_context2(&mp4Ctx_, NULL, NULL, mp4File_.c_str());
+    if (!mp4Ctx_) {
+        SIP_CORE_ERR() << "mp4_error: cannot create mp4Ctx_";
+    }
+
     SIP_CORE_DBG("[%p] New instance created", this);
 }
 
@@ -78,6 +87,10 @@ MediaEncoder::~MediaEncoder()
             }
         }
         avformat_free_context(outputCtx_);
+    }
+
+    if (mp4Ctx_) {
+        avformat_free_context(mp4Ctx_);
     }
     av_dict_free(&options_);
 
@@ -114,11 +127,9 @@ MediaEncoder::setOptions(const MediaDescription& args)
 {
     int ret;
     if (args.payload_type
-        and (ret = av_opt_set_int(reinterpret_cast<void*>(outputCtx_),
-                                  "payload_type",
-                                  args.payload_type,
-                                  AV_OPT_SEARCH_CHILDREN)
-                   < 0))
+        and (ret
+             = av_opt_set_int(outputCtx_, "payload_type", args.payload_type, AV_OPT_SEARCH_CHILDREN)
+               < 0))
         SIP_CORE_ERR() << "Failed to set payload type: " << libav_utils::getError(ret);
 
     if (not args.parameters.empty())
@@ -325,7 +336,16 @@ MediaEncoder::initStream(const SystemCodecInfo& systemCodecInfo, AVBufferRef* fr
         encoderCtx = initCodec(mediaType,
                                static_cast<AVCodecID>(systemCodecInfo.avcodecId),
                                videoOpts_.bitrate);
+
+        // this will create new stream
+        mp4Stream_ = avformat_new_stream(mp4Ctx_, NULL);
+
+        if (!mp4Stream_) {
+            SIP_CORE_ERR() << "mp4_error: cannot create mp4Stream_";
+        }
+
         readConfig(encoderCtx);
+
         encoders_.emplace_back(encoderCtx);
         if (avcodec_open2(encoderCtx, outputCodec_, &options_) < 0)
             throw MediaEncoderException("Could not open encoder");
@@ -333,8 +353,12 @@ MediaEncoder::initStream(const SystemCodecInfo& systemCodecInfo, AVBufferRef* fr
 
     avcodec_parameters_from_context(stream->codecpar, encoderCtx);
 
-    // framerate is not copied from encoderCtx to stream
-    stream->avg_frame_rate = encoderCtx->framerate;
+    // copy to mp4Stream_ our codec parameters
+    auto ret = avcodec_parameters_copy(mp4Stream_->codecpar, stream->codecpar);
+    if (ret < 0) {
+        SIP_CORE_ERR() << "mp4_error: cannot copy parameters";
+    }
+
 #ifdef ENABLE_VIDEO
     if (systemCodecInfo.mediaType == MEDIA_VIDEO) {
         // allocate buffers for both scaled (pre-encoder) and encoded frames
@@ -369,6 +393,12 @@ MediaEncoder::initStream(const SystemCodecInfo& systemCodecInfo, AVBufferRef* fr
 void
 MediaEncoder::openIOContext()
 {
+    if (!(mp4Ctx_->flags & AVFMT_NOFILE)) {
+        auto ret = avio_open(&mp4Ctx_->pb, mp4File_.c_str(), AVIO_FLAG_WRITE);
+        if (ret < 0) {
+            SIP_CORE_ERR() << "mp4_error: could not open file!";
+        }
+    }
     if (ioCtx_) {
         outputCtx_->pb = ioCtx_;
         outputCtx_->packet_size = outputCtx_->pb->buffer_size;
@@ -401,10 +431,19 @@ MediaEncoder::startIO()
         throw MediaEncoderException("Failed to write output file header");
     }
 
+    // as in OBS studio
+    av_dict_set(&mp4Opts_, "movflags", "frag_keyframe+empty_moov+separate_moof+omit_tfhd_offset", 0);
+
+    if (avformat_write_header(mp4Ctx_, &mp4Opts_)) {
+        SIP_CORE_ERR("mp4_error: could not write header for output mp4... check codec parameters");
+    }
+
 #if LIBAVFORMAT_VERSION_INT >= AV_VERSION_INT(58, 7, 100)
     av_dump_format(outputCtx_, 0, outputCtx_->url, 1);
+    av_dump_format(mp4Ctx_, 0, mp4Ctx_->url, 1);
 #else
     av_dump_format(outputCtx_, 0, outputCtx_->filename, 1);
+    av_dump_format(mp4Ctx_, 0, mp4Ctx_->filename, 1);
 #endif
     initialized_ = true;
 }
@@ -457,7 +496,7 @@ MediaEncoder::encode(const std::shared_ptr<VideoFrame>& input,
         avframe->key_frame = 0;
     }
 
-    return encode(avframe, currentStreamIdx_);
+    return encode(avframe, currentStreamIdx_, is_keyframe);
 }
 #endif // ENABLE_VIDEO
 
@@ -473,12 +512,12 @@ MediaEncoder::encodeAudio(AudioFrame& frame)
     }
     frame.pointer()->pts = sent_samples;
     sent_samples += frame.pointer()->nb_samples;
-    encode(frame.pointer(), currentStreamIdx_);
+    encode(frame.pointer(), currentStreamIdx_, false);
     return 0;
 }
 
 int
-MediaEncoder::encode(AVFrame* frame, int streamIdx)
+MediaEncoder::encode(AVFrame* frame, int streamIdx, bool is_keyframe)
 {
     if (!initialized_ && frame) {
         // Initialize on first video frame, or first audio frame if no video stream
@@ -503,6 +542,10 @@ MediaEncoder::encode(AVFrame* frame, int streamIdx)
     pkt.data = nullptr; // packet data will be allocated by the encoder
     pkt.size = 0;
 
+    if (is_keyframe) {
+        pkt.flags = AV_PKT_FLAG_KEY;
+    }
+
     if (!encoderCtx)
         return -1;
 
@@ -519,13 +562,20 @@ MediaEncoder::encode(AVFrame* frame, int streamIdx)
             return ret;
         }
 
+        if (is_keyframe) {
+            pkt.flags = AV_PKT_FLAG_KEY;
+        }
+
         if (pkt.size) {
-            if (send(pkt, streamIdx))
+            // send packet to file
+            ret = av_write_frame(mp4Ctx_, &pkt);
+
+            if (send(pkt, streamIdx)) {
                 break;
+            }
         }
     }
 
-    av_packet_unref(&pkt);
     return 0;
 }
 
@@ -564,7 +614,7 @@ MediaEncoder::flush()
 {
     int ret = 0;
     for (size_t i = 0; i < outputCtx_->nb_streams; ++i) {
-        if (encode(nullptr, i) < 0) {
+        if (encode(nullptr, i, false) < 0) {
             SIP_CORE_ERR() << "Could not flush stream #" << i;
             ret |= 1u << i; // provide a way for caller to know which streams failed
         }
@@ -635,11 +685,8 @@ MediaEncoder::prepareEncoderContext(const AVCodec* outputCodec, bool is_video)
 #endif
 #endif
 
-        // Fri Jul 22 11:37:59 EDT 2011:tmatth:XXX: DON'T set this, we want our
-        // pps and sps to be sent in-band for RTP
-        // This is to place global headers in extradata instead of every
-        // keyframe.
-        // encoderCtx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+        // mp4 REQUIRES global header in codec to work
+        encoderCtx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
     } else {
         encoderCtx->sample_fmt = AV_SAMPLE_FMT_S16;
         encoderCtx->sample_rate = std::max(8000, audioOpts_.sampleRate);

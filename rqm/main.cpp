@@ -3,8 +3,11 @@
 
 #include "manager.h"
 #include "videomanager.h"
+#include "sip/sipcall.h"
 #include "sip/sipaccount.h"
 #include "sip/sipaccount_config.h"
+
+#include "directencoder.h"
 
 using namespace sip_core;
 
@@ -15,11 +18,35 @@ auto& manager = Manager::instance();
 // Signal flag to detect Ctrl+C
 static std::atomic<bool> keepRunning(true);
 
+static std::weak_ptr<SIPCall> currentCall;
+
+static DirectEncoder* directEncoder;
+
+static const std::string rtp = "192.168.92.45:5060";
+
+bool test_video = true;
+
 // Signal handler for Ctrl+C (SIGINT)
 void
 signalHandler(int signum)
 {
     keepRunning = false;
+}
+
+std::string
+getWindowInfo(const std::string& windowName,
+              const std::string& processName,
+              const std::string& coords)
+{
+    Json::Value root;
+    root["windowRectangle"] = coords;
+    root["processName"] = processName;
+    root["windowName"] = windowName;
+    auto now = std::chrono::system_clock::now();
+    auto timestamp = std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count();
+    root["time"] = timestamp;
+    auto result = Json::writeString(Json::StreamWriterBuilder {}, root);
+    return result;
 }
 
 // Function to wait for Ctrl+C or 'q'
@@ -29,17 +56,30 @@ waitForExit()
     // Register signal handler for Ctrl+C
     std::signal(SIGINT, signalHandler);
 
-    // Set up non-blocking input (optional, but keeps it simple)
     while (keepRunning) {
-        std::cout << "keep running..." << std::endl;
-        // Check for 'q' without blocking too long
-        if (std::cin.peek() == 'q') {
-            keepRunning = false;
+        auto symbol = std::cin.peek();
+
+        std::cout << "peaked symbol: " << char(symbol) << std::endl;
+        if (symbol != EOF && symbol != '\n') { // Process only meaningful characters
+            std::cin.ignore(1);                // Consume the character
+            std::cout << "received " << static_cast<char>(symbol) << std::endl;
+            if (symbol == 'q') {
+                keepRunning = false;
+            } else if (symbol == 's') {
+                if (auto call = currentCall.lock()) {
+                    auto info = getWindowInfo("main.cpp - sip_core",
+                                              "VS Code",
+                                              "120.220-320.220-320.420-120.42");
+                    std::cout << "Sending json " << info << std::endl;
+                    call->sendSIPInfo(info, "json");
+                }
+            }
+        } else if (symbol == '\n') {
+            std::cin.ignore(1); // Consume the newline
         }
-        // Small sleep to avoid busy-waiting
+        // Small sleep to avoid busy-waiting when no input is processed
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
-
     std::cout << "Exiting..." << std::endl;
 }
 
@@ -88,24 +128,42 @@ main(int argc, char const* argv[])
                 std::cout << "IncomingCallWithMedia: "
                           << " from " << peerNumber << ", medias " << mediaList.capacity()
                           << std::endl;
-                sip_core::Manager::instance().answerCall(accountId, callId, mediaList);
+                manager.answerCall(accountId, callId, mediaList);
+
+                currentCall = manager.callFactory.getCall<SIPCall>(callId);
             }),
     };
 
     registerSignalHandlers(handlers);
 
-    sip_core::Manager::instance().getVideoManager().videoDeviceMonitor.setDefaultDevice("desktop");
+    manager.getVideoManager().videoDeviceMonitor.setDefaultDevice("desktop");
 
     auto config = rqm->config();
 
     std::vector<SipAccountConfig::Credentials> creds {
-        SipAccountConfig::Credentials("*", config.username, "1qazxsw2")};
+        SipAccountConfig::Credentials("*", config.username, "1")};
 
     rqm->setCredentials(creds);
 
-    rqm->doRegister();
+    if (test_video) {
+        // desktop video input decoder.
+        auto videoInput = getVideoInput(
+            manager.getVideoManager().videoDeviceMonitor.getMRLForDefaultDevice());
 
-    waitForExit();
+        auto params = videoInput->getParams().get();
+
+        directEncoder = new DirectEncoder(rtp, params);
+
+        // let the buffers go to our test renderers
+        videoInput->attach(directEncoder);
+
+        waitForExit();
+
+    } else {
+        rqm->doRegister();
+
+        waitForExit();
+    }
 
     return 0;
 }

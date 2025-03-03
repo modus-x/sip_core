@@ -1,12 +1,12 @@
 accounts:
   - id: RQM
     type: SIP
-    hostname: 192.168.101.235
+    hostname: 192.168.92.45
     username: vclient
     transport: udp
     activeCodecs: 139/27/86076/65543/65542
     useragent: RQM client
-    bindAddress: ""
+    bindAddress: 10.12.50.157
     port: 0
     publishPort: 5060
     keepAliveInterval: 15
@@ -54,7 +54,7 @@ audio:
     plugin: default
     smplRate: 44100
   alwaysRecording: false
-  audioApi: portaudio
+  audioApi: coreaudio
   captureMuted: false
   playbackMuted: false
   pulse:
@@ -78,15 +78,15 @@ video:
   recordQuality: 0
   conferenceResolution: 1280x720
   devices:
-    - input: desktop
+    - name: desktop
       id: desktop
-      name: desktop
+      input: desktop
       video_size: 0x0
       channel: ""
       framerate: 30
-    - id: EAB7A68F-EC2B-4487-AADF-D8A91C1CB782
+    - name: FaceTime HD Camera
+      id: EAB7A68F-EC2B-4487-AADF-D8A91C1CB782
       input: EAB7A68F-EC2B-4487-AADF-D8A91C1CB782
-      name: FaceTime HD Camera
       video_size: 640x480
       channel: ""
       framerate: 30
