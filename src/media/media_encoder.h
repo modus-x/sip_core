@@ -168,20 +168,20 @@ private:
     std::vector<AVCodecContext*> encoders_;
 
     // output from encoder. it may be rtp or file
-    AVFormatContext* outputCtx_ = nullptr;
+    AVFormatContext* outputCtx_ = NULL;
 
     // output to mp4. only local file url
-    AVFormatContext* mp4Ctx_ = nullptr;
+    AVFormatContext* mp4Ctx_ = NULL;
 
     // codec for mp4
-    AVCodecContext* mp4CodecContext_ = nullptr;
+    AVCodecContext* mp4CodecContext_ = NULL;
 
     // stream for mp4
-    AVStream *mp4Stream_ = nullptr;
+    AVStream *mp4Stream_ = NULL;
 
     std::string mp4File_;
 
-    AVDictionary *mp4Opts_;
+    AVDictionary *mp4Opts_ = NULL;
 
     AVIOContext* ioCtx_ = nullptr;
     int currentStreamIdx_ = -1;

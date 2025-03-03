@@ -432,7 +432,9 @@ MediaEncoder::startIO()
     }
 
     // as in OBS studio
-    av_dict_set(&mp4Opts_, "movflags", "frag_keyframe+empty_moov+separate_moof+omit_tfhd_offset", 0);
+    libav_utils::setDictValue(&mp4Opts_,
+"movflags",
+"frag_keyframe+empty_moov+separate_moof+omit_tfhd_offset");
 
     if (avformat_write_header(mp4Ctx_, &mp4Opts_)) {
         SIP_CORE_ERR("mp4_error: could not write header for output mp4... check codec parameters");
