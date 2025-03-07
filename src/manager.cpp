@@ -811,6 +811,9 @@ Manager::finish() noexcept
     } catch (const VoipLinkException& err) {
         SIP_CORE_ERR("%s", err.what());
     }
+
+    pimpl_->finished_ = true;
+    initialized = false;
 }
 
 void
