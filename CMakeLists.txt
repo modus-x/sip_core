@@ -161,7 +161,7 @@ if(NOT MSVC AND BUILD_DEPS)
             "-mios-simulator-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
         set(ENV{ASFLAGS}
             "-mios-simulator-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
-        set(TARGETS ${TARGETS}-ios${SDK_VERSION}-simulator)
+        set(TARGETS ${CMAKE_OSX_ARCHITECTURES}-ios${SDK_VERSION}-simulator)
       elseif($ENV{IOS_TARGET_PLATFORM} STREQUAL "iPhoneOS")
         message("-- iOS Build for iphone")
         set(ENV{LDFLAGS}
@@ -171,7 +171,7 @@ if(NOT MSVC AND BUILD_DEPS)
             "-miphoneos-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
         set(ENV{ASFLAGS}
             "-miphoneos-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
-        set(TARGETS ${TARGETS}-ios${SDK_VERSION}-real)
+        set(TARGETS ${CMAKE_OSX_ARCHITECTURES}-ios${SDK_VERSION}-real)
       else()
         message(FATAL_ERROR "-- iOS undefined arch for contrib build")
       endif()
