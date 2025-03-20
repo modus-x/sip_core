@@ -78,204 +78,192 @@ function(GETARCH TRIPLE)
   return(PROPAGATE ARCH)
 endfunction()
 
-if(NOT MSVC)
+if(NOT MSVC AND BUILD_DEPS)
   # ############################################################################
   # Contrib
   # ############################################################################
-  if(APPLE)
-    if(CMAKE_OSX_DEPLOYMENT_TARGET)
-      message(
-        STATUS
-          "apple detected non empty CMAKE_OSX_DEPLOYMENT_TARGET, propagading to ${CMAKE_OSX_DEPLOYMENT_TARGET} env"
-      )
-      set(ENV{CMAKE_OSX_DEPLOYMENT_TARGET} ${CMAKE_OSX_DEPLOYMENT_TARGET})
-      set(ENV{MACOSX_DEPLOYMENT_TARGET} ${CMAKE_OSX_DEPLOYMENT_TARGET})
-      set(ENV{RECOMMENDED_MACOSX_DEPLOYMENT_TARGET}
-          ${CMAKE_OSX_DEPLOYMENT_TARGET})
-    endif()
-  endif()
 
-  # Android target mapping for contrib
-  if(ANDROID_ABI STREQUAL "x86")
-    set(TARGETS i686-linux-android)
-  elseif(ANDROID_ABI STREQUAL "x86_64")
-    set(TARGETS x86_64-linux-android)
-  elseif(ANDROID_ABI STREQUAL "arm64-v8a")
-    set(TARGETS aarch64-linux-android)
-  elseif(ANDROID_ABI STREQUAL "armeabi-v7a")
-    set(TARGETS armv7a-linux-androideabi)
-  else()
-    execute_process(
-      COMMAND gcc -dumpmachine
-      COMMAND tr -d '\n'
-      OUTPUT_VARIABLE TARGETS)
+  # Local build target
+  # ----------------------------------------------------------------------------
 
-    getarch(${TARGETS})
-  endif()
+  # Get triplet where we build (our local machine)
+  execute_process(
+    COMMAND gcc -dumpmachine
+    COMMAND tr -d '\n'
+    OUTPUT_VARIABLE BUILD_MACHINE)
 
-  if(BUILD_DEPS)
-    if(ANDROID)
-      # We need to set this variables for contrib to be successfully configured
-      # See https://developer.android.com/ndk/guides/other_build_systems
-      set(ENV{ANDROID_NDK} ${ANDROID_NDK})
-      set(ENV{ANDROID_ABI} ${ANDROID_ABI})
-      set(ENV{ANDROID_API} ${ANDROID_PLATFORM})
-      set(ENV{TOOLCHAIN} ${ANDROID_TOOLCHAIN_ROOT})
-      set(ENV{TARGET} ${TARGETS})
-      set(ENV{API} ${ANDROID_PLATFORM_LEVEL})
-      set(ENV{CC} $ENV{TOOLCHAIN}/bin/${TARGETS}$ENV{API}-clang)
-      set(ENV{CXX} $ENV{TOOLCHAIN}/bin/${TARGETS}$ENV{API}-clang++)
-      set(ENV{AS} "$ENV{CC} -c")
-      set(ENV{AR} ${CMAKE_AR})
-      set(ENV{RANLIB} ${CMAKE_RANLIB})
-      set(ENV{STRIP} ${CMAKE_STRIP})
-      set(ENV{LD} $ENV{TOOLCHAIN}/bin/ld)
+  # Get our local architecture
+  getarch(${BUILD_MACHINE})
+
+  # Host build target with environment variables
+  # ----------------------------------------------------------------------------
+
+  if(ANDROID)
+
+    if(ANDROID_ABI STREQUAL "x86")
+      set(TARGETS i686-linux-android)
+    elseif(ANDROID_ABI STREQUAL "x86_64")
+      set(TARGETS x86_64-linux-android)
+    elseif(ANDROID_ABI STREQUAL "arm64-v8a")
+      set(TARGETS aarch64-linux-android)
+    elseif(ANDROID_ABI STREQUAL "armeabi-v7a")
+      set(TARGETS armv7a-linux-androideabi)
+    else()
+      message(FATAL_ERROR "Unsupported ABI: ${ANDROID_ABI}")
     endif()
 
-    if(APPLE)
+    # We need to set this variables for contrib to be successfully configured
+    # See https://developer.android.com/ndk/guides/other_build_systems
+    set(ENV{ANDROID_NDK} ${ANDROID_NDK})
+    set(ENV{ANDROID_ABI} ${ANDROID_ABI})
+    set(ENV{ANDROID_API} ${ANDROID_PLATFORM})
+    set(ENV{TOOLCHAIN} ${ANDROID_TOOLCHAIN_ROOT})
+    set(ENV{TARGET} ${TARGETS})
+    set(ENV{API} ${ANDROID_PLATFORM_LEVEL})
+    set(ENV{CC} $ENV{TOOLCHAIN}/bin/${TARGETS}$ENV{API}-clang)
+    set(ENV{CXX} $ENV{TOOLCHAIN}/bin/${TARGETS}$ENV{API}-clang++)
+    set(ENV{AS} "$ENV{CC} -c")
+    set(ENV{AR} ${CMAKE_AR})
+    set(ENV{RANLIB} ${CMAKE_RANLIB})
+    set(ENV{STRIP} ${CMAKE_STRIP})
+    set(ENV{LD} $ENV{TOOLCHAIN}/bin/ld)
+
+  elseif(LINUX)
+    # just build for the machine we are building on may be, in future, we will
+    # add cross-compilation support
+    set(TARGETS ${BUILD_MACHINE})
+  elseif(APPLE)
+    if(IOS)
+      # ios specific flags and contrib build root
+      execute_process(
+        COMMAND xcrun --sdk "${CMAKE_OSX_SYSROOT}" --show-sdk-version
+        OUTPUT_VARIABLE SDK_VERSION
+        OUTPUT_STRIP_TRAILING_WHITESPACE)
+
+      if(NOT DEFINED ENV{IOS_TARGET_PLATFORM})
+        message(
+          FATAL_ERROR
+            "IOS_TARGET_PLATFORM environment variable"
+            " should be set to make deps for iphone simulator or real device")
+      endif()
+      if($ENV{IOS_TARGET_PLATFORM} STREQUAL "iPhoneSimulator")
+        if(${CMAKE_OSX_ARCHITECTURES} MATCHES "arm64")
+          message("-- iOS Build for simulator arm64")
+        elseif(${CMAKE_OSX_ARCHITECTURES} MATCHES "x86_64")
+          message("-- iOS Build for simulator x86_64")
+        endif()
+
+        set(ENV{LDFLAGS}
+            "-mios-simulator-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
+        set(ENV{CFLAGS}
+            "-mios-simulator-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
+        set(ENV{CXXFLAGS}
+            "-mios-simulator-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
+        set(ENV{ASFLAGS}
+            "-mios-simulator-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
+        set(TARGETS ${TARGETS}-ios${SDK_VERSION}-simulator)
+      elseif($ENV{IOS_TARGET_PLATFORM} STREQUAL "iPhoneOS")
+        message("-- iOS Build for iphone")
+        set(ENV{LDFLAGS}
+            "-miphoneos-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
+        set(ENV{CFLAGS} "-miphoneos-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
+        set(ENV{CXXFLAGS}
+            "-miphoneos-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
+        set(ENV{ASFLAGS}
+            "-miphoneos-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
+        set(TARGETS ${TARGETS}-ios${SDK_VERSION}-real)
+      else()
+        message(FATAL_ERROR "-- iOS undefined arch for contrib build")
+      endif()
+    else()
       if(CMAKE_OSX_ARCHITECTURES STREQUAL "" OR NOT DEFINED
                                                 CMAKE_OSX_ARCHITECTURES)
         set(CMAKE_OSX_ARCHITECTURES ${ARCH})
       endif()
+      # create list of passed-in architectures, add them to targets, because we
+      # need to build contrib for every darwin arch!
+      string(REPLACE ";" " " OSX_ARCH "${CMAKE_OSX_ARCHITECTURES}")
+      string(REGEX MATCHALL "[^ ]+" OSX_ARCH_LIST "${OSX_ARCH}")
+      set(CURRENT_ARCH_TRIPLE ${BUILD_MACHINE})
+      set(TARGETS "")
 
-      if(NOT IOS)
-        # create list of passed-in architectures, add them to targets, because
-        # we need to build contrib for every darwin arch!
-        string(REPLACE ";" " " OSX_ARCH "${CMAKE_OSX_ARCHITECTURES}")
-        string(REGEX MATCHALL "[^ ]+" OSX_ARCH_LIST "${OSX_ARCH}")
-        set(CURRENT_ARCH_TRIPLE ${TARGETS})
-        set(TARGETS "")
+      foreach(osx_arch ${OSX_ARCH_LIST})
+        string(REPLACE ${ARCH} ${osx_arch} NEW_TARGET ${CURRENT_ARCH_TRIPLE})
+        list(APPEND TARGETS ${NEW_TARGET})
+      endforeach()
 
-        foreach(osx_arch ${OSX_ARCH_LIST})
-          string(REPLACE ${ARCH} ${osx_arch} NEW_TARGET ${CURRENT_ARCH_TRIPLE})
-          list(APPEND TARGETS ${NEW_TARGET})
-        endforeach()
-      endif()
+      set(ENV{LDFLAGS}
+          "-arch ${ARCH} -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
+      set(ENV{CFLAGS}
+          "-arch ${ARCH} -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
+      set(ENV{CXXFLAGS}
+          "-arch ${ARCH} -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
+    endif()
+  endif()
 
-      if(IOS)
-        # ios specific flags and contrib build root
-        execute_process(
-          COMMAND xcrun --sdk "${CMAKE_OSX_SYSROOT}" --show-sdk-version
-          OUTPUT_VARIABLE SDK_VERSION
-          OUTPUT_STRIP_TRAILING_WHITESPACE)
+  foreach(TARGET ${TARGETS})
+    message(STATUS "building native dependencies for ${TARGET}")
 
-        if(NOT DEFINED ENV{IOS_TARGET_PLATFORM})
-          message(
-            FATAL_ERROR
-              "IOS_TARGET_PLATFORM environment variable"
-              " should be set to make deps for iphone simulator or real device")
-        endif()
+    set(CONTRIB_BUILD_PATH ${CMAKE_CURRENT_SOURCE_DIR}/contrib/build-${TARGET})
+    set(CONTRIB_PATH ${CMAKE_CURRENT_SOURCE_DIR}/contrib/${TARGET})
 
-        if($ENV{IOS_TARGET_PLATFORM} STREQUAL "iPhoneSimulator")
-          if(${CMAKE_OSX_ARCHITECTURES} MATCHES "arm64")
-            message("-- iOS Build for simulator arm64")
-          elseif(${CMAKE_OSX_ARCHITECTURES} MATCHES "x86_64")
-            message("-- iOS Build for simulator x86_64")
-          endif()
+    # append our path to list of contrib paths!
+    list(APPEND CONTRIB_PATHS ${CONTRIB_PATH})
 
-          set(ENV{LDFLAGS}
-              "-mios-simulator-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
-          set(ENV{CFLAGS}
-              "-mios-simulator-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
-          set(ENV{CXXFLAGS}
-              "-mios-simulator-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
-          set(ENV{ASFLAGS}
-              "-mios-simulator-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
-          set(TARGETS ${TARGETS}-ios${SDK_VERSION}-simulator)
-        elseif($ENV{IOS_TARGET_PLATFORM} STREQUAL "iPhoneOS")
-          message("-- iOS Build for iphone")
-          set(ENV{LDFLAGS}
-              "-miphoneos-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
-          set(ENV{CFLAGS}
-              "-miphoneos-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
-          set(ENV{CXXFLAGS}
-              "-miphoneos-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
-          set(ENV{ASFLAGS}
-              "-miphoneos-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
-          set(TARGETS ${TARGETS}-ios${SDK_VERSION}-real)
-        else()
-          message(FATAL_ERROR "-- iOS undefined arch for contrib build")
-        endif()
-      endif()
+    # target for simulator and real device is the same, and does not reflect
+    # folder names in contrib, so we need to restore it!
+    if(IOS)
+      set(REAL_TARGET "${CMAKE_OSX_ARCHITECTURES}-apple-darwin_ios")
+    else()
+      set(REAL_TARGET ${TARGET})
     endif()
 
-    foreach(TARGET ${TARGETS})
-      message(STATUS "building native dependencies for ${TARGET}")
-      set(CONTRIB_BUILD_PATH
-          ${CMAKE_CURRENT_SOURCE_DIR}/contrib/build-${TARGET})
-      set(CONTRIB_PATH ${CMAKE_CURRENT_SOURCE_DIR}/contrib/${TARGET})
+    message(STATUS "Building for TARGET: ${REAL_TARGET}")
 
-      # append our path to list of contrib paths!
-      list(APPEND CONTRIB_PATHS ${CONTRIB_PATH})
-
-      # pass some args from cmake to dependencies. 
-      # TODO: this should be done in deps' build scripts!
-      if(APPLE)
-        if(NOT IOS)
-          getarch(${TARGET})
-
-          set(ENV{LDFLAGS}
-              "-arch ${ARCH} -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}"
-          )
-          set(ENV{CFLAGS}
-              "-arch ${ARCH} -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}"
-          )
-          set(ENV{CXXFLAGS}
-              "-arch ${ARCH} -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}"
-          )
-        endif()
-      endif()
-
-      # hack for ios
-      # TODO: this should be done in deps' build scripts!
-      if(IOS)
-        set(REAL_TARGET "${CMAKE_OSX_ARCHITECTURES}-apple-darwin_ios")
-      else()
-        set(REAL_TARGET ${TARGET})
-      endif()
-
-      message(STATUS "Building for TARGET: ${REAL_TARGET}")
-
-      if(NOT EXISTS ${CONTRIB_BUILD_PATH})
-        file(MAKE_DIRECTORY ${CONTRIB_BUILD_PATH})
-        execute_process(
-          COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/contrib/bootstrap
-                  --prefix=${CONTRIB_PATH} --build=${REAL_TARGET} --host=${REAL_TARGET}
-          WORKING_DIRECTORY ${CONTRIB_BUILD_PATH}
-          RESULT_VARIABLE CMD_RESULT)
-
-        if(CMD_RESULT)
-          message(
-            FATAL_ERROR
-              "Bootstrap for target ${TARGET} failed with code ${CMD_RESULT}")
-        endif()
-
-        execute_process(
-          COMMAND make list
-          WORKING_DIRECTORY ${CONTRIB_BUILD_PATH}
-          RESULT_VARIABLE CMD_RESULT)
-
-        if(CMD_RESULT)
-          message(
-            FATAL_ERROR
-              "Make native deps list for target ${TARGET} failed with code ${CMD_RESULT}"
-          )
-        endif()
-      endif()
+    if(NOT EXISTS ${CONTRIB_BUILD_PATH})
+      file(MAKE_DIRECTORY ${CONTRIB_BUILD_PATH})
 
       execute_process(
-        COMMAND make
+        COMMAND
+          ${CMAKE_CURRENT_SOURCE_DIR}/contrib/bootstrap --prefix=${CONTRIB_PATH}
+          --build=${BUILD_MACHINE} --host=${REAL_TARGET}
+        OUTPUT_VARIABLE BOOTSTRAP_OUTPUT
         WORKING_DIRECTORY ${CONTRIB_BUILD_PATH}
         RESULT_VARIABLE CMD_RESULT)
 
       if(CMD_RESULT)
         message(
           FATAL_ERROR
-            "Make native deps for target ${TARGET} failed with code ${CMD_RESULT}"
+            "Bootstrap for target ${TARGET} failed with code ${CMD_RESULT}, output is ${BOOTSTRAP_OUTPUT}"
         )
       endif()
-    endforeach()
-  endif()
+
+      execute_process(
+        COMMAND make list
+        OUTPUT_VARIABLE MAKE_LIST_OUTPUT
+        WORKING_DIRECTORY ${CONTRIB_BUILD_PATH}
+        RESULT_VARIABLE CMD_RESULT)
+
+      if(CMD_RESULT)
+        message(
+          FATAL_ERROR
+            "Make native deps list for target ${TARGET} failed with code ${CMD_RESULT}, output is ${MAKE_LIST_OUTPUT}"
+        )
+      endif()
+    endif()
+
+    execute_process(
+      COMMAND make
+      WORKING_DIRECTORY ${CONTRIB_BUILD_PATH}
+      RESULT_VARIABLE CMD_RESULT)
+
+    if(CMD_RESULT)
+      message(
+        FATAL_ERROR
+          "Make native deps for target ${TARGET} failed with code ${CMD_RESULT}"
+      )
+    endif()
+  endforeach()
 endif()
 
 # ##############################################################################
