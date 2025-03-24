@@ -720,6 +720,9 @@ Manager::init(const std::string& config_file, const std::optional<std::string>& 
     // manager can restart without being recreated (Unit tests)
     pimpl_->finished_ = false;
 
+    // call start explicitly if we trying to init core after finish().
+    pimpl_->scheduler_.start();
+
     bool no_errors;
 
     try {
