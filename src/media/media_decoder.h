@@ -147,6 +147,7 @@ public:
     const char* getInputName() const { return inputCtx_->iformat->long_name; }
 
 private:
+
     bool streamInfoFound_ {false};
     AVFormatContext* inputCtx_ = nullptr;
     std::vector<StreamCallback> streams_;
@@ -242,6 +243,7 @@ public:
 
 private:
     NON_COPYABLE(MediaDecoder);
+
 
     DecodeStatus decode(AVPacket&);
 

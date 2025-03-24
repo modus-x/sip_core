@@ -773,8 +773,6 @@ Manager::finish() noexcept
             hangupCall(call->getAccountId(), call->getCallId());
         callFactory.clear();
 
-        saveConfig();
-
         SIP_CORE_DBG("Unregistering accounts started");
         // Disconnect accounts, close link stacks and free allocated ressources
         unregisterAccounts();

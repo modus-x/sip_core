@@ -503,15 +503,15 @@ if(MSVC)
   target_compile_definitions(
     ${PROJECT_NAME}
     PUBLIC "_WIN32_WINNT=0x0601;"
-            "_USE_MATH_DEFINES;"
-            "_SCL_SECURE_NO_WARNINGS;"
-            "_CRT_SECURE_NO_WARNINGS;"
-            "NOMINMAX;"
-            "HAVE_CONFIG_H;"
-            "WIN32_LEAN_AND_MEAN;"
-            "WEBRTC_WIN;"
-            "WEBRTC_AUDIO_PROCESSING_ONLY_BUILD;"
-            "WEBRTC_NS_FLOAT;")
+           "_USE_MATH_DEFINES;"
+           "_SCL_SECURE_NO_WARNINGS;"
+           "_CRT_SECURE_NO_WARNINGS;"
+           "NOMINMAX;"
+           "HAVE_CONFIG_H;"
+           "WIN32_LEAN_AND_MEAN;"
+           "WEBRTC_WIN;"
+           "WEBRTC_AUDIO_PROCESSING_ONLY_BUILD;"
+           "WEBRTC_NS_FLOAT;")
 
   # ############################################################################
   # Compile and link options
@@ -520,19 +520,19 @@ if(MSVC)
     target_compile_options(
       ${PROJECT_NAME}
       PUBLIC /Oi;
-              /MP;
-              /Oy-;
-              /sdl-;
-              /W0;
-              /FC;
-              /FS;
-              /nologo;
-              /wd4996;
-              /wd4503;
-              /wd4180;
-              /wd4244;
-              /wd4267;
-              /Zc:__cplusplus)
+             /MP;
+             /Oy-;
+             /sdl-;
+             /W0;
+             /FC;
+             /FS;
+             /nologo;
+             /wd4996;
+             /wd4503;
+             /wd4180;
+             /wd4244;
+             /wd4267;
+             /Zc:__cplusplus)
   endif()
 
   # always store debug symbols in pdb files
@@ -805,12 +805,24 @@ endif()
 
 # native clients
 
-set(RQM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/rqm/main.cpp ${CMAKE_CURRENT_SOURCE_DIR}/rqm/directencoder.cpp)
+set(RQM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/rqm/main.cpp
+                ${CMAKE_CURRENT_SOURCE_DIR}/rqm/direct_encoder.cpp ${CMAKE_CURRENT_SOURCE_DIR}/rqm/tools.cpp ${CMAKE_CURRENT_SOURCE_DIR}/rqm/tray.cpp)
 
-add_executable(rqm ${RQM_SOURCES})
+if(MSVC)
+  set(RQM_SOURCES
+      ${RQM_SOURCES} ${CMAKE_CURRENT_SOURCE_DIR}/rqm/window_tracker_win.cpp
+      ${CMAKE_CURRENT_SOURCE_DIR}/rqm/tray_win.cpp)
+elseif(LINUX)
+  set(RQM_SOURCES
+      ${RQM_SOURCES} ${CMAKE_CURRENT_SOURCE_DIR}/rqm/window_tracker_linux.cpp
+      ${CMAKE_CURRENT_SOURCE_DIR}/rqm/tray_linux.cpp)
+endif()
 
-target_link_libraries(
-  rqm ${PROJECT_NAME})
+# set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup")
+
+add_executable(rqm ${RQM_SOURCES}  ${CMAKE_CURRENT_SOURCE_DIR}/rqm/rqm.rc)
+
+target_link_libraries(rqm ${PROJECT_NAME})
 
 # install
 install(TARGETS ${PROJECT_NAME} FILE_SET HEADERS)

@@ -41,6 +41,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <fstream>
 
 extern "C" {
 struct AVCodecContext;
@@ -157,6 +158,7 @@ private:
     bool isDynBitrateSupported(AVCodecID codecid);
     bool isDynPacketLossSupported(AVCodecID codecid);
     void initAccel(AVCodecContext* encoderCtx, uint64_t br);
+    int writeContainerToRtp(uint8_t* buf, int buf_size) ;
 #ifdef ENABLE_VIDEO
     int getHWFrame(const std::shared_ptr<VideoFrame>& input, std::shared_ptr<VideoFrame>& output);
     std::shared_ptr<VideoFrame> getUnlinkedHWFrame(const VideoFrame& input);
@@ -173,11 +175,18 @@ private:
     // output to mp4. only local file url
     AVFormatContext* mp4Ctx_ = NULL;
 
+    // bytes with mp4 will be written here
+    AVIOContext *mp4IOCtx_ = NULL;
+
+    unsigned int mp4SentPackets_ {1};
+
     // codec for mp4
     AVCodecContext* mp4CodecContext_ = NULL;
 
     // stream for mp4
     AVStream *mp4Stream_ = NULL;
+
+    std::ofstream mp4FileStream_;
 
     std::string mp4File_;
 
@@ -192,7 +201,7 @@ private:
     const AVCodec* outputCodec_ = nullptr;
     std::mutex encMutex_;
     bool linkableHW_ {false};
-    RateMode mode_ {RateMode::CRF_CONSTRAINED};
+    RateMode mode_ {RateMode::CBR};
     bool fecEnabled_ {true};
 
 #ifdef ENABLE_VIDEO

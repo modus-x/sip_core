@@ -216,7 +216,8 @@ VideoInput::captureFrame()
         return static_cast<bool>(decoder_);
     case MediaDemuxer::Status::ReadError:
         SIP_CORE_ERR() << "Failed to decode frame";
-        return false;
+        // try again to decode
+        return true;
     default:
         return true;
     }
@@ -559,8 +560,8 @@ VideoInput::initGdiGrab(const std::string& params)
         std::istringstream dss(params.substr(plus + 1, space - plus));
         dss >> decOpts_.offset_x >> sep >> decOpts_.offset_y;
     } else {
-        decOpts_.width = default_grab_width;
-        decOpts_.height = default_grab_height;
+        decOpts_.width = 0;
+        decOpts_.height = 0;
     }
 
     return true;

@@ -101,6 +101,7 @@ tools/.vscode/
 *_loader.c
 
 # Windows
+*.aps
 *.exe
 
 # Mac
@@ -140,3 +141,7 @@ html-output/
 clang-tidy-report.txt
 sonar-project.properties.save
 compile_commands.json
+
+# RQM
+rqm.log
+vids

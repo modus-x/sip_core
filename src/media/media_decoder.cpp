@@ -112,13 +112,11 @@ MediaDemuxer::openInput(const DeviceParams& params)
         // So we treat this imprecise reduction and adjust the value,
         // or let dshow choose the framerate, which is, unfortunately,
         // NOT the highest according to our experimentations.
-        av_dict_set(&options_, "framerate", "30", 0);
+        av_dict_set(&options_, "framerate", sip_core::to_string(params.framerate.real()).c_str(), 0);
 #else
         av_dict_set(&options_, "framerate", sip_core::to_string(params.framerate.real()).c_str(), 0);
 #endif
     }
-
-    av_dict_set(&options_, "rtbufsize", "15000000", 0);
 
     if (params.offset_x || params.offset_y) {
         av_dict_set(&options_, "offset_x", std::to_string(params.offset_x).c_str(), 0);
@@ -140,8 +138,6 @@ MediaDemuxer::openInput(const DeviceParams& params)
     if (!params.window_id.empty()) {
         av_dict_set(&options_, "window_id", params.window_id.c_str(), 0);
     }
-    av_dict_set(&options_, "is_area", std::to_string(params.is_area).c_str(), 0);
-    av_dict_set(&options_, "show_region", std::to_string(1).c_str(), 0);
 
 #if defined(__APPLE__) && TARGET_OS_MAC
     std::string input = params.name;
@@ -202,16 +198,19 @@ void
 MediaDemuxer::findStreamInfo()
 {
     if (not streamInfoFound_) {
-        inputCtx_->max_analyze_duration = 30 * AV_TIME_BASE;
+        inputCtx_->max_analyze_duration = 60 * AV_TIME_BASE;
+        inputCtx_->probesize = 50000000;
         int err;
         SIP_CORE_WARN() << "findStreamInfo " << "for " << inputCtx_->url << " START";
         if ((err = avformat_find_stream_info(inputCtx_, nullptr)) < 0) {
             SIP_CORE_ERR() << "findStreamInfo "
                            << "for " << inputCtx_->url
                            << " FINISH Could not find stream info: " << libav_utils::getError(err);
+            return;
         }
         SIP_CORE_WARN() << "findStreamInfo FINISH "
-                        << "for " << inputCtx_->url << " OK";
+                        << "for " << inputCtx_->url;
+        // flushInternalBuffers();
         streamInfoFound_ = true;
     }
 }
@@ -645,7 +644,7 @@ DecodeStatus
 MediaDecoder::decode(AVPacket& packet)
 {
     auto begin = steady_clock::now();
-    if (inputDecoder_->type == AVMEDIA_TYPE_VIDEO && frameCount_ % 100 == 0) {
+    if (inputDecoder_->type == AVMEDIA_TYPE_VIDEO && frameCount_ % 10 == 0) {
         SIP_CORE_DBG() << "[" << demuxer_->getInputName() << "] decodeFrame started";
     }
     int frameFinished = 0;
@@ -734,7 +733,7 @@ MediaDecoder::decode(AVPacket& packet)
             contextCallback_();
         }
         auto end = steady_clock::now();
-        if (inputDecoder_->type == AVMEDIA_TYPE_VIDEO && frameCount_ % 100 == 0) {
+        if (inputDecoder_->type == AVMEDIA_TYPE_VIDEO && frameCount_ % 10 == 0) {
             SIP_CORE_DBG() << "[" << demuxer_->getInputName()
                            << "] decodeFrame completed in "
                            << duration_cast<milliseconds>(end - begin).count();
@@ -743,7 +742,7 @@ MediaDecoder::decode(AVPacket& packet)
         return DecodeStatus::FrameFinished;
     }
     auto end = steady_clock::now();
-    if (inputDecoder_->type == AVMEDIA_TYPE_VIDEO && frameCount_ % 100 == 0) {
+    if (inputDecoder_->type == AVMEDIA_TYPE_VIDEO && frameCount_ % 10 == 0) {
         SIP_CORE_DBG() << "[" << demuxer_->getInputName()
                        << "] decodeFrame completed in "
                        << duration_cast<milliseconds>(end - begin).count();

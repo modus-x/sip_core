@@ -129,8 +129,9 @@ struct MediaStream
     {
         if (format < 0)
             return false;
+        // even if width or height is 0, we still have a valid stream
         if (isVideo)
-            return width > 0 && height > 0;
+            return true;
         else
             return sampleRate > 0 && nbChannels > 0;
     }
