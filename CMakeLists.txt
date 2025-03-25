@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.25)
 
+cmake_policy(VERSION 3.25...3.31)
+
 project(
   sip_core
   VERSION 0.10.2
