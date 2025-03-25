@@ -59,8 +59,8 @@ constexpr double LOGREG_PARAM_B_HEVC {-5.};
 MediaEncoder::MediaEncoder()
     : outputCtx_(avformat_alloc_context())
 {
-    auto now = std::chrono::system_clock::now();
-    auto timestamp = std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count();
+    // auto now = std::chrono::system_clock::now();
+    // auto timestamp = std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count();
 
     // mp4File_ = fmt::format("C:\\Users\\Admin\\code\\sip_core\\vids\\{}.mp4",
     //     std::to_string(timestamp));
