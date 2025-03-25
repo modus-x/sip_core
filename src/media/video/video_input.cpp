@@ -493,8 +493,8 @@ VideoInput::initX11(const std::string& display)
         }
     } else {
         p.input = display;
-        p.width = default_grab_width;
-        p.height = default_grab_height;
+        p.width = 0;
+        p.height = 0;
         p.is_area = 1;
     }
 
