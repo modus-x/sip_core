@@ -805,26 +805,5 @@ else()
   endif()
 endif()
 
-# native clients
-
-set(RQM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/rqm/main.cpp
-                ${CMAKE_CURRENT_SOURCE_DIR}/rqm/direct_encoder.cpp ${CMAKE_CURRENT_SOURCE_DIR}/rqm/tools.cpp ${CMAKE_CURRENT_SOURCE_DIR}/rqm/tray.cpp)
-
-if(MSVC)
-  set(RQM_SOURCES
-      ${RQM_SOURCES} ${CMAKE_CURRENT_SOURCE_DIR}/rqm/window_tracker_win.cpp
-      ${CMAKE_CURRENT_SOURCE_DIR}/rqm/tray_win.cpp)
-elseif(LINUX)
-  set(RQM_SOURCES
-      ${RQM_SOURCES} ${CMAKE_CURRENT_SOURCE_DIR}/rqm/window_tracker_linux.cpp
-      ${CMAKE_CURRENT_SOURCE_DIR}/rqm/tray_linux.cpp)
-endif()
-
-# set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup")
-
-add_executable(rqm ${RQM_SOURCES}  ${CMAKE_CURRENT_SOURCE_DIR}/rqm/rqm.rc)
-
-target_link_libraries(rqm ${PROJECT_NAME})
-
 # install
 install(TARGETS ${PROJECT_NAME} FILE_SET HEADERS)
