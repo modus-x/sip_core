@@ -118,7 +118,12 @@ VideoDeviceMonitor::getMRLForDefaultDevice() const
     static const std::string sep = libsip_core::Media::VideoProtocolPrefix::SEPARATOR;
 
     if (it->getDeviceId() == DEVICE_DESKTOP) {
+#ifdef __linux__
+        const char* display = std::getenv("DISPLAY");
+        return libsip_core::Media::VideoProtocolPrefix::DISPLAY + sep + (display ? display : ":0");
+#else
         return libsip_core::Media::VideoProtocolPrefix::DISPLAY + sep + "Display";
+#endif
     } else {
         return libsip_core::Media::VideoProtocolPrefix::CAMERA + sep + it->getDeviceId();
     }
