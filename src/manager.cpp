@@ -712,7 +712,7 @@ Manager::init(const std::string& config_file, const std::optional<std::string>& 
     pimpl_->sipLink_ = std::make_unique<SIPVoIPLink>();
 
     pimpl_->path_ = config_file.empty() ? pimpl_->retrieveConfigPath()
-                                        : config_file + DIR_SEPARATOR_STR + "sip.yaml";
+                                        : config_file;
     SIP_CORE_DBG("Configuration file path: %s", pimpl_->path_.c_str());
 
     pimpl_->data_path_ = data_path;
