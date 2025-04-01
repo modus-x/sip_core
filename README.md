@@ -107,3 +107,12 @@ pacman -S nasm yasm gcc make pkg-config
 Windows SDK + MSVC комиляторы очень просто устанавливаются через установщик [Visual Studio Community Edition](https://visualstudio.microsoft.com/vs/community/).
 
 Visual Studio 2010 (VC++ 10.0) SP1 требуется для сборки некоторых зависимостей, которые используют "легаси" код. При установке Visual Studio данный пакет **не устанавливается**.
+
+## Examples.
+
+Проект также включает в себя пример использования ядра в консоли - sip_cli. Его сборка происходит отдельной командой:
+
+```bash
+cd build
+cmake --build . --target sip_cli
+```

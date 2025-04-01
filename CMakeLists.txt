@@ -383,7 +383,7 @@ if(LINUX)
   # into binary
   target_link_options(${PROJECT_NAME} PRIVATE -rtlib=compiler-rt)
   # GCC specific CXX, which was used when deps were built
-  find_library(
+    find_library(
     GCC_CXX libstdc++.a
     PATHS /opt/rh/devtoolset-11/root/usr/lib/gcc/x86_64-redhat-linux/11
           REQUIRED NO_CACHE)
@@ -417,6 +417,8 @@ if(MSVC)
 
   add_subdirectory("compat")
 endif()
+
+add_subdirectory(example/sip_cli)
 
 target_compile_definitions(
   ${PROJECT_NAME}
