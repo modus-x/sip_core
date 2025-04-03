@@ -43,6 +43,9 @@ struct MediaStream
     int sampleRate {0};
     int nbChannels {0};
     int frameSize {0};
+    bool noColor{false};
+    int downScaleFactor{0};
+    int quality{0};
 
     MediaStream() {}
 
@@ -61,6 +64,27 @@ struct MediaStream
         , height(h)
         , bitrate(br)
         , frameRate(fr)
+    {}
+
+        MediaStream(const std::string& streamName,
+                int fmt,
+                rational<int> tb,
+                int w,
+                int h,
+                int br,
+                rational<int> fr,
+                bool nc, int dsf, int q)
+        : name(streamName)
+        , format(fmt)
+        , isVideo(true)
+        , timeBase(tb)
+        , width(w)
+        , height(h)
+        , bitrate(br)
+        , frameRate(fr)
+        , noColor(nc)
+        , downScaleFactor(dsf)
+        , quality(q)
     {}
 
     MediaStream(

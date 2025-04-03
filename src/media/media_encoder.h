@@ -150,6 +150,7 @@ private:
     void stopEncoder();
     AVCodecContext* initCodec(AVMediaType mediaType, AVCodecID avcodecId, uint64_t br);
     void initH264(AVCodecContext* encoderCtx, uint64_t br);
+    int h264CrfFromQuality() const;
     void initH265(AVCodecContext* encoderCtx, uint64_t br);
     void initVP8(AVCodecContext* encoderCtx, uint64_t br);
     void initMPEG4(AVCodecContext* encoderCtx, uint64_t br);
@@ -206,11 +207,17 @@ private:
 
 #ifdef ENABLE_VIDEO
     video::VideoScaler scaler_;
+    video::VideoScaler grayScaler_;
+
     std::shared_ptr<VideoFrame> scaledFrame_;
+    std::shared_ptr<VideoFrame> grayScaledFrame_;
 #endif // ENABLE_VIDEO
 
     std::vector<uint8_t> scaledFrameBuffer_;
     int scaledFrameBufferSize_ = 0;
+
+    std::vector<uint8_t> grayScaledFrameBuffer_;
+    int grayScaledFrameBufferSize_ = 0;
 
 #ifdef RING_ACCEL
     bool enableAccel_ {false};

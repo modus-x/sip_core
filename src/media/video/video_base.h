@@ -105,6 +105,12 @@ struct VideoSettings
     std::string channel {};
     std::string video_size {};
     std::string framerate {};
+
+    // they are here, because they must be read from config when testing RQM
+    // without Radix
+    bool no_color{};
+    int down_scale_factor{};
+    int quality{};
 };
 
 } // namespace video

@@ -147,6 +147,10 @@ private:
     VideoV4l2Channel channel_;
     VideoV4l2Size size_;
     VideoV4l2Rate rate_;
+
+    bool no_color_;
+    int down_scale_factor_;
+    int quality_;
 };
 
 static const unsigned pixelformats_supported[] = {
@@ -570,6 +574,9 @@ VideoDeviceImpl::getDeviceParams() const
     params.name = name;
     params.unique_id = unique_id;
     params.input = path;
+    params.down_scale_factor = down_scale_factor_;
+    params.quality = quality_;
+    params.no_color = no_color_;
     if (unique_id == DEVICE_DESKTOP) {
         params.format = "x11grab";
         params.framerate = rate_.frame_rate;
@@ -588,6 +595,10 @@ VideoDeviceImpl::getDeviceParams() const
 void
 VideoDeviceImpl::setDeviceParams(const DeviceParams& params)
 {
+    no_color_ = params.no_color;
+    quality_ = params.quality;
+    down_scale_factor_ = params.down_scale_factor;
+
     if (unique_id == DEVICE_DESKTOP) {
         rate_.frame_rate = params.framerate;
         return;

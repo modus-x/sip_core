@@ -699,7 +699,9 @@ MediaDecoder::decode(AVPacket& packet)
             frame->channel_layout = av_get_default_channel_layout(frame->channels);
 
         frame->format = (AVPixelFormat) correctPixFmt(frame->format);
-        auto packetTimestamp = frame->pts; // in stream time base
+        auto packetTimestamp = frame->pts;
+
+        // calculate real pts relative to start time of stream
         frame->pts = av_rescale_q_rnd(av_gettime() - startTime_,
                                       {1, AV_TIME_BASE},
                                       decoderCtx_->time_base,
@@ -707,9 +709,15 @@ MediaDecoder::decode(AVPacket& packet)
                                                               | AV_ROUND_PASS_MINMAX));
         lastTimestamp_ = frame->pts;
         if (emulateRate_ and packetTimestamp != AV_NOPTS_VALUE) {
+
+            // when our stream started? actual timestamp.
             auto startTime = avStream_->start_time == AV_NOPTS_VALUE ? 0 : avStream_->start_time;
+
+            // when frame actally was captured.
             rational<double> frame_time = rational<double>(getTimeBase())
                                           * (packetTimestamp - startTime);
+
+            // when frame was actually captured RELATIVE
             auto target_relative = static_cast<std::int64_t>(frame_time.real() * 1e6);
             auto target_absolute = startTime_ + target_relative;
             if (target_relative < seekTime_) {
@@ -719,7 +727,11 @@ MediaDecoder::decode(AVPacket& packet)
             if (target_relative >= seekTime_) {
                 resetSeekTime();
             }
+
+            // get absolute time now
             auto now = av_gettime();
+
+            // if we are late, sleep
             if (target_absolute > now) {
                 std::this_thread::sleep_for(std::chrono::microseconds(target_absolute - now));
             }

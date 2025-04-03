@@ -277,7 +277,10 @@ VideoRtpSession::startSender()
                                     localVideoParams_.width,
                                     localVideoParams_.height,
                                     send_.bitrate,
-                                    static_cast<rational<int>>(localVideoParams_.framerate))
+                                    static_cast<rational<int>>(localVideoParams_.framerate), 
+                                    localVideoParams_.no_color, 
+                                    localVideoParams_.down_scale_factor,
+                                    localVideoParams_.quality)
                       : videoMixer_->getStream("Video Sender");
             sender_.reset(new VideoSender(getRemoteRtpUri(),
                                           ms,
