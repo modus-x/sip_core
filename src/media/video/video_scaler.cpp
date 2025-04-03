@@ -31,7 +31,7 @@ namespace video {
 
 VideoScaler::VideoScaler()
     : ctx_(0)
-    , mode_(SWS_FAST_BILINEAR)
+    , mode_(SWS_LANCZOS)
     , tmp_data_()
 {}
 
@@ -55,7 +55,7 @@ VideoScaler::scale(const AVFrame* input_frame, AVFrame* output_frame)
                                 output_frame->width,
                                 output_frame->height,
                                 (AVPixelFormat) output_frame->format,
-                                mode_,
+                                SWS_LANCZOS | SWS_FULL_CHR_H_INT | SWS_ACCURATE_RND,
                                 NULL,
                                 NULL,
                                 NULL);
@@ -133,7 +133,7 @@ VideoScaler::scale_and_pad(const VideoFrame& input,
                                 dest_width,
                                 dest_height,
                                 (AVPixelFormat) output_frame->format,
-                                mode_,
+                                SWS_LANCZOS | SWS_FULL_CHR_H_INT | SWS_ACCURATE_RND,
                                 NULL,
                                 NULL,
                                 NULL);
