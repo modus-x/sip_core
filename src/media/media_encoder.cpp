@@ -533,8 +533,8 @@ MediaEncoder::encode(const std::shared_ptr<VideoFrame>& input,
     }
     auto width = (input->width() >> 3) << 3;
     auto height = (input->height() >> 3) << 3;
-    if (getWidth() == width || getHeight() != height) {
-        // resetStreams(width, height);
+    if (getWidth() != width || getHeight() != height) {
+        resetStreams(width, height);
         is_keyframe = true;
     }
 
