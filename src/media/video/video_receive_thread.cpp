@@ -238,9 +238,7 @@ VideoReceiveThread::decodeFrame()
             SIP_CORE_DBG("[%p] VideoReceiveThread decoder configured, starting decoding", this);
         }
     }
-    SIP_CORE_DBG("started frame decoding");
     auto status = videoDecoder_->decode();
-    SIP_CORE_DBG("finished frame decoding");
     if (status == MediaDemuxer::Status::EndOfFile) {
         SIP_CORE_DBG("[{:p}] End of file", fmt::ptr(this));
         loop_.stop();
