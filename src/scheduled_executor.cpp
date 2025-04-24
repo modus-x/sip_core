@@ -53,6 +53,34 @@ ScheduledExecutor::~ScheduledExecutor()
 }
 
 void
+ScheduledExecutor::start()
+{
+    // if already started - do nothing
+    if (*running_)
+        return;
+
+    // finish thread before starting new
+    if (thread_.joinable()) {
+        // Avoid deadlock
+        if (std::this_thread::get_id() == thread_.get_id()) {
+            thread_.detach();
+        } else {
+            thread_.join();
+        }
+    }
+
+    *running_ = true;
+
+    thread_ = std::thread([this, is_running = running_] {
+        // The thread needs its own reference of `running_` in case the
+        // scheduler is destroyed within the thread because of a job
+
+        while (*is_running)
+            loop();
+    });
+}
+
+void
 ScheduledExecutor::stop()
 {
     std::lock_guard<std::mutex> lock(jobLock_);

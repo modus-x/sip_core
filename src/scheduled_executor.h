@@ -217,6 +217,11 @@ public:
                                                       uint32_t linum=CURRENT_LINE());
 
     /**
+     * Starts the scheduler thread, only if stoped
+     */
+    void start();
+
+    /**
      * Stop the scheduler, can't be reversed
      */
     void stop();
