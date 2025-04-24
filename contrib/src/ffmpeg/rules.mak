@@ -137,7 +137,7 @@ FFMPEGCONF += \
 
 # platform specific options (LINUX / MAC)
 ifdef HAVE_LINUX
-FFMPEGCONF += --enable-pic
+FFMPEGCONF += --enable-pic --disable-asm
 
 
 ifdef HAVE_ANDROID
