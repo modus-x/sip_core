@@ -67,6 +67,9 @@ struct DeviceParams
     int orientation {};
     std::string window_id {};
     int is_area {};
+    bool no_color{};
+    int down_scale_factor{};
+    int quality{};
 };
 
 } // namespace sip_core

@@ -101,6 +101,7 @@ tools/.vscode/
 *_loader.c
 
 # Windows
+*.aps
 *.exe
 
 # Mac

@@ -104,7 +104,13 @@ VideoSettings::to_map() const
             {"input", input},
             {"size", video_size},
             {"channel", channel},
-            {"rate", framerate}};
+            {"rate", framerate},
+            {"quality",
+            std::to_string(quality)},
+            {"no_color",
+            std::to_string(no_color)},
+            {"down_scale_factor",
+            std::to_string(down_scale_factor)}};
 }
 
 } // namespace video
@@ -122,11 +128,15 @@ convert<sip_core::video::VideoSettings>::encode(const sip_core::video::VideoSett
     node["video_size"] = rhs.video_size;
     node["channel"] = rhs.channel;
     node["framerate"] = rhs.framerate;
+    node["quality"] = rhs.quality;
+    node["no_color"] = rhs.no_color;
+    node["down_scale_factor"] = rhs.down_scale_factor;
     return node;
 }
 
 bool
-convert<sip_core::video::VideoSettings>::decode(const Node& node, sip_core::video::VideoSettings& rhs)
+convert<sip_core::video::VideoSettings>::decode(const Node& node,
+                                                sip_core::video::VideoSettings& rhs)
 {
     if (not node.IsMap()) {
         SIP_CORE_WARN("Can't decode VideoSettings YAML node");
@@ -138,6 +148,9 @@ convert<sip_core::video::VideoSettings>::decode(const Node& node, sip_core::vide
     rhs.video_size = node["video_size"].as<std::string>();
     rhs.channel = node["channel"].as<std::string>();
     rhs.framerate = node["framerate"].as<std::string>();
+    rhs.quality = node["quality"].as<int>();
+    rhs.no_color = node["no_color"].as<bool>();
+    rhs.down_scale_factor = node["down_scale_factor"].as<int>();
     return true;
 }
 

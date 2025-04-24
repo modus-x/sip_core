@@ -414,7 +414,7 @@ std::string
 Account::getDefaultUserAgent()
 {
     return fmt::format("{:s} {:s} ({:s})",
-                       "Svetets Svetophone",
+                       "Svetets SIP core",
                        libsip_core::version(),
                        libsip_core::platform());
 }

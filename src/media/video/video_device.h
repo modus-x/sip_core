@@ -97,7 +97,6 @@ public:
             }
         }
 
-
         return cap;
     }
 
@@ -136,8 +135,8 @@ public:
             settings.video_size = fmt::format("{}x{}", max_size.first, max_size.second);
             settings.framerate = sip_core::to_string(max_size_rate.real());
             SIP_CORE_WARN("Default video settings: %s, %s FPS",
-                      settings.video_size.c_str(),
-                      settings.framerate.c_str());
+                          settings.video_size.c_str(),
+                          settings.framerate.c_str());
         }
 
         return settings;
@@ -177,6 +176,9 @@ public:
         params.width = size.first;
         params.height = size.second;
         params.framerate = rateFromString(settings.channel, size, settings.framerate);
+        params.quality = settings.quality;
+        params.no_color = settings.no_color;
+        params.down_scale_factor = settings.down_scale_factor;
         setDeviceParams(params);
     }
 
@@ -221,6 +223,12 @@ private:
         // fallback to framerate closest to 30 FPS
         if (rate_val == 0)
             rate_val = 30;
+
+        // for desktop, any framerate is fine
+        if (name == "desktop") {
+            return rate_val;
+        }
+
         double closest_dist = std::numeric_limits<double>::max();
         auto rate_list = getRateList(channel, size);
         for (const auto& r : rate_list) {

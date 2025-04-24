@@ -162,9 +162,9 @@ public:
      * @param none
      * @return int The number of credentials set for this account.
      */
-    unsigned getCredentialCount() const { return config().credentials.size(); }
+    unsigned getCredentialCount() const { return cred_.size(); }
 
-    bool hasCredentials() const { return not config().credentials.empty(); }
+    bool hasCredentials() const { return not cred_.empty(); }
 
     std::vector<std::map<std::string, std::string>> getCredentials() const
     {
@@ -418,6 +418,9 @@ public:
         pj_timer_entry timer {};
     } kaTarget;
 
+
+    void setCredentials(const std::vector<SipAccountConfig::Credentials>& creds);
+
 private:
     void doRegister1_();
     void doRegister2_();
@@ -426,8 +429,6 @@ private:
     // be updated (as the contact header)after the registration.
     bool initContactAddress();
     void updateContactHeader();
-
-    void setCredentials(const std::vector<SipAccountConfig::Credentials>& creds);
 
     void setUpTransmissionData(pjsip_tx_data* tdata, pjsip_transport_type_e transportType);
 

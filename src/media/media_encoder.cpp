@@ -41,8 +41,12 @@ extern "C" {
 #include <thread> // hardware_concurrency
 #include <string_view>
 #include <cmath>
+#include <chrono>
 
-#define DEBUG_SDP 1
+#define DEBUG_SDP          1
+#ifdef RQM
+#define MP4_IO_BUFFER_SIZE 1152
+#endif
 
 using namespace std::literals;
 
@@ -57,8 +61,81 @@ constexpr double LOGREG_PARAM_B_HEVC {-5.};
 MediaEncoder::MediaEncoder()
     : outputCtx_(avformat_alloc_context())
 {
+
+    // auto now = std::chrono::system_clock::now();
+    // auto timestamp = std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count();
+
+    // mp4File_ = fmt::format("C:\\Users\\Admin\\code\\sip_core\\vids\\{}.mp4",
+    //     std::to_string(timestamp));
+
+    // mp4FileStream_.open(mp4File_, std::ios::binary | std::ios::app);
+
+    // if (!mp4FileStream_) {
+    //     throw std::runtime_error("Failed to open file: " + mp4File_);
+    // }
+
+#ifdef RQM
+    // flush fragments as fast as possible
+    mp4Ctx_->flags = AVFMT_FLAG_NOBUFFER | AVFMT_FLAG_FLUSH_PACKETS;
+
+    auto buf = static_cast<uint8_t*>(av_malloc(MP4_IO_BUFFER_SIZE));
+
+    if (!mp4Ctx_) {
+        SIP_CORE_ERR() << "mp4_error: cannot create mp4Ctx_";
+    }
+
+    mp4IOCtx_ = avio_alloc_context(
+        buf,
+        MP4_IO_BUFFER_SIZE,
+        true,
+        reinterpret_cast<void*>(this),
+        NULL,
+        [](void* me, uint8_t* buf, int len) {
+            // SIP_CORE_ERR() << "writeContainerToRtp " << len;
+            return static_cast<MediaEncoder*>(me)->writeContainerToRtp(buf, len);
+        },
+        NULL);
+
+    if (!mp4IOCtx_) {
+        SIP_CORE_ERR() << "mp4_error: cannot create mp4IOCtx_";
+    }
+
+
+    avformat_alloc_output_context2(&mp4Ctx_, NULL, "mp4", NULL);
+#endif
+
     SIP_CORE_DBG("[%p] New instance created", this);
 }
+
+
+#ifdef RQM
+int
+MediaEncoder::writeContainerToRtp(uint8_t* buf, int buf_size)
+{
+
+    // Ensure file is still open
+    // if (mp4FileStream_.is_open()) {
+    //     mp4FileStream_.write(reinterpret_cast<const char*>(buf), buf_size);
+    //     if (!mp4FileStream_) {
+    //         throw std::runtime_error("Error writing to file");
+    //     }
+    //     mp4FileStream_.flush();  // Ensure data is written to disk
+    // }
+
+    AVPacket pkt;
+    av_init_packet(&pkt);
+
+    pkt.data = buf;
+
+    pkt.size = buf_size;
+    pkt.dts = mp4SentPackets_;
+    pkt.pts = mp4SentPackets_;
+
+    mp4SentPackets_++;
+    send(pkt, currentStreamIdx_);
+    return buf_size;
+}
+#endif
 
 MediaEncoder::~MediaEncoder()
 {
@@ -79,6 +156,12 @@ MediaEncoder::~MediaEncoder()
         }
         avformat_free_context(outputCtx_);
     }
+
+#ifdef RQM
+    if (mp4Ctx_) {
+        avformat_free_context(mp4Ctx_);
+    }
+#endif
     av_dict_free(&options_);
 
     SIP_CORE_DBG("[%p] Instance destroyed", this);
@@ -94,6 +177,15 @@ MediaEncoder::setOptions(const MediaStream& opts)
 
     if (opts.isVideo) {
         videoOpts_ = opts;
+
+        // if we have normal scale factor, scale it!
+        int scaleFactor = opts.downScaleFactor;
+
+        if (25 < scaleFactor && scaleFactor < 100) {
+            videoOpts_.width = std::round(videoOpts_.width * (scaleFactor / 100.0));
+            videoOpts_.height = std::round(videoOpts_.height * (scaleFactor / 100.0));
+        }
+
         // Make sure width and height are even (required by x264)
         // This is especially for image/gif streaming, as video files and cameras usually have even
         // resolutions
@@ -112,13 +204,16 @@ MediaEncoder::setOptions(const MediaStream& opts)
 void
 MediaEncoder::setOptions(const MediaDescription& args)
 {
+#ifdef RQM
+    // no payload exists for fMP4. So we use some random value
+    int payload_type = 111; 
+#else
+    int payload_type = args.payload_type;
+#endif
+
     int ret;
-    if (args.payload_type
-        and (ret = av_opt_set_int(reinterpret_cast<void*>(outputCtx_),
-                                  "payload_type",
-                                  args.payload_type,
-                                  AV_OPT_SEARCH_CHILDREN)
-                   < 0))
+    if (payload_type
+        and (ret = av_opt_set_int(outputCtx_, "payload_type", payload_type, AV_OPT_SEARCH_CHILDREN) < 0))
         SIP_CORE_ERR() << "Failed to set payload type: " << libav_utils::getError(ret);
 
     if (not args.parameters.empty())
@@ -325,7 +420,9 @@ MediaEncoder::initStream(const SystemCodecInfo& systemCodecInfo, AVBufferRef* fr
         encoderCtx = initCodec(mediaType,
                                static_cast<AVCodecID>(systemCodecInfo.avcodecId),
                                videoOpts_.bitrate);
-        readConfig(encoderCtx);
+
+        // readConfig(encoderCtx);
+
         encoders_.emplace_back(encoderCtx);
         if (avcodec_open2(encoderCtx, outputCodec_, &options_) < 0)
             throw MediaEncoderException("Could not open encoder");
@@ -335,6 +432,15 @@ MediaEncoder::initStream(const SystemCodecInfo& systemCodecInfo, AVBufferRef* fr
 
     // framerate is not copied from encoderCtx to stream
     stream->avg_frame_rate = encoderCtx->framerate;
+
+#ifdef RQM
+
+    avcodec_parameters_from_context(mp4Stream_->codecpar, encoderCtx);
+
+    // framerate is not copied from encoderCtx to stream
+    mp4Stream_->avg_frame_rate = encoderCtx->framerate;
+
+#endif
 #ifdef ENABLE_VIDEO
     if (systemCodecInfo.mediaType == MEDIA_VIDEO) {
         // allocate buffers for both scaled (pre-encoder) and encoded frames
@@ -360,6 +466,16 @@ MediaEncoder::initStream(const SystemCodecInfo& systemCodecInfo, AVBufferRef* fr
         scaledFrameBuffer_.reserve(scaledFrameBufferSize_);
         scaledFrame_ = std::make_shared<VideoFrame>();
         scaledFrame_->setFromMemory(scaledFrameBuffer_.data(), format, width, height);
+
+        if (videoOpts_.noColor) {
+            grayScaledFrameBufferSize_ = videoFrameSize(AV_PIX_FMT_GRAY8, width, height);
+            grayScaledFrameBuffer_.reserve(grayScaledFrameBufferSize_);
+            grayScaledFrame_ = std::make_shared<VideoFrame>();
+            grayScaledFrame_->setFromMemory(grayScaledFrameBuffer_.data(),
+                                            AV_PIX_FMT_GRAY8,
+                                            width,
+                                            height);
+        }
     }
 #endif // ENABLE_VIDEO
 
@@ -369,6 +485,12 @@ MediaEncoder::initStream(const SystemCodecInfo& systemCodecInfo, AVBufferRef* fr
 void
 MediaEncoder::openIOContext()
 {
+#ifdef RQM
+    if (mp4IOCtx_) {
+        mp4Ctx_->pb = mp4IOCtx_;
+    }
+#endif
+
     if (ioCtx_) {
         outputCtx_->pb = ioCtx_;
         outputCtx_->packet_size = outputCtx_->pb->buffer_size;
@@ -394,19 +516,51 @@ MediaEncoder::openIOContext()
 void
 MediaEncoder::startIO()
 {
-    if (!outputCtx_->pb)
+
+#ifdef RQM
+    bool writeToMp4 = false;
+#endif
+
+    if (!outputCtx_->pb) {
         openIOContext();
+#ifdef RQM
+        writeToMp4 = true;
+#endif
+    }
+
     if (avformat_write_header(outputCtx_, options_ ? &options_ : nullptr)) {
         SIP_CORE_ERR("Could not write header for output file... check codec parameters");
         throw MediaEncoderException("Failed to write output file header");
     }
 
+#ifdef RQM
+    // as in OBS studio
+    libav_utils::setDictValue(&mp4Opts_, "movflags", "+empty_moov+separate_moof+frag_every_frame");
+#endif
+
+    // av_dict_set_int(&mp4Opts_, "frag_size", 1152, AV_OPT_SEARCH_CHILDREN);
+
 #if LIBAVFORMAT_VERSION_INT >= AV_VERSION_INT(58, 7, 100)
     av_dump_format(outputCtx_, 0, outputCtx_->url, 1);
+#ifdef RQM
+    av_dump_format(mp4Ctx_, 0, mp4Ctx_->url, 1);
+#endif
 #else
     av_dump_format(outputCtx_, 0, outputCtx_->filename, 1);
+#ifdef RQM
+    av_dump_format(mp4Ctx_, 0, mp4Ctx_->filename, 1);
+#endif
 #endif
     initialized_ = true;
+
+#ifdef RQM
+    if (writeToMp4) {
+        if (avformat_write_header(mp4Ctx_, &mp4Opts_)) {
+            SIP_CORE_ERR(
+                "mp4_error: could not write header for output mp4... check codec parameters");
+        }
+    }
+#endif
 }
 
 #ifdef ENABLE_VIDEO
@@ -443,8 +597,19 @@ MediaEncoder::encode(const std::shared_ptr<VideoFrame>& input,
     }
     auto avframe = output->pointer();
 
+#ifdef RQM
+    // for mp4 stream, we need to set pts to the same value as input frame (to preserve the original timestamp)
+    avframe->pts = input->pointer()->pts;
+    avframe->pkt_dts = input->pointer()->pkt_dts;
+    avframe->pkt_duration = input->pointer()->pkt_duration;
+#endif
+
     AVCodecContext* enc = encoders_[currentStreamIdx_];
+#ifndef RQM
+    // for rtp stream, we need to set pts just increasing by 1
     avframe->pts = frame_number;
+#endif
+
     if (enc->framerate.num != enc->time_base.den || enc->framerate.den != enc->time_base.num)
         avframe->pts /= (rational<int64_t>(enc->framerate) * rational<int64_t>(enc->time_base))
                             .real<int64_t>();
@@ -520,8 +685,23 @@ MediaEncoder::encode(AVFrame* frame, int streamIdx)
         }
 
         if (pkt.size) {
-            if (send(pkt, streamIdx))
+#ifdef RQM
+            // Rescale the packet's timestamps from encoder time base to output stream's time base
+            pkt.pts = av_rescale_q(pkt.pts, encoderCtx->time_base, mp4Stream_->time_base);
+            pkt.dts = av_rescale_q(pkt.dts, encoderCtx->time_base, mp4Stream_->time_base);
+            pkt.duration = av_rescale_q(pkt.duration, encoderCtx->time_base, mp4Stream_->time_base);
+
+            // write packet to format, it will be written to mp4 buffer, and ONLY THEN sent to rtp
+            if (av_write_frame(mp4Ctx_, &pkt) == 0) {
                 break;
+            } else {
+                SIP_CORE_ERR() << "mp4_error:Failed to write frame: " << libav_utils::getError(ret);
+            }
+#else
+            if (send(pkt, streamIdx)) {
+                break;
+            }
+#endif
         }
     }
 
@@ -619,8 +799,16 @@ MediaEncoder::prepareEncoderContext(const AVCodec* outputCodec, bool is_video)
                   (1U << 16) - 1);
         encoderCtx->time_base = av_inv_q(encoderCtx->framerate);
 
+#ifdef RQM
+        // this will create new stream
+        mp4Stream_ = avformat_new_stream(mp4Ctx_, NULL);
+
+        if (!mp4Stream_) {
+            SIP_CORE_ERR() << "mp4_error: cannot create mp4Stream_";
+        }
+#endif
         // emit one intra frame every gop_size frames
-        encoderCtx->max_b_frames = 0;
+        // encoderCtx->max_b_frames = 0;
 
         // pixel format of our used video formats is always yuv420p
         encoderCtx->pix_fmt = AV_PIX_FMT_YUV420P;
@@ -635,11 +823,10 @@ MediaEncoder::prepareEncoderContext(const AVCodec* outputCodec, bool is_video)
 #endif
 #endif
 
-        // Fri Jul 22 11:37:59 EDT 2011:tmatth:XXX: DON'T set this, we want our
-        // pps and sps to be sent in-band for RTP
-        // This is to place global headers in extradata instead of every
-        // keyframe.
-        // encoderCtx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+#ifdef RQM
+        // mp4 REQUIRES global header in codec to work
+        encoderCtx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+#endif
     } else {
         encoderCtx->sample_fmt = AV_SAMPLE_FMT_S16;
         encoderCtx->sample_rate = std::max(8000, audioOpts_.sampleRate);
@@ -678,12 +865,31 @@ MediaEncoder::forcePresetX2645(AVCodecContext* encoderCtx)
     } else
 #endif
     {
-        const char* speedPreset = "ultrafast";
-        if (av_opt_set(encoderCtx, "preset", speedPreset, AV_OPT_SEARCH_CHILDREN))
-            SIP_CORE_WARN("Failed to set preset '%s'", speedPreset);
-        const char* tune = "zerolatency";
-        if (av_opt_set(encoderCtx, "tune", tune, AV_OPT_SEARCH_CHILDREN))
-            SIP_CORE_WARN("Failed to set tune '%s'", tune);
+        av_opt_set(encoderCtx, "preset", "veryslow", AV_OPT_SEARCH_CHILDREN);
+        av_opt_set(encoderCtx, "tune", "zerolatency", AV_OPT_SEARCH_CHILDREN);
+
+        av_opt_set_double(encoderCtx, "crf", h264CrfFromQuality(), AV_OPT_SEARCH_CHILDREN);
+
+        // av_opt_set_int(encoderCtx, "aq-mode", 3, AV_OPT_SEARCH_CHILDREN);
+        // av_opt_set_double(encoderCtx, "aq-strength", 0.80, AV_OPT_SEARCH_CHILDREN);
+        // av_opt_set(encoderCtx, "partitions", "all", AV_OPT_SEARCH_CHILDREN);
+    }
+}
+
+int
+MediaEncoder::h264CrfFromQuality() const
+{
+    switch (videoOpts_.quality) {
+    case 1:
+        return 35;
+    case 2:
+        return 30;
+    case 3:
+        return 25;
+    case 4:
+        return 20;
+    default:
+        return 30;
     }
 }
 
@@ -912,33 +1118,35 @@ MediaEncoder::setPacketLoss(uint64_t pl)
 void
 MediaEncoder::initH264(AVCodecContext* encoderCtx, uint64_t br)
 {
-    uint64_t maxBitrate = 1000 * br;
-    // 200 Kbit/s    -> CRF40
-    // 6 Mbit/s      -> CRF23
-    uint8_t crf = (uint8_t) std::round(LOGREG_PARAM_A + LOGREG_PARAM_B * std::log(maxBitrate));
-    // bufsize parameter impact the variation of the bitrate, reduce to half the maxrate to limit
-    // peak and congestion
-    // https://trac.ffmpeg.org/wiki/Limiting%20the%20output%20bitrate
-    uint64_t bufSize = maxBitrate / 2;
+    // // 200 Kbit/s    -> CRF40
+    // // 6 Mbit/s      -> CRF23
+    // uint8_t crf = (uint8_t) std::round(LOGREG_PARAM_A + LOGREG_PARAM_B * std::log(maxBitrate));
+    // // bufsize parameter impact the variation of the bitrate, reduce to half the maxrate to limit
+    // // peak and congestion
+    // // https://trac.ffmpeg.org/wiki/Limiting%20the%20output%20bitrate
+    // uint64_t bufSize = maxBitrate / 2;
 
-    // If auto quality disabled use CRF mode
-    if (mode_ == RateMode::CRF_CONSTRAINED) {
-        av_opt_set_int(encoderCtx, "crf", crf, AV_OPT_SEARCH_CHILDREN);
-        av_opt_set_int(encoderCtx, "maxrate", maxBitrate, AV_OPT_SEARCH_CHILDREN);
-        av_opt_set_int(encoderCtx, "bufsize", bufSize, AV_OPT_SEARCH_CHILDREN);
-        SIP_CORE_DEBUG("H264 encoder setup: crf={:d}, maxrate={:d} kbit/s, bufsize={:d} kbit",
-                       crf,
-                       maxBitrate / 1000,
-                       bufSize / 1000);
-    } else if (mode_ == RateMode::CBR) {
-        av_opt_set_int(encoderCtx, "b", maxBitrate, AV_OPT_SEARCH_CHILDREN);
-        av_opt_set_int(encoderCtx, "maxrate", maxBitrate, AV_OPT_SEARCH_CHILDREN);
-        av_opt_set_int(encoderCtx, "minrate", maxBitrate, AV_OPT_SEARCH_CHILDREN);
-        av_opt_set_int(encoderCtx, "bufsize", bufSize, AV_OPT_SEARCH_CHILDREN);
-        av_opt_set_int(encoderCtx, "crf", -1, AV_OPT_SEARCH_CHILDREN);
+    // av_opt_set_int(encoderCtx, "no-scenecut", 1, AV_OPT_SEARCH_CHILDREN);
+    // av_opt_set_int(encoderCtx, "intra-refresh", 1, AV_OPT_SEARCH_CHILDREN);
 
-        SIP_CORE_DEBUG("H264 encoder setup cbr: bitrate={:d} kbit/s", br);
-    }
+    // // If auto quality disabled use CRF mode
+    // if (mode_ == RateMode::CRF_CONSTRAINED) {
+    //     av_opt_set_int(encoderCtx, "crf", crf, AV_OPT_SEARCH_CHILDREN);
+    //     av_opt_set_int(encoderCtx, "maxrate", maxBitrate, AV_OPT_SEARCH_CHILDREN);
+    //     av_opt_set_int(encoderCtx, "bufsize", bufSize, AV_OPT_SEARCH_CHILDREN);
+    //     SIP_CORE_DEBUG("H264 encoder setup: crf={:d}, maxrate={:d} kbit/s, bufsize={:d} kbit",
+    //                    crf,
+    //                    maxBitrate / 1000,
+    //                    bufSize / 1000);
+    // } else if (mode_ == RateMode::CBR) {
+    //     av_opt_set_int(encoderCtx, "b", maxBitrate, AV_OPT_SEARCH_CHILDREN);
+    //     av_opt_set_int(encoderCtx, "maxrate", maxBitrate, AV_OPT_SEARCH_CHILDREN);
+    //     av_opt_set_int(encoderCtx, "minrate", maxBitrate, AV_OPT_SEARCH_CHILDREN);
+    //     av_opt_set_int(encoderCtx, "bufsize", bufSize, AV_OPT_SEARCH_CHILDREN);
+    //     av_opt_set_int(encoderCtx, "crf", -1, AV_OPT_SEARCH_CHILDREN);
+
+    //     SIP_CORE_DEBUG("H264 encoder setup cbr: bitrate={:d} kbit/s", br);
+    // }
 }
 
 void
@@ -1348,7 +1556,14 @@ std::shared_ptr<VideoFrame>
 MediaEncoder::getScaledSWFrame(const VideoFrame& input)
 {
     libav_utils::fillWithBlack(scaledFrame_->pointer());
-    scaler_.scale_with_aspect(input, *scaledFrame_);
+
+    if (videoOpts_.noColor) {
+        libav_utils::fillWithBlack(grayScaledFrame_->pointer());
+        grayScaler_.scale_with_aspect(input, *grayScaledFrame_);
+        scaler_.scale_with_aspect(*grayScaledFrame_, *scaledFrame_);
+    } else {
+        scaler_.scale_with_aspect(input, *scaledFrame_);
+    }
     return scaledFrame_;
 }
 #endif

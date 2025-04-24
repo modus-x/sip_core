@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.25)
 
+cmake_policy(VERSION 3.25...3.31)
+
 project(
   sip_core
   VERSION 0.10.4
@@ -379,16 +381,17 @@ endif()
 add_library(${PROJECT_NAME} STATIC ${ALL_FILES})
 
 if(LINUX)
-  # compile with -rtlib=compiler-rt, to include all special builtin functions
+  # link with -rtlib=compiler-rt, to include all special builtin functions
   # into binary
-  target_link_options(${PROJECT_NAME} PRIVATE -rtlib=compiler-rt)
-  # GCC specific CXX, which was used when deps were built
-    find_library(
+  target_link_options(${PROJECT_NAME} PUBLIC -rtlib=compiler-rt)
+
+  # link GCC specific CXX, which was used when deps were built
+  find_library(
     GCC_CXX libstdc++.a
     PATHS /opt/rh/devtoolset-11/root/usr/lib/gcc/x86_64-redhat-linux/11
           REQUIRED NO_CACHE)
 
-  target_link_libraries(${PROJECT_NAME} PRIVATE ${GCC_CXX})
+  target_link_libraries(${PROJECT_NAME} PUBLIC ${GCC_CXX})
 endif()
 
 set_target_properties(${PROJECT_NAME} PROPERTIES FOLDER "sip_core")
@@ -470,7 +473,7 @@ if(MSVC)
   # ############################################################################
   target_include_directories(
     ${PROJECT_NAME}
-    PRIVATE
+    PUBLIC
       "${CMAKE_CURRENT_SOURCE_DIR}/compat/msvc;"
       "${CMAKE_CURRENT_SOURCE_DIR}/contrib/msvc;"
       "${CMAKE_CURRENT_SOURCE_DIR}/contrib/msvc/include;"
@@ -481,7 +484,6 @@ if(MSVC)
       "${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/speexdsp/include;"
       "${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/webrtc-audio-processing;"
       "${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/portaudio/include;"
-    PUBLIC
       $<$<CONFIG:Debug>:${DEPS_DEBUG}/include>
       $<$<CONFIG:Release>:${DEPS_RELEASE}/include>
       $<$<CONFIG:RelWithDebInfo>:${DEPS_RELEASE}/include>
@@ -498,16 +500,16 @@ if(MSVC)
   # ############################################################################
   target_compile_definitions(
     ${PROJECT_NAME}
-    PRIVATE "_WIN32_WINNT=0x0601;"
-            "_USE_MATH_DEFINES;"
-            "_SCL_SECURE_NO_WARNINGS;"
-            "_CRT_SECURE_NO_WARNINGS;"
-            "NOMINMAX;"
-            "HAVE_CONFIG_H;"
-            "WIN32_LEAN_AND_MEAN;"
-            "WEBRTC_WIN;"
-            "WEBRTC_AUDIO_PROCESSING_ONLY_BUILD;"
-            "WEBRTC_NS_FLOAT;")
+    PUBLIC "_WIN32_WINNT=0x0601;"
+           "_USE_MATH_DEFINES;"
+           "_SCL_SECURE_NO_WARNINGS;"
+           "_CRT_SECURE_NO_WARNINGS;"
+           "NOMINMAX;"
+           "HAVE_CONFIG_H;"
+           "WIN32_LEAN_AND_MEAN;"
+           "WEBRTC_WIN;"
+           "WEBRTC_AUDIO_PROCESSING_ONLY_BUILD;"
+           "WEBRTC_NS_FLOAT;")
 
   # ############################################################################
   # Compile and link options
@@ -515,20 +517,20 @@ if(MSVC)
   if("${CMAKE_VS_PLATFORM_NAME}" STREQUAL "x64")
     target_compile_options(
       ${PROJECT_NAME}
-      PRIVATE /Oi;
-              /MP;
-              /Oy-;
-              /sdl-;
-              /W0;
-              /FC;
-              /FS;
-              /nologo;
-              /wd4996;
-              /wd4503;
-              /wd4180;
-              /wd4244;
-              /wd4267;
-              /Zc:__cplusplus)
+      PUBLIC /Oi;
+             /MP;
+             /Oy-;
+             /sdl-;
+             /W0;
+             /FC;
+             /FS;
+             /nologo;
+             /wd4996;
+             /wd4503;
+             /wd4180;
+             /wd4244;
+             /wd4267;
+             /Zc:__cplusplus)
   endif()
 
   # always store debug symbols in pdb files
@@ -541,7 +543,7 @@ if(MSVC)
   if("${CMAKE_VS_PLATFORM_NAME}" STREQUAL "x64")
     target_link_options(
       ${PROJECT_NAME}
-      PRIVATE
+      PUBLIC
       /MACHINE:X64
       /VERBOSE:LIB
       # all dependencies are build with /MD

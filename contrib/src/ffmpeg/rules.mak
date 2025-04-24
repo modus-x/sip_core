@@ -20,7 +20,8 @@ FFMPEGCONF += \
 	--disable-filters \
 	--disable-autodetect \
 	--disable-programs \
-	--disable-postproc
+	--disable-postproc \
+	--disable-autodetect
 
 FFMPEGCONF += \
 	--disable-protocols \
@@ -38,6 +39,7 @@ FFMPEGCONF += \
 	--disable-demuxers \
 	--disable-muxers \
 	--enable-muxer=rtp \
+	--enable-muxer=mp4 \
 	--enable-muxer=h264 \
 	--enable-muxer=webm \
 	--enable-muxer=ogg \
@@ -134,9 +136,10 @@ FFMPEGCONF += \
 	--enable-filter=pad
 
 # platform specific options (LINUX / MAC)
-
 ifdef HAVE_LINUX
-FFMPEGCONF += --enable-pic --disable-asm
+FFMPEGCONF += --enable-pic
+
+
 ifdef HAVE_ANDROID
 # Android Linux
 FFMPEGCONF += \
@@ -160,14 +163,21 @@ endif
 ifeq ($(ARCH),x86_64)
 FFMPEGCONF += --disable-asm
 endif
+
 else
+
 # Desktop Linux
 FFMPEGCONF += \
 	--target-os=linux \
 	--enable-indev=v4l2 \
-	--enable-indev=xcbgrab 
+	--enable-indev=xcbgrab \
+	--enable-libxcb \
+	--enable-libxcb-shm \
+	--enable-libxcb-xfixes \
+	--enable-libxcb-shape
 # End Desktop Linux:
 endif
+
 # End HAVE_LINUX:
 endif
 
@@ -182,10 +192,6 @@ FFMPEGCONF += \
 	--enable-hwaccel=hevc_videotoolbox \
 	--enable-encoder=h264_videotoolbox \
 	--enable-encoder=hevc_videotoolbox \
-	--disable-libxcb \
-	--disable-libxcb-shm \
-	--disable-libxcb-xfixes \
-	--disable-libxcb-shape \
 	--disable-securetransport
 endif
 
@@ -198,18 +204,9 @@ FFMPEGCONF += \
 	--enable-hwaccel=hevc_videotoolbox \
 	--enable-encoder=h264_videotoolbox \
 	--enable-encoder=hevc_videotoolbox \
-	--disable-libxcb \
-	--disable-libxcb-shm \
-	--disable-libxcb-xfixes \
-	--disable-libxcb-shape \
 	--target-os=darwin \
 	--enable-cross-compile \
 	--enable-pic
-endif
-
-ifndef HAVE_IOS
-ifndef HAVE_ANDROID
-endif
 endif
 
 # x86 stuff
@@ -256,6 +253,7 @@ ffmpeg: ffmpeg-$(FFMPEG_HASH).tar.gz
 	$(APPLY) $(SRC)/ffmpeg/change-RTCP-ratio.patch
 	$(APPLY) $(SRC)/ffmpeg/rtp_ext_abs_send_time.patch
 	$(APPLY) $(SRC)/ffmpeg/rtp_dtmf.patch
+	$(APPLY) $(SRC)/ffmpeg/rtp_any_payload.patch
 	$(APPLY) $(SRC)/ffmpeg/libopusdec-enable-FEC.patch
 	$(APPLY) $(SRC)/ffmpeg/libopusenc-reload-packet-loss-at-encode.patch
 	$(APPLY) $(SRC)/ffmpeg/ios-disable-b-frames.patch

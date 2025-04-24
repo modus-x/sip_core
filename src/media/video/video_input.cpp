@@ -216,7 +216,8 @@ VideoInput::captureFrame()
         return static_cast<bool>(decoder_);
     case MediaDemuxer::Status::ReadError:
         SIP_CORE_ERR() << "Failed to decode frame";
-        return false;
+        // try again to decode
+        return true;
     default:
         return true;
     }
@@ -492,8 +493,8 @@ VideoInput::initX11(const std::string& display)
         }
     } else {
         p.input = display;
-        p.width = default_grab_width;
-        p.height = default_grab_height;
+        p.width = 0;
+        p.height = 0;
         p.is_area = 1;
     }
 
@@ -529,8 +530,13 @@ VideoInput::initAVFoundation(const std::string& display)
         decOpts_.width = round2pow(w, 3);
         decOpts_.height = round2pow(h, 3);
     } else {
+        #ifdef __APPLE__
+        decOpts_.width = 5120;
+        decOpts_.height = 2880;
+        #else
         decOpts_.width = default_grab_width;
         decOpts_.height = default_grab_height;
+        #endif
     }
     return true;
 }
@@ -547,20 +553,15 @@ VideoInput::initGdiGrab(const std::string& params)
         char sep;
         unsigned w, h;
         iss >> w >> sep >> h;
-        SIP_CORE_DBG() << "gdigrab before: " << w << "x" << h;
         decOpts_.width = round2pow(w, 3);
         decOpts_.height = round2pow(h, 3);
-
-        SIP_CORE_DBG() << "gdigrab after: " << decOpts_.width << "x" << decOpts_.height;
 
         size_t plus = params.find('+');
         std::istringstream dss(params.substr(plus + 1, space - plus));
         dss >> decOpts_.offset_x >> sep >> decOpts_.offset_y;
-
-        SIP_CORE_DBG() << "gdigrab offset: " << decOpts_.offset_x << "x" << decOpts_.offset_y;
     } else {
-        decOpts_.width = default_grab_width;
-        decOpts_.height = default_grab_height;
+        decOpts_.width = 0;
+        decOpts_.height = 0;
     }
 
     return true;

@@ -112,10 +112,21 @@ VideoDeviceMonitor::getMRLForDefaultDevice() const
 {
     std::lock_guard<std::mutex> l(lock_);
     const auto it = findDeviceById(defaultDevice_);
-    if (it == std::end(devices_) || it->getDeviceId() == DEVICE_DESKTOP)
+    if (it == std::end(devices_))
         return {};
+
     static const std::string sep = libsip_core::Media::VideoProtocolPrefix::SEPARATOR;
-    return libsip_core::Media::VideoProtocolPrefix::CAMERA + sep + it->getDeviceId();
+
+    if (it->getDeviceId() == DEVICE_DESKTOP) {
+#ifdef __linux__
+        const char* display = std::getenv("DISPLAY");
+        return libsip_core::Media::VideoProtocolPrefix::DISPLAY + sep + (display ? display : ":0");
+#else
+        return libsip_core::Media::VideoProtocolPrefix::DISPLAY + sep + "Display";
+#endif
+    } else {
+        return libsip_core::Media::VideoProtocolPrefix::CAMERA + sep + it->getDeviceId();
+    }
 }
 
 bool
@@ -207,10 +218,10 @@ VideoDeviceMonitor::addDevice(const string& id,
         // restore its preferences if any, or store the defaults
         auto it = findPreferencesById(id);
         if (it != preferences_.end()) {
-           dev.applySettings(*it);
+            dev.applySettings(*it);
         } else {
-           dev.applySettings(dev.getDefaultSettings());
-           preferences_.emplace_back(dev.getSettings());
+            dev.applySettings(dev.getDefaultSettings());
+            preferences_.emplace_back(dev.getSettings());
         }
 
         // in case there is no default device on a fresh run

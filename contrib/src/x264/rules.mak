@@ -5,6 +5,7 @@ X264_GITURL := https://code.videolan.org/videolan/x264.git
 X264CONF = --prefix="$(PREFIX)" \
            --host="$(HOST)"     \
            --enable-static      \
+           --enable-debug       \
            --disable-avs        \
            --disable-lavf       \
            --disable-cli        \

@@ -42,6 +42,10 @@
 #include <string>
 #include <vector>
 
+#ifdef RQM
+#include <fstream>
+#endif
+
 extern "C" {
 struct AVCodecContext;
 struct AVFormatContext;
@@ -76,8 +80,15 @@ public:
 
     void openOutput(const std::string& filename, const std::string& format = "");
     void setMetadata(const std::string& title, const std::string& description);
+
+    // set media stream parameters (video width, height, audio sample rate, etc)
     void setOptions(const MediaStream& opts);
+
+    // set media description parameters (payload type, video mode)
     void setOptions(const MediaDescription& args);
+
+    // add steam to context with some predefined codec info
+
     int addStream(const SystemCodecInfo& codec);
     void setIOContext(AVIOContext* ioctx) { ioCtx_ = ioctx; }
     void resetStreams(int width, int height);
@@ -142,6 +153,7 @@ private:
     void stopEncoder();
     AVCodecContext* initCodec(AVMediaType mediaType, AVCodecID avcodecId, uint64_t br);
     void initH264(AVCodecContext* encoderCtx, uint64_t br);
+    int h264CrfFromQuality() const;
     void initH265(AVCodecContext* encoderCtx, uint64_t br);
     void initVP8(AVCodecContext* encoderCtx, uint64_t br);
     void initMPEG4(AVCodecContext* encoderCtx, uint64_t br);
@@ -150,6 +162,10 @@ private:
     bool isDynBitrateSupported(AVCodecID codecid);
     bool isDynPacketLossSupported(AVCodecID codecid);
     void initAccel(AVCodecContext* encoderCtx, uint64_t br);
+#ifdef RQM
+    int writeContainerToRtp(uint8_t* buf, int buf_size);
+#endif
+
 #ifdef ENABLE_VIDEO
     int getHWFrame(const std::shared_ptr<VideoFrame>& input, std::shared_ptr<VideoFrame>& output);
     std::shared_ptr<VideoFrame> getUnlinkedHWFrame(const VideoFrame& input);
@@ -157,8 +173,34 @@ private:
     std::shared_ptr<VideoFrame> getScaledSWFrame(const VideoFrame& input);
 #endif
 
+    // encode data into h264 / something another
     std::vector<AVCodecContext*> encoders_;
-    AVFormatContext* outputCtx_ = nullptr;
+
+    // output from encoder. it may be rtp or file
+    AVFormatContext* outputCtx_ = NULL;
+
+#ifdef RQM
+    // output to mp4. only local file url
+    AVFormatContext* mp4Ctx_ = NULL;
+
+    // bytes with mp4 will be written here
+    AVIOContext *mp4IOCtx_ = NULL;
+
+    unsigned int mp4SentPackets_ {1};
+
+    // codec for mp4
+    AVCodecContext* mp4CodecContext_ = NULL;
+
+    // stream for mp4
+    AVStream *mp4Stream_ = NULL;
+
+    std::ofstream mp4FileStream_;
+
+    std::string mp4File_;
+
+    AVDictionary *mp4Opts_ = NULL;
+#endif
+
     AVIOContext* ioCtx_ = nullptr;
     int currentStreamIdx_ = -1;
     unsigned sent_samples = 0;
@@ -168,16 +210,22 @@ private:
     const AVCodec* outputCodec_ = nullptr;
     std::mutex encMutex_;
     bool linkableHW_ {false};
-    RateMode mode_ {RateMode::CRF_CONSTRAINED};
+    RateMode mode_ {RateMode::CBR};
     bool fecEnabled_ {true};
 
 #ifdef ENABLE_VIDEO
     video::VideoScaler scaler_;
+    video::VideoScaler grayScaler_;
+
     std::shared_ptr<VideoFrame> scaledFrame_;
+    std::shared_ptr<VideoFrame> grayScaledFrame_;
 #endif // ENABLE_VIDEO
 
     std::vector<uint8_t> scaledFrameBuffer_;
     int scaledFrameBufferSize_ = 0;
+
+    std::vector<uint8_t> grayScaledFrameBuffer_;
+    int grayScaledFrameBufferSize_ = 0;
 
 #ifdef RING_ACCEL
     bool enableAccel_ {false};
