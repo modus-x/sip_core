@@ -813,8 +813,9 @@ MediaEncoder::prepareEncoderContext(const AVCodec* outputCodec, bool is_video)
         // keyframe.
         // encoderCtx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
 #endif
+
         // emit one intra frame every gop_size frames
-        // encoderCtx->max_b_frames = 0;
+        encoderCtx->max_b_frames = 0;
 
         // pixel format of our used video formats is always yuv420p
         encoderCtx->pix_fmt = AV_PIX_FMT_YUV420P;
