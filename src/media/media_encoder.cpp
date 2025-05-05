@@ -806,6 +806,12 @@ MediaEncoder::prepareEncoderContext(const AVCodec* outputCodec, bool is_video)
         if (!mp4Stream_) {
             SIP_CORE_ERR() << "mp4_error: cannot create mp4Stream_";
         }
+#else
+        // Fri Jul 22 11:37:59 EDT 2011:tmatth:XXX: DON'T set this, we want our
+        // pps and sps to be sent in-band for RTP
+        // This is to place global headers in extradata instead of every
+        // keyframe.
+        // encoderCtx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
 #endif
         // emit one intra frame every gop_size frames
         // encoderCtx->max_b_frames = 0;
