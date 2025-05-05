@@ -12,6 +12,7 @@
 #include "sip_core/callmanager_interface.h"
 #include "sip_core/configurationmanager_interface.h"
 #include "client/ring_signal.h"
+#include "client/videomanager.h"
 #include "manager.h"
 
 #ifdef _WIN32
@@ -25,23 +26,29 @@
 
 using namespace std;
 
-string username = "your_user_name";
-string password = "your_password";
-string domain = "your_domain";
+string username = "username";
+string password = "password";
+string domain = "192.168.92.27";
 
-vector<map<string, string>> mediaList {
-    {
-        { "MEDIA_TYPE", "MEDIA_TYPE_AUDIO"},
-        { "ENABLED", "true" },
-        { "MUTED", "false" },
-        { "LABEL", "audio_0" }
-    },
-    {
-        { "MEDIA_TYPE", "MEDIA_TYPE_VIDEO"},
-        { "ENABLED", "true" },
-        { "MUTED", "false" },
-        { "LABEL", "video_0" }
-    }
+
+bool g_isAudioOn = true;
+bool g_isVideoOn = false;
+
+map<string, string> g_mediaAudio
+{
+    { "MEDIA_TYPE", "MEDIA_TYPE_AUDIO"},
+    { "ENABLED", "true" },
+    { "MUTED", "false" },
+    { "LABEL", "audio_0" }
+};
+
+map<string, string> g_mediaVideo
+{
+    { "MEDIA_TYPE", "MEDIA_TYPE_VIDEO"},
+    { "ENABLED", "true" },
+    { "MUTED", "false" },
+    //{ "SOURCE", "display://:0.0" },
+    { "LABEL", "video_0" }
 };
 
 string toSipUri(const string& number, const string& domainName);
@@ -51,13 +58,12 @@ vector<string> split(const string &s);
 bool init_sip();
 bool register_accaunt();
 
-
 string active_call {};
 
 int main() {
 
     cout << "SIP core Console App" << endl;
-    cout << "Available commands: call <callee>, hangup, cstart, cend, exit" << endl;
+    cout << "Available commands: call <callee>, switch <device>, hangup, capOn, capOff, video, audio, exit" << endl;
 
     if(!init_sip()) {
         cerr << "Error: can't initialize sip." << endl;
@@ -69,9 +75,15 @@ int main() {
         return 1;
     }
 
+    // Get list of input devices
+    //auto inputs = sip_core::Manager::instance().getAudioInputDeviceList();
+    // Get list of output devices
+    //auto outputs = sip_core::Manager::instance().getAudioOutputDeviceList();
+    //sip_core::Manager::instance().setAudioDevice(1, sip_core::AudioDeviceType::CAPTURE);
+    //sip_core::Manager::instance().setAudioDevice(1, sip_core::AudioDeviceType::PLAYBACK);
+
     string line;
     while (true) {
-        cout << "> ";
         getline(cin, line);
         vector<string> tokens = split(line);
         if (tokens.empty()) continue;
@@ -84,59 +96,109 @@ int main() {
         }
         else if (command == "call") {
             if (tokens.size() != 2) {
-                cout << "Error: Usage - call <callee>" << endl;
+                cerr << "Error: Usage - call <callee>" << endl;
                 continue;
             }
             if(!active_call.empty()) {
-                cout << "Error: already in an active call state" << endl;
+                cerr << "Error: already in an active call state" << endl;
                 continue;
             }
 
+            // build media list settings according to settings
+            vector<map<string, string>> mediaList;
+            if(g_isAudioOn)
+            mediaList.push_back(g_mediaAudio);
+            if(g_isVideoOn)
+            mediaList.push_back(g_mediaVideo);
+            
             string callee = tokens[1];
             active_call = libsip_core::placeCallWithMedia(ACCAUNT_ID,
                 toSipUri(callee, domain),
                 mediaList);
-
+                
             cout << "Call connected: " << username << " -> " << callee << "\n CallID = " << active_call << endl;
+        } else if (command == "switch") {
+            if (tokens.size() != 2) {
+                cerr << "Error: Usage - switch <device>\n device could be of type:\n  display://:(screen_number)\n  camera://(camera_name)\n  default" << endl;
+                continue;
+            }
+            string device = tokens[1];
+            if (device.rfind("display://") == 0 || device.rfind("camera://") == 0) {
+                g_mediaVideo["SOURCE"] = device;
+            } else if(device == "default") {
+                g_mediaVideo["SOURCE"] = libsip_core::getDefaultDevice();
+            } else {
+                cerr << "Error: Usage - switch <device>\n device could be of type:\n  display://:(screen_number)\n  camera://(camera_name)\n  default" << endl;
+                continue;
+            }
+
         } else if (command == "hangup") {
             if (active_call.empty()) {
-                cout << "Error: no active call" << endl;
+                cerr << "Error: no active call" << endl;
                 continue;
             }
             if(!libsip_core::hangUp(ACCAUNT_ID, active_call)) {
-                cout << "Error: failed to hangup call: " <<  active_call << endl;
+                cerr << "Error: failed to hangup call: " <<  active_call << endl;
                 continue;
             }
+            
             active_call = "";
-
-        } else if (command == "cstart") {
+        } else if (command == "capon") {
             if(active_call.empty()){
-                cout << "Error: no active call" << endl;
+                cerr << "Error: no active call" << endl;
                 continue;
             }
+            
             if(libsip_core::getIsRecording(ACCAUNT_ID, active_call)) {
-                cout << "Error: already recording" << endl;
-                continue;
+                cerr << "Error: already recording" << endl;
             }
+
             if(!libsip_core::toggleRecording(ACCAUNT_ID, active_call)) {
-                cout << "Error: failed to start recording" << endl;
+                cerr << "Error: failed to start recording" << endl;
                 continue;
             }
-        } else if (command == "cend") {
+        } else if (command == "capoff") {
             if(active_call.empty()){
-                cout << "Error: no active call" << endl;
+                cerr << "Error: no active call" << endl;
                 continue;
             }
             if(!libsip_core::getIsRecording(ACCAUNT_ID, active_call)) {
-                cout << "Error: nothing recodring" << endl;
+                cerr << "Error: nothing recodring" << endl;
                 continue;
             }
             if(!libsip_core::toggleRecording(ACCAUNT_ID, active_call)) {
-                cout << "Error: failed to stop recording" << endl;
+                cerr << "Error: failed to stop recording" << endl;
                 continue;
+                
+            }
+        } else if (command == "audio") {
+            if(g_isAudioOn) cout << "Disabling audio..." << endl;
+            else cout << "Enabling audio..." << endl;
+            g_isAudioOn = !g_isAudioOn;
+
+            if(!active_call.empty()) {
+                // build media list settings according to settings
+                vector<map<string, string>> mediaList;
+                if(g_isAudioOn) mediaList.push_back(g_mediaAudio);
+                if(g_isVideoOn) mediaList.push_back(g_mediaVideo);
+
+                libsip_core::requestMediaChange(ACCAUNT_ID, active_call, mediaList);
+            }
+        } else if (command == "video") {
+            if(g_isVideoOn) cout << "Disabling video..." << endl;
+            else cout << "Enabling video..." << endl;
+            g_isVideoOn = !g_isVideoOn;
+
+            if(!active_call.empty()) {
+                // build media list settings according to settings
+                vector<map<string, string>> mediaList;
+                if(g_isAudioOn) mediaList.push_back(g_mediaAudio);
+                if(g_isVideoOn) mediaList.push_back(g_mediaVideo);
+
+                libsip_core::requestMediaChange(ACCAUNT_ID, active_call, mediaList);
             }
         } else {
-            cout << "Error: Unknown command. \nFull list of commands:\ncall <callee> - initiates call with given ID,\n hangup - hangup current call.\n cstart - start capture of video in a local file.\n cend - stops capture of video.\n exit - exit program." << endl;
+            cerr << "Error: Unknown command. \nFull list of commands:\n call <callee> - initiates call with given ID,\n switch <device> - switches video source for an active call.\n hangup - hangup current call.\n capOn - start capture of active call in a local file.\n capOff - stops capture of video.\n video - enables video transfer.\n audio -enables audio transfer.\n exit - exit program." << endl;
         }
     }
 
@@ -151,13 +213,13 @@ bool init_sip()
 {
     const sip_core::SignalHandlerMap sigMap = {
         libsip_core::exportable_callback<libsip_core::ConfigurationSignal::RegistrationStateChanged>(&registrationStateChanged),
+        libsip_core::exportable_callback<libsip_core::ConfigurationSignal::VolatileDetailsChanged>(&volatileDetailsChanged),
         libsip_core::exportable_callback<libsip_core::CallSignal::StateChange>(&callStateChanged),
         libsip_core::exportable_callback<libsip_core::CallSignal::IncomingCall>(&incomingCall),
         libsip_core::exportable_callback<libsip_core::CallSignal::IncomingCallWithMedia>(&incomingCallWithMedia),
-        libsip_core::exportable_callback<libsip_core::ConfigurationSignal::VolatileDetailsChanged>(&volatileDetailsChanged),
+        libsip_core::exportable_callback<libsip_core::CallSignal::MediaNegotiationStatus>(&mediaNegotiationStatus),
         libsip_core::exportable_callback<libsip_core::AudioSignal::DeviceEvent>(&audioDeviceEvent),
         libsip_core::exportable_callback<libsip_core::VideoSignal::StartCapture>(&startCapture),
-        libsip_core::exportable_callback<libsip_core::CallSignal::MediaNegotiationStatus>(&mediaNegotiationStatus),
         libsip_core::exportable_callback<libsip_core::VideoSignal::DecodingStarted>(&decodingStarted),
     };
 
@@ -172,7 +234,7 @@ bool init_sip()
         cwd = buffer;
     }
     
-    if(!libsip_core::start(cwd, ""))
+    if(!libsip_core::start(cwd + "/test.yaml", ""))
         return false;
 
     return true;

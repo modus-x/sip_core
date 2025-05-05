@@ -1,6 +1,14 @@
 #include <string>
 #include <map>
+#include <memory>
 #include <vector>
+
+extern bool g_isAudioOn;
+extern bool g_isVideoOn;
+
+extern std::map<std::string, std::string> g_mediaAudio;
+extern std::map<std::string, std::string> g_mediaVideo;
+extern std::string active_call;
 
 void audioDeviceEvent();
 
