@@ -5,7 +5,6 @@
 #include <sstream>
 #include <algorithm>
 #include <unistd.h>
-#include <climits>
 #include <regex>
 
 #include "SignalHandlers.h"
@@ -17,7 +16,10 @@
 
 #ifdef _WIN32
 #include <conio.h>  // Windows-specific for _getch()
+#include <windows.h>
+#define PATH_MAX MAX_PATH
 #else
+#include <climits>
 #include <termios.h>
 #include <unistd.h>
 #endif
