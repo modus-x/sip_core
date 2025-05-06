@@ -1424,6 +1424,7 @@ MediaEncoder::testH265Accel()
 
             AVCodecContext* encoderCtx = avcodec_alloc_context3(outputCodec);
             encoderCtx->thread_count = std::min(std::thread::hardware_concurrency(), 16u);
+            encoderCtx->thread_type = FF_THREAD_SLICE;
             encoderCtx->width = 1280;
             encoderCtx->height = 720;
             AVRational framerate;

@@ -582,6 +582,7 @@ MediaDecoder::setupStream()
                  av_get_media_type_string(avStream_->codecpar->codec_type));
 
     decoderCtx_->thread_count = std::max(1u, std::min(8u, std::thread::hardware_concurrency() / 2));
+    decoderCtx_->thread_type = FF_THREAD_SLICE;
     if (emulateRate_)
         SIP_CORE_DBG() << "Using framerate emulation";
     startTime_ = av_gettime(); // used to set pts after decoding, and for rate emulation
