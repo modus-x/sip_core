@@ -806,9 +806,16 @@ MediaEncoder::prepareEncoderContext(const AVCodec* outputCodec, bool is_video)
         if (!mp4Stream_) {
             SIP_CORE_ERR() << "mp4_error: cannot create mp4Stream_";
         }
+#else
+        // Fri Jul 22 11:37:59 EDT 2011:tmatth:XXX: DON'T set this, we want our
+        // pps and sps to be sent in-band for RTP
+        // This is to place global headers in extradata instead of every
+        // keyframe.
+        // encoderCtx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
 #endif
+
         // emit one intra frame every gop_size frames
-        // encoderCtx->max_b_frames = 0;
+        encoderCtx->max_b_frames = 0;
 
         // pixel format of our used video formats is always yuv420p
         encoderCtx->pix_fmt = AV_PIX_FMT_YUV420P;
@@ -1417,6 +1424,7 @@ MediaEncoder::testH265Accel()
 
             AVCodecContext* encoderCtx = avcodec_alloc_context3(outputCodec);
             encoderCtx->thread_count = std::min(std::thread::hardware_concurrency(), 16u);
+            encoderCtx->thread_type = FF_THREAD_SLICE;
             encoderCtx->width = 1280;
             encoderCtx->height = 720;
             AVRational framerate;

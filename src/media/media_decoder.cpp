@@ -104,17 +104,20 @@ MediaDemuxer::openInput(const DeviceParams& params)
     }
     if (params.framerate) {
 #ifdef _WIN32
-        // On windows, framerate settings don't reduce to avrational values
-        // that correspond to valid video device formats.
-        // e.g. A the rational<double>(10000000, 333333) or 30.000030000
-        //      will be reduced by av_reduce to 999991/33333 or 30.00003000003
-        //      which cause the device opening routine to fail.
-        // So we treat this imprecise reduction and adjust the value,
-        // or let dshow choose the framerate, which is, unfortunately,
-        // NOT the highest according to our experimentations.
-        av_dict_set(&options_, "framerate", sip_core::to_string(params.framerate.real()).c_str(), 0);
+            // On windows, framerate settings don't reduce to avrational values
+            // that correspond to valid video device formats.
+            // e.g. A the rational<double>(10000000, 333333) or 30.000030000
+            //      will be reduced by av_reduce to 999991/33333 or 30.00003000003
+            //      which cause the device opening routine to fail.
+            // So we treat this imprecise reduction and adjust the value,
+            // or let dshow choose the framerate, which is, unfortunately,
+            // NOT the highest according to our experimentations.
+            auto framerate {params.framerate.real()};
+            framerate = params.framerate.numerator() / (params.framerate.denominator() + 0.5);
+            if (params.framerate.denominator() != 4999998)
+                av_dict_set(&options_, "framerate", sip_core::to_string(framerate).c_str(), 0);
 #else
-        av_dict_set(&options_, "framerate", sip_core::to_string(params.framerate.real()).c_str(), 0);
+            av_dict_set(&options_, "framerate", sip_core::to_string(params.framerate.real()).c_str(), 0);
 #endif
     }
 
@@ -579,6 +582,7 @@ MediaDecoder::setupStream()
                  av_get_media_type_string(avStream_->codecpar->codec_type));
 
     decoderCtx_->thread_count = std::max(1u, std::min(8u, std::thread::hardware_concurrency() / 2));
+    decoderCtx_->thread_type = FF_THREAD_SLICE;
     if (emulateRate_)
         SIP_CORE_DBG() << "Using framerate emulation";
     startTime_ = av_gettime(); // used to set pts after decoding, and for rate emulation

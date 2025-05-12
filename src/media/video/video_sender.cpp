@@ -54,7 +54,7 @@ VideoSender::VideoSender(const std::string& dest,
     , stream_(opts)
     , callId_(callId)
 {
-    keyFrameFreq_ = opts.frameRate.numerator() * KEY_FRAME_PERIOD;
+    keyFrameFreq_ = opts.frameRate.real() * KEY_FRAME_PERIOD;
     videoEncoder_->openOutput(dest, "rtp");
     videoEncoder_->setOptions(opts);
     videoEncoder_->setOptions(args);
@@ -104,8 +104,9 @@ VideoSender::encodeAndSendVideo(const std::shared_ptr<VideoFrame>& input_frame)
         bool is_keyframe = forceKeyFrame_ > 0
                            or (keyFrameFreq_ > 0 and (frameNumber_ % keyFrameFreq_) == 0);
 
-        if (is_keyframe)
+        if (is_keyframe) {
             --forceKeyFrame_;
+        }
 
         if (videoEncoder_->encode(input_frame, is_keyframe, frameNumber_++) < 0)
             SIP_CORE_ERR("encoding failed");
