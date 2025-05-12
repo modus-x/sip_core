@@ -109,7 +109,11 @@ void syslog(int level, const char* format, ...)
  *      options
  *      facility
  */
+#ifdef UNICODE
+ void openlog(LPCWSTR ident, int logopt, int facility)
+#else
  void openlog(const char *ident, int logopt, int facility)
+#endif
  {
     char tmp[1024];
 

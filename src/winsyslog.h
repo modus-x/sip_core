@@ -69,8 +69,13 @@ extern "C" {
 #endif
 
 extern void closelog(void);
-extern void openlog(const char*, int, int);
 extern void syslog(int, const char*, ...);
+
+#ifdef UNICODE
+extern void openlog(LPCWSTR, int, int);
+#else
+extern void openlog(const char*, int, int);
+#endif
 
 #ifdef __cplusplus
 }

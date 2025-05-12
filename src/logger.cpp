@@ -94,7 +94,13 @@
 #define LIGHT_GREEN      FOREGROUND_GREEN + 0x0008
 #endif // _WIN32
 
+
+#ifdef UNICODE
+#define LOGFILE L"sip_core"
+#else
 #define LOGFILE "sip_core"
+#endif
+
 
 namespace sip_core {
 
@@ -367,7 +373,7 @@ public:
     SysLog()
     {
 #ifdef _WIN32
-        ::openlog(LOGFILE, WINLOG_PID, WINLOG_MAIL);
+        //::openlog(LOGFILE, WINLOG_PID, WINLOG_MAIL);
 #else
 #ifndef __ANDROID__
         ::openlog(LOGFILE, LOG_NDELAY, LOG_USER);
@@ -379,7 +385,7 @@ public:
     {
 #ifdef __ANDROID__
         __android_log_print(msg.level_, APP_NAME, "%s%s", msg.header_.c_str(), msg.payload_.c_str());
-#else
+#elifndef _WIN32
         ::syslog(msg.level_, "%.*s", (int) msg.payload_.size(), msg.payload_.data());
 #endif
     }
