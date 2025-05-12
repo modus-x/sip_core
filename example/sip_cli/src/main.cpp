@@ -24,9 +24,8 @@
 #include <unistd.h>
 #endif
 
-#define ACCAUNT_ID "test_acc"
-
 using namespace std;
+#define ACCAUNT_ID "test_acc"
 
 string username = "username";
 string password = "password";
@@ -84,6 +83,11 @@ int main() {
     //sip_core::Manager::instance().setAudioDevice(1, sip_core::AudioDeviceType::CAPTURE);
     //sip_core::Manager::instance().setAudioDevice(1, sip_core::AudioDeviceType::PLAYBACK);
 
+    auto cameras = sip_core::Manager::instance().getVideoManager().videoDeviceMonitor.getDeviceList();
+    for(auto camera : cameras) {
+        std::cout << "Camera: " << camera << std::endl;
+    }
+
     string line;
     while (true) {
         getline(cin, line);
@@ -105,7 +109,7 @@ int main() {
                 cerr << "Error: already in an active call state" << endl;
                 continue;
             }
-
+            
             // build media list settings according to settings
             vector<map<string, string>> mediaList;
             if(g_isAudioOn)
@@ -171,7 +175,6 @@ int main() {
             if(!libsip_core::toggleRecording(ACCAUNT_ID, active_call)) {
                 cerr << "Error: failed to stop recording" << endl;
                 continue;
-                
             }
         } else if (command == "audio") {
             if(g_isAudioOn) cout << "Disabling audio..." << endl;
@@ -223,6 +226,7 @@ bool init_sip()
         libsip_core::exportable_callback<libsip_core::AudioSignal::DeviceEvent>(&audioDeviceEvent),
         libsip_core::exportable_callback<libsip_core::VideoSignal::StartCapture>(&startCapture),
         libsip_core::exportable_callback<libsip_core::VideoSignal::DecodingStarted>(&decodingStarted),
+        libsip_core::exportable_callback<libsip_core::CallSignal::MediaChangeRequested>(&mediaChange)
     };
 
     libsip_core::registerSignalHandlers(sigMap);

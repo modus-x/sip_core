@@ -31,3 +31,5 @@ void stopCapture(const std::string& camid);
 void decodingStarted(const std::string& id, const std::string& shmPath, const int32_t w, const int32_t h, const bool isMixer);
 
 void decodingStopped(const std::string& id, const std::string& shmPath, const bool isMixer);
+
+void mediaChange(const std::string &accountId, const std::string &callId, const std::vector<std::map<std::string, std::string>> &mediaList);
