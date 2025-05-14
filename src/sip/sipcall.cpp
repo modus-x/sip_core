@@ -1,4 +1,4 @@
-
+﻿
 /*
  *  Copyright (C) 2004-2022 Savoir-faire Linux Inc.
  *
@@ -2208,15 +2208,15 @@ SIPCall::requestMediaChange(const std::vector<libsip_core::MediaMap>& mediaList)
                      getCallId().c_str());
         requestReinvite(mediaAttrList);
     } else if (needMediaRestart) {
-SIP_CORE_DBG("[call:%s] Media change DOES NOT require a new negotiation (restart), but "
+        SIP_CORE_DBG("[call:%s] Media change DOES NOT require a new negotiation (restart), but "
                      "requires a restart",
                      getCallId().c_str());
         this->mediaRestartRequired_ = true;
         onMediaNegotiationComplete();
     } else {
         SIP_CORE_DBG(
-"[call:%s] Media change DOES NOT require a new negotiation (re-invite) and restart",
-                     getCallId().c_str());
+            "[call:%s] Media change DOES NOT require a new negotiation (re-invite) and restart",
+            getCallId().c_str());
         reportMediaNegotiationStatus();
     }
 
@@ -2261,7 +2261,8 @@ SIPCall::onMediaNegotiationComplete()
                 // No ICE, start media now.
                 SIP_CORE_WARN("[call:%s] ICE media disabled, using default media ports",
                               this_->getCallId().c_str());
-                // Start the media.
+                // RESTART the media.
+                this_->stopAllMedia();
                 this_->startAllMedia();
             }
 
