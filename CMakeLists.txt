@@ -762,6 +762,17 @@ else()
                             PRIVATE PkgConfig::webrtcap_${TARGET})
       target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::udev
                                                     PkgConfig::pulseaudio)
+      # X11, XCB, XCB_SHM, XCB_SHAPE, XCB_XFIXES for desktop share
+      pkg_search_module(X11 REQUIRED IMPORTED_TARGET x11)
+      pkg_search_module(XCB REQUIRED IMPORTED_TARGET xcb)
+      pkg_search_module(XCB_SHM REQUIRED IMPORTED_TARGET xcb-shm)
+      pkg_search_module(XCB_SHAPE REQUIRED IMPORTED_TARGET xcb-shape)
+      pkg_search_module(XCB_XFIXES REQUIRED IMPORTED_TARGET xcb-xfixes)
+
+      target_link_libraries(
+        ${PROJECT_NAME}
+        INTERFACE PkgConfig::X11 PkgConfig::XCB PkgConfig::XCB_SHM
+                  PkgConfig::XCB_SHAPE PkgConfig::XCB_XFIXES)
     endif()
 
     if(ANDROID)
