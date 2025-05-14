@@ -381,8 +381,8 @@ endif()
 add_library(${PROJECT_NAME} STATIC ${ALL_FILES})
 
 if(LINUX)
-  # link with -rtlib=compiler-rt, to include all special builtin functions
-  # into binary
+  # link with -rtlib=compiler-rt, to include all special builtin functions into
+  # binary
   target_link_options(${PROJECT_NAME} PUBLIC -rtlib=compiler-rt)
 
   # link GCC specific CXX, which was used when deps were built
