@@ -1,4 +1,4 @@
-﻿
+
 /*
  *  Copyright (C) 2004-2022 Savoir-faire Linux Inc.
  *
@@ -1759,7 +1759,8 @@ SIPCall::setupNegotiatedMedia()
         const auto& remote = slot.second;
 
         if (static_cast<size_t>(streamIdx) >= rtpStreams_.size()) {
-            throw std::runtime_error("Stream index is out-of-range");
+            SIP_CORE_WARN("[call:%s] Stream index is out-of-range, skipping", getCallId().c_str());
+            continue;
         }
 
         auto const& rtpStream = rtpStreams_[streamIdx];
