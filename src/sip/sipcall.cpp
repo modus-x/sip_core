@@ -2208,10 +2208,14 @@ SIPCall::requestMediaChange(const std::vector<libsip_core::MediaMap>& mediaList)
                      getCallId().c_str());
         requestReinvite(mediaAttrList);
     } else if (needMediaRestart) {
+SIP_CORE_DBG("[call:%s] Media change DOES NOT require a new negotiation (restart), but "
+                     "requires a restart",
+                     getCallId().c_str());
         this->mediaRestartRequired_ = true;
         onMediaNegotiationComplete();
     } else {
-        SIP_CORE_DBG("[call:%s] Media change DOES NOT require a new negotiation (re-invite)",
+        SIP_CORE_DBG(
+"[call:%s] Media change DOES NOT require a new negotiation (re-invite) and restart",
                      getCallId().c_str());
         reportMediaNegotiationStatus();
     }
