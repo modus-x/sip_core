@@ -65,8 +65,9 @@ public:
     void setChangeOrientationCallback(std::function<void(int)> cb);
     int setBitrate(uint64_t br);
 
-    void blackFrame();
     void natPing();
+
+    inline void setMuted(bool mute) { muted_.store(mute); }
 
 private:
     static constexpr int KEYFRAMES_AT_START {1}; // Number of keyframes to enforce at stream startup
@@ -92,6 +93,7 @@ private:
     std::function<void(int)> changeOrientationCallback_;
 
     bool natResolved_ = false;
+    std::atomic<bool> muted_ {false};
 };
 } // namespace video
 } // namespace sip_core

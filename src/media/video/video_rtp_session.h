@@ -209,11 +209,6 @@ private:
     pj_timer_entry ka_timer_ {};
     void attachRemoteRecorder(const MediaStream& ms);
     void attachLocalRecorder(const MediaStream& ms);
-
-    bool videoInputAttached_ {false};
-
-    // only for local
-    bool muteState_ {false};
 };
 
 } // namespace video

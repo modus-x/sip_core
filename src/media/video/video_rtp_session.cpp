@@ -207,7 +207,7 @@ VideoRtpSession::startSender()
         return;
     }
 
-    if (send_.enabled and not send_.onHold) {
+    if (send_.enabled) {
         if (sender_) {
             if (videoLocal_)
                 videoLocal_->detach(sender_.get());
@@ -296,15 +296,9 @@ VideoRtpSession::startSender()
             if (socketPair_)
                 socketPair_->setPacketLossCallback([this]() { cbKeyFrameRequest_(); });
 
-            if (!muteState_) {
-                // if needed, cancel sending empty packets and start video
-                cancelKeepAliveTimer();
-                attachVideoInput();
-            }
-            else {
-                // start keep alive timer
-                // setupKaTimer();
-            }
+
+            // attach video input!
+            attachVideoInput();
 
         } catch (const MediaEncoderException& e) {
             SIP_CORE_ERR("%s", e.what());
@@ -500,7 +494,7 @@ VideoRtpSession::start()
     startReceiver();
 
     if (conference_) {
-        if (send_.enabled and not send_.onHold) {
+        if (send_.enabled) {
             setupConferenceVideoPipeline(*conference_, Direction::SEND);
         }
         if (receive_.enabled and not receive_.onHold) {
@@ -514,12 +508,11 @@ VideoRtpSession::stop()
 {
     std::lock_guard lock(mutex_);
 
+    stopSender();
+    stopReceiver();
 
     if (socketPair_)
         socketPair_->interrupt();
-
-    stopReceiver();
-    stopSender();
 
     rtcpCheckerThread_.join();
 
@@ -537,28 +530,47 @@ VideoRtpSession::stop()
 void
 VideoRtpSession::setMuted(bool mute, Direction dir)
 {
-    SIP_CORE_DBG("VideoRtpSession [%p] change to %s", this, mute ? "muted" : "un-muted");
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
-
-    // save state for future explicit starting of sender
-    muteState_ = mute;
-
-    // ensure that start has been called before setmuted
-    if (not socketPair_)
-        return;
+    std::lock_guard lock(mutex_);
 
     // Sender
     if (dir == Direction::SEND) {
-        if (mute) {
-            stopSender();
-            // setupKaTimer();
-        } else {
-            cancelKeepAliveTimer();
-            restartSender();
+        if (send_.onHold == mute) {
+            SIP_CORE_DBG("[%p] Local already %s", this, mute ? "muted" : "un-muted");
+            return;
         }
+
+        // set onHold
+        send_.onHold = mute;
+        if (videoLocal_) {
+            sender_->setMuted(mute);
+        }
+
         return;
     }
+
+    // Receiver
+    if (receive_.onHold == mute) {
+        SIP_CORE_DBG("[%p] Remote already %s", this, mute ? "muted" : "un-muted");
+        return;
+    }
+
+    if ((receive_.onHold = mute)) {
+        if (receiveThread_) {
+            auto ms = receiveThread_->getInfo();
+            if (auto ob = recorder_->getStream(ms.name)) {
+                receiveThread_->detach(ob);
+                recorder_->removeStream(ms);
+            }
+        }
+        stopReceiver();
+    } else {
+        startReceiver();
+        if (conference_ and not receive_.onHold) {
+            setupConferenceVideoPipeline(*conference_, Direction::RECV);
+        }
+    }
 }
+
 
 void
 VideoRtpSession::forceKeyFrame()
@@ -595,7 +607,6 @@ VideoRtpSession::attachVideoInput()
 {
     if (videoLocal_) {
         videoLocal_->attach(sender_.get());
-        videoInputAttached_ = true;
 
     } else if (videoMixer_) {
         videoMixer_->attach(sender_.get());
@@ -608,13 +619,6 @@ VideoRtpSession::detachVideoInput()
     if (videoLocal_) {
         auto sender = sender_.get();
         videoLocal_->detach(sender);
-
-        // send some black frames immediately to remote party as we cannot change
-        // our stream mode to sendonly. he will see black screen instead of us.
-        for (size_t i = 0; i < 5; i++) {
-            sender->blackFrame();
-        }
-        videoInputAttached_ = false;
 
     } else if (videoMixer_) {
         videoMixer_->detach(sender_.get());
@@ -924,7 +928,7 @@ VideoRtpSession::initRecorder()
         receiveThread_->setRecorderCallback(
             [this](const MediaStream& ms) { attachRemoteRecorder(ms); });
     }
-    if (videoLocal_ && !send_.onHold) {
+    if (videoLocal_) {
         videoLocal_->setRecorderCallback([this](const MediaStream& ms) { attachLocalRecorder(ms); });
     }
 }

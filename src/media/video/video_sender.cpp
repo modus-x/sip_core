@@ -65,21 +65,7 @@ VideoSender::VideoSender(const std::string& dest,
     videoEncoder_->addStream(args.codec->systemCodecInfo);
     videoEncoder_->setInitSeqVal(seqVal);
     videoEncoder_->setIOContext(muxContext_->getContext());
-}
-
-void
-VideoSender::blackFrame()
-{
-    if (stream_.width <= 0 || stream_.height <= 0) {
-        return;
-    }
-
-    // will be auto-deleted from memory when function returns
-    std::unique_ptr<VideoFrame> frame = std::make_unique<VideoFrame>();
-    VideoFrame& output = *frame.get();
-    output.reserve(AV_PIX_FMT_YUV420P, stream_.width, stream_.height);
-    libav_utils::fillWithBlack(output.pointer());
-    encodeAndSendVideo(std::move(frame));
+    muted_.store(args.onHold);
 }
 
 void
@@ -106,6 +92,16 @@ VideoSender::encodeAndSendVideo(const std::shared_ptr<VideoFrame>& input_frame)
 
         if (is_keyframe) {
             --forceKeyFrame_;
+        }
+
+        if (muted_.load()) {
+            auto black_frame = std::make_shared<VideoFrame>();
+            black_frame->reserve(AV_PIX_FMT_YUV420P, stream_.width, stream_.height);
+            libav_utils::fillWithBlack(black_frame->pointer());
+            if (videoEncoder_->encode(black_frame, is_keyframe, frameNumber_++) < 0) {
+                SIP_CORE_ERR("encoding black frame failed");
+            }
+            return;
         }
 
         if (videoEncoder_->encode(input_frame, is_keyframe, frameNumber_++) < 0)
