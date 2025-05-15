@@ -104,6 +104,7 @@ MediaDemuxer::openInput(const DeviceParams& params)
     }
     if (params.framerate) {
 #ifdef _WIN32
+        if (params.format == "dshow") {
             // On windows, framerate settings don't reduce to avrational values
             // that correspond to valid video device formats.
             // e.g. A the rational<double>(10000000, 333333) or 30.000030000
@@ -116,6 +117,12 @@ MediaDemuxer::openInput(const DeviceParams& params)
             framerate = params.framerate.numerator() / (params.framerate.denominator() + 0.5);
             if (params.framerate.denominator() != 4999998)
                 av_dict_set(&options_, "framerate", sip_core::to_string(framerate).c_str(), 0);
+        } else {
+            av_dict_set(&options_,
+                        "framerate",
+                        sip_core::to_string(params.framerate.real()).c_str(),
+                        0);
+        }
 #else
             av_dict_set(&options_, "framerate", sip_core::to_string(params.framerate.real()).c_str(), 0);
 #endif
