@@ -267,6 +267,11 @@ VideoRtpSession::startSender()
             initSeqVal_ = socketPair_->lastSeqValOut();
 
         try {
+
+            auto lastSeq = initSeqVal_ + 1;
+            if (sender_) {
+                lastSeq = sender_->getLastSeqValue() + 1;
+            }
             sender_.reset();
             socketPair_->stopSendOp(false);
             MediaStream ms
@@ -286,7 +291,7 @@ VideoRtpSession::startSender()
                                           ms,
                                           send_,
                                           *socketPair_,
-                                          initSeqVal_ + 1,
+                                          lastSeq,
                                           mtu_,
                                           callId_,
                                           allowHwAccel));
