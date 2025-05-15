@@ -560,8 +560,14 @@ VideoInput::initGdiGrab(const std::string& params)
         std::istringstream dss(params.substr(plus + 1, space - plus));
         dss >> decOpts_.offset_x >> sep >> decOpts_.offset_y;
     } else {
-        decOpts_.width = 0;
-        decOpts_.height = 0;
+
+        auto dec = std::make_unique<MediaDecoder>();
+
+        if (dec->openInput(decOpts_) < 0 || dec->setupVideo() < 0)
+            return initCamera(sip_core::getVideoDeviceMonitor().getDefaultDevice());
+
+        decOpts_.width = round2pow(dec->getStream().width, 3);
+        decOpts_.height = round2pow(dec->getStream().height, 3);
     }
 
     return true;
