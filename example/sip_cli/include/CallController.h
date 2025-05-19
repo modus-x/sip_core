@@ -2,8 +2,11 @@
 
 #include <map>
 #include <string>
+#include <memory>
+#include <SDL3/SDL.h>
 
 #include "SignalHandlers.h"
+#include "SDLVideoRenderer.h"
 
 class CallController final : private ISignals
 {
@@ -11,10 +14,11 @@ public:
     CallController(const std::string& accountId);
     ~CallController();
 
-    bool Init();
-    bool Register(const std::string& user, const std::string& pass, const std::string& domain);
+    bool init();
+    bool sendRegister(const std::string& user, const std::string& pass, const std::string& domain);
 
-    bool Call(const std::string& callTo);
+    bool call(const std::string& callTo);
+    bool hangUp();
     bool hasActiveCall() const;
     const std::string& getActiveCall() const;
 
@@ -26,8 +30,8 @@ public:
     bool isVideoEnabled() const;
     bool setVideoDevice(const std::string& videoDevice);
     const std::string& getVideoDevice() const;
-
-    bool HangUp();
+    
+    void proccesEvents();
 
 private:
     virtual void audioDeviceEvent();
@@ -43,6 +47,8 @@ private:
     virtual void decodingStopped(const std::string& id, const std::string& shmPath, const bool isMixer);
     
     std::string toSipUri(const std::string& number, const std::string& domainName);
+    void OpenVideoPrievew(const std::string& id, int width, int height);
+    void CloseVideoPreview(const std::string& id);
 
     bool m_isVideoEnabled;
     std::map<std::string, std::string> m_mediaAudio;
@@ -51,4 +57,6 @@ private:
     std::string m_domain;
     const std::string m_accontId;
     std::string m_activeCall;
+
+    std::map<std::string, std::shared_ptr<SDLVideoRenderer>> m_previewWindow;
 };

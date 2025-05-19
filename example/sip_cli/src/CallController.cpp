@@ -29,7 +29,8 @@ CallController::CallController(const std::string& accountId) :
     },
     m_domain(),
     m_accontId(accountId),
-    m_activeCall()
+    m_activeCall(),
+    m_previewWindow()
 {
     assert(!m_accontId.empty() && "Accouni id must not be empty");
 }
@@ -39,9 +40,11 @@ CallController::~CallController()
     if(libsip_core::initialized()) {
         libsip_core::fini();
     }
+
+    SDL_Quit();
 }
 
-bool CallController::Init()
+bool CallController::init()
 {
     const sip_core::SignalHandlerMap sigMap = {
         libsip_core::exportable_callback<libsip_core::ConfigurationSignal::RegistrationStateChanged>(std::bind(&CallController::registrationStateChanged, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4)),
@@ -69,10 +72,16 @@ bool CallController::Init()
     if(!libsip_core::start(cwd + "/test.yaml", ""))
         return false;
 
+    // Initialize SDL
+    if (!SDL_Init(SDL_INIT_VIDEO)) {
+        SDL_Log("Failed to initialize SDL: %s", SDL_GetError());
+        return false;
+    }
+
     return true;
 }
 
-bool CallController::Register(const std::string& user, const std::string& pass, const std::string& domain)
+bool CallController::sendRegister(const std::string& user, const std::string& pass, const std::string& domain)
 {
     if(!libsip_core::initialized())
         return false;
@@ -111,7 +120,7 @@ bool CallController::Register(const std::string& user, const std::string& pass, 
     return true;
 }
 
-bool CallController::Call(const std::string& callTo)
+bool CallController::call(const std::string& callTo)
 {
     if(!m_activeCall.empty())
         return false;
@@ -195,7 +204,7 @@ const std::string& CallController::getVideoDevice() const
     return source;
 }
 
-bool CallController::HangUp()
+bool CallController::hangUp()
 {
     if(m_activeCall.empty())
         return true;
@@ -205,6 +214,16 @@ bool CallController::HangUp()
     
     m_activeCall = "";
     return true;
+}
+
+void CallController::proccesEvents()
+{
+    SDL_Event event;
+    while (SDL_PollEvent(&event)) {
+        // if (event.type == SDL_QUIT) {
+
+        // }
+    }
 }
 
 std::string CallController::toSipUri(const std::string& number, const std::string& domainName)
@@ -238,4 +257,21 @@ std::string CallController::toSipUri(const std::string& number, const std::strin
 
     // Default case: Simple username
     return "sip:" + number + "@" + domainName;
+}
+
+void CallController::OpenVideoPrievew(const std::string& id, int width, int height)
+{
+    if(m_previewWindow.find(id) != m_previewWindow.end())
+        return;
+
+    m_previewWindow[id] = std::shared_ptr<SDLVideoRenderer>(new SDLVideoRenderer(id, width, height));
+}
+
+void CallController::CloseVideoPreview(const std::string& id)
+{
+    auto it = m_previewWindow.find(id);
+
+    if(it != m_previewWindow.end()) {
+        m_previewWindow.erase(it);
+    }
 }

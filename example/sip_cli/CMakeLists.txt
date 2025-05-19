@@ -2,6 +2,7 @@ add_executable(sip_cli EXCLUDE_FROM_ALL
     src/main.cpp
     src/SignalHandlers.cpp
     src/CallController.cpp
+    src/SDLVideoRenderer.cpp
 )
 
 target_include_directories(sip_cli 
