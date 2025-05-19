@@ -4,15 +4,13 @@
 #include <string>
 #include <sstream>
 #include <algorithm>
+<<<<<<< HEAD
 #include <unistd.h>
 #include <regex>
+=======
+>>>>>>> 0ffc415ee (chore: example CallController implemented)
 
-#include "SignalHandlers.h"
-#include "sip_core/callmanager_interface.h"
-#include "sip_core/configurationmanager_interface.h"
-#include "client/ring_signal.h"
-#include "client/videomanager.h"
-#include "manager.h"
+#include "CallController.h"
 
 #ifdef _WIN32
 #include <conio.h>  // Windows-specific for _getch()
@@ -24,58 +22,43 @@
 #include <unistd.h>
 #endif
 
+<<<<<<< HEAD
 using namespace std;
 #define ACCAUNT_ID "test_acc"
+=======
+#define ACCAUNT_ID "test_acc"
 
-string username = "username";
-string password = "password";
-string domain = "192.168.92.27";
+// getInput("Enter username: ");
+// getInput("Enter domain: ");
+// getPassword();
+>>>>>>> 0ffc415ee (chore: example CallController implemented)
 
+std::string username = "user";
+std::string password = "pass";
+std::string domain = "192.168.92.27";
 
-bool g_isAudioOn = true;
-bool g_isVideoOn = false;
-
-map<string, string> g_mediaAudio
-{
-    { "MEDIA_TYPE", "MEDIA_TYPE_AUDIO"},
-    { "ENABLED", "true" },
-    { "MUTED", "false" },
-    { "LABEL", "audio_0" }
-};
-
-map<string, string> g_mediaVideo
-{
-    { "MEDIA_TYPE", "MEDIA_TYPE_VIDEO"},
-    { "ENABLED", "true" },
-    { "MUTED", "false" },
-    //{ "SOURCE", "display://:0.0" },
-    { "LABEL", "video_0" }
-};
-
-string toSipUri(const string& number, const string& domainName);
 std::string getPassword(const std::string& prompt);
-string getInput(const string& prompt);
-vector<string> split(const string &s);
-bool init_sip();
-bool register_accaunt();
-
-string active_call {};
+std::string getInput(const std::string& prompt);
+std::vector<std::string> split(const std::string &s);
 
 int main() {
 
-    cout << "SIP core Console App" << endl;
-    cout << "Available commands: call <callee>, switch <device>, hangup, capOn, capOff, video, audio, exit" << endl;
+    std::cout << "SIP core Console App" << std::endl;
+    std::cout << "Available commands: call <callee>, switch <device>, hangup, capOn, capOff, video, exit" << std::endl;
 
-    if(!init_sip()) {
-        cerr << "Error: can't initialize sip." << endl;
+    CallController controller(ACCAUNT_ID);
+    
+    if(!controller.Init()) {
+        std::cerr << "Error: can't initialize sip." << std::endl;
         return 1;
     }
 
-    if(!register_accaunt()) {
-        cerr << "Error: unable to register account" << endl;
+    if(!controller.Register(username, password, domain)) {
+        std::cerr << "Error: unable to send register for current account." << std::endl;
         return 1;
     }
 
+<<<<<<< HEAD
     // Get list of input devices
     //auto inputs = sip_core::Manager::instance().getAudioInputDeviceList();
     // Get list of output devices
@@ -89,12 +72,15 @@ int main() {
     }
 
     string line;
+=======
+    std::string line;
+>>>>>>> 0ffc415ee (chore: example CallController implemented)
     while (true) {
-        getline(cin, line);
-        vector<string> tokens = split(line);
+        getline(std::cin, line);
+        std::vector<std::string> tokens = split(line);
         if (tokens.empty()) continue;
 
-        string command = tokens[0];
+        std::string command = tokens[0];
         transform(command.begin(), command.end(), command.begin(), ::tolower);
 
         if (command == "exit") {
@@ -102,13 +88,10 @@ int main() {
         }
         else if (command == "call") {
             if (tokens.size() != 2) {
-                cerr << "Error: Usage - call <callee>" << endl;
+                std::cerr << "Error: Usage - call <callee>" << std::endl;
                 continue;
             }
-            if(!active_call.empty()) {
-                cerr << "Error: already in an active call state" << endl;
-                continue;
-            }
+<<<<<<< HEAD
             
             // build media list settings according to settings
             vector<map<string, string>> mediaList;
@@ -126,94 +109,77 @@ int main() {
         } else if (command == "switch") {
             if (tokens.size() != 2) {
                 cerr << "Error: Usage - switch <device>\n device could be of type:\n  display://:(screen_number)\n  camera://(camera_name)\n  default" << endl;
+=======
+
+            std::string callee = tokens[1];
+            if(controller.Call(callee)) {
+                std::cerr << "Error: already in an active call state" << std::endl;
+>>>>>>> 0ffc415ee (chore: example CallController implemented)
                 continue;
             }
-            string device = tokens[1];
-            if (device.rfind("display://") == 0 || device.rfind("camera://") == 0) {
-                g_mediaVideo["SOURCE"] = device;
-            } else if(device == "default") {
-                g_mediaVideo["SOURCE"] = libsip_core::getDefaultDevice();
-            } else {
-                cerr << "Error: Usage - switch <device>\n device could be of type:\n  display://:(screen_number)\n  camera://(camera_name)\n  default" << endl;
+                
+            std::cout << "Call connected: " << username << " -> " << callee << "\n CallID = " << controller.getActiveCall() << std::endl;
+        } else if (command == "switch") {
+            if (tokens.size() != 2) {
+                std::cerr << "Error: Usage - switch <device>\n device could be of type:\n  display://:(screen_number)\n  camera://(camera_name)\n  default" << std::endl;
+                continue;
+            }
+            std::string device = tokens[1];
+            if (!controller.setVideoDevice(device)) {
+                std::cerr << "Error: Usage - switch <device>\n device could be of type:\n  display://:(screen_number)\n  camera://(camera_name)\n  default" << std::endl;
                 continue;
             }
 
         } else if (command == "hangup") {
-            if (active_call.empty()) {
-                cerr << "Error: no active call" << endl;
+            if (!controller.hasActiveCall()) {
+                std::cerr << "Error: no active call" << std::endl;
                 continue;
             }
-            if(!libsip_core::hangUp(ACCAUNT_ID, active_call)) {
-                cerr << "Error: failed to hangup call: " <<  active_call << endl;
+            if(!controller.HangUp()) {
+                std::cerr << "Error: failed to hangup call: " <<  controller.getActiveCall() << std::endl;
                 continue;
             }
-            
-            active_call = "";
         } else if (command == "capon") {
-            if(active_call.empty()){
-                cerr << "Error: no active call" << endl;
+            if (!controller.hasActiveCall()) {
+                std::cerr << "Error: no active call" << std::endl;
                 continue;
             }
             
-            if(libsip_core::getIsRecording(ACCAUNT_ID, active_call)) {
-                cerr << "Error: already recording" << endl;
+            if(controller.isCaptureInProgress()) {
+                std::cerr << "Error: already recording" << std::endl;
             }
 
-            if(!libsip_core::toggleRecording(ACCAUNT_ID, active_call)) {
-                cerr << "Error: failed to start recording" << endl;
+            if(!controller.startCallCapture()) {
+                std::cerr << "Error: failed to start recording" << std::endl;
                 continue;
             }
         } else if (command == "capoff") {
-            if(active_call.empty()){
-                cerr << "Error: no active call" << endl;
+            if(controller.hasActiveCall()){
+                std::cerr << "Error: no active call" << std::endl;
                 continue;
             }
-            if(!libsip_core::getIsRecording(ACCAUNT_ID, active_call)) {
-                cerr << "Error: nothing recodring" << endl;
+            if(!controller.isCaptureInProgress()) {
+                std::cerr << "Error: nothing recording" << std::endl;
                 continue;
             }
-            if(!libsip_core::toggleRecording(ACCAUNT_ID, active_call)) {
-                cerr << "Error: failed to stop recording" << endl;
+            if(!controller.stopCallCapture()) {
+                std::cerr << "Error: failed to stop recording" << std::endl;
                 continue;
-            }
-        } else if (command == "audio") {
-            if(g_isAudioOn) cout << "Disabling audio..." << endl;
-            else cout << "Enabling audio..." << endl;
-            g_isAudioOn = !g_isAudioOn;
-
-            if(!active_call.empty()) {
-                // build media list settings according to settings
-                vector<map<string, string>> mediaList;
-                if(g_isAudioOn) mediaList.push_back(g_mediaAudio);
-                if(g_isVideoOn) mediaList.push_back(g_mediaVideo);
-
-                libsip_core::requestMediaChange(ACCAUNT_ID, active_call, mediaList);
             }
         } else if (command == "video") {
-            if(g_isVideoOn) cout << "Disabling video..." << endl;
-            else cout << "Enabling video..." << endl;
-            g_isVideoOn = !g_isVideoOn;
+            if(controller.isVideoEnabled()) std::cout << "Disabling video..." << std::endl;
+            else std::cout << "Enabling video..." << std::endl;
 
-            if(!active_call.empty()) {
-                // build media list settings according to settings
-                vector<map<string, string>> mediaList;
-                if(g_isAudioOn) mediaList.push_back(g_mediaAudio);
-                if(g_isVideoOn) mediaList.push_back(g_mediaVideo);
-
-                libsip_core::requestMediaChange(ACCAUNT_ID, active_call, mediaList);
-            }
+            controller.toggleVideo();
         } else {
-            cerr << "Error: Unknown command. \nFull list of commands:\n call <callee> - initiates call with given ID,\n switch <device> - switches video source for an active call.\n hangup - hangup current call.\n capOn - start capture of active call in a local file.\n capOff - stops capture of video.\n video - enables video transfer.\n audio -enables audio transfer.\n exit - exit program." << endl;
+            std::cerr << "Error: Unknown command. \nFull list of commands:\n call <callee> - initiates call with given ID,\n switch <device> - switches video source for an active call.\n hangup - hangup current call.\n capOn - start capture of active call in a local file.\n capOff - stops capture of video.\n video - enables video transfer.\n exit - exit program." << std::endl;
         }
-    }
-
-    if(libsip_core::initialized()) {
-        libsip_core::fini();
     }
 
     return 0;
 }
 
+<<<<<<< HEAD
 bool init_sip()
 {
     const sip_core::SignalHandlerMap sigMap = {
@@ -314,10 +280,12 @@ string toSipUri(const string& number, const string& domainName) {
     return "sip:" + number + "@" + domainName;
 }
 
+=======
+>>>>>>> 0ffc415ee (chore: example CallController implemented)
 // Function to hide password input (cross-platform)
-string getPassword(const string& prompt = "Enter password: ") {
-    string password;
-    cout << prompt;
+std::string getPassword(const std::string& prompt = "Enter password: ") {
+    std::string password;
+    std::cout << prompt;
     
     #ifdef _WIN32
     // Windows implementation (no echo)
@@ -326,11 +294,11 @@ string getPassword(const string& prompt = "Enter password: ") {
         if (ch == '\b') {  // Backspace
             if (!password.empty()) {
                 password.pop_back();
-                cout << "\b \b";  // Erase asterisk
+                std::cout << "\b \b";  // Erase asterisk
             }
         } else {
             password.push_back(ch);
-            cout << '*';
+            std::cout << '*';
         }
     }
     #else
@@ -341,26 +309,26 @@ string getPassword(const string& prompt = "Enter password: ") {
     newt.c_lflag &= ~ECHO;
     tcsetattr(STDIN_FILENO, TCSANOW, &newt);
     
-    getline(cin, password);
+    getline(std::cin, password);
     
     tcsetattr(STDIN_FILENO, TCSANOW, &oldt);  // Restore terminal settings
     #endif
 
-    cout << endl;
+    std::cout << std::endl;
     return password;
 }
 
-string getInput(const string& prompt) {
-    string input;
-    cout << prompt;
+std::string getInput(const std::string& prompt) {
+    std::string input;
+    std::cout << prompt;
     getline(std::cin, input);
     return input;
 }
 
-vector<string> split(const string &s) {
-    vector<string> tokens;
-    string token;
-    istringstream iss(s);
+std::vector<std::string> split(const std::string &s) {
+    std::vector<std::string> tokens;
+    std::string token;
+    std::istringstream iss(s);
     while (iss >> token) {
         tokens.push_back(token);
     }
