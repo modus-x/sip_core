@@ -68,7 +68,11 @@ void CallController::decodingStarted(const std::string& id, const std::string& s
 {
     std::cout << "decodingStarted for id - " << id << std::endl;
 
-    OpenVideoPrievew(id, w, h);
+    if(!OpenVideoPrievew(id, w, h)) {
+        std::cerr << "Error: failed to create window for " << id << "." << std::endl;
+        return;
+    }
+
     auto it = m_previewWindow.find(id);
     if(it == m_previewWindow.end())
         return;

@@ -259,12 +259,16 @@ std::string CallController::toSipUri(const std::string& number, const std::strin
     return "sip:" + number + "@" + domainName;
 }
 
-void CallController::OpenVideoPrievew(const std::string& id, int width, int height)
+bool CallController::OpenVideoPrievew(const std::string& id, int width, int height)
 {
     if(m_previewWindow.find(id) != m_previewWindow.end())
-        return;
+        return false;
 
-    m_previewWindow[id] = std::shared_ptr<SDLVideoRenderer>(new SDLVideoRenderer(id, width, height));
+    auto sdlWindow = std::shared_ptr<SDLVideoRenderer>(new SDLVideoRenderer(id, width, height));
+    if(!sdlWindow->init())
+        return false;
+
+    m_previewWindow[id] = sdlWindow;
 }
 
 void CallController::CloseVideoPreview(const std::string& id)
