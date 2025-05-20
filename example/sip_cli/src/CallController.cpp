@@ -12,6 +12,7 @@
 //sip_core::Manager::instance().setAudioDevice(1, sip_core::AudioDeviceType::PLAYBACK);
 
 CallController::CallController(const std::string& accountId) :
+    m_mtxEvents(),
     m_isVideoEnabled(true),
     m_mediaAudio
     {
@@ -25,12 +26,13 @@ CallController::CallController(const std::string& accountId) :
         { "MEDIA_TYPE", "MEDIA_TYPE_VIDEO"},
         { "ENABLED", "true" },
         { "MUTED", "false" },
-        //{ "SOURCE", "display://:0.0" },
+        // { "SOURCE", "display://:0.0" },
         { "LABEL", "video_0" }
     },
     m_domain(),
     m_accontId(accountId),
-    m_activeCall(),
+    m_activeConfirence(),
+    m_activeCalls(),
     EVENT_FRAME_READY(0),
     EVENT_CREATE_PREVIEW(0),
     EVENT_DESTROY_PREVIEW(0),
@@ -61,6 +63,9 @@ bool CallController::init()
         libsip_core::exportable_callback<libsip_core::VideoSignal::StartCapture>(std::bind(&CallController::startCapture, this, std::placeholders::_1)),
         libsip_core::exportable_callback<libsip_core::VideoSignal::DecodingStarted>(std::bind(&CallController::decodingStarted, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5)),
         libsip_core::exportable_callback<libsip_core::VideoSignal::DecodingStopped>(std::bind(&CallController::decodingStopped, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3)),
+        libsip_core::exportable_callback<libsip_core::CallSignal::ConferenceCreated>(std::bind(&CallController::conferenceCreated, this, std::placeholders::_1, std::placeholders::_2)),
+        libsip_core::exportable_callback<libsip_core::CallSignal::ConferenceChanged>(std::bind(&CallController::conferenceChanged, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3)),
+        libsip_core::exportable_callback<libsip_core::CallSignal::ConferenceRemoved>(std::bind(&CallController::conferenceRemoved, this, std::placeholders::_1, std::placeholders::_2)),
     };
 
     libsip_core::registerSignalHandlers(sigMap);
@@ -134,7 +139,7 @@ bool CallController::sendRegister(const std::string& user, const std::string& pa
 bool CallController::call(const std::string& callTo)
 {
     std::lock_guard<std::mutex> lock(m_mtxEvents);
-    if(!m_activeCall.empty())
+    if(!m_activeCalls.empty())
         return false;
 
     // build media list settings according to settings
@@ -142,62 +147,146 @@ bool CallController::call(const std::string& callTo)
     mediaList.push_back(m_mediaAudio);
     if(m_isVideoEnabled) mediaList.push_back(m_mediaVideo);
     
-    m_activeCall = libsip_core::placeCallWithMedia(m_accontId,
+    std::string id = libsip_core::placeCallWithMedia(m_accontId,
         toSipUri(callTo, m_domain),
         mediaList);
 
+    if(id.empty())
+        return false;
+
+    m_activeCalls[callTo] = id;
     return true;
 }
 
 bool CallController::hasActiveCall() const
 {
     std::lock_guard<std::mutex> lock(m_mtxEvents);
-    return !m_activeCall.empty();
+    return !m_activeConfirence.empty() || m_activeCalls.size() != 0;
 }
 
-const std::string& CallController::getActiveCall() const
+const std::string CallController::getActiveCall() const
 {
     std::lock_guard<std::mutex> lock(m_mtxEvents);
-    return m_activeCall;
+    if(!m_activeConfirence.empty())
+        return m_activeConfirence;
+    else if(m_activeCalls.size() != 0) {
+        return m_activeCalls.begin()->second;
+    }
+    else return "";
+}
+
+bool CallController::addParticipant(const std::string& newParticipant)
+{
+    std::lock_guard<std::mutex> lock(m_mtxEvents);
+    if(m_activeCalls.empty())
+        return false;
+    
+    // Create call
+    auto callId = libsip_core::placeCallWithMedia(m_accontId, newParticipant, {});
+    if (callId.empty())
+        return false;
+    
+    bool result;
+    if(m_activeConfirence.empty())
+        result =  libsip_core::joinParticipant(m_accontId, m_activeCalls.begin()->second, m_accontId, callId, true);
+    else
+        result = libsip_core::addParticipant(m_accontId, callId, m_accontId, m_activeConfirence);
+
+    if(!result) {
+        libsip_core::hangUp(m_accontId, callId);
+        return false; 
+    }
+
+    m_activeCalls[newParticipant] = callId;
+    return true;
+}
+
+bool CallController::removeParticipant(const std::string& participant)
+{
+    std::lock_guard<std::mutex> lock(m_mtxEvents);
+    if(m_activeConfirence.empty())
+        return false;
+
+    auto it = m_activeCalls.find(participant);
+    if(it == m_activeCalls.end())
+        return false;
+
+    m_activeCalls.erase(it);
+    return libsip_core::detachParticipant(m_accontId, it->second);
+}
+
+bool CallController::createConfirence(const std::vector<std::string>& participantsList)
+{
+    if(hasActiveCall() || participantsList.size() < 2)
+        return false;
+
+    if(!call(participantsList[0]))
+        return false;
+
+    if(!libsip_core::joinParticipant(m_accontId, m_activeCalls.begin()->second, m_accontId, participantsList[0], true)) {
+        hangUp();
+        return false;
+    }
+
+    int count = 1;
+    for(int i = 1; i < participantsList.size(); i++) {
+        // Create call
+        auto callId = libsip_core::placeCallWithMedia(m_accontId, participantsList[i], {});
+        if (callId.empty())
+            continue;
+
+        if(!libsip_core::addParticipant(m_accontId, callId, m_accontId, m_activeConfirence))
+            continue;
+
+        std::lock_guard<std::mutex> lock(m_mtxEvents);
+        m_activeCalls[participantsList[i]] = callId;
+    }
+
+    if(m_activeCalls.size() < 2) {
+        hangUp();
+        return false;
+    }
+
+    return true;
 }
 
 bool CallController::isCaptureInProgress()
 {
-    std::lock_guard<std::mutex> lock(m_mtxEvents);
-    return libsip_core::getIsRecording(m_accontId, m_activeCall);
+    return libsip_core::getIsRecording(m_accontId, getActiveCall());
 }
 
 bool CallController::startCallCapture()
 {
-    std::lock_guard<std::mutex> lock(m_mtxEvents);
-    if(libsip_core::getIsRecording(m_accontId, m_activeCall))
+    if(libsip_core::getIsRecording(m_accontId, getActiveCall()))
         return true;
 
-    return libsip_core::toggleRecording(m_accontId, m_activeCall);
+    return libsip_core::toggleRecording(m_accontId, getActiveCall());
 }
 
 bool CallController::stopCallCapture()
 {
-    std::lock_guard<std::mutex> lock(m_mtxEvents);
-    if(!libsip_core::getIsRecording(m_accontId, m_activeCall))
+    if(!libsip_core::getIsRecording(m_accontId, getActiveCall()))
         return true;
 
     //returns fasle if recodring stopped
-    return !libsip_core::toggleRecording(m_accontId, m_activeCall);
+    return !libsip_core::toggleRecording(m_accontId, getActiveCall());
 }
 
 void CallController::toggleVideo()
 {
-    std::lock_guard<std::mutex> lock(m_mtxEvents);
-    m_isVideoEnabled = !m_isVideoEnabled;
-    if(!m_activeCall.empty()) {
+    
+    if(hasActiveCall()) {
+        std::lock_guard<std::mutex> lock(m_mtxEvents);
         // build media list settings according to settings
         std::vector<std::map<std::string, std::string>> mediaList;
         mediaList.push_back(m_mediaAudio);
         if(m_isVideoEnabled) mediaList.push_back(m_mediaVideo);
-
-        libsip_core::requestMediaChange(m_accontId, m_activeCall, mediaList);
+        
+        libsip_core::requestMediaChange(m_accontId, getActiveCall(), mediaList);
     }
+    
+    std::lock_guard<std::mutex> lock(m_mtxEvents);
+    m_isVideoEnabled = !m_isVideoEnabled;
 }
 
 bool CallController::isVideoEnabled() const
@@ -218,7 +307,7 @@ bool CallController::setVideoDevice(const std::string& videoDevice)
     return true;
 }
 
-const std::string& CallController::getVideoDevice() const
+const std::string CallController::getVideoDevice() const
 {
     std::lock_guard<std::mutex> lock(m_mtxEvents);
     static std::string source;
@@ -228,14 +317,21 @@ const std::string& CallController::getVideoDevice() const
 
 bool CallController::hangUp()
 {
-    std::lock_guard<std::mutex> lock(m_mtxEvents);
-    if(m_activeCall.empty())
-        return true;
-
-    if(!libsip_core::hangUp(m_accontId, m_activeCall)) 
-        return false;
+    if(!hasActiveCall())
+    return true;
     
-    m_activeCall = "";
+    std::lock_guard<std::mutex> lock(m_mtxEvents);
+    if(m_activeConfirence.empty()) {
+        if(!libsip_core::hangUp(m_accontId, m_activeCalls.begin()->second))
+            return false;
+    }
+    else {
+        m_activeCalls.clear();
+        if(!libsip_core::hangUpConference(m_accontId, m_activeConfirence))
+            return false;
+    }
+    
+    m_activeCalls.clear();
     return true;
 }
 

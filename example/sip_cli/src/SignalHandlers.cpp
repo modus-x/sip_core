@@ -7,8 +7,15 @@ void CallController::callStateChanged(const std::string& accountId, const std::s
 {
     std::lock_guard<std::mutex> lock(m_mtxEvents);
     std::cout << "Call state: " << state << "." << std::endl;
-    if (state == "OVER")
-        m_activeCall = "";
+    if (state == "OVER") {
+        auto it = std::find_if(m_activeCalls.begin(), m_activeCalls.end(), [&callId](const std::pair<std::string, std::string>& item) {
+            return item.second == callId;
+        });
+
+        if(it != m_activeCalls.end()) {
+            m_activeCalls.erase(it);
+        }
+    }
 }
 
 void CallController::registrationStateChanged(const std::string& accountId, const std::string& state, const int32_t code, const std::string& detailStr)
@@ -37,7 +44,7 @@ void CallController::incomingCall(const std::string& accountId, const std::strin
     std::vector<std::map<std::string, std::string>> answerMediaList;
     answerMediaList.push_back(m_mediaAudio);
 
-    libsip_core::acceptWithMedia(accountId, callId, answerMediaList); 
+    libsip_core::acceptWithMedia(accountId, callId, answerMediaList);
 }
 
 void CallController::incomingCallWithMedia( const std::string &accountId, const std::string &callId, const std::string &from, const std::vector<::std::map<::std::string, std::string>> &mediaList, const std::map<::std::string, std::string> &headers)
@@ -110,4 +117,26 @@ void CallController::decodingStopped(const std::string& id, const std::string& s
     event.user.data1 = (void*)args;
     if(!SDL_PushEvent(&event))
         delete args;
+}
+
+void CallController::conferenceCreated(const std::string& accountId, const std::string& confId)
+{
+    std::lock_guard<std::mutex> lock(m_mtxEvents);
+    std::cout << "Conference created with id - " << confId << "." << std::endl;
+
+    m_activeConfirence = confId;
+}
+
+void CallController::conferenceChanged(const std::string& accountId, const std::string& confId, const std::string& state)
+{
+    std::lock_guard<std::mutex> lock(m_mtxEvents);
+    std::cout << "Conference changed; id - " << confId << ". State - " << state << "." << std::endl;
+}
+
+void CallController::conferenceRemoved(const std::string& accountId, const std::string& confId)
+{
+    std::lock_guard<std::mutex> lock(m_mtxEvents);
+    std::cout << "Conference removed; id - " << confId << "." << std::endl;
+
+    m_activeConfirence = "";
 }

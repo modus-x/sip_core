@@ -24,9 +24,13 @@
 // getInput("Enter domain: ");
 // getPassword();
 
-std::string username = "user";
-std::string password = "pass";
+std::string username = "krill2.yakovlev";
+std::string password = "J7pOD4Bk";
 std::string domain = "192.168.92.27";
+
+// string username = "kirill.yakovlev";
+// string password = "LIdHPV7B";
+// string domain = "SMoscow007.14.rt.ru";
 
 std::atomic_bool g_needFinish(false);
 std::queue<std::vector<std::string>> g_command_queue;
@@ -40,11 +44,10 @@ std::vector<std::string> split(const std::string &s);
 int main() {
 
     std::cout << "SIP core Console App" << std::endl;
-    std::cout << "Available commands: call <callee>, switch <device>, hangup, capOn, capOff, video, exit" << std::endl;
+    std::cout << "Available commands: call <callee>, add <callee>, del <callee>, conf <callee1> ... <calleeN>, switch <device>, hangup, capOn, capOff, video, exit" << std::endl;
     
-    std::thread input_thread(consoleInputLoop);
-
     CallController controller(ACCAUNT_ID);
+    std::thread input_thread(consoleInputLoop);
     
     if(!controller.init()) {
         std::cerr << "Error: can't initialize sip." << std::endl;
@@ -60,7 +63,7 @@ int main() {
         controller.proccesEvents();
 
         std::vector<std::string> tokens;
-        {    
+        {
             std::lock_guard<std::mutex> lock(g_queue_mutex);
             if(g_command_queue.empty())
                 continue;
@@ -88,12 +91,55 @@ int main() {
             }
                 
             std::cout << "Call started: " << username << " -> " << callee << "\n CallID = " << controller.getActiveCall() << std::endl;
+        } else if (command == "add") {
+            if (tokens.size() != 2) {
+                std::cerr << "Error: Usage - add <callee>\n adds new participant to a current call." << std::endl;
+                continue;
+            }
+
+            if(!controller.hasActiveCall()) {
+                std::cerr << "Error: No active call." << std::endl;
+                continue;;
+            }
+
+            controller.addParticipant(tokens[1]);
+                std::cerr << "Error: failed to add participant." << std::endl;
+
+        } else if (command == "del") {
+            if (tokens.size() != 2) {
+                std::cerr << "Error: Usage - del <callee>\n removes participant from current conference." << std::endl;
+                continue;
+            }
+
+            if(!controller.hasActiveCall()) {
+                std::cerr << "Error: No active call." << std::endl;
+                continue;;
+            }
+
+            controller.addParticipant(tokens[1]);
+                std::cerr << "Error: failed to remove participant." << std::endl;
+
+            controller.removeParticipant(tokens[1]);
+
+        } else if (command == "conf") {
+            if (tokens.size() < 4) {
+                std::cerr << "Error: Usage - conf <callee1> ... <calleeN>\n new conference should have at least 3 valid members." << std::endl;
+                continue;
+            }
+
+            std::vector<std::string> calleeList;
+            for(int i = 1; i < tokens.size(); i++) {
+                calleeList.push_back(tokens[i]);
+            }
+
+            if(!controller.createConfirence(calleeList))
+                std::cerr << "Error: failed to create conference." << std::endl;
+
         } else if (command == "switch") {
             if (tokens.size() != 2 || !controller.setVideoDevice(tokens[1])) {
                 std::cerr << "Error: Usage - switch <device>\n device could be of type:\n  display://:(screen_number)\n  camera://(camera_name)\n  default" << std::endl;
                 continue;
             }
-
         } else if (command == "hangup") {
             if (!controller.hasActiveCall()) {
                 std::cerr << "Error: no active call" << std::endl;
@@ -138,7 +184,7 @@ int main() {
 
             controller.toggleVideo();
         } else {
-            std::cerr << "Error: Unknown command. \nFull list of commands:\n call <callee> - initiates call with given ID,\n switch <device> - switches video source for an active call.\n hangup - hangup current call.\n capOn - start capture of active call in a local file.\n capOff - stops capture of video.\n video - enables video transfer.\n exit - exit program." << std::endl;
+            std::cerr << "Error: Unknown command. \nFull list of commands:\n call <callee> - initiates call with given ID,\n add <callee> - adds new participant to current call,\n del <callee> - remove participant from conference.\n conf <callee1> ... <calleeN> - creates conference with given participants (>=3),\n switch <device> - switches video source for an active call.\n hangup - hangup current call.\n capOn - start capture of active call in a local file.\n capOff - stops capture of video.\n video - enables video transfer.\n exit - exit program." << std::endl;
         }
     }
 

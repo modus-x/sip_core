@@ -27,7 +27,11 @@ public:
     bool call(const std::string& callTo);
     bool hangUp();
     bool hasActiveCall() const;
-    const std::string& getActiveCall() const;
+    const std::string getActiveCall() const;
+
+    bool addParticipant(const std::string& newParticipant);
+    bool removeParticipant(const std::string& participant);
+    bool createConfirence(const std::vector<std::string>& participantsList);
 
     bool isCaptureInProgress();
     bool startCallCapture();
@@ -36,26 +40,32 @@ public:
     void toggleVideo();
     bool isVideoEnabled() const;
     bool setVideoDevice(const std::string& videoDevice);
-    const std::string& getVideoDevice() const;
+    const std::string getVideoDevice() const;
     
     void proccesEvents();
 
 private:
     virtual void audioDeviceEvent();
-    virtual void callStateChanged(const std::string& accountId, const std::string& callId, const std::string& state, const int32_t detailCode);
-    virtual void registrationStateChanged(const std::string& accountId, const std::string& state, const int32_t code, const std::string& detailStr);    
-    virtual void volatileDetailsChanged(const std::string& account_id, const std::map<std::string, std::string>& details);
-    virtual void incomingCall(const std::string& accountId, const std::string& callId, const std::string& from);
-    virtual void incomingCallWithMedia( const std::string &accountId, const std::string &callId, const std::string &from, const std::vector<std::map<std::string, std::string>> &mediaList, const std::map<std::string, std::string> &headers);
-    virtual void mediaNegotiationStatus(const ::std::string &callId, const ::std::string &event, const ::std::vector<::std::map<::std::string, ::std::string>> &mediaList);
-    virtual void startCapture(const std::string& camid);
-    virtual void stopCapture(const std::string& camid);
-    virtual void decodingStarted(const std::string& id, const std::string& shmPath, const int32_t w, const int32_t h, const bool isMixer);
-    virtual void decodingStopped(const std::string& id, const std::string& shmPath, const bool isMixer);
-    
+    virtual void callStateChanged(const std::string& accountId, const std::string& callId, const std::string& state, const int32_t detailCode) override;
+    virtual void registrationStateChanged(const std::string& accountId, const std::string& state, const int32_t code, const std::string& detailStr) override;
+    virtual void volatileDetailsChanged(const std::string& account_id, const std::map<std::string, std::string>& details) override;
+    virtual void incomingCall(const std::string& accountId, const std::string& callId, const std::string& from) override;
+    virtual void incomingCallWithMedia( const std::string &accountId, const std::string &callId, const std::string &from, const std::vector<std::map<std::string, std::string>> &mediaList, const std::map<std::string, std::string> &headers) override;
+    virtual void mediaNegotiationStatus(const ::std::string &callId, const ::std::string &event, const ::std::vector<::std::map<::std::string, ::std::string>> &mediaList) override;
+    virtual void startCapture(const std::string& camid) override;
+    virtual void stopCapture(const std::string& camid) override;
+    virtual void decodingStarted(const std::string& id, const std::string& shmPath, const int32_t w, const int32_t h, const bool isMixer) override;
+    virtual void decodingStopped(const std::string& id, const std::string& shmPath, const bool isMixer) override;
+    virtual void conferenceCreated(const std::string& accountId, const std::string& confId) override;
+    virtual void conferenceChanged(const std::string& accountId, const std::string& confId, const std::string& state) override;
+    virtual void conferenceRemoved(const std::string& accountId, const std::string& confId) override;
+
     std::string toSipUri(const std::string& number, const std::string& domainName);
     bool OpenVideoPrievew(const std::string& id, int width, int height);
     void CloseVideoPreview(const std::string& id);
+
+    void createConfFromParticipantList(const std::string& accountId,
+                                       const std::vector<std::string>& participantList);
 
     mutable std::mutex m_mtxEvents;
 
@@ -65,7 +75,8 @@ private:
 
     std::string m_domain;
     const std::string m_accontId;
-    std::string m_activeCall;
+    std::string m_activeConfirence;
+    std::map<std::string, std::string> m_activeCalls;
 
     Uint32 EVENT_CREATE_PREVIEW;
     Uint32 EVENT_DESTROY_PREVIEW;

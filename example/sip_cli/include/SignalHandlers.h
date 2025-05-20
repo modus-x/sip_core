@@ -17,4 +17,7 @@ class ISignals {
     virtual void stopCapture(const std::string& camid) = 0;
     virtual void decodingStarted(const std::string& id, const std::string& shmPath, const int32_t w, const int32_t h, const bool isMixer) = 0;
     virtual void decodingStopped(const std::string& id, const std::string& shmPath, const bool isMixer) = 0;
+    virtual void conferenceCreated(const std::string& accountId, const std::string& confId) = 0;
+    virtual void conferenceChanged(const std::string& accountId, const std::string& confId, const std::string& state) = 0;
+    virtual void conferenceRemoved(const std::string& accountId, const std::string& confId) = 0;
 };
