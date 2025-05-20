@@ -36,8 +36,6 @@ void CallController::incomingCall(const std::string& accountId, const std::strin
 
     std::vector<std::map<std::string, std::string>> answerMediaList;
     answerMediaList.push_back(m_mediaAudio);
-    if(m_isVideoEnabled)
-        answerMediaList.push_back(m_mediaVideo);
 
     libsip_core::acceptWithMedia(accountId, callId, answerMediaList); 
 }
@@ -47,9 +45,20 @@ void CallController::incomingCallWithMedia( const std::string &accountId, const 
     std::lock_guard<std::mutex> lock(m_mtxEvents);
     std::cout << "Incoming call with media form user: " << from << ".\nAccapting..." << std::endl;
 
+    bool hasVideo = false;
+    for(auto media : mediaList) {
+        auto type = media.find("MEDIA_TYPE");
+        if(type != media.end()) {
+            if(type->second == "VIDEO") {
+                hasVideo = true;
+                continue;
+            }
+        }
+    }
+
     std::vector<std::map<std::string, std::string>> answerMediaList;
     answerMediaList.push_back(m_mediaAudio);
-    if(m_isVideoEnabled)
+    if(m_isVideoEnabled && hasVideo)
         answerMediaList.push_back(m_mediaVideo);
         
     libsip_core::acceptWithMedia(accountId, callId, answerMediaList);
@@ -96,7 +105,7 @@ void CallController::decodingStopped(const std::string& id, const std::string& s
     std::string* args = new std::string(id);
     SDL_Event event;
     SDL_zero(event);
-    event.type = EVENT_CREATE_PREVIEW;
+    event.type = EVENT_DESTROY_PREVIEW;
     event.user.code = 1;
     event.user.data1 = (void*)args;
     if(!SDL_PushEvent(&event))

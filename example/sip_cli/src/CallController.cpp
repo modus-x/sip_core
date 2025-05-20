@@ -60,6 +60,7 @@ bool CallController::init()
         libsip_core::exportable_callback<libsip_core::AudioSignal::DeviceEvent>(std::bind(&CallController::audioDeviceEvent, this)),
         libsip_core::exportable_callback<libsip_core::VideoSignal::StartCapture>(std::bind(&CallController::startCapture, this, std::placeholders::_1)),
         libsip_core::exportable_callback<libsip_core::VideoSignal::DecodingStarted>(std::bind(&CallController::decodingStarted, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5)),
+        libsip_core::exportable_callback<libsip_core::VideoSignal::DecodingStopped>(std::bind(&CallController::decodingStopped, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3)),
     };
 
     libsip_core::registerSignalHandlers(sigMap);
@@ -181,7 +182,8 @@ bool CallController::stopCallCapture()
     if(!libsip_core::getIsRecording(m_accontId, m_activeCall))
         return true;
 
-    return libsip_core::toggleRecording(m_accontId, m_activeCall);
+    //returns fasle if recodring stopped
+    return !libsip_core::toggleRecording(m_accontId, m_activeCall);
 }
 
 void CallController::toggleVideo()
