@@ -4,6 +4,7 @@
 #include <map>
 #include <vector>
 
+// this events functions gonna be called from event thread.
 class ISignals {
     virtual void audioDeviceEvent() = 0;
     virtual void callStateChanged(const std::string& accountId, const std::string& callId, const std::string& state, const int32_t detailCode) = 0;

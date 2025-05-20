@@ -10,6 +10,13 @@
 
 class CallController final : private ISignals
 {
+private:
+    struct CreateNewPreviewArgs 
+    {
+        std::string id;
+        int w, h;
+    };
+
 public:
     CallController(const std::string& accountId);
     ~CallController();
@@ -47,8 +54,10 @@ private:
     virtual void decodingStopped(const std::string& id, const std::string& shmPath, const bool isMixer);
     
     std::string toSipUri(const std::string& number, const std::string& domainName);
-    void OpenVideoPrievew(const std::string& id, int width, int height);
+    bool OpenVideoPrievew(const std::string& id, int width, int height);
     void CloseVideoPreview(const std::string& id);
+
+    mutable std::mutex m_mtxEvents;
 
     bool m_isVideoEnabled;
     std::map<std::string, std::string> m_mediaAudio;
@@ -58,5 +67,9 @@ private:
     const std::string m_accontId;
     std::string m_activeCall;
 
-    std::map<std::string, std::shared_ptr<SDLVideoRenderer>> m_previewWindow;
+    Uint32 EVENT_CREATE_PREVIEW;
+    Uint32 EVENT_DESTROY_PREVIEW;
+    Uint32 EVENT_FRAME_READY;
+
+    std::map<std::string, std::shared_ptr<SDLVideoRenderer>> m_previewWindows;
 };

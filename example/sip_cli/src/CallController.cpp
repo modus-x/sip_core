@@ -12,6 +12,7 @@
 //sip_core::Manager::instance().setAudioDevice(1, sip_core::AudioDeviceType::PLAYBACK);
 
 CallController::CallController(const std::string& accountId) :
+    m_isVideoEnabled(true),
     m_mediaAudio
     {
         { "MEDIA_TYPE", "MEDIA_TYPE_AUDIO"},
@@ -30,7 +31,10 @@ CallController::CallController(const std::string& accountId) :
     m_domain(),
     m_accontId(accountId),
     m_activeCall(),
-    m_previewWindow()
+    EVENT_FRAME_READY(0),
+    EVENT_CREATE_PREVIEW(0),
+    EVENT_DESTROY_PREVIEW(0),
+    m_previewWindows()
 {
     assert(!m_accontId.empty() && "Accouni id must not be empty");
 }
@@ -78,6 +82,12 @@ bool CallController::init()
         return false;
     }
 
+    EVENT_CREATE_PREVIEW = SDL_RegisterEvents(3);
+    if (EVENT_CREATE_PREVIEW == (Uint32)0) return false;
+
+    EVENT_FRAME_READY = EVENT_CREATE_PREVIEW + 1;
+    EVENT_DESTROY_PREVIEW = EVENT_CREATE_PREVIEW + 2;
+
     return true;
 }
 
@@ -122,6 +132,7 @@ bool CallController::sendRegister(const std::string& user, const std::string& pa
 
 bool CallController::call(const std::string& callTo)
 {
+    std::lock_guard<std::mutex> lock(m_mtxEvents);
     if(!m_activeCall.empty())
         return false;
 
@@ -139,21 +150,25 @@ bool CallController::call(const std::string& callTo)
 
 bool CallController::hasActiveCall() const
 {
+    std::lock_guard<std::mutex> lock(m_mtxEvents);
     return !m_activeCall.empty();
 }
 
 const std::string& CallController::getActiveCall() const
 {
+    std::lock_guard<std::mutex> lock(m_mtxEvents);
     return m_activeCall;
 }
 
 bool CallController::isCaptureInProgress()
 {
+    std::lock_guard<std::mutex> lock(m_mtxEvents);
     return libsip_core::getIsRecording(m_accontId, m_activeCall);
 }
 
 bool CallController::startCallCapture()
 {
+    std::lock_guard<std::mutex> lock(m_mtxEvents);
     if(libsip_core::getIsRecording(m_accontId, m_activeCall))
         return true;
 
@@ -162,6 +177,7 @@ bool CallController::startCallCapture()
 
 bool CallController::stopCallCapture()
 {
+    std::lock_guard<std::mutex> lock(m_mtxEvents);
     if(!libsip_core::getIsRecording(m_accontId, m_activeCall))
         return true;
 
@@ -170,6 +186,7 @@ bool CallController::stopCallCapture()
 
 void CallController::toggleVideo()
 {
+    std::lock_guard<std::mutex> lock(m_mtxEvents);
     m_isVideoEnabled = !m_isVideoEnabled;
     if(!m_activeCall.empty()) {
         // build media list settings according to settings
@@ -183,11 +200,13 @@ void CallController::toggleVideo()
 
 bool CallController::isVideoEnabled() const
 {
+    std::lock_guard<std::mutex> lock(m_mtxEvents);
     return m_isVideoEnabled;
 }
 
 bool CallController::setVideoDevice(const std::string& videoDevice)
 {
+    std::lock_guard<std::mutex> lock(m_mtxEvents);
     if (videoDevice.rfind("display://") == 0 || videoDevice.rfind("camera://") == 0) {
         m_mediaVideo["SOURCE"] = videoDevice;
     } else if(videoDevice == "default") {
@@ -199,6 +218,7 @@ bool CallController::setVideoDevice(const std::string& videoDevice)
 
 const std::string& CallController::getVideoDevice() const
 {
+    std::lock_guard<std::mutex> lock(m_mtxEvents);
     static std::string source;
     source = m_mediaVideo.at("SOURCE");
     return source;
@@ -206,6 +226,7 @@ const std::string& CallController::getVideoDevice() const
 
 bool CallController::hangUp()
 {
+    std::lock_guard<std::mutex> lock(m_mtxEvents);
     if(m_activeCall.empty())
         return true;
 
@@ -220,9 +241,58 @@ void CallController::proccesEvents()
 {
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
-        // if (event.type == SDL_QUIT) {
+        if (event.type == EVENT_FRAME_READY) {
+            std::unique_ptr<std::string> args((std::string*)event.user.data1);
 
-        // }
+            std::lock_guard<std::mutex> lock(m_mtxEvents);
+            
+            auto it = m_previewWindows.find(*args);
+            if(it == m_previewWindows.end())
+                return;
+            
+            auto ptrWindow = it->second;
+            ptrWindow->render();
+        }
+        else if (event.type == EVENT_CREATE_PREVIEW) {
+            std::unique_ptr<CreateNewPreviewArgs> args((CreateNewPreviewArgs*)event.user.data1);
+
+            std::lock_guard<std::mutex> lock(m_mtxEvents);
+            if(!OpenVideoPrievew(args->id, args->w, args->h)) {
+                std::cerr << "Error: failed to create window for " << args->id << "." << std::endl;
+                return;
+            }
+            
+            auto it = m_previewWindows.find(args->id);
+            if(it == m_previewWindows.end())
+                return;
+
+            auto ptrWindow = it->second;
+            libsip_core::SinkTarget target;
+            target.preferredFormat = AV_PIX_FMT_RGBA;
+            
+            target.push = [this, id = args->id, ptrWindow] (libsip_core::FrameBuffer frame) {
+                ptrWindow->update(frame);
+                
+                std::string* new_args = new std::string(id);
+                SDL_Event event;
+                SDL_zero(event);
+                event.type = EVENT_FRAME_READY;
+                event.user.code = 1;
+                event.user.data1 = (void*)new_args;
+                if(!SDL_PushEvent(&event))
+                    delete new_args;
+            };
+
+            if(!libsip_core::registerSinkTarget(args->id, target)) {
+                std::cerr << "Error: unable to register sink target for: " << args->id << "." << std::endl;
+            }
+        }
+        else if(event.type == EVENT_DESTROY_PREVIEW) {
+            std::unique_ptr<std::string> args((std::string*)event.user.data1);
+
+            std::lock_guard<std::mutex> lock(m_mtxEvents);
+            CloseVideoPreview(*args);
+        }
     }
 }
 
@@ -261,21 +331,23 @@ std::string CallController::toSipUri(const std::string& number, const std::strin
 
 bool CallController::OpenVideoPrievew(const std::string& id, int width, int height)
 {
-    if(m_previewWindow.find(id) != m_previewWindow.end())
+    if(m_previewWindows.find(id) != m_previewWindows.end())
         return false;
 
     auto sdlWindow = std::shared_ptr<SDLVideoRenderer>(new SDLVideoRenderer(id, width, height));
     if(!sdlWindow->init())
         return false;
 
-    m_previewWindow[id] = sdlWindow;
+    m_previewWindows[id] = sdlWindow;
+
+    return true;
 }
 
 void CallController::CloseVideoPreview(const std::string& id)
 {
-    auto it = m_previewWindow.find(id);
+    auto it = m_previewWindows.find(id);
 
-    if(it != m_previewWindow.end()) {
-        m_previewWindow.erase(it);
+    if(it != m_previewWindows.end()) {
+        m_previewWindows.erase(it);
     }
 }

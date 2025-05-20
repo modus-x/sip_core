@@ -41,10 +41,10 @@ int main() {
 
     std::cout << "SIP core Console App" << std::endl;
     std::cout << "Available commands: call <callee>, switch <device>, hangup, capOn, capOff, video, exit" << std::endl;
+    
+    std::thread input_thread(consoleInputLoop);
 
     CallController controller(ACCAUNT_ID);
-
-    std::thread input_thread(consoleInputLoop);
     
     if(!controller.init()) {
         std::cerr << "Error: can't initialize sip." << std::endl;
