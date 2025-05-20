@@ -24,13 +24,9 @@
 // getInput("Enter domain: ");
 // getPassword();
 
-std::string username = "krill2.yakovlev";
-std::string password = "J7pOD4Bk";
+std::string username = "user";
+std::string password = "pass";
 std::string domain = "192.168.92.27";
-
-// string username = "kirill.yakovlev";
-// string password = "LIdHPV7B";
-// string domain = "SMoscow007.14.rt.ru";
 
 std::atomic_bool g_needFinish(false);
 std::queue<std::vector<std::string>> g_command_queue;
