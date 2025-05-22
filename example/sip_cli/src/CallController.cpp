@@ -4,6 +4,10 @@
 #include <functional>
 #include <regex>
 
+#ifdef _WIN32
+#define PATH_MAX MAX_PATH
+#endif
+
 // Get list of input devices
 //auto inputs = sip_core::Manager::instance().getAudioInputDeviceList();
 // Get list of output devices
