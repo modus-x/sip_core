@@ -134,6 +134,7 @@ __pycache__
 *.gcno
 *.gcda
 *info
+!cpuinfo
 html-output/
 
 #sonarqube generated files
