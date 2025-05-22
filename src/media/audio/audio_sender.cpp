@@ -96,7 +96,7 @@ AudioSender::sendRtpEvents(const std::string& events)
     /* convert ASCII digits from events into payload type first, to make sure
      * that all digits are valid.
      */
-    for (auto c: events) {
+    for (auto c : events) {
         unsigned int dig = std::tolower(static_cast<unsigned char>(c));
         unsigned pt;
 
@@ -127,8 +127,6 @@ AudioSender::update(Observable<std::shared_ptr<sip_core::MediaFrame>>* /*obs*/,
                     const std::shared_ptr<sip_core::MediaFrame>& framePtr)
 {
     auto frame = framePtr->pointer();
-    frame->pts = sent_samples;
-    sent_samples += frame->nb_samples;
 
     // check for change in voice activity, if so, call callback
     // downcast MediaFrame to AudioFrame
@@ -152,18 +150,20 @@ AudioSender::update(Observable<std::shared_ptr<sip_core::MediaFrame>>* /*obs*/,
         // packet with 32 flag == dtmf
         int flags = 32;
 
-        // force new timestamp on first and last packets
-        if (last || first) {
+        if (first) {
+            // set marker bit for first packet
+            flags |= 128;
+
+            // set new timestamp for first packet
             flags |= 64;
         }
-
-        if (first) {
-            flags |= 128;
-        }
-
-        audioEncoder_->sendBuffer(reinterpret_cast<uint8_t*>(&dtmfPayload), 4, first, flags);
+        
+        audioEncoder_->sendBuffer(reinterpret_cast<uint8_t*>(&dtmfPayload), 4, sent_samples, flags);
+        sent_samples += 160;
 
     } else {
+        frame->pts = sent_samples;
+        sent_samples += frame->nb_samples;
         if (audioEncoder_->encodeAudio(*std::static_pointer_cast<AudioFrame>(framePtr)) < 0)
             SIP_CORE_ERR("encoding failed");
     }
@@ -205,31 +205,42 @@ AudioSender::createDtmfPayload(RtpDtmfPayload* payload, bool* first, bool* last)
 {
     dtmf& data = txDtmfQueue_.front();
 
+    constexpr uint16_t SAMPLES_PER_PACKET = 160; // 20 ms @ 8 kHz
+    constexpr uint16_t MIN_END_DURATION = 800;   // ≥100 ms before setting E-bit
+
     *first = *last = false;
 
-    // means that we are sending out packet first time
+    /* First packet for this digit ----------------------------------------- */
     if (data.duration == 0) {
         SIP_CORE_DBG() << "Sending DTMF digit id " << digitmap[data.event];
         *first = true;
     }
 
-    // some constant value (currently make always last)
-    data.duration = 800;
+    /* --------------------------------------------------------------------- */
+    /* Build the RTP-DTMF payload                                            */
+    /* --------------------------------------------------------------------- */
+    payload->event = static_cast<uint8_t>(data.event);
+    payload->volume = 10; // 0-63 (arbitrary example)
+    payload->duration = static_cast<uint16_t>(data.duration);
 
-    payload->event = (uint8_t) data.event;
-    payload->volume = 10;
-    payload->duration = (uint16_t) data.duration;
+    /* --------------------------------------------------------------------- */
+    /* End-of-event handling                                                 */
+    /* --------------------------------------------------------------------- */
+    if (data.duration >= MIN_END_DURATION) {
+        payload->volume |= 0x80; // set E-bit
 
-    if (data.duration >= 800) {
-        payload->volume |= 0x80;
-
+        /* RFC 2833: transmit the ending packet a few times (here: 3) */
         if (++data.eBitRetransmissions >= 3) {
             *last = true;
-
-            /* Prepare next digit by deleting first element in queue. */
+            /* Move on to the next queued digit                           */
             std::lock_guard<std::mutex> lock(dtmfQueueMutex_);
             txDtmfQueue_.pop();
         }
     }
+
+    /* --------------------------------------------------------------------- */
+    /* Prepare for the next invocation                                       */
+    /* --------------------------------------------------------------------- */
+    data.duration += SAMPLES_PER_PACKET; // cumulative
 }
 } // namespace sip_core
