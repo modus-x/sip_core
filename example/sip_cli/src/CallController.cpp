@@ -30,9 +30,13 @@ CallController::CallController(const std::string& accountId) :
         { "MEDIA_TYPE", "MEDIA_TYPE_VIDEO"},
         { "ENABLED", "true" },
         { "MUTED", "false" },
-        // { "SOURCE", "display://:0.0" },
+        
+        // { "SOURCE", R"(camera://video=@device_pnp_\\?\usb#vid_1bcf&pid_2284&mi_00#6&2e99a59a&0&0000#{65e8773d-8f56-11d0-a3b9-00a0c9223196}\global)" }, // 4k
+        // { "SOURCE", R"(camera://video=@device_pnp_\\?\usb#vid_09da&pid_2695&mi_00#6&26daa0e0&0&0000#{65e8773d-8f56-11d0-a3b9-00a0c9223196}\global)" }, // aux
+        { "SOURCE", R"(camera://video=@device_pnp_\\?\usb#vid_04f2&pid_b76f&mi_00#6&330c68f9&0&0000#{65e8773d-8f56-11d0-a3b9-00a0c9223196}\global)" }, // front
         { "LABEL", "video_0" }
     },
+    m_user(),
     m_domain(),
     m_accontId(accountId),
     m_activeConfirence(),
@@ -51,6 +55,7 @@ CallController::~CallController()
         libsip_core::fini();
     }
 
+    hangUp();
     SDL_Quit();
 }
 
@@ -106,6 +111,7 @@ bool CallController::sendRegister(const std::string& user, const std::string& pa
     if(!libsip_core::initialized())
         return false;
 
+    std::cout << "Registring user - " << user << "..." << std::endl;
     std::map<std::string, std::string> account;
     account["Account.type"] = "SIP";
     account["Account.upnpEnabled"] = "false";
@@ -136,6 +142,7 @@ bool CallController::sendRegister(const std::string& user, const std::string& pa
     
     libsip_core::sendRegister(m_accontId, true);
 
+    m_user = user;
     m_domain = domain;
     return true;
 }
@@ -198,7 +205,7 @@ bool CallController::addParticipant(const std::string& newParticipant)
 
     if(!result) {
         libsip_core::hangUp(m_accontId, callId);
-        return false; 
+        return false;
     }
 
     m_activeCalls[newParticipant] = callId;
@@ -309,6 +316,11 @@ bool CallController::setVideoDevice(const std::string& videoDevice)
     } else return false;
 
     return true;
+}
+
+std::vector<std::string> CallController::getVideoDeviceList() const
+{
+    return libsip_core::getDeviceList();
 }
 
 const std::string CallController::getVideoDevice() const
@@ -436,7 +448,7 @@ bool CallController::OpenVideoPrievew(const std::string& id, int width, int heig
     if(m_previewWindows.find(id) != m_previewWindows.end())
         return false;
 
-    auto sdlWindow = std::shared_ptr<SDLVideoRenderer>(new SDLVideoRenderer(id, width, height));
+    auto sdlWindow = std::shared_ptr<SDLVideoRenderer>(new SDLVideoRenderer(m_user + " - " + id, width, height));
     if(!sdlWindow->init())
         return false;
 

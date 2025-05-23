@@ -44,7 +44,8 @@ void CallController::incomingCall(const std::string& accountId, const std::strin
     std::vector<std::map<std::string, std::string>> answerMediaList;
     answerMediaList.push_back(m_mediaAudio);
 
-    libsip_core::acceptWithMedia(accountId, callId, answerMediaList);
+    if(libsip_core::acceptWithMedia(accountId, callId, answerMediaList))
+        m_activeCalls[callId] = callId;
 }
 
 void CallController::incomingCallWithMedia( const std::string &accountId, const std::string &callId, const std::string &from, const std::vector<::std::map<::std::string, std::string>> &mediaList, const std::map<::std::string, std::string> &headers)
@@ -52,12 +53,12 @@ void CallController::incomingCallWithMedia( const std::string &accountId, const 
     std::lock_guard<std::mutex> lock(m_mtxEvents);
     std::cout << "Incoming call with media form user: " << from << ".\nAccapting..." << std::endl;
 
-    bool hasVideo = false;
+    bool incomingWithVideo = false;
     for(auto media : mediaList) {
         auto type = media.find("MEDIA_TYPE");
         if(type != media.end()) {
-            if(type->second == "VIDEO") {
-                hasVideo = true;
+            if(type->second == "MEDIA_TYPE_VIDEO") {
+                incomingWithVideo = true;
                 continue;
             }
         }
@@ -65,10 +66,16 @@ void CallController::incomingCallWithMedia( const std::string &accountId, const 
 
     std::vector<std::map<std::string, std::string>> answerMediaList;
     answerMediaList.push_back(m_mediaAudio);
-    if(m_isVideoEnabled && hasVideo)
+    if(incomingWithVideo && m_isVideoEnabled)
         answerMediaList.push_back(m_mediaVideo);
+    else if(incomingWithVideo && !m_isVideoEnabled) {
+        auto video = m_mediaVideo;
+        video["ENABLED"] = "false";
+        answerMediaList.push_back(video);
+    }
         
-    libsip_core::acceptWithMedia(accountId, callId, answerMediaList);
+    if(libsip_core::acceptWithMedia(accountId, callId, answerMediaList))
+        m_activeCalls[callId] = callId;
 }
 
 void CallController::mediaNegotiationStatus(const ::std::string &callId, const ::std::string &event, const ::std::vector<::std::map<::std::string, ::std::string>> &mediaList)

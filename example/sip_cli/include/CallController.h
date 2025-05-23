@@ -40,6 +40,7 @@ public:
     void toggleVideo();
     bool isVideoEnabled() const;
     bool setVideoDevice(const std::string& videoDevice);
+    std::vector<std::string> getVideoDeviceList() const;
     const std::string getVideoDevice() const;
     
     void proccesEvents();
@@ -73,6 +74,7 @@ private:
     std::map<std::string, std::string> m_mediaAudio;
     std::map<std::string, std::string> m_mediaVideo;
 
+    std::string m_user;
     std::string m_domain;
     const std::string m_accontId;
     std::string m_activeConfirence;

@@ -114,6 +114,10 @@ void SDLVideoRenderer::render()
     SDL_LockMutex(m_mtxFrame);
     // Copy data from AVFrame to texture
     uint8_t *src_data = m_frame->data[0];
+    if(!src_data || src_data[0] == '\0') {
+        SDL_UnlockMutex(m_mtxFrame);
+        return;
+    }
     int src_linesize = m_frame->linesize[0];
     int width = m_frame->width;
     int height = m_frame->height;
