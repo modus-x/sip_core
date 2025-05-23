@@ -72,6 +72,10 @@ VideoDeviceMonitorImpl::VideoDeviceMonitorImpl(VideoDeviceMonitor* monitor)
 void
 VideoDeviceMonitorImpl::start()
 {
+    HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+    if (FAILED(hr)) {
+        SIP_CORE_ERR() << "Cannot initialize COM";
+    }
     // Enumerate the initial capture device list.
     auto captureDeviceList = enumerateVideoInputDevices();
     for (auto node : captureDeviceList) {
@@ -85,6 +89,8 @@ VideoDeviceMonitorImpl::~VideoDeviceMonitorImpl()
     SendMessage(hWnd_, WM_DESTROY, 0, 0);
     if (thread_.joinable())
         thread_.join();
+
+    CoUninitialize();
 }
 
 std::string
