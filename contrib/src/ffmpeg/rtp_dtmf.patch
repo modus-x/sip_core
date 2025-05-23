@@ -1,8 +1,8 @@
 diff --git a/libavformat/rtpenc.c b/libavformat/rtpenc.c
-index 38d931a..2ff59ee 100644
+index c764fca..9976e7b 100644
 --- a/libavformat/rtpenc.c
 +++ b/libavformat/rtpenc.c
-@@ -355,11 +355,15 @@ void ff_rtp_send_data(AVFormatContext *s1, const uint8_t *buf1, int len, int m)
+@@ -304,11 +304,15 @@ void ff_rtp_send_data(AVFormatContext *s1, const uint8_t *buf1, int len, int m)
  #else
      avio_w8(s1->pb, RTP_VERSION << 6);
  #endif
@@ -19,26 +19,34 @@ index 38d931a..2ff59ee 100644
  #ifdef EXT_ABS_SEND_TIME
      avio_wb16(s1->pb, 0xBEDE);      // magic word
      avio_wb16(s1->pb, 0x0001);      // length=1
-@@ -553,6 +557,23 @@ static int rtp_write_packet(AVFormatContext *s1, AVPacket *pkt)
- 
-     av_log(s1, AV_LOG_TRACE, "%d: write len=%d\n", pkt->stream_index, size);
+@@ -496,12 +500,29 @@ static int rtp_send_ilbc(AVFormatContext *s1, const uint8_t *buf, int size)
+ static int rtp_write_packet(AVFormatContext *s1, AVPacket *pkt)
+ {
+     RTPMuxContext *s = s1->priv_data;
+-    AVStream *st = s1->streams[0];
+-    int rtcp_bytes;
+     int size= pkt->size;
  
 +    // send dtmf
 +    if (pkt->flags & FF_RTP_FLAG_DTMF) {
++        av_log(s1, AV_LOG_DEBUG, "%d: write DTMF len=%d\n", pkt->stream_index, size);
 +        int m = 0;
-+        if (pkt->flags & FF_RTP_FLAG_FORCE_TIMESTAMP) {
-+            if (pkt->flags & FF_RTP_FLAG_FORCE_MARKER) {
-+                m = 1;
-+                s->cur_timestamp = s->base_timestamp + pkt->pts;
-+            }
-+            else {
-+                s->cur_timestamp = s->base_timestamp + 1600 + (2 * pkt->pts);
-+            }
++        if (pkt->flags & FF_RTP_FLAG_FORCE_MARKER) {
++            m = 1;
 +        }
++        if (pkt->flags & FF_RTP_FLAG_FORCE_TIMESTAMP) {
++            s->cur_timestamp = s->base_timestamp + pkt->pts;
++        }
++        s->timestamp = s->cur_timestamp;
 +        s->flags |= FF_RTP_FLAG_DTMF;
-+        ff_rtp_send_data(s1, pkt->data, 4, m);
++        ff_rtp_send_data(s1, pkt->data, size, m);
 +        return 0;
 +    }
++
+     av_log(s1, AV_LOG_TRACE, "%d: write len=%d\n", pkt->stream_index, size);
+ 
++    AVStream *st = s1->streams[0];
++    int rtcp_bytes;
 +
      rtcp_bytes = ((s->octet_count - s->last_octet_count) * RTCP_TX_RATIO_NUM) /
          RTCP_TX_RATIO_DEN;

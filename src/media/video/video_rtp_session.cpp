@@ -511,7 +511,7 @@ VideoRtpSession::start()
 void
 VideoRtpSession::stop()
 {
-    std::lock_guard lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
 
     stopSender();
     stopReceiver();
@@ -535,7 +535,7 @@ VideoRtpSession::stop()
 void
 VideoRtpSession::setMuted(bool mute, Direction dir)
 {
-    std::lock_guard lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
 
     // Sender
     if (dir == Direction::SEND) {
@@ -907,26 +907,30 @@ VideoRtpSession::processRtcpChecker()
 void
 VideoRtpSession::attachRemoteRecorder(const MediaStream& ms)
 {
-    if (!recorder_ || !receiveThread_)
+    if (!mutex_.try_lock() || !recorder_ || !receiveThread_)
         return;
     if (auto ob = recorder_->addStream(ms)) {
         receiveThread_->attach(ob);
     }
+    mutex_.unlock();
 }
 
 void
 VideoRtpSession::attachLocalRecorder(const MediaStream& ms)
 {
-    if (!recorder_ || !videoLocal_ || !Manager::instance().videoPreferences.getRecordPreview())
+    if (!mutex_.try_lock() || !recorder_ || !videoLocal_ || !Manager::instance().videoPreferences.getRecordPreview())
         return;
     if (auto ob = recorder_->addStream(ms)) {
         videoLocal_->attach(ob);
     }
+    mutex_.unlock();
 }
 
 void
 VideoRtpSession::initRecorder()
 {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+
     if (!recorder_)
         return;
     if (receiveThread_) {
@@ -941,6 +945,8 @@ VideoRtpSession::initRecorder()
 void
 VideoRtpSession::deinitRecorder()
 {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+
     if (!recorder_)
         return;
     if (receiveThread_) {

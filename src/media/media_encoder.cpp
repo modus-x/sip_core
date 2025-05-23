@@ -1602,17 +1602,14 @@ MediaEncoder::resetStreams(int width, int height)
 }
 
 bool
-MediaEncoder::sendBuffer(uint8_t* buf1, int len, bool m, int flags)
+MediaEncoder::sendBuffer(uint8_t* buf1, int len, int samples, int flags)
 {
     AVPacket pkt;
     av_init_packet(&pkt);
     pkt.data = buf1;
     pkt.size = len;
     pkt.flags = flags;
-
-    if (m) {
-        pkt.flags |= 128;
-    }
+    pkt.pts = samples;
 
     return send(pkt, -1);
 }

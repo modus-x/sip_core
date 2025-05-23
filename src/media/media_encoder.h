@@ -98,7 +98,7 @@ public:
     bool send(AVPacket& packet, int streamIdx = -1);
 
     // send raw data
-    bool sendBuffer(uint8_t *buf1, int len, bool m, int flags);
+    bool sendBuffer(uint8_t* buf1, int len, int samples, int flags);
 
 #ifdef ENABLE_VIDEO
     int encode(const std::shared_ptr<VideoFrame>& input, bool is_keyframe, int64_t frame_number);
