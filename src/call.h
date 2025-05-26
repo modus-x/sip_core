@@ -389,7 +389,7 @@ public:
      * Send DTMF
      * @param code  The char code
      */
-    virtual void carryingDTMFdigits(const std::string& dtmfEvents) = 0;
+    virtual void carryingDTMFdigits(const std::string& dtmfEvents, double duration, unsigned int volume) = 0;
 
     /**
      * Make a change request of the current media with the provided media
