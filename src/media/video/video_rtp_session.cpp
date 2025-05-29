@@ -296,6 +296,8 @@ VideoRtpSession::startSender()
                                           callId_,
                                           allowHwAccel));
 
+            sender_->setSource(input_);
+
             if (changeOrientationCallback_)
                 sender_->setChangeOrientationCallback(changeOrientationCallback_);
             if (socketPair_)
