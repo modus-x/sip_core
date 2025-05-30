@@ -60,6 +60,7 @@ private:
     virtual void conferenceCreated(const std::string& accountId, const std::string& confId) override;
     virtual void conferenceChanged(const std::string& accountId, const std::string& confId, const std::string& state) override;
     virtual void conferenceRemoved(const std::string& accountId, const std::string& confId) override;
+    virtual void confInfoChanged(const std::string& callId, const std::vector<std::map<std::string, std::string>>& confInfos);
 
     std::string toSipUri(const std::string& number, const std::string& domainName);
     bool OpenVideoPrievew(const std::string& id, int width, int height);

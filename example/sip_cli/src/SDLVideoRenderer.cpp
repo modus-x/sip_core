@@ -8,6 +8,9 @@ SDLVideoRenderer::SDLVideoRenderer(const std::string& id, int width, int height)
 
 SDLVideoRenderer::~SDLVideoRenderer()
 {
+    if(m_mtxFrame)
+    SDL_LockMutex(m_mtxFrame);
+
     if(m_texture)
     SDL_DestroyTexture(m_texture);
     
@@ -18,9 +21,13 @@ SDLVideoRenderer::~SDLVideoRenderer()
     SDL_DestroyWindow(m_window);
     
     if(m_mtxFrame)
+    SDL_UnlockMutex(m_mtxFrame);
+
+    if(m_mtxFrame)
     SDL_DestroyMutex(m_mtxFrame);
     
     av_frame_free(&m_frame);
+    
 }
 
 bool SDLVideoRenderer::init()
@@ -62,43 +69,17 @@ void SDLVideoRenderer::update(libsip_core::FrameBuffer& frame)
         return;
         
     SDL_LockMutex(m_mtxFrame);
+
     av_frame_free(&m_frame);
     m_frame = av_frame_alloc();
     m_frame->format = AV_PIX_FMT_RGB24;
     m_frame->width = frame->width;
     m_frame->height = frame->height;
-        
-    // allocate buffer
-    av_frame_get_buffer(m_frame, 0);
 
-    struct SwsContext* ScaleCtx = sws_getContext(
-        frame->width,
-        frame->height,
-        (AVPixelFormat)frame->format,
-        m_frame->width,
-        m_frame->height,
-        (AVPixelFormat)m_frame->format,
-        SWS_LANCZOS | SWS_ACCURATE_RND,
-        0,
-        0,
-        0);
-        
-        if (!ScaleCtx) {
-            av_frame_free(&m_frame);
-            SDL_UnlockMutex(m_mtxFrame);
-            return;
-        }
-        
-        int ret = sws_scale(
-            ScaleCtx,
-            (const uint8_t* const*)frame->data,
-            frame->linesize,
-            0,
-        m_frame->height,
-        m_frame->data,
-        m_frame->linesize);
-
-    sws_freeContext(ScaleCtx);
+    av_frame_get_buffer(m_frame, 32);
+    m_scaler.scale(frame.get(), m_frame);
+    av_frame_copy_props(m_frame, frame.get());
+    
     SDL_UnlockMutex(m_mtxFrame);
 }
 
@@ -107,6 +88,7 @@ void SDLVideoRenderer::render()
     
     void *dst_pixels;
     int dst_pitch;
+
     if (!SDL_LockTexture(m_texture, NULL, &dst_pixels, &dst_pitch)) {
         return;
     }
@@ -116,8 +98,40 @@ void SDLVideoRenderer::render()
     uint8_t *src_data = m_frame->data[0];
     if(!src_data || src_data[0] == '\0') {
         SDL_UnlockMutex(m_mtxFrame);
+        SDL_UnlockTexture(m_texture);
         return;
     }
+    
+    bool same_size = (m_frame->width == m_width) && (m_frame->width == m_height);
+    if(!same_size) {
+        SDL_UnlockTexture(m_texture);
+        
+        if(!SDL_SetWindowSize(m_window, m_frame->width, m_frame->height)) {
+            SDL_UnlockMutex(m_mtxFrame);
+            return;
+        }
+        
+        SDL_DestroyTexture(m_texture);
+        m_texture = SDL_CreateTexture(m_renderer,
+            SDL_PIXELFORMAT_RGB24,  // Matches AV_PIX_FMT_YUV420P
+            SDL_TEXTUREACCESS_STREAMING,
+            m_frame->width, m_frame->height);
+
+        if(m_texture == nullptr) {
+            SDL_UnlockMutex(m_mtxFrame);
+            return;
+        }
+
+            
+        m_width = m_frame->width;
+        m_height = m_frame->height;
+        
+        if (!SDL_LockTexture(m_texture, NULL, &dst_pixels, &dst_pitch)) {
+            SDL_UnlockMutex(m_mtxFrame);
+            return;
+        }
+    }
+
     int src_linesize = m_frame->linesize[0];
     int width = m_frame->width;
     int height = m_frame->height;
@@ -128,10 +142,10 @@ void SDLVideoRenderer::render()
         memcpy(dst_row, src_row, width * 3);
     }
     SDL_UnlockMutex(m_mtxFrame);
-
+    
     // Unlock texture to upload to GPU
     SDL_UnlockTexture(m_texture);
-
+    
     // Clear and present
     SDL_RenderClear(m_renderer);
     SDL_RenderTexture(m_renderer, m_texture, nullptr, nullptr);

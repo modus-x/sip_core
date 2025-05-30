@@ -2,7 +2,9 @@
 
 #include <string>
 #include <SDL3/SDL.h>
+
 #include "manager.h"
+#include "video/video_scaler.h"
 
 class SDLVideoRenderer {
 public:
@@ -22,4 +24,5 @@ private:
     std::string m_id;
 
     AVFrame* m_frame;
+    sip_core::video::VideoScaler m_scaler;
 };

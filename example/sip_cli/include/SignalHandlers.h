@@ -20,4 +20,5 @@ class ISignals {
     virtual void conferenceCreated(const std::string& accountId, const std::string& confId) = 0;
     virtual void conferenceChanged(const std::string& accountId, const std::string& confId, const std::string& state) = 0;
     virtual void conferenceRemoved(const std::string& accountId, const std::string& confId) = 0;
+    virtual void confInfoChanged(const std::string& callId, const std::vector<std::map<std::string, std::string>>& confInfos) = 0;
 };
