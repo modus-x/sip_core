@@ -45,6 +45,8 @@ void CallController::incomingCall(const std::string& accountId, const std::strin
         std::vector<std::map<std::string, std::string>> answerMediaList;
         answerMediaList.push_back(m_mediaAudio);
 
+        std::this_thread::sleep_for(1s);
+
         if(libsip_core::acceptWithMedia(accountId, callId, answerMediaList))
             m_activeCalls[callId] = callId;   
     } else {
@@ -78,6 +80,8 @@ void CallController::incomingCallWithMedia( const std::string &accountId, const 
             video["ENABLED"] = "false";
             answerMediaList.push_back(video);
         }
+
+        std::this_thread::sleep_for(1s);
             
         if(libsip_core::acceptWithMedia(accountId, callId, answerMediaList))
             m_activeCalls[callId] = callId;
@@ -111,8 +115,7 @@ void CallController::decodingStarted(const std::string& id, const std::string& s
     std::cout << "decodingStarted for id - " << id << std::endl;
 
     CreateNewPreviewArgs* args = new CreateNewPreviewArgs { id, w, h };
-    SDL_Event event;
-    SDL_zero(event);
+    SDL_Event event; SDL_zero(event);
     event.type = EVENT_CREATE_PREVIEW;
     event.user.code = 1;
     event.user.data1 = (void*)args;
@@ -140,7 +143,7 @@ void CallController::conferenceCreated(const std::string& accountId, const std::
     std::cout << "Conference created with id - " << confId << "." << std::endl;
 
     // libsip_core::setActiveStream(accountId, confId, "", "", "host_video_0", true);
-    // libsip_core::addMainParticipant(accountId, confId);
+    libsip_core::addMainParticipant(accountId, confId);
     m_activeConfirence = confId;
 }
 

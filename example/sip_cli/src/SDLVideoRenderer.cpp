@@ -40,7 +40,7 @@ bool SDLVideoRenderer::init()
     }
     
     m_texture = SDL_CreateTexture(m_renderer,
-        SDL_PIXELFORMAT_RGB24,  // Matches AV_PIX_FMT_YUV420P
+        SDL_PIXELFORMAT_RGB24,
         SDL_TEXTUREACCESS_STREAMING,
         m_width, m_height);
 
@@ -63,7 +63,7 @@ bool SDLVideoRenderer::init()
     return true;
 }
 
-void SDLVideoRenderer::update(libsip_core::FrameBuffer& frame) 
+void SDLVideoRenderer::update(libsip_core::FrameBuffer& frame)
 {
     if (frame->width == 0 || frame->height == 0)
         return;
@@ -113,7 +113,7 @@ void SDLVideoRenderer::render()
         
         SDL_DestroyTexture(m_texture);
         m_texture = SDL_CreateTexture(m_renderer,
-            SDL_PIXELFORMAT_RGB24,  // Matches AV_PIX_FMT_YUV420P
+            SDL_PIXELFORMAT_RGB24,
             SDL_TEXTUREACCESS_STREAMING,
             m_frame->width, m_frame->height);
 
@@ -121,7 +121,6 @@ void SDLVideoRenderer::render()
             SDL_UnlockMutex(m_mtxFrame);
             return;
         }
-
             
         m_width = m_frame->width;
         m_height = m_frame->height;
