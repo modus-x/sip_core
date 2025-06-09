@@ -421,6 +421,8 @@ MediaEncoder::initStream(const SystemCodecInfo& systemCodecInfo, AVBufferRef* fr
                                static_cast<AVCodecID>(systemCodecInfo.avcodecId),
                                videoOpts_.bitrate);
 
+        encoderCtx->flags |= videoOpts_.flags;
+
         // readConfig(encoderCtx);
 
         encoders_.emplace_back(encoderCtx);

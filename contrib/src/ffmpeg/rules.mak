@@ -42,6 +42,7 @@ FFMPEGCONF += \
 	--enable-muxer=mp4 \
 	--enable-muxer=h264 \
 	--enable-muxer=webm \
+	--enable-muxer=matroska \
 	--enable-muxer=ogg \
 	--enable-muxer=pcm_s16be \
 	--enable-muxer=pcm_s16le \

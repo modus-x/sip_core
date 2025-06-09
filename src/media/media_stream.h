@@ -46,6 +46,7 @@ struct MediaStream
     bool noColor{false};
     int downScaleFactor{0};
     int quality{0};
+    int flags {0};
 
     MediaStream() {}
 

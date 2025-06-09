@@ -159,7 +159,7 @@ MediaRecorder::getPath() const
     if (audioOnly_)
         return path_ + ".ogg";
     else
-        return path_ + ".webm";
+        return path_ + ".mkv";
 }
 
 void
@@ -432,6 +432,8 @@ MediaRecorder::initRecord()
         videoStream.height = 720;
         videoStream.frameRate = rational<int>(30, 1);
         videoStream.bitrate = Manager::instance().videoPreferences.getRecordQuality();
+        // we need global header for mkv format
+        videoStream.flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
 
         MediaDescription args;
         args.mode = RateMode::CQ;
@@ -439,7 +441,7 @@ MediaRecorder::initRecord()
         encoder_->setOptions(args);
 
         auto videoCodec = std::static_pointer_cast<sip_core::SystemVideoCodecInfo>(
-            getSystemCodecContainer()->searchCodecByName("VP8", sip_core::MEDIA_VIDEO));
+            getSystemCodecContainer()->searchCodecByName("H264", sip_core::MEDIA_VIDEO));
         videoIdx_ = encoder_->addStream(*videoCodec.get());
         if (videoIdx_ < 0) {
             SIP_CORE_ERR() << "Failed to add video stream to encoder";
