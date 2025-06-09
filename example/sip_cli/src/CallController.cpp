@@ -30,7 +30,6 @@ CallController::CallController(const std::string& accountId) :
         { "MEDIA_TYPE", "MEDIA_TYPE_VIDEO"},
         { "ENABLED", "true" },
         { "MUTED", "false" },
-        
         // { "SOURCE", R"(camera://video=@device_pnp_\\?\usb#vid_1bcf&pid_2284&mi_00#6&2e99a59a&0&0000#{65e8773d-8f56-11d0-a3b9-00a0c9223196}\global)" }, // 4k
         // { "SOURCE", R"(camera://video=@device_pnp_\\?\usb#vid_09da&pid_2695&mi_00#6&26daa0e0&0&0000#{65e8773d-8f56-11d0-a3b9-00a0c9223196}\global)" }, // aux
         // { "SOURCE", R"(camera://video=@device_pnp_\\?\usb#vid_04f2&pid_b76f&mi_00#6&330c68f9&0&0000#{65e8773d-8f56-11d0-a3b9-00a0c9223196}\global)" }, // front
@@ -272,13 +271,11 @@ bool CallController::createConfirence(const std::vector<std::string>& participan
 
 bool CallController::isCaptureInProgress()
 {
-    std::lock_guard<std::mutex> lock(m_mtxEvents);
     return libsip_core::getIsRecording(m_accontId, getActiveCall());
 }
 
 bool CallController::startCallCapture()
 {
-    std::lock_guard<std::mutex> lock(m_mtxEvents);
     if(libsip_core::getIsRecording(m_accontId, getActiveCall()))
         return true;
 
@@ -287,7 +284,6 @@ bool CallController::startCallCapture()
 
 bool CallController::stopCallCapture()
 {
-    std::lock_guard<std::mutex> lock(m_mtxEvents);
     if(!libsip_core::getIsRecording(m_accontId, getActiveCall()))
         return true;
 
