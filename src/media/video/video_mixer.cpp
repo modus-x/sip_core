@@ -113,26 +113,31 @@ VideoMixer::~VideoMixer()
 void
 VideoMixer::switchInputs(const std::vector<std::string>& inputs)
 {
-    // Do not stop video inputs that are already in mixer
-    std::lock_guard<std::mutex> lk(localInputsMtx_);
+    // Do not stop video inputs that are already there
+    // But only detach it to get new index
+    std::lock_guard lk(localInputsMtx_);
     decltype(localInputs_) newInputs;
-    for (auto i = 0u; i != inputs.size(); ++i) {
-        auto videoInput = getVideoInput(inputs[i]);
-        auto alreadyExistsInMixer = false;
+    newInputs.reserve(inputs.size());
+    for (const auto& input : inputs) {
+        auto videoInput = getVideoInput(input);
+        // Note, video can be a previously stopped device (eg. restart a screen sharing)
+        // in this case, the videoInput will be found and must be restarted
+        videoInput->restart();
         auto it = std::find(localInputs_.cbegin(), localInputs_.cend(), videoInput);
-        alreadyExistsInMixer = it != localInputs_.cend();
-        newInputs.emplace_back(videoInput);
-        if (alreadyExistsInMixer) {
-            // detach to get new stream id corresponding to it's index in localInputs_ via next startInputs() call
+        auto onlyDetach = it != localInputs_.cend();
+        if (onlyDetach) {
             videoInput->detach(this);
             localInputs_.erase(it);
         }
+        newInputs.emplace_back(std::move(videoInput));
     }
-    // Stop other video inputs (detach them from mixer)
+    // Stop other video inputs
     stopInputs();
-
-    // set localInputs_ and wait for the startInputs() call
     localInputs_ = std::move(newInputs);
+
+    // Re-attach videoInput to mix
+    startInputs();
+
 }
 
 void
