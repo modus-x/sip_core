@@ -12,8 +12,6 @@ target_include_directories(sip_cli
 
 set(SDL_VERSION 3.2.12)
 
-set(EXTERNAL_DIR "${CMAKE_SOURCE_DIR}/example/sip_cli/extern")
-
 set(SDL_SOURCE_URL
     "https://nexus.svetlocal.ru/repository/github-artifacts/SDL3-${SDL_VERSION}.tar.gz"
 )
@@ -46,7 +44,6 @@ FetchContent_Declare(
     sdl_ext
     URL ${SDL_SOURCE_URL}
     URL_HASH ${SDL_SOURCE_URL_HASH}
-    SOURCE_DIR ${EXTERNAL_DIR}/SDL3-${SDL_VERSION}
     EXCLUDE_FROM_ALL
 )
 FetchContent_MakeAvailable(sdl_ext)

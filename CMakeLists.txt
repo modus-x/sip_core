@@ -31,6 +31,7 @@ endif()
 # ##############################################################################
 # Build options
 # ##############################################################################
+option(ENABLE_CLI_EXAMPLE "Build with CLI example" OFF)
 option(ENABLE_VIDEO "Build with video support" ON)
 option(BUILD_DEPS "Build deps" ON)
 
@@ -421,7 +422,9 @@ if(MSVC)
   add_subdirectory("compat")
 endif()
 
-add_subdirectory(example/sip_cli)
+if(ENABLE_CLI_EXAMPLE)
+  add_subdirectory(example/sip_cli EXCLUDE_FROM_ALL)
+endif()
 
 target_compile_definitions(
   ${PROJECT_NAME}
