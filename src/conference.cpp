@@ -560,7 +560,12 @@ Conference::requestMediaChange(const std::vector<libsip_core::MediaMap>& mediaLi
         }
     }
 
-    hostSources_ = mediaAttrList; // New medias, MUST be set after everything else
+    hostSources_ = mediaAttrList; // New medias
+
+    // It's host medias, so no need to negotiate anything, but inform the client.
+    reportMediaNegotiationStatus();
+
+    return true;
 }
 
 // handle media change request OF CALL -> should auto - add / auto - delete patricipant video from mixer!
