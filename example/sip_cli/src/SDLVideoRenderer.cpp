@@ -33,7 +33,7 @@ bool SDLVideoRenderer::init()
     }
     
     m_texture = SDL_CreateTexture(m_renderer,
-        SDL_PIXELFORMAT_RGB24,  // Matches AV_PIX_FMT_YUV420P
+        SDL_PIXELFORMAT_RGB24,
         SDL_TEXTUREACCESS_STREAMING,
         m_width, m_height);
 
@@ -94,9 +94,9 @@ void SDLVideoRenderer::update(libsip_core::FrameBuffer& frame)
             (const uint8_t* const*)frame->data,
             frame->linesize,
             0,
-        m_frame->height,
-        m_frame->data,
-        m_frame->linesize);
+            m_frame->height,
+            m_frame->data,
+            m_frame->linesize);
 
     sws_freeContext(ScaleCtx);
     SDL_UnlockMutex(m_mtxFrame);

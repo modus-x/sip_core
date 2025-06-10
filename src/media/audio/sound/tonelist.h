@@ -43,6 +43,7 @@ public:
         ZID_SPAIN,
         ZID_ITALY,
         ZID_JAPAN,
+        ZID_RUSSIA,
         ZID_COUNTRIES,
     };
 
