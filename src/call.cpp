@@ -236,6 +236,14 @@ Call::setState(CallState call_state, ConnectionState cnx_state, signed code)
                          id_.c_str(),
                          new_client_state.c_str(),
                          code);
+
+            if(cnx_state == ConnectionState::PROGRESSING) {
+                Manager::instance().playTone();
+            }
+            else if(cnx_state == ConnectionState::DISCONNECTED
+                    || cnx_state == ConnectionState::CONNECTED) {
+                Manager::instance().stopTone();
+            }
             emitSignal<libsip_core::CallSignal::StateChange>(getAccountId(),
                                                              id_,
                                                              new_client_state,

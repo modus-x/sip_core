@@ -77,7 +77,7 @@ namespace sip_core {
 using yaml_utils::parseValue;
 
 constexpr const char* const Preferences::CONFIG_LABEL;
-const char* const Preferences::DFT_ZONE = "North America";
+const char* const Preferences::DFT_ZONE = "Russia";
 const char* const Preferences::REGISTRATION_EXPIRE_KEY = "registrationexpire";
 constexpr std::string_view DEFAULT_CONFERENCE_RESOLUTION {"1280x720"};
 
@@ -223,7 +223,7 @@ Preferences::unserialize(const YAML::Node& in)
     parseValue(node, HISTORY_LIMIT_KEY, historyLimit_);
     parseValue(node, RINGING_TIMEOUT, ringingTimeout_);
     parseValue(node, HISTORY_MAX_CALLS_KEY, historyMaxCalls_);
-    parseValue(node, ZONE_TONE_CHOICE_KEY, zoneToneChoice_);
+    // parseValue(node, ZONE_TONE_CHOICE_KEY, zoneToneChoice_); // ignore this to force default ringing convenction for Russia
     parseValue(node, PORT_NUM_KEY, portNum_);
     parseValue(node, SEARCH_BAR_DISPLAY_KEY, searchBarDisplay_);
     // parseValue(node, MD5_HASH_KEY, md5Hash_);

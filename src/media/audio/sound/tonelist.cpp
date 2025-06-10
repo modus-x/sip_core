@@ -43,8 +43,10 @@ TelephoneTone::getCountryId(const std::string& countryName)
         return CountryId::ZID_ITALY;
     else if (countryName == "Japan")
         return CountryId::ZID_JAPAN;
+    else if (countryName == "Russia")
+        return CountryId::ZID_RUSSIA;
     else
-        return CountryId::ZID_NORTH_AMERICA; // default
+        return CountryId::ZID_RUSSIA; // default
 }
 
 TelephoneTone::TelephoneTone(const std::string& countryName, unsigned int sampleRate)
@@ -131,6 +133,13 @@ TelephoneTone::buildTones(unsigned int sampleRate)
                "400/500,0/500",
                "400+15/1000,0/2000",
                "400/500,0/500",
+           },
+           {
+               // ZID_RUSSIA
+                "425",
+                "425/350,0/700",
+                "425/1000,0/4000",
+                "425/200,0/200",
            }};
     tones_[(size_t) Tone::ToneId::DIALTONE]
         = std::make_shared<Tone>(toneZone[(size_t) countryId_][(size_t) Tone::ToneId::DIALTONE],
