@@ -6,7 +6,7 @@
 void CallController::callStateChanged(const std::string& accountId, const std::string& callId, const std::string& state, const int32_t detailCode)
 {
     std::lock_guard<std::mutex> lock(m_mtxEvents);
-    std::cout << "Call state: " << state << "." << std::endl;
+    std::cout << "Call state: " << state << ", id - " << callId << "." << std::endl;
     if (state == "OVER") {
         auto it = std::find_if(m_activeCalls.begin(), m_activeCalls.end(), [&callId](const std::pair<std::string, std::string>& item) {
             return item.second == callId;
@@ -39,36 +39,56 @@ void CallController::audioDeviceEvent()
 void CallController::incomingCall(const std::string& accountId, const std::string& callId, const std::string& from)
 {
     std::lock_guard<std::mutex> lock(m_mtxEvents);
-    std::cout << "Incoming call form user: " << from << ".\nAccapting..." << std::endl;
+    
+    if(m_activeCalls.empty()) {
+        std::cout << "Incoming call form user: " << from << ".\nAccapting..." << std::endl;
+        std::vector<std::map<std::string, std::string>> answerMediaList;
+        answerMediaList.push_back(m_mediaAudio);
 
-    std::vector<std::map<std::string, std::string>> answerMediaList;
-    answerMediaList.push_back(m_mediaAudio);
+        std::this_thread::sleep_for(1s);
 
-    libsip_core::acceptWithMedia(accountId, callId, answerMediaList);
+        if(libsip_core::acceptWithMedia(accountId, callId, answerMediaList))
+            m_activeCalls[callId] = callId;   
+    } else {
+        std::cout << "Incoming call form user: " << from << ".\nDenied..." << std::endl;
+    }
 }
 
 void CallController::incomingCallWithMedia( const std::string &accountId, const std::string &callId, const std::string &from, const std::vector<::std::map<::std::string, std::string>> &mediaList, const std::map<::std::string, std::string> &headers)
 {
     std::lock_guard<std::mutex> lock(m_mtxEvents);
-    std::cout << "Incoming call with media form user: " << from << ".\nAccapting..." << std::endl;
-
-    bool hasVideo = false;
-    for(auto media : mediaList) {
-        auto type = media.find("MEDIA_TYPE");
-        if(type != media.end()) {
-            if(type->second == "VIDEO") {
-                hasVideo = true;
-                continue;
+    
+    if(m_activeCalls.empty()) {
+        std::cout << "Incoming call with media form user: " << from << ".\nAccapting..." << std::endl;
+        bool incomingWithVideo = false;
+        for(auto media : mediaList) {
+            auto type = media.find("MEDIA_TYPE");
+            if(type != media.end()) {
+                if(type->second == "MEDIA_TYPE_VIDEO") {
+                    incomingWithVideo = true;
+                    continue;
+                }
             }
         }
-    }
 
-    std::vector<std::map<std::string, std::string>> answerMediaList;
-    answerMediaList.push_back(m_mediaAudio);
-    if(m_isVideoEnabled && hasVideo)
-        answerMediaList.push_back(m_mediaVideo);
-        
-    libsip_core::acceptWithMedia(accountId, callId, answerMediaList);
+        std::vector<std::map<std::string, std::string>> answerMediaList;
+        answerMediaList.push_back(m_mediaAudio);
+        if(incomingWithVideo && m_isVideoEnabled)
+            answerMediaList.push_back(m_mediaVideo);
+        else if(incomingWithVideo && !m_isVideoEnabled) {
+            auto video = m_mediaVideo;
+            video["ENABLED"] = "false";
+            answerMediaList.push_back(video);
+        }
+
+        std::this_thread::sleep_for(1s);
+            
+        if(libsip_core::acceptWithMedia(accountId, callId, answerMediaList))
+            m_activeCalls[callId] = callId;
+    }
+    else {
+        std::cout << "Incoming call form user: " << from << ".\nDenied..." << std::endl;
+    }
 }
 
 void CallController::mediaNegotiationStatus(const ::std::string &callId, const ::std::string &event, const ::std::vector<::std::map<::std::string, ::std::string>> &mediaList)
@@ -95,8 +115,7 @@ void CallController::decodingStarted(const std::string& id, const std::string& s
     std::cout << "decodingStarted for id - " << id << std::endl;
 
     CreateNewPreviewArgs* args = new CreateNewPreviewArgs { id, w, h };
-    SDL_Event event;
-    SDL_zero(event);
+    SDL_Event event; SDL_zero(event);
     event.type = EVENT_CREATE_PREVIEW;
     event.user.code = 1;
     event.user.data1 = (void*)args;
@@ -110,8 +129,7 @@ void CallController::decodingStopped(const std::string& id, const std::string& s
     std::cout << "decodingStopped for id - " << id << std::endl;
 
     std::string* args = new std::string(id);
-    SDL_Event event;
-    SDL_zero(event);
+    SDL_Event event; SDL_zero(event);
     event.type = EVENT_DESTROY_PREVIEW;
     event.user.code = 1;
     event.user.data1 = (void*)args;
@@ -124,6 +142,8 @@ void CallController::conferenceCreated(const std::string& accountId, const std::
     std::lock_guard<std::mutex> lock(m_mtxEvents);
     std::cout << "Conference created with id - " << confId << "." << std::endl;
 
+    // libsip_core::setActiveStream(accountId, confId, "", "", "host_video_0", true);
+    libsip_core::addMainParticipant(accountId, confId);
     m_activeConfirence = confId;
 }
 
@@ -139,4 +159,9 @@ void CallController::conferenceRemoved(const std::string& accountId, const std::
     std::cout << "Conference removed; id - " << confId << "." << std::endl;
 
     m_activeConfirence = "";
+}
+
+void CallController::confInfoChanged(const std::string& callId, const std::vector<std::map<std::string, std::string>>& confInfos)
+{
+    std::cout << "Conference infos changed." << std::endl;
 }

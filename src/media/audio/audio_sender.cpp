@@ -28,6 +28,11 @@
 #include "media_stream.h"
 
 #include <memory>
+#include <algorithm>
+#include <functional>
+
+constexpr unsigned int MIN_DTMF_VOLUME = 0;
+constexpr unsigned int MAX_DTMF_VOLUME = 55;
 
 namespace sip_core {
 
@@ -82,16 +87,32 @@ AudioSender::setup(SocketPair& socketPair)
 
 // currently, we support only simple dtmf events
 bool
-AudioSender::sendRtpEvents(const std::string& events)
+AudioSender::sendRtpEvents(const std::string& events, double duration, unsigned int volume)
 {
-    std::lock_guard<std::mutex> lock(dtmfQueueMutex_);
-
     bool found = false;
 
     // no more than 32 symbols at once
     if (txDtmfQueue_.size() + events.size() >= 32) {
         return false;
     }
+
+    auto currentCodec = std::static_pointer_cast<sip_core::AccountAudioCodecInfo>(args_.codec);
+
+    auto currentSampleRate = currentCodec->audioformat.sample_rate;
+
+    // 100ms is the minimum duration for a DTMF event
+    unsigned int minDuration = static_cast<unsigned int>(currentSampleRate * 0.1);
+
+    unsigned int requestedDuration = static_cast<unsigned int>(duration * currentSampleRate);
+
+    if (requestedDuration < minDuration) {
+        requestedDuration = minDuration;
+    }
+
+    // just send every 20 ms
+    unsigned int samplesPerPacket = static_cast<unsigned int>(currentSampleRate * 0.02);
+
+    volume = std::clamp(volume, MIN_DTMF_VOLUME, MAX_DTMF_VOLUME);
 
     /* convert ASCII digits from events into payload type first, to make sure
      * that all digits are valid.
@@ -114,9 +135,13 @@ AudioSender::sendRtpEvents(const std::string& events)
             continue;
         }
 
+        SIP_CORE_DBG() << "Queued DTMF digit " << dig;
+
         found = true;
 
-        txDtmfQueue_.push({pt, 0, 0});
+        std::lock_guard<std::mutex> lock(dtmfQueueMutex_);
+
+        txDtmfQueue_.push({pt, 0, requestedDuration, volume, samplesPerPacket, 0});
     }
 
     return found;
@@ -145,7 +170,7 @@ AudioSender::update(Observable<std::shared_ptr<sip_core::MediaFrame>>* /*obs*/,
 
         bool first, last = false;
 
-        createDtmfPayload(&dtmfPayload, &first, &last);
+        auto samples = createDtmfPayload(&dtmfPayload, &first, &last);
 
         // packet with 32 flag == dtmf
         int flags = 32;
@@ -157,10 +182,19 @@ AudioSender::update(Observable<std::shared_ptr<sip_core::MediaFrame>>* /*obs*/,
             // set new timestamp for first packet
             flags |= 64;
         }
-        
-        audioEncoder_->sendBuffer(reinterpret_cast<uint8_t*>(&dtmfPayload), 4, sent_samples, flags);
-        sent_samples += 160;
 
+        uint8_t dtmfBytes[4];
+
+        dtmfBytes[0] = dtmfPayload.event;
+        dtmfBytes[1] = dtmfPayload.volume;
+        // Convert to network byte order (big-endian)
+        dtmfBytes[2] = (dtmfPayload.duration >> 8) & 0xFF; // high byte
+        dtmfBytes[3] = dtmfPayload.duration & 0xFF;        // low byte
+
+        
+        audioEncoder_->sendBuffer(dtmfBytes, 4, sent_samples, flags);
+
+        sent_samples += samples;
     } else {
         frame->pts = sent_samples;
         sent_samples += frame->nb_samples;
@@ -196,23 +230,17 @@ AudioSender::setPacketLoss(uint64_t pl)
     return audioEncoder_->setPacketLoss(pl);
 }
 
-/* RFC 2833 digit */
-static const char digitmap[17]
-    = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '#', 'A', 'B', 'C', 'D', 'R'};
-
-void
+unsigned int
 AudioSender::createDtmfPayload(RtpDtmfPayload* payload, bool* first, bool* last)
 {
     dtmf& data = txDtmfQueue_.front();
 
-    constexpr uint16_t SAMPLES_PER_PACKET = 160; // 20 ms @ 8 kHz
-    constexpr uint16_t MIN_END_DURATION = 800;   // ≥100 ms before setting E-bit
-
     *first = *last = false;
+
+    bool eventEnded = false;
 
     /* First packet for this digit ----------------------------------------- */
     if (data.duration == 0) {
-        SIP_CORE_DBG() << "Sending DTMF digit id " << digitmap[data.event];
         *first = true;
     }
 
@@ -220,14 +248,15 @@ AudioSender::createDtmfPayload(RtpDtmfPayload* payload, bool* first, bool* last)
     /* Build the RTP-DTMF payload                                            */
     /* --------------------------------------------------------------------- */
     payload->event = static_cast<uint8_t>(data.event);
-    payload->volume = 10; // 0-63 (arbitrary example)
+    payload->volume = static_cast<uint8_t>(data.volume); // 0-63 (arbitrary example)
     payload->duration = static_cast<uint16_t>(data.duration);
 
     /* --------------------------------------------------------------------- */
     /* End-of-event handling                                                 */
     /* --------------------------------------------------------------------- */
-    if (data.duration >= MIN_END_DURATION) {
+    if (data.duration >= data.requestedDuration) {
         payload->volume |= 0x80; // set E-bit
+        eventEnded = true;
 
         /* RFC 2833: transmit the ending packet a few times (here: 3) */
         if (++data.eBitRetransmissions >= 3) {
@@ -241,6 +270,11 @@ AudioSender::createDtmfPayload(RtpDtmfPayload* payload, bool* first, bool* last)
     /* --------------------------------------------------------------------- */
     /* Prepare for the next invocation                                       */
     /* --------------------------------------------------------------------- */
-    data.duration += SAMPLES_PER_PACKET; // cumulative
+    if (!eventEnded) {
+        data.duration += data.samplesPerPacket; // cumulative
+        return data.samplesPerPacket;
+    }
+
+    return eventEnded;
 }
 } // namespace sip_core

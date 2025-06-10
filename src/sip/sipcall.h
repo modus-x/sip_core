@@ -122,7 +122,7 @@ public:
     bool offhold(OnReadyCb&& cb) override;
     void switchInput(const std::string& resource = {}) override;
     void peerHungup() override;
-    void carryingDTMFdigits(const std::string& dtmfEvents) override;
+    void carryingDTMFdigits(const std::string& dtmfEvents, double duration, unsigned int volume) override;
     bool requestMediaChange(const std::vector<libsip_core::MediaMap>& mediaList) override;
     std::vector<libsip_core::MediaMap> currentMediaList() const override;
     void sendTextMessage(const std::map<std::string, std::string>& messages,

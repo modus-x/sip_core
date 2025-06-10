@@ -40,6 +40,7 @@ public:
     void toggleVideo();
     bool isVideoEnabled() const;
     bool setVideoDevice(const std::string& videoDevice);
+    std::vector<std::string> getVideoDeviceList() const;
     const std::string getVideoDevice() const;
     
     void proccesEvents();
@@ -59,6 +60,7 @@ private:
     virtual void conferenceCreated(const std::string& accountId, const std::string& confId) override;
     virtual void conferenceChanged(const std::string& accountId, const std::string& confId, const std::string& state) override;
     virtual void conferenceRemoved(const std::string& accountId, const std::string& confId) override;
+    virtual void confInfoChanged(const std::string& callId, const std::vector<std::map<std::string, std::string>>& confInfos);
 
     std::string toSipUri(const std::string& number, const std::string& domainName);
     bool OpenVideoPrievew(const std::string& id, int width, int height);
@@ -73,6 +75,7 @@ private:
     std::map<std::string, std::string> m_mediaAudio;
     std::map<std::string, std::string> m_mediaVideo;
 
+    std::string m_user;
     std::string m_domain;
     const std::string m_accontId;
     std::string m_activeConfirence;

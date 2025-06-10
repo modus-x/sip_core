@@ -24,8 +24,8 @@
 // getInput("Enter domain: ");
 // getPassword();
 
-std::string username = "user";
-std::string password = "pass";
+std::string username = "dev_user";
+std::string password = "!QAZxsw2";
 std::string domain = "192.168.92.27";
 
 std::atomic_bool g_needFinish(false);
@@ -53,6 +53,18 @@ int main() {
     if(!controller.sendRegister(username, password, domain)) {
         std::cerr << "Error: unable to send register for current account." << std::endl;
         return 1;
+    }
+
+    // print video cameras info
+    auto devices = controller.getVideoDeviceList();
+    if(devices.empty())
+        std::cout << "No avaliable video devices found." << std::endl;
+    else {
+        std::cout << "Avaliable video devices:";
+        for(auto dev : devices) {
+            std::cout <<  " " << dev;
+        }
+        std::cout << std::endl;
     }
 
     while (true) {
@@ -98,7 +110,7 @@ int main() {
                 continue;;
             }
 
-            controller.addParticipant(tokens[1]);
+            if(!controller.addParticipant(tokens[1]))
                 std::cerr << "Error: failed to add participant." << std::endl;
 
         } else if (command == "del") {

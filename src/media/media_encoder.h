@@ -137,6 +137,8 @@ public:
     MediaStream getStream(const std::string& name, int streamIdx = -1) const;
     void sendDummyPacket();
 
+    void setSource(const std::string& source) { source_ = source; }
+
 private:
     NON_COPYABLE(MediaEncoder);
 
@@ -239,6 +241,8 @@ protected:
     MediaStream audioOpts_;
     std::string videoCodec_;
     std::string audioCodec_;
+
+    std::string source_;
 };
 
 } // namespace sip_core

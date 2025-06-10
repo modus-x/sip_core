@@ -1347,7 +1347,7 @@ SIPCall::peerHungup()
 }
 
 void
-SIPCall::carryingDTMFdigits(const std::string& dtmfEvents)
+SIPCall::carryingDTMFdigits(const std::string& dtmfEvents, double duration, unsigned int volume)
 {
     auto account = getSIPAccount();
     if (not account) {
@@ -1389,7 +1389,7 @@ SIPCall::carryingDTMFdigits(const std::string& dtmfEvents)
         // this is handled at RTP layer
         for (const auto& rtpSession : getRtpSessionList(MediaType::MEDIA_AUDIO)) {
             auto audioRtp = std::dynamic_pointer_cast<AudioRtpSession>(rtpSession);
-            audioRtp->sendRtpEvents(dtmfEvents);
+            audioRtp->sendRtpEvents(dtmfEvents, duration, volume);
         }
     }
 }

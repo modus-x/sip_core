@@ -68,6 +68,7 @@ public:
     void natPing();
 
     inline void setMuted(bool mute) { muted_.store(mute); }
+    void setSource(const std::string& source);
 
 private:
     static constexpr int KEYFRAMES_AT_START {1}; // Number of keyframes to enforce at stream startup

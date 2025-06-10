@@ -92,28 +92,22 @@ avcodecManageMutex(void** data, enum AVLockOp op)
 }
 #endif
 
-static constexpr const char* AVLOGLEVEL = "AVLOGLEVEL";
 
 static void
 setAvLogLevel()
 {
-#ifndef RING_UWP
-    char* envvar = getenv(AVLOGLEVEL);
-    signed level = AV_LOG_WARNING;
 
-    if (envvar != nullptr) {
-        level = to_int<int>(envvar, AV_LOG_ERROR);
-        level = std::max(AV_LOG_QUIET, std::min(level, AV_LOG_DEBUG));
+    auto avloglevel = AV_LOG_WARNING;
+
+    if (sip_core::Logger::debugEnabled()) {
+        avloglevel = AV_LOG_VERBOSE;
     }
-    av_log_set_level(level);
-#else
-    av_log_set_level(0);
-#endif
+
+    av_log_set_level(avloglevel);
 }
 
-#ifdef __ANDROID__
 static void
-androidAvLogCb(void* ptr, int level, const char* fmt, va_list vl)
+avLogCb(void* ptr, int level, const char* fmt, va_list vl)
 {
     if (level > av_log_get_level())
         return;
@@ -134,6 +128,8 @@ androidAvLogCb(void* ptr, int level, const char* fmt, va_list vl)
         ++idx;
     }
 
+    // this is for android system log
+    #ifdef __ANDROID__
     switch (level) {
     case AV_LOG_QUIET:
         android_level = ANDROID_LOG_SILENT;
@@ -167,8 +163,24 @@ androidAvLogCb(void* ptr, int level, const char* fmt, va_list vl)
         break;
     }
     __android_log_print(android_level, "FFmpeg", "%s", line);
+    #endif
+
+    // AV_LOG_ERROR + AV_LOG_FATAL == ERROR
+    if (level <= 16)
+        SIP_CORE_ERR() << line;
+
+    // AV_LOG_WARNING == WARNING
+    else if (level <= 24)
+        SIP_CORE_WARN() << line;
+
+    // AV_LOG_INFO == INFO
+    else if (level <= 32)
+        SIP_CORE_INFO() << line;
+
+    // AV_LOG_DEBUG == DEBUG
+    else
+        SIP_CORE_DBG() << line;
 }
-#endif
 
 static void
 init_once()
@@ -188,10 +200,7 @@ init_once()
 
     setAvLogLevel();
 
-#ifdef __ANDROID__
-    // android doesn't like stdout and stderr :(
-    av_log_set_callback(androidAvLogCb);
-#endif
+    av_log_set_callback(avLogCb);
 }
 
 static std::once_flag already_called;

@@ -69,6 +69,12 @@ VideoSender::VideoSender(const std::string& dest,
 }
 
 void
+VideoSender::setSource(const std::string& source)
+{
+    videoEncoder_->setSource(source);
+}
+
+void
 VideoSender::natPing()
 {
     videoEncoder_->sendDummyPacket();

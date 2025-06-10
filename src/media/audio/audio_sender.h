@@ -35,6 +35,9 @@ struct dtmf
 {
     unsigned int event;
     unsigned int duration;
+    unsigned int requestedDuration;
+    unsigned int volume;
+    unsigned int samplesPerPacket;
     unsigned int eBitRetransmissions; /**< # of E bit transmissions   */
 };
 
@@ -61,7 +64,7 @@ public:
     void update(Observable<std::shared_ptr<sip_core::MediaFrame>>*,
                 const std::shared_ptr<sip_core::MediaFrame>&) override;
 
-    bool sendRtpEvents(const std::string& events);
+    bool sendRtpEvents(const std::string& events, double duration, unsigned int volume);
 
 private:
     NON_COPYABLE(AudioSender);
@@ -76,7 +79,7 @@ private:
         uint16_t duration; /**< Event duration.    */
     };
 
-    void createDtmfPayload(RtpDtmfPayload* payload, bool *first, bool *last);
+    unsigned int createDtmfPayload(RtpDtmfPayload* payload, bool* first, bool* last);
 
     /* RFC 2833 DTMF transmission FIFO queue */
     std::mutex dtmfQueueMutex_;

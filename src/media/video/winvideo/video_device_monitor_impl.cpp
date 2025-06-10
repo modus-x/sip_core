@@ -67,7 +67,12 @@ private:
 VideoDeviceMonitorImpl::VideoDeviceMonitorImpl(VideoDeviceMonitor* monitor)
     : monitor_(monitor)
     , thread_()
-{}
+{
+    HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+    if (FAILED(hr)) {
+        SIP_CORE_ERR() << "Can't initialize COM.";
+    }
+}
 
 void
 VideoDeviceMonitorImpl::start()

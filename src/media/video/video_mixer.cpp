@@ -288,8 +288,6 @@ VideoMixer::process()
         return;
     }
 
-    libav_utils::fillWithBlack(output.pointer());
-
     {
         std::lock_guard<std::mutex> lk(audioOnlySourcesMtx_);
         std::shared_lock lock(rwMutex_);

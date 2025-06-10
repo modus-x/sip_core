@@ -283,7 +283,7 @@ void
 PortAudioLayer::updatePreference(AudioPreference& preference, int index, AudioDeviceType type)
 {
     auto deviceName = pimpl_->getDeviceNameByType(index, type);
-    switch (type) {
+    switch (type) { 
     case AudioDeviceType::PLAYBACK:
         preference.setPortAudioDevicePlayback(deviceName);
         break;
@@ -306,6 +306,8 @@ PortAudioLayer::PortAudioLayerImpl::PortAudioLayerImpl(PortAudioLayer& parent,
     , devicePlayback_ {pref.getPortAudioDevicePlayback()}
     , deviceRingtone_ {pref.getPortAudioDeviceRingtone()}
 {
+    SIP_CORE_INFO() << "PortAudioLayerImpl: prefs are " << deviceRecord_ << " ; " << devicePlayback_
+                    << "; " << deviceRingtone_;
     init(parent);
 }
 
@@ -520,39 +522,171 @@ PortAudioLayer::PortAudioLayerImpl::terminate() const
         SIP_CORE_ERR("PortAudioLayer error : %s", Pa_GetErrorText(err));
 }
 
-static void
-openStreamDevice(PaStream** stream,
-                 PaDeviceIndex device,
-                 Direction direction,
-                 PaStreamCallback* callback,
-                 void* user_data)
-{
-    auto is_out = direction == Direction::Output;
-    auto device_info = Pa_GetDeviceInfo(device);
+#include <vector>
+#include <utility>
+
+using FormatRatePair = std::pair<PaSampleFormat, double>;
+
+std::vector<FormatRatePair> getSupportedFormatSampleRates(PaDeviceIndex device, Direction direction) {
+    std::vector<FormatRatePair> supported;
+
+    auto* deviceInfo = Pa_GetDeviceInfo(device);
+    if (!deviceInfo) return supported;
+
+    bool isOut = direction == Direction::Output;
+    int maxChannels = isOut ? deviceInfo->maxOutputChannels : deviceInfo->maxInputChannels;
 
     PaStreamParameters params;
     params.device = device;
-    params.channelCount = is_out ? device_info->maxOutputChannels : device_info->maxInputChannels;
-    params.sampleFormat = paInt16;
+    params.channelCount = maxChannels;
+    params.hostApiSpecificStreamInfo = nullptr;
+    params.suggestedLatency = isOut ? deviceInfo->defaultLowOutputLatency
+                                    : deviceInfo->defaultLowInputLatency;
+
+    const std::vector<PaSampleFormat> formats = {
+        paFloat32, paInt32, paInt24, paInt16, paInt8, paUInt8
+    };
+
+    const std::vector<double> sampleRates = {
+        8000.0, 16000.0, 22050.0, 32000.0,
+        44100.0, 48000.0, 88200.0, 96000.0, 192000.0
+    };
+    
+    for (auto fmt : formats) {
+        params.sampleFormat = fmt;
+
+        for (auto rate : sampleRates) {
+            PaError err = Pa_IsFormatSupported(
+                isOut ? nullptr : &params,
+                isOut ? &params : nullptr,
+                rate);
+
+            if (err == paFormatIsSupported) {
+                supported.emplace_back(fmt, rate);
+            }
+        }
+    }
+
+    return supported;
+}
+
+const char* formatToString(PaSampleFormat fmt) {
+    switch (fmt) {
+        case paFloat32: return "Float32";
+        case paInt32:   return "Int32";
+        case paInt24:   return "Int24";
+        case paInt16:   return "Int16";
+        case paInt8:    return "Int8";
+        case paUInt8:   return "UInt8";
+        default:        return "Unknown";
+    }
+}
+
+static void
+openStreamDevice(PaStream**      stream,
+                 PaDeviceIndex   device,
+                 Direction       direction,
+                 PaStreamCallback* callback,
+                 void*           user_data)
+{
+    auto is_out = (direction == Direction::Output);
+
+    const PaDeviceInfo* device_info = Pa_GetDeviceInfo(device);
+    if (!device_info) {
+        SIP_CORE_ERR("PortAudioLayer error: Invalid device info.");
+        return;
+    }
+
+    SIP_CORE_INFO() << "PortAudioLayer: openStreamDevice " << (is_out ? "OUTPUT" : "INPUT")
+                    << ", device info : name " << device_info->name;
+
+    // Get all (format, rate) combinations that this device actually supports.
+    auto supportedCombinations = getSupportedFormatSampleRates(device, direction);
+    SIP_CORE_INFO() << "PortAudioLayer: Supported format/sample rate combinations:";
+
+    const double         requested_rate   = device_info->defaultSampleRate;
+    const PaSampleFormat requested_format = paInt16;
+
+    bool               found_exact_pair = false;
+    bool               found_exact_fmt  = false;
+    double             selected_rate    = 0.0;
+    PaSampleFormat     selected_format  = 0;
+    double             fallback_rate    = 0.0;
+    PaSampleFormat     fallback_format  = 0;
+
+    // 1) First pass: see if any combination of rate and fmt is what we trying to find
+    for (const auto& [fmt, rate] : supportedCombinations) {
+        SIP_CORE_INFO() << "PortAudioLayer: - Format: " << formatToString(fmt) 
+                        << ", Rate: " << rate;
+
+        if (rate == requested_rate && fmt == requested_format && !found_exact_pair) {
+            selected_rate   = rate;
+            selected_format = fmt;
+            found_exact_pair = true;
+            SIP_CORE_INFO() << "PortAudioLayer: Found exact rate match!";
+        }
+
+        // Meanwhile remember the first time we see the requested_format
+        if (!found_exact_fmt && fmt == requested_format && !found_exact_pair) {
+            fallback_format = fmt;
+            fallback_rate   = rate;
+            found_exact_fmt = true;
+        }
+    }
+
+    // 2) If we didn’t find any entry at the requested_rate, try format == requested_format.
+    if (!found_exact_pair) {
+        if (found_exact_fmt) {
+            selected_rate   = fallback_rate;
+            selected_format = fallback_format;
+        }
+    }
+
+    // 3) If we still have neither a matching rate nor a matching format, we cannot open.
+    if (selected_format == 0 || selected_rate == 0.0) {
+        SIP_CORE_WARN("PortAudioLayer: Neither requested sample rate (%.0f) nor "
+                      "requested sample format (%s) is supported by device %d (%s). "
+                      "Skipping stream open.",
+                      requested_rate,
+                      formatToString(requested_format),
+                      device,
+                      device_info->name);
+        return;
+    }
+
+    // Log which combination we’re actually going to use:
+    SIP_CORE_INFO() << "PortAudioLayer: Selecting format " 
+                    << formatToString(selected_format) 
+                    << " @ rate " << selected_rate;
+
+    PaStreamParameters params;
+    params.device = device;
+    params.channelCount = is_out ? device_info->maxOutputChannels
+                                 : device_info->maxInputChannels;
+    params.sampleFormat = selected_format;
     params.suggestedLatency = is_out ? device_info->defaultLowOutputLatency
                                      : device_info->defaultLowInputLatency;
     params.hostApiSpecificStreamInfo = nullptr;
 
-    auto err = Pa_OpenStream(stream,
-                             is_out ? nullptr : &params,
-                             is_out ? &params : nullptr,
-                             device_info->defaultSampleRate,
-                             paFramesPerBufferUnspecified,
-                             paNoFlag,
-                             callback,
-                             user_data);
+    if (!is_out) {
+        SIP_CORE_INFO() << "PortAudioLayer: Is format supported (input): "
+                        << Pa_IsFormatSupported(&params, nullptr, selected_rate);
+    }
+
+    PaError err = Pa_OpenStream(stream,
+                                is_out ? nullptr         : &params,
+                                is_out ? &params         : nullptr,
+                                selected_rate,
+                                paFramesPerBufferUnspecified,
+                                paNoFlag,
+                                callback,
+                                user_data);
 
     if (err != paNoError) {
-        auto error = Pa_GetErrorText(err);
-        SIP_CORE_ERR("PortAudioLayer error : %s. Reporting it!", error);
-        emitSignal<libsip_core::ConfigurationSignal::DeviceOpenError>(error, is_out);
+        const char* errorText = Pa_GetErrorText(err);
+        SIP_CORE_ERR("PortAudioLayer error: %s. Reporting it!", errorText);
+        emitSignal<libsip_core::ConfigurationSignal::DeviceOpenError>(errorText, is_out);
     }
-        
 }
 
 static void

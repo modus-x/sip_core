@@ -872,14 +872,34 @@ MediaEncoder::forcePresetX2645(AVCodecContext* encoderCtx)
     } else
 #endif
     {
-        av_opt_set(encoderCtx, "preset", "veryslow", AV_OPT_SEARCH_CHILDREN);
-        av_opt_set(encoderCtx, "tune", "zerolatency", AV_OPT_SEARCH_CHILDREN);
+        if (source_.find("display") != std::string::npos) {
+            // Desktop sharing: optimize for screen content
+            av_opt_set(encoderCtx, "preset", "veryslow", AV_OPT_SEARCH_CHILDREN);    // Balance speed/quality
+            av_opt_set(encoderCtx, "tune", "stillimage", AV_OPT_SEARCH_CHILDREN); // Low latency
 
-        av_opt_set_double(encoderCtx, "crf", h264CrfFromQuality(), AV_OPT_SEARCH_CHILDREN);
+            auto quality = h264CrfFromQuality();
 
-        // av_opt_set_int(encoderCtx, "aq-mode", 3, AV_OPT_SEARCH_CHILDREN);
-        // av_opt_set_double(encoderCtx, "aq-strength", 0.80, AV_OPT_SEARCH_CHILDREN);
-        // av_opt_set(encoderCtx, "partitions", "all", AV_OPT_SEARCH_CHILDREN);
+            av_opt_set_double(encoderCtx, "crf", quality, AV_OPT_SEARCH_CHILDREN);
+
+            av_opt_set_int(encoderCtx, "refs", 1, AV_OPT_SEARCH_CHILDREN);          // Low latency
+
+            // Screen content optimizations
+            av_opt_set_int(encoderCtx, "rc-lookahead", 5, AV_OPT_SEARCH_CHILDREN);  // Reduced for lower latency
+            av_opt_set_int(encoderCtx, "min-keyint", 1, AV_OPT_SEARCH_CHILDREN);    // Allow immediate keyframes on scene change
+
+            // Additional screen optimizations
+            av_opt_set_int(encoderCtx, "bframes", 0, AV_OPT_SEARCH_CHILDREN);       // No B-frames for lower latency
+            av_opt_set_int(encoderCtx, "me", 1, AV_OPT_SEARCH_CHILDREN);            // Diamond motion estimation (faster)
+            av_opt_set_int(encoderCtx, "subme", 6, AV_OPT_SEARCH_CHILDREN);         // Good subpixel refinement
+            av_opt_set_int(encoderCtx, "trellis", 1, AV_OPT_SEARCH_CHILDREN);       // Optimize for sharp edges
+        }
+        else {
+            // Camera sharing: optimize for motion content
+            av_opt_set(encoderCtx, "preset", "ultrafast", AV_OPT_SEARCH_CHILDREN);    // Balance speed/quality
+            av_opt_set(encoderCtx, "tune", "zerolatency", AV_OPT_SEARCH_CHILDREN); // Low latency
+
+            av_opt_set_double(encoderCtx, "crf", 26, AV_OPT_SEARCH_CHILDREN);
+        }
     }
 }
 
@@ -896,7 +916,7 @@ MediaEncoder::h264CrfFromQuality() const
     case 4:
         return 20;
     default:
-        return 30;
+        return 32;
     }
 }
 

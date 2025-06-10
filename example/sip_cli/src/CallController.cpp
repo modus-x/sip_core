@@ -30,9 +30,13 @@ CallController::CallController(const std::string& accountId) :
         { "MEDIA_TYPE", "MEDIA_TYPE_VIDEO"},
         { "ENABLED", "true" },
         { "MUTED", "false" },
-        // { "SOURCE", "display://:0.0" },
+        
+        // { "SOURCE", R"(camera://video=@device_pnp_\\?\usb#vid_1bcf&pid_2284&mi_00#6&2e99a59a&0&0000#{65e8773d-8f56-11d0-a3b9-00a0c9223196}\global)" }, // 4k
+        // { "SOURCE", R"(camera://video=@device_pnp_\\?\usb#vid_09da&pid_2695&mi_00#6&26daa0e0&0&0000#{65e8773d-8f56-11d0-a3b9-00a0c9223196}\global)" }, // aux
+        // { "SOURCE", R"(camera://video=@device_pnp_\\?\usb#vid_04f2&pid_b76f&mi_00#6&330c68f9&0&0000#{65e8773d-8f56-11d0-a3b9-00a0c9223196}\global)" }, // front
         { "LABEL", "video_0" }
     },
+    m_user(),
     m_domain(),
     m_accontId(accountId),
     m_activeConfirence(),
@@ -51,6 +55,7 @@ CallController::~CallController()
         libsip_core::fini();
     }
 
+    hangUp();
     SDL_Quit();
 }
 
@@ -70,6 +75,7 @@ bool CallController::init()
         libsip_core::exportable_callback<libsip_core::CallSignal::ConferenceCreated>(std::bind(&CallController::conferenceCreated, this, std::placeholders::_1, std::placeholders::_2)),
         libsip_core::exportable_callback<libsip_core::CallSignal::ConferenceChanged>(std::bind(&CallController::conferenceChanged, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3)),
         libsip_core::exportable_callback<libsip_core::CallSignal::ConferenceRemoved>(std::bind(&CallController::conferenceRemoved, this, std::placeholders::_1, std::placeholders::_2)),
+        libsip_core::exportable_callback<libsip_core::CallSignal::OnConferenceInfosUpdated>(std::bind(&CallController::confInfoChanged, this, std::placeholders::_1, std::placeholders::_2)),        
     };
 
     libsip_core::registerSignalHandlers(sigMap);
@@ -103,9 +109,12 @@ bool CallController::init()
 
 bool CallController::sendRegister(const std::string& user, const std::string& pass, const std::string& domain)
 {
+    std::lock_guard<std::mutex> lock(m_mtxEvents);
+    
     if(!libsip_core::initialized())
         return false;
 
+    std::cout << "Registring user - " << user << "..." << std::endl;
     std::map<std::string, std::string> account;
     account["Account.type"] = "SIP";
     account["Account.upnpEnabled"] = "false";
@@ -136,6 +145,7 @@ bool CallController::sendRegister(const std::string& user, const std::string& pa
     
     libsip_core::sendRegister(m_accontId, true);
 
+    m_user = user;
     m_domain = domain;
     return true;
 }
@@ -143,7 +153,7 @@ bool CallController::sendRegister(const std::string& user, const std::string& pa
 bool CallController::call(const std::string& callTo)
 {
     std::lock_guard<std::mutex> lock(m_mtxEvents);
-    if(!m_activeCalls.empty())
+    if(!m_activeCalls.empty() || !m_activeConfirence.empty())
         return false;
 
     // build media list settings according to settings
@@ -185,11 +195,16 @@ bool CallController::addParticipant(const std::string& newParticipant)
     if(m_activeCalls.empty())
         return false;
     
+    // build media list settings according to settings
+    std::vector<std::map<std::string, std::string>> mediaList;
+    mediaList.push_back(m_mediaAudio);
+    if(m_isVideoEnabled) mediaList.push_back(m_mediaVideo);
+
     // Create call
-    auto callId = libsip_core::placeCallWithMedia(m_accontId, newParticipant, {});
+    auto callId = libsip_core::placeCallWithMedia(m_accontId, newParticipant, mediaList);
     if (callId.empty())
         return false;
-    
+
     bool result;
     if(m_activeConfirence.empty())
         result =  libsip_core::joinParticipant(m_accontId, m_activeCalls.begin()->second, m_accontId, callId, true);
@@ -198,7 +213,7 @@ bool CallController::addParticipant(const std::string& newParticipant)
 
     if(!result) {
         libsip_core::hangUp(m_accontId, callId);
-        return false; 
+        return false;
     }
 
     m_activeCalls[newParticipant] = callId;
@@ -247,6 +262,7 @@ bool CallController::createConfirence(const std::vector<std::string>& participan
     }
 
     if(m_activeCalls.size() < 2) {
+        m_activeCalls.clear();
         hangUp();
         return false;
     }
@@ -256,11 +272,13 @@ bool CallController::createConfirence(const std::vector<std::string>& participan
 
 bool CallController::isCaptureInProgress()
 {
+    std::lock_guard<std::mutex> lock(m_mtxEvents);
     return libsip_core::getIsRecording(m_accontId, getActiveCall());
 }
 
 bool CallController::startCallCapture()
 {
+    std::lock_guard<std::mutex> lock(m_mtxEvents);
     if(libsip_core::getIsRecording(m_accontId, getActiveCall()))
         return true;
 
@@ -269,6 +287,7 @@ bool CallController::startCallCapture()
 
 bool CallController::stopCallCapture()
 {
+    std::lock_guard<std::mutex> lock(m_mtxEvents);
     if(!libsip_core::getIsRecording(m_accontId, getActiveCall()))
         return true;
 
@@ -278,7 +297,6 @@ bool CallController::stopCallCapture()
 
 void CallController::toggleVideo()
 {
-    
     if(hasActiveCall()) {
         std::lock_guard<std::mutex> lock(m_mtxEvents);
         // build media list settings according to settings
@@ -309,6 +327,12 @@ bool CallController::setVideoDevice(const std::string& videoDevice)
     } else return false;
 
     return true;
+}
+
+std::vector<std::string> CallController::getVideoDeviceList() const
+{
+    std::lock_guard<std::mutex> lock(m_mtxEvents);
+    return libsip_core::getDeviceList();
 }
 
 const std::string CallController::getVideoDevice() const
@@ -359,16 +383,14 @@ void CallController::proccesEvents()
             std::unique_ptr<CreateNewPreviewArgs> args((CreateNewPreviewArgs*)event.user.data1);
 
             std::lock_guard<std::mutex> lock(m_mtxEvents);
-            if(!OpenVideoPrievew(args->id, args->w, args->h)) {
-                std::cerr << "Error: failed to create window for " << args->id << "." << std::endl;
-                return;
+            if(m_previewWindows.find(args->id) == m_previewWindows.end()) {
+                if(!OpenVideoPrievew(args->id, args->w, args->h)) {
+                    std::cerr << "Error: failed to create window for " << args->id << "." << std::endl;
+                    return;
+                }
             }
-            
-            auto it = m_previewWindows.find(args->id);
-            if(it == m_previewWindows.end())
-                return;
 
-            auto ptrWindow = it->second;
+            auto ptrWindow = m_previewWindows.find(args->id)->second;
             libsip_core::SinkTarget target;
             target.preferredFormat = AV_PIX_FMT_RGBA;
             
@@ -436,7 +458,7 @@ bool CallController::OpenVideoPrievew(const std::string& id, int width, int heig
     if(m_previewWindows.find(id) != m_previewWindows.end())
         return false;
 
-    auto sdlWindow = std::shared_ptr<SDLVideoRenderer>(new SDLVideoRenderer(id, width, height));
+    auto sdlWindow = std::shared_ptr<SDLVideoRenderer>(new SDLVideoRenderer(m_user + " - " + id, width, height));
     if(!sdlWindow->init())
         return false;
 
@@ -452,4 +474,6 @@ void CallController::CloseVideoPreview(const std::string& id)
     if(it != m_previewWindows.end()) {
         m_previewWindows.erase(it);
     }
+
+    libsip_core::registerSinkTarget(id, {});
 }

@@ -70,10 +70,10 @@ AudioRtpSession::~AudioRtpSession()
 }
 
 void
-AudioRtpSession::sendRtpEvents(const std::string& events)
+AudioRtpSession::sendRtpEvents(const std::string& events, double duration, unsigned int volume)
 {
     if (sender_) {
-        sender_->sendRtpEvents(events);
+        sender_->sendRtpEvents(events, duration, volume);
     }
 }
 
