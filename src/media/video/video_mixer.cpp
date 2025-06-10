@@ -152,6 +152,7 @@ VideoMixer::stopInputs()
 {
     for (auto& input : localInputs_)
         stopInput(input);
+    localInputs_.clear();
 }
 
 void
@@ -159,6 +160,9 @@ VideoMixer::startInputs()
 {
     // Attach videoInput to mixer and start / restart it if it was stopped before
     for (auto i = 0u; i != localInputs_.size(); ++i) {
+        // attach video input to mixer AS:
+        // no callId
+        // video_X as streamId
         attachVideo(localInputs_[i].get(), "", sip_utils::streamId("", fmt::format("video_{}", i)));
     }
 }
@@ -170,6 +174,7 @@ VideoMixer::setActiveStream(const std::string& id)
     updateLayout();
 }
 
+// just report that layout was updated
 void
 VideoMixer::updateLayout()
 {
@@ -293,17 +298,23 @@ VideoMixer::process()
         return;
     }
 
+    // fill with black to make the background black
+    libav_utils::fillWithBlack(output.pointer());
+
     {
         std::lock_guard<std::mutex> lk(audioOnlySourcesMtx_);
         std::shared_lock lock(rwMutex_);
 
-        int i = 0;
-        bool activeFound = false;
-        bool needsUpdate = layoutUpdated_ > 0;
+        // does current frame is SUCCESSFULLY rendered?
         bool successfullyRendered = audioOnlySources_.size() != 0 && sources_.size() == 0;
+
+        // collection of patricipants, both audio & video
         std::vector<SourceInfo> sourcesInfo;
         sourcesInfo.reserve(sources_.size() + audioOnlySources_.size());
-        // add all audioonlysources
+
+        // add all audioonlysources with width & height set to 10
+        // BUT set 10 to w&ho nly if currentLayout is not ONE_BIG or active stream was found and currentLayout is ONE_BIG
+        // The width and height set to 0 here will led the peer to filter them out.
         for (auto& [callId, streamId] : audioOnlySources_) {
             auto active = verifyActive(streamId);
             if (currentLayout_ != Layout::ONE_BIG or active) {
@@ -314,10 +325,18 @@ VideoMixer::process()
                     successfullyRendered = true;
                 else
                     sourcesInfo.emplace_back(SourceInfo {{}, 0, 0, 0, 0, false, callId, streamId});
-                // Add all participants info even in ONE_BIG layout.
-                // The width and height set to 0 here will led the peer to filter them out.
             }
         }
+
+        // counter of all VIDEO frames
+        int i = 0;
+
+        // did active stream was found?
+        bool activeFound = false;
+
+        // did updateLayout was called before
+        bool needsUpdate = layoutUpdated_ > 0;
+
         // add video sources
         for (auto& x : sources_) {
             /* thread stop pending? */
@@ -326,21 +345,27 @@ VideoMixer::process()
 
             auto sinfo = streamInfo(x->source);
             auto activeSource = verifyActive(sinfo.streamId);
+
             if (currentLayout_ != Layout::ONE_BIG or activeSource) {
                 // make rendered frame temporarily unavailable for update()
                 // to avoid concurrent access.
                 std::shared_ptr<VideoFrame> input = x->getRenderFrame();
                 std::shared_ptr<VideoFrame> fooInput = std::make_shared<VideoFrame>();
 
+                // set "wantedIndex" to current index of video source, for GRID layout
                 auto wantedIndex = i;
                 if (currentLayout_ == Layout::ONE_BIG) {
+                    // reset to zero if ONE_BIG layout
                     wantedIndex = 0;
                     activeFound = true;
                 } else if (currentLayout_ == Layout::ONE_BIG_WITH_SMALL) {
+                    // show active stream FIRST
                     if (activeSource) {
                         wantedIndex = 0;
                         activeFound = true;
                     } else if (not activeFound) {
+                        // active streams appears at i == 3
+                        // 1 2 3 0 4 5 6
                         wantedIndex += 1;
                     }
                 }
@@ -359,6 +384,7 @@ VideoMixer::process()
                 // If orientation changed or if the first valid frame for source
                 // is received -> trigger layout calculation and confInfo update
                 if (x->rotation != fooInput->getOrientation() or !x->w or !x->h) {
+                    // layoutUpdated_ += 1;
                     updateLayout();
                     needsUpdate = true;
                 }
@@ -375,6 +401,7 @@ VideoMixer::process()
 
                 x->hasVideo = !blackFrame && successfullyRendered;
                 if (hasVideo != x->hasVideo) {
+                    // layoutUpdated_ += 1;
                     updateLayout();
                     needsUpdate = true;
                 }

@@ -121,6 +121,7 @@ Conference::Conference(const std::shared_ptr<Account>& account,
                 bool isLocalMuted = false, isPeerRecording = false;
                 std::string deviceId {};
                 auto active = false;
+                // if callId is NON empty, then this is remote patricipant
                 if (!info.callId.empty()) {
                     std::string callId = info.callId;
                     if (auto call = std::dynamic_pointer_cast<SIPCall>(getCall(callId))) {
@@ -163,7 +164,7 @@ Conference::Conference(const std::shared_ptr<Account>& account,
                         // TODO: this is a first version, we assume that the peer is not
                         // a master of a conference and there is only one remote
                         // In the future, we should retrieve confInfo from the call
-                        // To merge layouts informations
+                        // To merge layout information
                         isModeratorMuted = shared->isMuted(streamId);
                         if (auto videoMixer = shared->videoMixer_)
                             active = videoMixer->verifyActive(streamId);
@@ -184,7 +185,6 @@ Conference::Conference(const std::shared_ptr<Account>& account,
                     auto isModerator = shared->isModerator(peerId);
                     if (uri.empty() && !hostAdded) {
                         hostAdded = true;
-                        peerId = "host"sv;
                         deviceId = Manager::instance()
                                        .getVideoManager()
                                        .videoDeviceMonitor.getMRLForDefaultDevice();
