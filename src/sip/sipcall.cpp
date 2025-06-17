@@ -982,7 +982,6 @@ SIPCall::hangup(int reason)
 
     // Stop all RTP streams
     stopAllMedia();
-    detachAudioFromConference();
     setState(Call::ConnectionState::DISCONNECTED, reason);
     removeCall();
 }
@@ -2576,6 +2575,7 @@ SIPCall::exitConference()
         auto& rbPool = Manager::instance().getRingBufferPool();
         rbPool.bindCallID(getCallId(), RingBufferPool::DEFAULT_ID);
         rbPool.flush(RingBufferPool::DEFAULT_ID);
+        detachAudioFromConference();
     }
 #ifdef ENABLE_VIDEO
     for (const auto& videoRtp : getRtpSessionList(MediaType::MEDIA_VIDEO))
