@@ -312,23 +312,6 @@ VideoMixer::process()
         std::vector<SourceInfo> sourcesInfo;
         sourcesInfo.reserve(sources_.size() + audioOnlySources_.size());
 
-        // add all audioonlysources with width & height set to 10
-        // BUT set 10 to w&ho nly if currentLayout is not ONE_BIG or active stream was found and currentLayout is ONE_BIG
-        // The width and height set to 0 here will led the peer to filter them out.
-        for (auto& [callId, streamId] : audioOnlySources_) {
-            auto active = verifyActive(streamId);
-            if (currentLayout_ != Layout::ONE_BIG or active) {
-                sourcesInfo.emplace_back(SourceInfo {{}, 0, 0, 10, 10, false, callId, streamId});
-            }
-            if (currentLayout_ == Layout::ONE_BIG) {
-                if (active)
-                    successfullyRendered = true;
-                else
-                    sourcesInfo.emplace_back(SourceInfo {{}, 0, 0, 0, 0, false, callId, streamId});
-            }
-        }
-
-        // counter of all VIDEO frames
         int i = 0;
 
         // did active stream was found?
@@ -336,6 +319,45 @@ VideoMixer::process()
 
         // did updateLayout was called before
         bool needsUpdate = layoutUpdated_ > 0;
+
+        // first, iterate and draw audioOnlySources_
+        for (auto& [callId, streamId] : audioOnlySources_) {
+            auto isActiveSource = verifyActive(streamId);
+            std::shared_ptr<VideoFrame> audioFrame = std::make_shared<VideoFrame>();
+            audioFrame->reserve(format_, 640, 480);
+
+            // set "wantedIndex" to current index of video source, for GRID layout
+            auto wantedIndex = i;
+            if (currentLayout_ == Layout::ONE_BIG) {
+                // reset to zero if ONE_BIG layout
+                wantedIndex = 0;
+                activeFound = true;
+            } else if (currentLayout_ == Layout::ONE_BIG_WITH_SMALL) {
+                // show active stream FIRST
+                if (isActiveSource) {
+                    wantedIndex = 0;
+                    activeFound = true;
+                } else if (not activeFound) {
+                    // active streams appears at i == 3
+                    // 1 2 3 0 4 5 6
+                    wantedIndex += 1;
+                }
+            }
+
+            auto audioSource = std::make_unique<VideoMixer::VideoMixerSource>();
+
+            // calc pos, but DO NOT render anything
+            calc_position(audioSource, audioFrame, wantedIndex);
+            sourcesInfo.emplace_back(SourceInfo { {},
+                                        audioSource->x,
+                                        audioSource->y,
+                                        audioSource->w,
+                                        audioSource->h,
+                                        false,
+                                        callId,
+                                        streamId});
+            i++;
+        }
 
         // add video sources
         for (auto& x : sources_) {
@@ -491,7 +513,7 @@ VideoMixer::calc_position(std::unique_ptr<VideoMixerSource>& source,
 
     // Compute cell size/position
     int cell_width, cell_height, cellW_off, cellH_off;
-    const int n = currentLayout_ == Layout::ONE_BIG ? 1 : sources_.size();
+    const int n = currentLayout_ == Layout::ONE_BIG ? 1 : sources_.size() + audioOnlySources_.size();
     const int zoom = currentLayout_ == Layout::ONE_BIG_WITH_SMALL ? std::max(MIN_LINE_ZOOM, n)
                                                                   : ceil(sqrt(n));
     if (currentLayout_ == Layout::ONE_BIG_WITH_SMALL && index == 0) {
