@@ -250,7 +250,7 @@ public:
     /**
      * Set default media source for the local host
      */
-    void setLocalHostDefaultMediaSource();
+    void setLocalHostDefaultMediaSource(const std::string& source = {});
 
     /**
      * Set the mute state of the local host
@@ -299,9 +299,9 @@ public:
     void removeParticipant(const std::string& participant_id);
 
     /**
-     * Attach local audio/video to the conference
+     * Attach local audio/video to the conference WITH source
      */
-    void attachLocalParticipant();
+    void attachLocalParticipant(const std::string& source = {});
 
     /**
      * Detach local audio/video from the conference

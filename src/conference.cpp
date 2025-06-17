@@ -295,7 +295,7 @@ Conference::setState(State state)
 }
 
 void
-Conference::setLocalHostDefaultMediaSource()
+Conference::setLocalHostDefaultMediaSource(const std::string& source)
 {
     hostSources_.clear();
     // Setup local audio source
@@ -320,7 +320,7 @@ Conference::setLocalHostDefaultMediaSource()
                    false,
                    false,
                    true,
-                   Manager::instance().getVideoManager().videoDeviceMonitor.getMRLForDefaultDevice(),
+                   source.empty() ? Manager::instance().getVideoManager().videoDeviceMonitor.getMRLForDefaultDevice() : source,
                    sip_utils::DEFAULT_VIDEO_STREAMID};
         }
         SIP_CORE_DEBUG("[conf {:s}] Setting local host video source to [{:s}]",
@@ -792,13 +792,13 @@ Conference::removeParticipant(const std::string& participant_id)
 }
 
 void
-Conference::attachLocalParticipant()
+Conference::attachLocalParticipant(const std::string& source)
 {
     SIP_CORE_INFO("Attach local participant to conference %s", id_.c_str());
 
     if (getState() == State::ACTIVE_DETACHED) {
         setState(State::ACTIVE_ATTACHED);
-        setLocalHostDefaultMediaSource();
+        setLocalHostDefaultMediaSource(source);
 
         auto& rbPool = Manager::instance().getRingBufferPool();
         for (const auto& participant : getParticipantList()) {

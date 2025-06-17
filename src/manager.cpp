@@ -1341,6 +1341,17 @@ Manager::joinParticipant(const std::string& accountId,
         return false;
     }
 
+    auto call2Media = call2->getMediaAttributeList();
+
+    // use default source if not found
+    std::string source;
+
+    for (auto m : call2Media) {
+        if (m.type_ == MediaType::MEDIA_VIDEO) {
+            source = m.sourceUri_;
+        }
+    }
+
     auto conf = std::make_shared<Conference>(account, "");
     account->attach(conf);
     emitSignal<libsip_core::CallSignal::ConferenceCreated>(account->getAccountID(),
@@ -1353,7 +1364,7 @@ Manager::joinParticipant(const std::string& accountId,
     // Switch current call id to this conference
     if (attached) {
         // attach local participant
-        conf->attachLocalParticipant();
+        conf->attachLocalParticipant(source);
         pimpl_->switchCall(conf->getConfId());
         conf->setState(Conference::State::ACTIVE_ATTACHED);
     } else {
