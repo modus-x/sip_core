@@ -216,7 +216,7 @@ Conference::Conference(const std::shared_ptr<Account>& account,
         [&](const auto& accountUri, const auto& deviceId, const auto& streamId, bool state) {
             muteStream(accountUri, deviceId, streamId, state);
         });
-    parser_.onSetLayout([&](int layout) { setLayout(layout); });
+    // parser_.onSetLayout([&](int layout) { setLayout(layout); });
 
     // Version 0, deprecated
     parser_.onKickParticipant([&](const auto& participantId) { hangupParticipant(participantId); });
