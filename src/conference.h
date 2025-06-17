@@ -197,9 +197,7 @@ public:
      * Constructor for this class, increment static counter
      */
     explicit Conference(const std::shared_ptr<Account>&,
-                        const std::string& confId = "",
-                        bool attachHost = true,
-                        const std::vector<MediaAttribute>& hostAttr = {});
+                        const std::string& confId = "");
 
     /**
      * Destructor for this class, decrement static counter
@@ -437,7 +435,7 @@ private:
 
     std::string id_;
     std::weak_ptr<Account> account_;
-    State confState_ {State::ACTIVE_ATTACHED};
+    State confState_ {State::ACTIVE_DETACHED};
     mutable std::mutex participantsMtx_ {};
     ParticipantSet participants_;
 
