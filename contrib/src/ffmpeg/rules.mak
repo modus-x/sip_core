@@ -74,6 +74,7 @@ FFMPEGCONF += \
 	--enable-encoder=pcm_mulaw \
 	--enable-decoder=pcm_mulaw \
 	--enable-encoder=libvpx_vp8 \
+	--enable-encoder=libvpx_vp9 \
 	--enable-decoder=vp8 \
 	--enable-decoder=vp9 \
 	--enable-encoder=h263 \

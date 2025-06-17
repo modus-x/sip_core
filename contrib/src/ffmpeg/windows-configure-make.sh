@@ -38,7 +38,6 @@ FFMPEGCONF+='
 FFMPEGCONF+='
             --enable-demuxers
             --enable-decoders
-            --disable-decoder=libvpx_vp9
             --disable-decoder=vp3
             --disable-decoder=vp4
             --disable-decoder=vp5
@@ -67,6 +66,7 @@ FFMPEGCONF+='
 FFMPEGCONF+='
             --enable-libvpx
             --enable-encoder=libvpx_vp8
+            --enable-encoder=libvpx_vp9
             --enable-decoder=vp8 
             --enable-decoder=vp9
             --enable-libopus
