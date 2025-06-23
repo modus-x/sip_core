@@ -197,9 +197,7 @@ public:
      * Constructor for this class, increment static counter
      */
     explicit Conference(const std::shared_ptr<Account>&,
-                        const std::string& confId = "",
-                        bool attachHost = true,
-                        const std::vector<MediaAttribute>& hostAttr = {});
+                        const std::string& confId = "");
 
     /**
      * Destructor for this class, decrement static counter
@@ -252,7 +250,7 @@ public:
     /**
      * Set default media source for the local host
      */
-    void setLocalHostDefaultMediaSource();
+    void setLocalHostDefaultMediaSource(const std::string& source = {});
 
     /**
      * Set the mute state of the local host
@@ -301,9 +299,9 @@ public:
     void removeParticipant(const std::string& participant_id);
 
     /**
-     * Attach local audio/video to the conference
+     * Attach local audio/video to the conference WITH source
      */
-    void attachLocalParticipant();
+    void attachLocalParticipant(const std::string& source = {});
 
     /**
      * Detach local audio/video from the conference
@@ -437,7 +435,7 @@ private:
 
     std::string id_;
     std::weak_ptr<Account> account_;
-    State confState_ {State::ACTIVE_ATTACHED};
+    State confState_ {State::ACTIVE_DETACHED};
     mutable std::mutex participantsMtx_ {};
     ParticipantSet participants_;
 
