@@ -419,11 +419,11 @@ Conference::takeOverMediaSourceControl(const std::string& callId)
         }
 
         if (getState() == State::ACTIVE_ATTACHED) {
-            // If it's the first participant, just use its mute state.
+            // If it's the first participant, just use its mute state as local
             if (participants_.size() == 1) {
                 setLocalHostMuteState(iter->type_, iter->muted_);
             } else {
-                // The best logic here is to set muted only if previous state was muted.
+                // The best logic here is to set local state as muted only if: previous local state was muted AND call media is muted
                 setLocalHostMuteState(iter->type_, iter->muted_ and isMediaSourceMuted(iter->type_));
             }
         }
