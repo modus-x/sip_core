@@ -618,7 +618,11 @@ Conference::addParticipant(const std::string& participant_id)
         // In conference, if a participant joins with an audio only
         // call, it must be listed in the audioonlylist.
         auto mediaList = call->getMediaAttributeList();
-        if (videoMixer_ && not MediaAttribute::hasMediaType(mediaList, MediaType::MEDIA_VIDEO)) {
+        bool hasValidVideo = std::any_of(mediaList.begin(), mediaList.end(), 
+                                        [](const MediaAttribute& media) {
+                                            return media.hasValidVideo();
+                                        });
+        if (videoMixer_ && !hasValidVideo) {
             videoMixer_->addAudioOnlySource(call->getCallId(),
                                             sip_utils::streamId(call->getCallId(),
                                                                 sip_utils::DEFAULT_AUDIO_STREAMID));

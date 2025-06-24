@@ -103,6 +103,6 @@ public:
     // audio input (capture) of the encoding session, resulting in
     // sending RTP packets without actual audio (silence).
 
-    bool hasValidVideo();
+    bool hasValidVideo() const;
 };
 } // namespace sip_core

@@ -200,7 +200,7 @@ MediaAttribute::toString(bool full) const
 }
 
 bool
-MediaAttribute::hasValidVideo()
+MediaAttribute::hasValidVideo() const
 {
     return type_ == MediaType::MEDIA_VIDEO && enabled_&& !muted_ && !onHold_;
 }
