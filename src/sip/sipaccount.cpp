@@ -1160,7 +1160,7 @@ SIPAccount::getToUri(const std::string& username) const
     scheme = "sip:";
 
     // Check if scheme is already specified
-    if (username.find("sip") != std::string::npos)
+    if (username.size() >= 3 && username.compare(0, 4, scheme) == 0)
         scheme = "";
 
     // Check if hostname is already specified
