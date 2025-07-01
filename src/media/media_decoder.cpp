@@ -681,6 +681,8 @@ MediaDecoder::decode(AVPacket& packet)
 #endif
     auto frame = f->pointer();
     ret = avcodec_receive_frame(decoderCtx_, frame);
+    // fix for sdp time_base
+    decoderCtx_->time_base = av_inv_q(decoderCtx_->framerate);
     frame->time_base = decoderCtx_->time_base;
     if (resolutionChangedCallback_) {
         if (decoderCtx_->width != width_ or decoderCtx_->height != height_) {

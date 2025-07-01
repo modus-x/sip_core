@@ -64,7 +64,7 @@ private:
     std::vector<VideoSize> sizeList_;
     std::map<VideoSize, std::vector<FrameRate>> rateList_;
     std::map<VideoSize, AM_MEDIA_TYPE*> capMap_;
-    FrameRate desktopFrameRate_ = {30};
+    FrameRate desktopFrameRate_ = {10};
 
     void fail(const std::string& error);
 };

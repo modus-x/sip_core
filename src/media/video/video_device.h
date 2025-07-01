@@ -45,7 +45,6 @@ namespace video {
 using VideoSize = std::pair<unsigned, unsigned>;
 using FrameRate = rational<double>;
 static constexpr const char DEVICE_DESKTOP[] = "desktop";
-static constexpr int DESKTOP_FRAME_RATE = 10;
 
 class VideoDeviceImpl;
 
@@ -227,7 +226,7 @@ private:
 
         // for desktop, any framerate is fine
         if (name == "desktop") {
-            return FrameRate(DESKTOP_FRAME_RATE);
+            rate_val;
         }
 
         double closest_dist = std::numeric_limits<double>::max();

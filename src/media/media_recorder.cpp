@@ -248,7 +248,7 @@ MediaRecorder::stopRecording()
 
 Observer<std::shared_ptr<MediaFrame>>*
 MediaRecorder::addStream(const MediaStream& ms)
-{
+    {
     std::lock_guard<std::mutex> lk(mutexStreamSetup_);
     if (audioOnly_ && ms.isVideo) {
         SIP_CORE_ERR() << "Trying to add video stream to audio only recording";
@@ -340,39 +340,60 @@ MediaRecorder::onFrame(const std::string& name, const std::shared_ptr<MediaFrame
 #if defined(ENABLE_VIDEO) && defined(RING_ACCEL)
     }
 #endif // ENABLE_VIDEO && RING_ACCEL
-    clone->pointer()->pts = av_rescale_q_rnd(av_gettime() - startTimeStamp_,
-                                             {1, AV_TIME_BASE},
-                                             ms.timeBase,
-                                             static_cast<AVRounding>(AV_ROUND_NEAR_INF
-                                                                     | AV_ROUND_PASS_MINMAX));
-    std::unique_ptr<MediaFrame> filteredFrame;
+    
 #ifdef ENABLE_VIDEO
-    if (ms.isVideo && videoFilter_ && outputVideoFilter_) {
+if (ms.isVideo && videoFilter_ && outputVideoFilter_) {
+    clone->pointer()->pts = av_rescale_q_rnd(av_gettime() - startTimeStamp_,
+                                            {1, AV_TIME_BASE},
+                                            {1, targetFramerate_},
+                                            static_cast<AVRounding>(AV_ROUND_NEAR_INF
+                                                                    | AV_ROUND_PASS_MINMAX));
         std::lock_guard<std::mutex> lk(mutexFilterVideo_);
         videoFilter_->feedInput(clone->pointer(), name);
         auto videoFilterOutput = videoFilter_->readOutput();
         if (videoFilterOutput) {
             outputVideoFilter_->feedInput(videoFilterOutput->pointer(), "input");
-            filteredFrame = outputVideoFilter_->readOutput();
+            videoFilterOutput = outputVideoFilter_->readOutput();
         }
+        
+        if(videoFilterOutput)
+        {
+            auto delta = clone->pointer()->pts - lastVideoPts_;
+            if(delta) {
+                std::lock_guard<std::mutex> lk(mutexFrameBuff_);
+                std::unique_ptr<MediaFrame> f = std::make_unique<MediaFrame>();;
+                f->copyFrom(*videoFilterOutput);
+                frameBuff_.emplace_back(std::move(f));
+                lastVideoPts_ = clone->pointer()->pts;
+                cv_.notify_one();
+            }
+        }
+        
     } else if (audioFilter_ && outputAudioFilter_) {
-#endif // ENABLE_VIDEO
+        #endif // ENABLE_VIDEO
+        clone->pointer()->pts = av_rescale_q_rnd(av_gettime() - startTimeStamp_,
+                                             {1, AV_TIME_BASE},
+                                             ms.timeBase,
+                                             static_cast<AVRounding>(AV_ROUND_NEAR_INF
+                                                                     | AV_ROUND_PASS_MINMAX));
+        
         std::lock_guard<std::mutex> lk(mutexFilterAudio_);
         audioFilter_->feedInput(clone->pointer(), name);
         auto audioFilterOutput = audioFilter_->readOutput();
+        std::unique_ptr<MediaFrame> filteredFrame;
         if (audioFilterOutput) {
             outputAudioFilter_->feedInput(audioFilterOutput->pointer(), "input");
             filteredFrame = outputAudioFilter_->readOutput();
         }
+        
+        if (filteredFrame) {
+            std::lock_guard<std::mutex> lk(mutexFrameBuff_);
+            frameBuff_.emplace_back(std::move(filteredFrame));
+            cv_.notify_one();
+        }
 #ifdef ENABLE_VIDEO
     }
 #endif // ENABLE_VIDEO
-
-    if (filteredFrame) {
-        std::lock_guard<std::mutex> lk(mutexFrameBuff_);
-        frameBuff_.emplace_back(std::move(filteredFrame));
-        cv_.notify_one();
-    }
 }
 
 int
@@ -430,7 +451,7 @@ MediaRecorder::initRecord()
         videoStream.timeBase = rational<int>(0, 1);
         videoStream.width = 1280;
         videoStream.height = 720;
-        videoStream.frameRate = rational<int>(30, 1);
+        videoStream.frameRate = rational<int>(targetFramerate_, 1);
         videoStream.bitrate = Manager::instance().videoPreferences.getRecordQuality();
         // we need global header for mkv format
         videoStream.flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
@@ -538,7 +559,7 @@ MediaRecorder::setupVideoOutput()
 
     ret = outputVideoFilter_
               ->initialize("[input]" + scaleFilter
-                               + ",pad=1280:720:(ow-iw)/2:(oh-ih)/2,format=pix_fmts=yuv420p,fps=30",
+                               + ",pad=1280:720:(ow-iw)/2:(oh-ih)/2,format=pix_fmts=yuv420p",
                            {secondaryFilter});
 
     if (ret < 0) {
@@ -558,7 +579,7 @@ MediaRecorder::buildVideoFilter(const std::vector<MediaStream>& peers,
 
     switch (peers.size()) {
     case 0:
-        v << "[" << local.name << "] fps=30, format=pix_fmts=yuv420p";
+        v << "[" << local.name << "] format=pix_fmts=yuv420p";
         break;
     case 1: {
         auto p = peers[0];
@@ -569,14 +590,17 @@ MediaRecorder::buildVideoFilter(const std::vector<MediaStream>& peers,
 
         // NOTE -2 means preserve aspect ratio and have the new number be even
         if (needScale)
-            v << "[" << p.name << "] fps=" << newFps << ", scale=-2:" << newHeight << " [v:m]; ";
-        else
-            v << "[" << p.name << "] fps=" << newFps << " [v:m]; ";
+            v << "[" << p.name << "] scale=-2:" << newHeight << " [v:m]; ";
 
-        v << "[" << local.name << "] fps=" << newFps << ", scale=-2:" << newHeight / 5
+        v << "[" << local.name << "] scale=-2:" << newHeight / 5
           << " [v:o]; ";
 
-        v << "[v:m] [v:o] overlay=main_w-overlay_w:main_h-overlay_h"
+        if(needScale)
+            v << "[v:m]";
+        else 
+            v << "[" << p.name << "]";
+
+        v << " [v:o] overlay=main_w-overlay_w:main_h-overlay_h"
           << ", format=pix_fmts=yuv420p";
     } break;
     default:
