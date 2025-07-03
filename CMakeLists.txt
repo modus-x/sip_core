@@ -423,7 +423,7 @@ if(MSVC)
 endif()
 
 if(ENABLE_CLI_EXAMPLE)
-  add_subdirectory(example/sip_cli EXCLUDE_FROM_ALL)
+add_subdirectory(example/sip_cli)
 endif()
 
 target_compile_definitions(

@@ -144,6 +144,8 @@ private:
     std::string buildAudioFilter(const std::vector<MediaStream>& peers,
                                  const MediaStream& local) const;
 
+    static const int targetFramerate_ = 30;
+
     std::mutex mutexFrameBuff_;
     std::mutex mutexFilterVideo_;
     std::mutex mutexFilterAudio_;

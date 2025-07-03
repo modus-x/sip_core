@@ -227,7 +227,7 @@ private:
 
         // for desktop, any framerate is fine
         if (name == "desktop") {
-            return FrameRate(DESKTOP_FRAME_RATE);
+            rate_val;
         }
 
         double closest_dist = std::numeric_limits<double>::max();
