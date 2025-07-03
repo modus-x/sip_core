@@ -263,6 +263,12 @@ bool CallController::createConfirence(const std::vector<std::string>& participan
     return true;
 }
 
+bool CallController::moveParticipant(size_t from_index, size_t to_index)
+{
+    return true;
+}
+
+
 bool CallController::isCaptureInProgress()
 {
     return libsip_core::getIsRecording(m_accontId, getActiveCall());

@@ -101,6 +101,8 @@ public:
 
     bool verifyActive(const std::string& id) { return activeStream_ == id; }
 
+    bool moveSource(size_t from_index, size_t to_index);
+
     void setVideoLayout(Layout newLayout)
     {
         currentLayout_ = newLayout;

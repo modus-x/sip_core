@@ -32,6 +32,7 @@ public:
     bool addParticipant(const std::string& newParticipant);
     bool removeParticipant(const std::string& participant);
     bool createConfirence(const std::vector<std::string>& participantsList);
+    bool moveParticipant(size_t from_index, size_t to_index);
 
     bool isCaptureInProgress();
     bool startCallCapture();
