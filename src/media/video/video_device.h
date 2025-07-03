@@ -45,6 +45,7 @@ namespace video {
 using VideoSize = std::pair<unsigned, unsigned>;
 using FrameRate = rational<double>;
 static constexpr const char DEVICE_DESKTOP[] = "desktop";
+static constexpr int DESKTOP_FRAME_RATE = 30;
 
 class VideoDeviceImpl;
 

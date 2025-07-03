@@ -1340,52 +1340,19 @@ Manager::joinParticipant(const std::string& accountId,
         SIP_CORE_ERR("Could not find call %s", callId2.c_str());
         return false;
     }
-    std::vector<MediaAttribute> allMedia {};
-    std::vector<MediaAttribute> media {};
 
-    auto call1Media = call1->getMediaAttributeList();
     auto call2Media = call2->getMediaAttributeList();
 
-    bool audioMuted = true;
-    bool videoMuted = true;
+    // use default source if not found
+    std::string source;
 
-    // if even one source is UN muted, then make mixer source unmuted
-    // TODO: add media attribute list as function parameter
-    for (auto m : call1Media) {
-        if (m.type_ == MediaType::MEDIA_AUDIO) {
-            allMedia.push_back((m));
-            if (m.muted_ == false) {
-                audioMuted = false;
-            }
-        }
+    for (auto m : call2Media) {
         if (m.type_ == MediaType::MEDIA_VIDEO) {
-            allMedia.push_back((m));
-            if (m.muted_ == false) {
-                videoMuted = false;
-            }
+            source = m.sourceUri_;
         }
     }
 
-    // find first audio + video
-    auto itVideo = std::find_if(allMedia.begin(), allMedia.end(), [&](auto attr) {
-        return attr.type_ == MediaType::MEDIA_VIDEO;
-    });
-
-    if (itVideo != allMedia.end()) {
-        itVideo->muted_ = videoMuted;
-        media.push_back(*itVideo);
-    }
-
-    auto itAudio = std::find_if(allMedia.begin(), allMedia.end(), [&](auto attr) {
-        return attr.type_ == MediaType::MEDIA_AUDIO;
-    });
-
-    if (itAudio != allMedia.end()) {
-        itAudio->muted_ = audioMuted;
-        media.push_back(*itAudio);
-    }
-
-    auto conf = std::make_shared<Conference>(account, "", attached, media);
+    auto conf = std::make_shared<Conference>(account, "");
     account->attach(conf);
     emitSignal<libsip_core::CallSignal::ConferenceCreated>(account->getAccountID(),
                                                            conf->getConfId());
@@ -1396,6 +1363,8 @@ Manager::joinParticipant(const std::string& accountId,
 
     // Switch current call id to this conference
     if (attached) {
+        // attach local participant
+        conf->attachLocalParticipant(source);
         pimpl_->switchCall(conf->getConfId());
         conf->setState(Conference::State::ACTIVE_ATTACHED);
     } else {

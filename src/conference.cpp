@@ -49,56 +49,19 @@ using namespace std::literals;
 namespace sip_core {
 
 Conference::Conference(const std::shared_ptr<Account>& account,
-                       const std::string& confId,
-                       bool attachHost,
-                       const std::vector<MediaAttribute>& hostAttr)
+                       const std::string& confId)
     : id_(confId.empty() ? Manager::instance().callFactory.getNewCallID() : confId)
     , account_(account)
 #ifdef ENABLE_VIDEO
     , videoEnabled_(account->isVideoEnabled())
-    , attachHost_(attachHost)
 #endif
 {
-    /** NOTE:
-     *
-     *** Handling mute state of the local host.
-     *
-     * When a call is added to a conference, the media source of the
-     * call is set to the audio/video mixers output, and the host media
-     * source (e.g. camera), is added as a source for the mixer.
-     * Note that, by design, the mixers are never muted, but the mixer
-     * can produce audio/video frames with no content (silence or black
-     * video frames) if all the participants are muted.
-     *
-     * The mute state of the local host is set as follows:
-     *
-     * 1. If the video is disabled, the mute state is irrelevant.
-     * 2. If the local is not attached, the mute state is irrelevant.
-     * 3. When the conference is created from existing calls:
-     *  the mute state is set to true if the local mute state of
-     *  all participating calls are true.
-     * 4. Attaching the local host to an existing conference:
-     *  the audio and video is set to the default capture device
-     *  (microphone and/or camera), and set to un-muted state.
-     */
-
     SIP_CORE_INFO("Create new conference %s", id_.c_str());
-    if (hostAttr.empty()) {
-        setLocalHostDefaultMediaSource();
-    } else {
-        hostSources_ = hostAttr;
-        reportMediaNegotiationStatus();
-    }
+
     duration_start_ = clock::now();
 
 #ifdef ENABLE_VIDEO
-    auto itVideo = std::find_if(hostSources_.begin(), hostSources_.end(), [&](auto attr) {
-        return attr.type_ == MediaType::MEDIA_VIDEO;
-    });
-    // Only set host source if creating conference from joining calls
-    auto hasVideo = videoEnabled_ && itVideo != hostSources_.end() && attachHost_;
-    auto source = hasVideo ? itVideo->sourceUri_ : "";
-    videoMixer_ = std::make_shared<video::VideoMixer>(id_, source, hasVideo);
+    videoMixer_ = std::make_shared<video::VideoMixer>(id_);
     videoMixer_->setOnSourcesUpdated([this](std::vector<video::SourceInfo>&& infos) {
         runOnMainThread([w = weak(), infos = std::move(infos)] {
             auto shared = w.lock();
@@ -227,10 +190,6 @@ Conference::Conference(const std::shared_ptr<Account>& account,
         });
     });
 
-    if (attachHost && itVideo == hostSources_.end()) {
-        // If no video, we still want to attach outself
-        videoMixer_->addAudioOnlySource("", "host_audio_0");
-    }
     auto conf_res = split_string_to_unsigned(sip_core::Manager::instance()
                                                  .videoPreferences.getConferenceResolution(),
                                              'x');
@@ -257,7 +216,7 @@ Conference::Conference(const std::shared_ptr<Account>& account,
         [&](const auto& accountUri, const auto& deviceId, const auto& streamId, bool state) {
             muteStream(accountUri, deviceId, streamId, state);
         });
-    parser_.onSetLayout([&](int layout) { setLayout(layout); });
+    // parser_.onSetLayout([&](int layout) { setLayout(layout); });
 
     // Version 0, deprecated
     parser_.onKickParticipant([&](const auto& participantId) { hangupParticipant(participantId); });
@@ -274,11 +233,6 @@ Conference::Conference(const std::shared_ptr<Account>& account,
     parser_.onVoiceActivity(
         [&](const auto& streamId, bool state) { setVoiceActivity(streamId, state); });
     sip_core_tracepoint(conference_begin, id_.c_str());
-
-    // if not muted, start inputs
-    if (!isMediaSourceMuted(MediaType::MEDIA_VIDEO)) {
-        videoMixer_->startInputs();
-    }
 }
 
 Conference::~Conference()
@@ -341,7 +295,7 @@ Conference::setState(State state)
 }
 
 void
-Conference::setLocalHostDefaultMediaSource()
+Conference::setLocalHostDefaultMediaSource(const std::string& source)
 {
     hostSources_.clear();
     // Setup local audio source
@@ -366,7 +320,7 @@ Conference::setLocalHostDefaultMediaSource()
                    false,
                    false,
                    true,
-                   Manager::instance().getVideoManager().videoDeviceMonitor.getMRLForDefaultDevice(),
+                   source.empty() ? Manager::instance().getVideoManager().videoDeviceMonitor.getMRLForDefaultDevice() : source,
                    sip_utils::DEFAULT_VIDEO_STREAMID};
         }
         SIP_CORE_DEBUG("[conf {:s}] Setting local host video source to [{:s}]",
@@ -465,11 +419,11 @@ Conference::takeOverMediaSourceControl(const std::string& callId)
         }
 
         if (getState() == State::ACTIVE_ATTACHED) {
-            // If it's the first participant, just use its mute state.
+            // If it's the first participant, just use its mute state as local
             if (participants_.size() == 1) {
                 setLocalHostMuteState(iter->type_, iter->muted_);
             } else {
-                // The best logic here is to set muted only if previous state was muted.
+                // The best logic here is to set local state as muted only if: previous local state was muted AND call media is muted
                 setLocalHostMuteState(iter->type_, iter->muted_ and isMediaSourceMuted(iter->type_));
             }
         }
@@ -664,7 +618,11 @@ Conference::addParticipant(const std::string& participant_id)
         // In conference, if a participant joins with an audio only
         // call, it must be listed in the audioonlylist.
         auto mediaList = call->getMediaAttributeList();
-        if (videoMixer_ && not MediaAttribute::hasMediaType(mediaList, MediaType::MEDIA_VIDEO)) {
+        bool hasValidVideo = std::any_of(mediaList.begin(), mediaList.end(), 
+                                        [](const MediaAttribute& media) {
+                                            return media.hasValidVideo();
+                                        });
+        if (videoMixer_ && !hasValidVideo) {
             videoMixer_->addAudioOnlySource(call->getCallId(),
                                             sip_utils::streamId(call->getCallId(),
                                                                 sip_utils::DEFAULT_AUDIO_STREAMID));
@@ -838,13 +796,13 @@ Conference::removeParticipant(const std::string& participant_id)
 }
 
 void
-Conference::attachLocalParticipant()
+Conference::attachLocalParticipant(const std::string& source)
 {
     SIP_CORE_INFO("Attach local participant to conference %s", id_.c_str());
 
     if (getState() == State::ACTIVE_DETACHED) {
         setState(State::ACTIVE_ATTACHED);
-        setLocalHostDefaultMediaSource();
+        setLocalHostDefaultMediaSource(source);
 
         auto& rbPool = Manager::instance().getRingBufferPool();
         for (const auto& participant : getParticipantList()) {

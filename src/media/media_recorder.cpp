@@ -448,7 +448,7 @@ MediaRecorder::initRecord()
         videoStream.name = "videoOutput";
         videoStream.format = 0;
         videoStream.isVideo = true;
-        videoStream.timeBase = rational<int>(0, 1);
+        videoStream.timeBase = rational<int>(1, 30);
         videoStream.width = 1280;
         videoStream.height = 720;
         videoStream.frameRate = rational<int>(targetFramerate_, 1);
