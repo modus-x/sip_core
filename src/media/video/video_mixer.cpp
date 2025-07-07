@@ -180,28 +180,27 @@ VideoMixer::moveSource(size_t from_index, size_t to_index)
     std::unique_lock lock(rwMutex_);
     
     size_t size = sources_.size();
-    if (from_index >= size) 
-        return false;
-    if (to_index > size) 
-        return false;
-    if (from_index == to_index) 
+    if (from_index == to_index || from_index >= size || to_index >= size) 
         return false;
 
-    auto it_from = std::next(sources_.begin(), from_index);
-    if (to_index == size) {
-        // Move to end
-        sources_.splice(sources_.end(), sources_, it_from);
-    } else if (to_index < from_index) {
-        // Move to a position before from_index
-        auto it_to = std::next(sources_.begin(), to_index);
-        sources_.splice(it_to, sources_, it_from);
-    } else {
-        // Move to a position after from_index (adjust for removal)
-        auto it_to = std::next(sources_.begin(), to_index + 1);
+    auto it_from = sources_.begin();
+    std::advance(it_from, from_index);
+
+    if (from_index < to_index) {
+        if (to_index == sources_.size()) {
+            sources_.splice(sources_.end(), sources_, it_from);
+        } else {
+            auto it_to = sources_.begin();
+            std::advance(it_to, to_index);
+            sources_.splice(std::next(it_to), sources_, it_from);
+        }
+    } else { // from > to
+        auto it_to = sources_.begin();
+        std::advance(it_to, to_index);
         sources_.splice(it_to, sources_, it_from);
     }
-
     updateLayout();
+    return true;
 }
 
 // just report that layout was updated

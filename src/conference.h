@@ -294,6 +294,16 @@ public:
     void addParticipant(const std::string& participant_id);
 
     /**
+     * Moves position of the given participant to specified index
+     */
+    bool moveParticipant(const std::string& participant_id, size_t to);
+
+    /**
+     * Moves position of participant from index <from> to index <to>
+     */
+    bool moveParticipant(size_t from, size_t to);
+
+    /**
      * Remove a participant from the conference
      */
     void removeParticipant(const std::string& participant_id);
@@ -367,7 +377,7 @@ public:
 
     void muteParticipant(const std::string& uri, const bool& state);
     void muteLocalHost(bool is_muted, const std::string& mediaType);
-    bool isRemoteParticipant(const std::string& uri);
+    // bool isRemoteParticipant(const std::string& uri);
     void mergeConfInfo(ConfInfo& newInfo, const std::string& peerURI);
 
     /**

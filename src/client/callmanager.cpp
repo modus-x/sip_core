@@ -363,6 +363,26 @@ getParticipantList(const std::string& accountId, const std::string& confId)
     return {};
 }
 
+bool
+moveParticipant(const std::string& accountId, const std::string& confId, size_t from, size_t to)
+{
+    if (const auto account = sip_core::Manager::instance().getAccount(accountId))
+        if (auto conf = account->getConference(confId)) {
+            return conf->moveParticipant(from, to);
+        }
+    return false;
+}
+
+bool
+moveParticipant(const std::string& accountId, const std::string& confId, const std::string& participant_id, size_t to)
+{
+    if (const auto account = sip_core::Manager::instance().getAccount(accountId))
+        if (auto conf = account->getConference(confId)) {
+            return conf->moveParticipant(participant_id, to);
+        }
+    return false;
+}
+
 std::string
 getConferenceId(const std::string& accountId, const std::string& callId)
 {

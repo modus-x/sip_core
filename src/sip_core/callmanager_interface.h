@@ -122,6 +122,10 @@ LIBSIP_CORE_PUBLIC bool unholdConference(const std::string& accountId, const std
 LIBSIP_CORE_PUBLIC std::vector<std::string> getConferenceList(const std::string& accountId);
 LIBSIP_CORE_PUBLIC std::vector<std::string> getParticipantList(const std::string& accountId,
                                                                const std::string& confId);
+
+LIBSIP_CORE_PUBLIC bool moveParticipant(const std::string& accountId, const std::string& confId, size_t from, size_t to);
+LIBSIP_CORE_PUBLIC bool moveParticipant(const std::string& accountId, const std::string& confId, const std::string& participant_id, size_t to);
+
 LIBSIP_CORE_PUBLIC std::string getConferenceId(const std::string& accountId,
                                                const std::string& callId);
 LIBSIP_CORE_PUBLIC std::map<std::string, std::string> getConferenceDetails(

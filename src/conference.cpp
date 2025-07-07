@@ -643,6 +643,25 @@ Conference::addParticipant(const std::string& participant_id)
         SIP_CORE_ERR("no call associate to participant %s", participant_id.c_str());
 }
 
+bool 
+Conference::moveParticipant(const std::string& participant_id, size_t to)
+{
+    SIP_CORE_DEBUG("Moving participant {:s} to position {:s} in conference {:s}", participant_id, std::to_string(to), id_);
+    // todo: add finding participant id
+    return false;
+}
+
+bool
+Conference::moveParticipant(size_t from, size_t to)
+{
+    SIP_CORE_DEBUG("Moving participant from position {:s} to position {:s} in conference {:s}", std::to_string(from), std::to_string(to), id_);
+
+    if (!videoMixer_)
+        return false;
+
+    return videoMixer_->moveSource(from, to);
+}
+
 void
 Conference::setActiveParticipant(const std::string& participant_id)
 {

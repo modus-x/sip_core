@@ -265,7 +265,7 @@ bool CallController::createConfirence(const std::vector<std::string>& participan
 
 bool CallController::moveParticipant(size_t from_index, size_t to_index)
 {
-    return true;
+    return libsip_core::moveParticipant(m_accontId, m_activeConfirence, from_index, to_index);
 }
 
 
