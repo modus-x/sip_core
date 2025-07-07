@@ -50,21 +50,45 @@ int main() {
         return 1;
     }
 
-    if(!controller.sendRegister(username, password, domain)) {
-        std::cerr << "Error: unable to send register for current account." << std::endl;
-        return 1;
+    // print audio captures
+    auto captures = controller.getAudioCaptureDeviceList();
+    if(captures.empty())
+        std::cout << "\nNo avaliable audio capture devices found." << std::endl;
+    else {
+        std::cout << "\nAvaliable audio capture devices: \n";
+        for(auto dev : captures) {
+            std::cout <<  "\t" << dev << "\n";
+        }
+        std::cout << std::endl;
+    }
+
+    // print audio playbacks
+    auto playbacks = controller.getAudioPlaybackDeviceList();
+    if(playbacks.empty())
+        std::cout << "\nNo avaliable audio playback devices found." << std::endl;
+    else {
+        std::cout << "\nAvaliable audio playback devices:\n";
+        for(auto dev : playbacks) {
+            std::cout <<  "\t" << dev << "\n";
+        }
+        std::cout << std::endl;
     }
 
     // print video cameras info
     auto devices = controller.getVideoDeviceList();
     if(devices.empty())
-        std::cout << "No avaliable video devices found." << std::endl;
+        std::cout << "\nNo avaliable video devices found." << std::endl;
     else {
-        std::cout << "Avaliable video devices:";
+        std::cout << "\nAvaliable video devices:\n";
         for(auto dev : devices) {
-            std::cout <<  " " << dev;
+            std::cout <<  "\t" << dev << "\n";
         }
         std::cout << std::endl;
+    }
+
+    if(!controller.sendRegister(username, password, domain)) {
+        std::cerr << "Error: unable to send register for current account." << std::endl;
+        return 1;
     }
 
     while (true) {

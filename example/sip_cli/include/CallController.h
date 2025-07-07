@@ -42,6 +42,12 @@ public:
     bool setVideoDevice(const std::string& videoDevice);
     std::vector<std::string> getVideoDeviceList() const;
     const std::string getVideoDevice() const;
+
+    std::vector<std::string> getAudioCaptureDeviceList() const;
+    std::vector<std::string> getAudioPlaybackDeviceList() const;
+
+    void setAudioCaptureDevice(int index);
+    void setAudioPlaybackDevice(int index);
     
     void proccesEvents();
 

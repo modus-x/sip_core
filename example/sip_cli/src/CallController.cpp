@@ -340,6 +340,26 @@ const std::string CallController::getVideoDevice() const
     return source;
 }
 
+std::vector<std::string> CallController::getAudioCaptureDeviceList() const
+{
+    return sip_core::Manager::instance().getAudioInputDeviceList();
+}
+
+std::vector<std::string> CallController::getAudioPlaybackDeviceList() const
+{
+    return sip_core::Manager::instance().getAudioOutputDeviceList();
+}
+
+void CallController::setAudioCaptureDevice(int index)
+{
+    sip_core::Manager::instance().setAudioDevice(index, sip_core::AudioDeviceType::CAPTURE);
+}
+
+void CallController::setAudioPlaybackDevice(int index)
+{
+    sip_core::Manager::instance().setAudioDevice(index, sip_core::AudioDeviceType::PLAYBACK);
+}
+
 bool CallController::hangUp()
 {
     if(!hasActiveCall())
