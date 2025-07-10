@@ -50,6 +50,7 @@ int main() {
         return 1;
     }
 
+    // controller.setAudioCaptureDevice(1);
     // print audio captures
     auto captures = controller.getAudioCaptureDeviceList();
     if(captures.empty())
