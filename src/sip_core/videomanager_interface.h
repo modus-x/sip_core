@@ -240,7 +240,7 @@ LIBSIP_CORE_PUBLIC void releaseNativeWindow(long windowId);
 LIBSIP_CORE_PUBLIC void captureVideoFrame(
     JavaVM* javaVM, JNIEnv* jenv, const std::string& inputId, jobject javaImage, int rotation);
 LIBSIP_CORE_PUBLIC void captureVideoPacket(const std::string& inputId,
-                                           const ::std::shared_ptr< ::std::vector< uint8_t > >& buffer,
+                                           uint8_t* data,
                                            int size,
                                            int offset,
                                            bool keyframe,
