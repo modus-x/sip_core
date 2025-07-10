@@ -76,6 +76,7 @@ config_auto.h
 
 # Ignore temp files
 *~
+*.idx
 
 # Cscope/Ctags/Etags files
 cscope.*

@@ -73,12 +73,18 @@ namespace libsip_core {
 
 // external binding by default
 #ifdef __ANDROID__
+
+// surface -> current buffer
 std::map<ANativeWindow*, libsip_core::FrameBuffer> windows {};
 std::mutex windows_mutex;
 
 std::vector<uint8_t> workspace;
+
+// current rotate buffer
 int rotAngle = 0;
 AVBufferRef* rotMatrix = nullptr;
+
+// TAG for logger
 constexpr const char TAG[] = "videomanager.cpp";
 #endif
 
@@ -691,21 +697,23 @@ addVideoDevice(const std::string& node,
 #if defined(__ANDROID__)
 
 void
-releaseBuffer(ANativeWindow* window, libsip_core::FrameBuffer frame)
+setNativeWindowGeometry(long windowId, int width, int height)
 {
-    std::unique_lock<std::mutex> guard(windows_mutex);
-    try {
-        windows.at(window) = std::move(frame);
-    } catch (...) {
-        __android_log_print(ANDROID_LOG_WARN, TAG, "Can't move frame: no window");
-    }
+    ANativeWindow* window = (ANativeWindow*) ((intptr_t) windowId);
+    ANativeWindow_setBuffersGeometry(window, width, height, WINDOW_FORMAT_RGBX_8888);
+}
+
+long
+acquireNativeWindow(JNIEnv* jenv, jobject javaSurface)
+{
+    return (long) ANativeWindow_fromSurface(jenv, javaSurface);
 }
 
 void
-AndroidDisplayCb(ANativeWindow* window, libsip_core::FrameBuffer frame)
+releaseNativeWindow(long windowId)
 {
-    ANativeWindow_unlockAndPost(window);
-    releaseBuffer(window, std::move(frame));
+    ANativeWindow* window = (ANativeWindow*) ((intptr_t) windowId);
+    ANativeWindow_release(window);
 }
 
 int
@@ -727,6 +735,28 @@ AndroidFormatToAVFormat(int androidformat)
     }
 }
 
+void
+releaseBuffer(ANativeWindow* window, libsip_core::FrameBuffer frame)
+{
+    std::unique_lock<std::mutex> guard(windows_mutex);
+    try {
+        windows.at(window) = std::move(frame);
+    } catch (...) {
+        __android_log_print(ANDROID_LOG_WARN, TAG, "Can't move frame: no window");
+    }
+}
+
+
+// puth (display) it to the screen
+void
+AndroidDisplayCb(ANativeWindow* window, libsip_core::FrameBuffer frame)
+{
+    ANativeWindow_unlockAndPost(window);
+    releaseBuffer(window, std::move(frame));
+}
+
+
+// get a writable frame to post into 
 libsip_core::FrameBuffer
 sinkTargetPullCallback(ANativeWindow* window)
 {
@@ -756,6 +786,33 @@ sinkTargetPullCallback(ANativeWindow* window)
     return {};
 }
 
+void
+unregisterVideoCallback(const std::string& sink, long windowId)
+{
+    libsip_core::registerSinkTarget(sink, libsip_core::SinkTarget {});
+    ANativeWindow* nativeWindow = (ANativeWindow*) ((intptr_t) windowId);
+
+    std::lock_guard<std::mutex> guard(windows_mutex);
+    windows.erase(nativeWindow);
+}
+
+bool
+registerVideoCallback(const std::string& sink, long windowId)
+{
+    ANativeWindow* nativeWindow = (ANativeWindow*) ((intptr_t) windowId);
+    auto f_display_cb = std::bind(&AndroidDisplayCb, nativeWindow, std::placeholders::_1);
+    auto p_display_cb = std::bind(&sinkTargetPullCallback, nativeWindow);
+
+    {
+        std::lock_guard<std::mutex> guard(windows_mutex);
+        windows.emplace(nativeWindow, libsip_core::FrameBuffer {av_frame_alloc()});
+    }
+    return libsip_core::registerSinkTarget(sink,
+                                           libsip_core::SinkTarget {.pull = p_display_cb,
+                                                                    .push = f_display_cb});
+}
+
+// just rotate INPUT (YUV 4:2:0 semi-planar, used by Android cameras and many codecs) data!
 void
 rotateNV21(uint8_t* yinput,
            uint8_t* uvinput,
@@ -802,6 +859,7 @@ rotateNV21(uint8_t* yinput,
     return;
 }
 
+// sets current rotate matrix angle (this is ONLY for data that is being captured)
 void
 setRotation(int angle)
 {
@@ -817,9 +875,10 @@ setRotation(int angle)
     av_buffer_unref(&localFrameDataBuffer);
 }
 
+// pubish frame to SIP core from android raw bytes
 void
 captureVideoPacket(const std::string& input,
-                   const ::std::shared_ptr< ::std::vector< uint8_t > >& buffer,
+                   uint8_t* data,
                    int size,
                    int offset,
                    bool keyframe,
@@ -840,8 +899,6 @@ captureVideoPacket(const std::string& input,
                                                rotMatrix->size);
             std::copy_n(rotMatrix->data, rotMatrix->size, buf);
         }
-        ::std::vector< uint8_t > vector = *buffer.get();
-        uint8_t * data = &vector[0];
         packet->data = data + offset;
         packet->size = size;
         packet->pts = timestamp;
@@ -855,74 +912,7 @@ captureVideoPacket(const std::string& input,
     }
 }
 
-void
-setNativeWindowGeometry(long windowId, int width, int height)
-{
-    ANativeWindow* window = (ANativeWindow*) ((intptr_t) windowId);
-    ANativeWindow_setBuffersGeometry(window, width, height, WINDOW_FORMAT_RGBX_8888);
-}
-
-long
-acquireNativeWindow(JNIEnv* jenv, jobject javaSurface)
-{
-    return (long) ANativeWindow_fromSurface(jenv, javaSurface);
-}
-
-void
-setVideoFrame(JNIEnv* jenv, jbyteArray frame, int frame_size, long target, int w, int h, int rotation)
-{
-    uint8_t* f_target = (uint8_t*) ((intptr_t) target);
-    if (rotation == 0)
-        jenv->GetByteArrayRegion(frame, 0, frame_size, (jbyte*) f_target);
-    else {
-        workspace.resize(frame_size);
-        jenv->GetByteArrayRegion(frame, 0, frame_size, (jbyte*) workspace.data());
-        auto planeSize = w * h;
-        rotateNV21(workspace.data(),
-                   workspace.data() + planeSize,
-                   w,
-                   w,
-                   w,
-                   h,
-                   rotation,
-                   f_target,
-                   f_target + planeSize);
-    }
-}
-
-void
-releaseNativeWindow(long windowId)
-{
-    ANativeWindow* window = (ANativeWindow*) ((intptr_t) windowId);
-    ANativeWindow_release(window);
-}
-
-void
-unregisterVideoCallback(const std::string& sink, long windowId)
-{
-    libsip_core::registerSinkTarget(sink, libsip_core::SinkTarget {});
-    ANativeWindow* nativeWindow = (ANativeWindow*) ((intptr_t) windowId);
-
-    std::lock_guard<std::mutex> guard(windows_mutex);
-    windows.erase(nativeWindow);
-}
-
-bool
-registerVideoCallback(const std::string& sink, long windowId)
-{
-    ANativeWindow* nativeWindow = (ANativeWindow*) ((intptr_t) windowId);
-    auto f_display_cb = std::bind(&AndroidDisplayCb, nativeWindow, std::placeholders::_1);
-    auto p_display_cb = std::bind(&sinkTargetPullCallback, nativeWindow);
-
-    {
-        std::lock_guard<std::mutex> guard(windows_mutex);
-        windows.emplace(nativeWindow, libsip_core::FrameBuffer {av_frame_alloc()});
-    }
-    return libsip_core::registerSinkTarget(sink,
-                                           libsip_core::SinkTarget {.pull = p_display_cb,
-                                                                    .push = f_display_cb});
-}
-
+// pubish frame to SIP core from android Image object
 void
 captureVideoFrame(JavaVM* javaVM, JNIEnv* jenv, const std::string& input, jobject image, int rotation)
 {
@@ -1041,6 +1031,29 @@ captureVideoFrame(JavaVM* javaVM, JNIEnv* jenv, const std::string& input, jobjec
         __android_log_print(ANDROID_LOG_ERROR, TAG, "Exception capturing video frame: %s", e.what());
     }
 }
+
+void
+setVideoFrame(JNIEnv* jenv, jbyteArray frame, int frame_size, long target, int w, int h, int rotation)
+{
+    uint8_t* f_target = (uint8_t*) ((intptr_t) target);
+    if (rotation == 0)
+        jenv->GetByteArrayRegion(frame, 0, frame_size, (jbyte*) f_target);
+    else {
+        workspace.resize(frame_size);
+        jenv->GetByteArrayRegion(frame, 0, frame_size, (jbyte*) workspace.data());
+        auto planeSize = w * h;
+        rotateNV21(workspace.data(),
+                   workspace.data() + planeSize,
+                   w,
+                   w,
+                   w,
+                   h,
+                   rotation,
+                   f_target,
+                   f_target + planeSize);
+    }
+}
+
 
 #endif
 
