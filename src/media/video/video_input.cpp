@@ -415,14 +415,15 @@ VideoInput::deleteDecoder()
 void
 VideoInput::stopInput()
 {
+
+    emitSignal<libsip_core::VideoSignal::StopCapture>(decOpts_.input);
+
     isStopped_ = true;
     if (videoManagedByClient()) {
         capturing_ = false;
         return;
     }
     loop_.join();
-
-    emitSignal<libsip_core::VideoSignal::StopCapture>(decOpts_.input);
 
     clearOptions();
 }
