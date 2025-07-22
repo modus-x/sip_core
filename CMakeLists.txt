@@ -71,14 +71,16 @@ if(ANDROID)
   endif()
 endif()
 
-function(GETARCH TRIPLE)
+function(GETARCH TRIPLE OUT_VAR)
   string(REGEX MATCH "^([^-]+)" ARCH ${TRIPLE})
 
   if(ARCH STREQUAL "aarch64")
     set(ARCH "arm64")
   endif()
 
-  return(PROPAGATE ARCH)
+  set(${OUT_VAR}
+      "${ARCH}"
+      PARENT_SCOPE)
 endfunction()
 
 if(NOT MSVC AND BUILD_DEPS)
@@ -94,9 +96,6 @@ if(NOT MSVC AND BUILD_DEPS)
     COMMAND gcc -dumpmachine
     COMMAND tr -d '\n'
     OUTPUT_VARIABLE BUILD_MACHINE)
-
-  # Get our local architecture
-  getarch(${BUILD_MACHINE})
 
   # Host build target with environment variables
   # ----------------------------------------------------------------------------
@@ -179,9 +178,11 @@ if(NOT MSVC AND BUILD_DEPS)
         message(FATAL_ERROR "-- iOS undefined arch for contrib build")
       endif()
     else()
+      getarch(${BUILD_MACHINE} MACHINE_ARCH)
+
       if(CMAKE_OSX_ARCHITECTURES STREQUAL "" OR NOT DEFINED
                                                 CMAKE_OSX_ARCHITECTURES)
-        set(CMAKE_OSX_ARCHITECTURES ${ARCH})
+        set(CMAKE_OSX_ARCHITECTURES ${MACHINE_ARCH})
       endif()
       # create list of passed-in architectures, add them to targets, because we
       # need to build contrib for every darwin arch!
@@ -191,20 +192,26 @@ if(NOT MSVC AND BUILD_DEPS)
       set(TARGETS "")
 
       foreach(osx_arch ${OSX_ARCH_LIST})
-        string(REPLACE ${ARCH} ${osx_arch} NEW_TARGET ${CURRENT_ARCH_TRIPLE})
+        string(REPLACE ${MACHINE_ARCH} ${osx_arch} NEW_TARGET
+                       ${CURRENT_ARCH_TRIPLE})
         list(APPEND TARGETS ${NEW_TARGET})
       endforeach()
 
-      set(ENV{LDFLAGS}
-          "-arch ${ARCH} -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
-      set(ENV{CFLAGS}
-          "-arch ${ARCH} -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
-      set(ENV{CXXFLAGS}
-          "-arch ${ARCH} -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
     endif()
   endif()
 
   foreach(TARGET ${TARGETS})
+    if(APPLE AND NOT IOS)
+      getarch(${TARGET} TARGET_ARCH)
+      message(STATUS "Building on macOS for ${TARGET}...")
+      set(ENV{LDFLAGS}
+          "-arch ${TARGET_ARCH} -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
+      set(ENV{CFLAGS}
+          "-arch ${TARGET_ARCH} -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
+      set(ENV{CXXFLAGS}
+          "-arch ${TARGET_ARCH} -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
+    endif()
+
     message(STATUS "building native dependencies for ${TARGET}")
 
     set(CONTRIB_BUILD_PATH ${CMAKE_CURRENT_SOURCE_DIR}/contrib/build-${TARGET})
@@ -423,7 +430,7 @@ if(MSVC)
 endif()
 
 if(ENABLE_CLI_EXAMPLE)
-add_subdirectory(example/sip_cli)
+  add_subdirectory(example/sip_cli)
 endif()
 
 target_compile_definitions(
