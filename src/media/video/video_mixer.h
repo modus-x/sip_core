@@ -27,11 +27,17 @@
 #include "video_input.h"
 #include "threadloop.h"
 #include "media_stream.h"
+#include "media_filter.h"
 
 #include <list>
 #include <chrono>
 #include <memory>
 #include <shared_mutex>
+
+#define CONF_BORDER_WIDTH 6
+#define CONF_PADDING 4
+#define CONF_BORDER_INACTIVE_COLOR "blue@1"
+#define CONF_BORDER_ACTIVE_COLOR "green@1"
 
 namespace sip_core {
 namespace video {
@@ -170,6 +176,8 @@ private:
     void calc_position(std::unique_ptr<VideoMixerSource>& source,
                        const std::shared_ptr<VideoFrame>& input,
                        int index);
+
+    bool initBorderFilter(MediaFilter* filter, std::string inputName, int format, int x, int y, int width, int height, bool active);
 
     void startSink();
     void stopSink();
