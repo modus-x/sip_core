@@ -45,11 +45,7 @@ x264: x264-$(X264_HASH).tar.xz .sum-x264
 ifdef HAVE_ANDROID
 	cd $< && $(HOSTVARS) AS="$(CC)" ./configure $(X264CONF)
 else
-ifeq ($(IOS_TARGET_PLATFORM),iPhoneOS)
 	cd $< && $(HOSTVARS) ASFLAGS="$(CFLAGS)" ./configure $(X264CONF)
-else
-	cd $< && $(HOSTVARS) ./configure $(X264CONF)
-endif
 endif
 	cd $< && $(MAKE) install
 	touch $@
