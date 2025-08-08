@@ -285,6 +285,32 @@ AudioRtpSession::setVoiceCallback(std::function<void(bool)> cb)
     }
 }
 
+rtcpRRHeader
+AudioRtpSession::getRtcpRR()
+{
+    if(socketPair_)
+        return socketPair_->getLastRtcpRR();
+
+    return {};
+}
+
+rtcpREMBHeader
+AudioRtpSession::getRtcpREMB()
+{
+    if(socketPair_)
+        return socketPair_->getLastRtcpREMB();
+
+    return {};
+}
+
+rtcpSRHeader AudioRtpSession::getRtcpSR()
+{
+    if(socketPair_)
+        return socketPair_->getLastRtcpSR();
+
+    return {};
+}
+
 bool
 AudioRtpSession::check_RCTP_Info_RR(RTCPInfo& rtcpi)
 {

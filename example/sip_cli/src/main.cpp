@@ -216,8 +216,21 @@ int main() {
             else std::cout << "Enabling video..." << std::endl;
 
             controller.toggleVideo();
+        } else if (command == "info") {
+            if(!controller.hasActiveCall()) {
+                std::cerr << "No active call..." << std::endl;
+                continue;
+            }
+
+            auto info = controller.getCallDetails(controller.getActiveCall());
+            std::cout << "Current call info:\n";
+            for (auto it = info.begin(); it != info.end(); ++it) {
+                std::cout << " " << it->first 
+                        << " : " << it->second 
+                        << std::endl;
+            }
         } else {
-            std::cerr << "Error: Unknown command. \nFull list of commands:\n call <callee> - initiates call with given ID,\n add <callee> - adds new participant to current call,\n del <callee> - remove participant from conference.\n conf <callee1> ... <calleeN> - creates conference with given participants (>=3),\n switch <device> - switches video source for an active call.\n hangup - hangup current call.\n capOn - start capture of active call in a local file.\n capOff - stops capture of video.\n video - enables video transfer.\n exit - exit program." << std::endl;
+            std::cerr << "Error: Unknown command. \nFull list of commands:\n call <callee> - initiates call with given ID,\n add <callee> - adds new participant to current call,\n del <callee> - remove participant from conference.\n conf <callee1> ... <calleeN> - creates conference with given participants (>=3),\n switch <device> - switches video source for an active call.\n hangup - hangup current call.\n capOn - start capture of active call in a local file.\n capOff - stops capture of video.\n video - enables video transfer.\n info - get current call infos.\n exit - exit program." << std::endl;
         }
     }
 

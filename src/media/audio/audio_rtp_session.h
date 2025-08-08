@@ -70,6 +70,10 @@ public:
 
     void setVoiceCallback(std::function<void(bool)> cb);
 
+    virtual rtcpRRHeader getRtcpRR() override;
+    virtual rtcpREMBHeader getRtcpREMB() override;
+    virtual rtcpSRHeader getRtcpSR() override;
+
 private:
     void startSender();
     void startReceiver();

@@ -333,6 +333,11 @@ const std::string CallController::getVideoDevice() const
     return source;
 }
 
+std::map<std::string, std::string> CallController::getCallDetails(const std::string& callId)
+{
+    return libsip_core::getCallDetails(m_accontId, callId);
+}
+
 std::vector<std::string> CallController::getAudioCaptureDeviceList() const
 {
     return sip_core::Manager::instance().getAudioInputDeviceList();

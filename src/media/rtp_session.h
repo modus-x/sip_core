@@ -84,6 +84,9 @@ public:
     std::shared_ptr<AccountCodecInfo> getCodec() const { return send_.codec; }
     const IpAddr& getSendAddr() const { return send_.addr; };
     const IpAddr& getRecvAddr() const { return receive_.addr; };
+    virtual rtcpRRHeader getRtcpRR() = 0;
+    virtual rtcpREMBHeader getRtcpREMB() = 0;
+    virtual rtcpSRHeader getRtcpSR() = 0;
 
     inline std::string streamId() const { return streamId_; }
 
