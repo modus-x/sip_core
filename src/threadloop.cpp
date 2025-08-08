@@ -23,6 +23,15 @@
 
 #include <ciso646> // fix windows compiler bug
 
+#include <thread>
+#ifdef __linux__
+#include <pthread.h>
+#include <sched.h>
+#elif _WIN32
+#include <windows.h>
+#endif
+
+
 namespace sip_core {
 
 void
@@ -50,8 +59,10 @@ ThreadLoop::mainloop(std::thread::id& tid,
 
 ThreadLoop::ThreadLoop(const std::function<bool()>& setup,
                        const std::function<void()>& process,
-                       const std::function<void()>& cleanup)
-    : setup_(setup)
+                       const std::function<void()>& cleanup,
+                       const ThreadPriority priority /* = ThreadPriority::NORMAL */)
+    : priority_(priority)
+    , setup_(setup)
     , process_(process)
     , cleanup_(cleanup)
     , thread_()
@@ -84,6 +95,10 @@ ThreadLoop::start()
     state_ = ThreadState::RUNNING;
     thread_ = std::thread(&ThreadLoop::mainloop, this, std::ref(threadId_), setup_, process_, cleanup_);
     threadId_ = thread_.get_id();
+
+    // set priority if not default
+    if(priority_ != ThreadPriority::NORMAL)
+        setPriority(thread_, priority_);
 }
 
 void
@@ -123,6 +138,65 @@ ThreadLoop::isRunning() const noexcept
 #else
     return thread_.joinable() and state_ == ThreadState::RUNNING;
 #endif
+}
+
+void
+ThreadLoop::setPriority(std::thread& thread, const ThreadLoop::ThreadPriority& priority)
+{
+    auto handle = thread.native_handle();
+
+#ifdef __linux__
+    struct sched_param param;
+    int policy;
+
+    pthread_getschedparam(handle, &policy, &param);
+
+    switch(priority) {
+        case ThreadPriority::HIGH:
+            // Real-time FIFO scheduling
+            // policy = SCHED_FIFO;
+            param.sched_priority = sched_get_priority_max(policy);
+            break;
+        case ThreadPriority::LOW:
+            // Background scheduling
+            // policy = SCHED_OTHER;
+            param.sched_priority = sched_get_priority_min(policy);
+            break;
+        case ThreadPriority::NORMAL:
+            // Keep default policy but adjust priority
+            param.sched_priority = (sched_get_priority_max(policy) + 
+                                 sched_get_priority_min(policy)) / 2;
+            break;
+    }
+
+    if (pthread_setschedparam(handle, policy, &param) != 0) {
+        SIP_CORE_ERR("Failed to set ThreadLoop thread priority.");
+        return;
+    }
+#elif _WIN32
+    switch(priority) {
+        case ThreadPriority::HIGH:
+            if(!SetThreadPriority(handle, THREAD_PRIORITY_HIGHEST)) {
+                SIP_CORE_ERR("Failed to set ThreadLoop thread priority.");
+                return;
+            }
+            break;
+        case ThreadPriority::LOW:
+            if(!SetThreadPriority(handle, THREAD_PRIORITY_IDLE)) {
+                SIP_CORE_ERR("Failed to set ThreadLoop thread priority.");
+                return;
+            }
+            break;
+        case ThreadPriority::NORMAL:
+        default:
+            if(!SetThreadPriority(handle, THREAD_PRIORITY_NORMAL)) {
+                SIP_CORE_ERR("Failed to set ThreadLoop thread priority.");
+                return;
+            }
+            break;
+    }
+#endif
+    return;
 }
 
 void

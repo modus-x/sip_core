@@ -784,8 +784,8 @@ MediaEncoder::writeContainerToRtp(uint8_t* buf, int buf_size)
 
         auto encoderName = outputCodec->name; // guaranteed to be non null if AVCodec is not null
 
-        encoderCtx->thread_count = std::min(std::thread::hardware_concurrency(), is_video ? 16u : 4u);
-        SIP_CORE_DBG("[%s] Using %d threads", encoderName, encoderCtx->thread_count);
+    encoderCtx->thread_count = std::min(std::thread::hardware_concurrency() / 2, is_video ? 4u : 16u);
+    SIP_CORE_DBG("[%s] Using %d threads", encoderName, encoderCtx->thread_count);
 
         if (is_video) {
             // resolution must be a multiple of two
