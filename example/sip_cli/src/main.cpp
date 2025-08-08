@@ -239,7 +239,7 @@ int main() {
                         << std::endl;
             }
         } else {
-            std::cerr << "Error: Unknown command. \nFull list of commands:\n call <callee> - initiates call with given ID,\n add <callee> - adds new participant to current call,\n del <callee> - remove participant from conference,\n move <from> <to> - move conference participant position in grid,\n conf <callee1> ... <calleeN> - creates conference with given participants (>=3),\n switch <device> - switches video source for an active call.\n hangup - hangup current call.\n capOn - start capture of active call in a local file.\n capOff - stops capture of video.\n video - enables video transfer.\n exit - exit program." << std::endl;
+            std::cerr << "Error: Unknown command. \nFull list of commands:\n call <callee> - initiates call with given ID,\n add <callee> - adds new participant to current call,\n del <callee> - remove participant from conference,\n move <from> <to> - move conference participant position in grid,\n conf <callee1> ... <calleeN> - creates conference with given participants (>=3),\n switch <device> - switches video source for an active call.\n hangup - hangup current call.\n capOn - start capture of active call in a local file.\n capOff - stops capture of video.\n video - enables video transfer.\n info - get current call infos.\n exit - exit program." << std::endl;
         }
     }
 
