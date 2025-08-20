@@ -374,6 +374,7 @@ public:
     void hangupParticipant(const std::string& accountUri, const std::string& deviceId = "");
     void setHandRaised(const std::string& uri, const bool& state);
     void setVoiceActivity(const std::string& streamId, const bool& newState);
+    void setVoiceActivity(const Json::Value& json);
 
     void muteParticipant(const std::string& uri, const bool& state);
     void muteLocalHost(bool is_muted, const std::string& mediaType);
@@ -453,6 +454,7 @@ private:
     ConfInfo confInfo_ {};
 
     void sendConferenceInfos();
+    void sendVoiceActivity();
     std::shared_ptr<RingBuffer> ghostRingBuffer_;
 
 #ifdef ENABLE_VIDEO
@@ -477,6 +479,7 @@ private:
     bool isMuted(std::string_view uri) const;
 
     ConfInfo getConfInfoHostUri(std::string_view localHostURI, std::string_view destURI);
+    std::string voiceActivivtyToString(const ConfInfo&);
     bool isHost(std::string_view uri) const;
     bool isHostDevice(std::string_view deviceId) const;
 

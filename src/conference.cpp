@@ -770,6 +770,30 @@ Conference::sendConferenceInfos()
         id_, confInfo.toVectorMapStringString());
 }
 
+void Conference::sendVoiceActivity()
+{
+    // Inform calls that voiceActivity changed
+    foreachCall([&](auto call) {
+        // Produce specific JSON for each participant (2 separate accounts can host ...
+        // a conference on a same device, the conference is not link to one account).
+        auto w = call->getAccount();
+        auto account = w.lock();
+        if (!account)
+            return;
+
+        //send voice activity without additional ConfInfo parameters
+        call->sendVoiceActivity(voiceActivivtyToString(
+            getConfInfoHostUri(account->getUsername() + "@server", call->getPeerNumber())
+        ));
+    });
+
+    auto confInfo = getConfInfoHostUri("", "");
+
+    // Inform client that layout has changed
+    sip_core::emitSignal<libsip_core::CallSignal::OnConferenceInfosUpdated>(
+        id_, confInfo.toVectorMapStringString());
+}
+
 #ifdef ENABLE_VIDEO
 void
 Conference::createSinks(const ConfInfo& infos)
@@ -1225,6 +1249,58 @@ Conference::setVoiceActivity(const std::string& streamId, const bool& newState)
 }
 
 void
+Conference::setVoiceActivity(const Json::Value& json)
+{
+    bool needsUpdate = false;
+    for (const auto& participantInfo : json) {
+        if (!json.isMember("uri") || !json.isMember("state") || !json.isMember("sinkId"))
+            continue;
+            
+        auto uri = json["uri"].asString();
+        auto sinkId = json["sinkId"].asString();
+        auto state = json["state"].asBool();
+        
+        bool exists = false;
+        for (auto& participant : confInfo_) {
+            if (participant.sinkId == sinkId) {
+                exists = true;
+                break;
+            }
+        }
+
+        if (!exists) {
+            SIP_CORE_ERR("participant not found with streamId: %s", sinkId.c_str());
+            continue;
+        }
+
+        auto previousState = isVoiceActive(sinkId);
+
+        if (previousState == state) {
+            // no change, do not send out updates
+            continue;
+        }
+
+        if (state and not previousState) {
+            // voice going from inactive to active
+            streamsVoiceActive.emplace(sinkId);
+            needsUpdate = true;
+            continue;
+        }
+
+        if (not state and previousState) {
+            // voice going from active to inactive
+            streamsVoiceActive.erase(sinkId);
+            needsUpdate = true;
+            continue;
+        }
+    }
+
+    if(needsUpdate) {
+        updateVoiceActivity();
+    }
+}
+
+void
 Conference::setModerator(const std::string& participant_id, const bool& state)
 {
     for (const auto& p : getParticipantList()) {
@@ -1285,11 +1361,12 @@ Conference::updateVoiceActivity()
             newActivity = isVoiceActive(participantInfo.sinkId);
         }
 
+        // why such optimization for bool
         if (participantInfo.voiceActivity != newActivity) {
             participantInfo.voiceActivity = newActivity;
         }
     }
-    sendConferenceInfos(); // also emits signal to client
+    sendVoiceActivity(); // also emits signal to client
 }
 
 void
@@ -1453,6 +1530,22 @@ Conference::getConfInfoHostUri(std::string_view localHostURI, std::string_view d
             newInfo.insert(newInfo.end(), confInfo.begin(), confInfo.end());
     }
     return newInfo;
+}
+
+std::string
+Conference::voiceActivivtyToString(const ConfInfo& confInfo)
+{
+    Json::Value val = {};
+    for (const auto& part : confInfo) {
+        Json::Value p;
+        p["uri"] = part.uri;
+        p["sinkId"] = part.sinkId;
+        p["state"] = part.voiceActivity;
+
+        val.append(p);
+    }
+
+    return Json::writeString(Json::StreamWriterBuilder {}, val);
 }
 
 bool
