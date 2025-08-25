@@ -77,7 +77,7 @@ private:
     void createConfFromParticipantList(const std::string& accountId,
                                        const std::vector<std::string>& participantList);
 
-    mutable std::mutex m_mtxEvents;
+    mutable std::recursive_mutex m_mtxEvents;
 
     bool m_isVideoEnabled;
     std::map<std::string, std::string> m_mediaAudio;

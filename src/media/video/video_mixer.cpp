@@ -175,6 +175,27 @@ VideoMixer::setActiveStream(const std::string& id)
     updateLayout();
 }
 
+void VideoMixer::setVoiceActivity(const std::string& streamId, bool state)
+{
+    std::lock_guard<std::mutex> lock(vocieActivivtyMtx_);
+    voiceActivity_[streamId] = state;
+    updateLayout();
+}
+
+void VideoMixer::setVoiceActivity(const std::map<std::string, bool>& states)
+{
+    std::lock_guard<std::mutex> lock(vocieActivivtyMtx_);
+    voiceActivity_ = states;
+    updateLayout();
+}
+
+void VideoMixer::setVoiceActivity(const std::map<std::string, bool>&& states)
+{
+    std::lock_guard<std::mutex> lock(vocieActivivtyMtx_);
+    voiceActivity_ = std::move(states);
+    updateLayout();
+}
+
 bool
 VideoMixer::moveSource(size_t from_index, size_t to_index) 
 {
@@ -450,8 +471,11 @@ VideoMixer::process()
                         needsUpdate = true;
                 }
 
-                if (needsUpdate)
-                    calc_position(x, fooInput, wantedIndex);
+                {
+                    std::lock_guard<std::mutex> lock(vocieActivivtyMtx_);
+                    if (needsUpdate)
+                        calc_position(x, fooInput, wantedIndex, voiceActivity_[sinfo.streamId]);
+                }
 
                 if (!blackFrame) {
                     if (fooInput)
@@ -555,7 +579,7 @@ VideoMixer::render_frame(VideoFrame& output,
 void
 VideoMixer::calc_position(std::unique_ptr<VideoMixerSource>& source,
                           const std::shared_ptr<VideoFrame>& input,
-                          int index)
+                          int index, bool isActive)
 {
     if (!width_ or !height_)
         return;
@@ -636,7 +660,7 @@ VideoMixer::calc_position(std::unique_ptr<VideoMixerSource>& source,
 
     source->bordersFilter = std::unique_ptr<MediaFilter>(new MediaFilter());
     if(!initBorderFilter(source->bordersFilter.get(), "border", input->format(), 
-                        source->x, source->y, source->w, source->h, false))
+                        source->x, source->y, source->w, source->h, isActive))
         source->bordersFilter.release();
 }
 

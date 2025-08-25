@@ -1366,6 +1366,13 @@ Conference::updateVoiceActivity()
             participantInfo.voiceActivity = newActivity;
         }
     }
+
+    std::map<std::string, bool> voiceStates;
+    for (auto p : confInfo_) {
+        voiceStates[p.sinkId] = p.voiceActivity;
+    }
+    videoMixer_->setVoiceActivity(std::move(voiceStates));
+
     sendVoiceActivity(); // also emits signal to client
 }
 
