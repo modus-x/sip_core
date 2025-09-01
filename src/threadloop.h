@@ -41,10 +41,12 @@ class ThreadLoop
 {
 public:
     enum class ThreadState { READY, RUNNING, STOPPING };
+    enum class ThreadPriority { LOW, NORMAL, HIGH };
 
     ThreadLoop(const std::function<bool()>& setup,
                const std::function<void()>& process,
-               const std::function<void()>& cleanup);
+               const std::function<void()>& cleanup,
+               const ThreadPriority priority = ThreadPriority::NORMAL);
     virtual ~ThreadLoop();
 
     void start();
@@ -58,12 +60,19 @@ public:
     std::thread::id get_id() const noexcept { return threadId_; }
 
 private:
+    // set threads priority only for linux/windows
+    // this is usefull when the system doesn not have 
+    // enough resources to decode/encode audio and video at the same time.
+    // MacOS doesnt need such optimization as it usualy have enough resources.
+    void setPriority(std::thread& thread, const ThreadPriority& priority);
+
     ThreadLoop(const ThreadLoop&) = delete;
     ThreadLoop(ThreadLoop&&) noexcept = delete;
     ThreadLoop& operator=(const ThreadLoop&) = delete;
     ThreadLoop& operator=(ThreadLoop&&) noexcept = delete;
 
     // These must be provided by users of ThreadLoop
+    const ThreadPriority priority_;
     std::function<bool()> setup_;
     std::function<void()> process_;
     std::function<void()> cleanup_;

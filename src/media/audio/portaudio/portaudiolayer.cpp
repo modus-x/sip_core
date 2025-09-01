@@ -582,7 +582,7 @@ const char* formatToString(PaSampleFormat fmt) {
     }
 }
 
-static void
+static std::pair<PaSampleFormat, double>
 openStreamDevice(PaStream**      stream,
                  PaDeviceIndex   device,
                  Direction       direction,
@@ -594,7 +594,7 @@ openStreamDevice(PaStream**      stream,
     const PaDeviceInfo* device_info = Pa_GetDeviceInfo(device);
     if (!device_info) {
         SIP_CORE_ERR("PortAudioLayer error: Invalid device info.");
-        return;
+        return { 0, 0.0 };
     }
 
     SIP_CORE_INFO() << "PortAudioLayer: openStreamDevice " << (is_out ? "OUTPUT" : "INPUT")
@@ -634,7 +634,7 @@ openStreamDevice(PaStream**      stream,
         }
     }
 
-    // 2) If we didn’t find any entry at the requested_rate, try format == requested_format.
+    // 2) If we didnï¿½t find any entry at the requested_rate, try format == requested_format.
     if (!found_exact_pair) {
         if (found_exact_fmt) {
             selected_rate   = fallback_rate;
@@ -651,10 +651,10 @@ openStreamDevice(PaStream**      stream,
                       formatToString(requested_format),
                       device,
                       device_info->name);
-        return;
+        return { 0, 0.0 };
     }
 
-    // Log which combination we’re actually going to use:
+    // Log which combination weï¿½re actually going to use:
     SIP_CORE_INFO() << "PortAudioLayer: Selecting format " 
                     << formatToString(selected_format) 
                     << " @ rate " << selected_rate;
@@ -687,6 +687,8 @@ openStreamDevice(PaStream**      stream,
         SIP_CORE_ERR("PortAudioLayer error: %s. Reporting it!", errorText);
         emitSignal<libsip_core::ConfigurationSignal::DeviceOpenError>(errorText, is_out);
     }
+
+    return { selected_format, selected_rate };
 }
 
 static void
@@ -734,7 +736,7 @@ PortAudioLayer::PortAudioLayerImpl::initInputStream(PortAudioLayer& parent)
     auto& stream = streams_[Direction::Input];
     auto apiIndex = getApiIndexByType(AudioDeviceType::CAPTURE);
     if (apiIndex != paNoDevice) {
-        openStreamDevice(
+        auto [ format, sample_rate ] = openStreamDevice(
             &streams_[Direction::Input],
             apiIndex,
             Direction::Input,
@@ -753,6 +755,8 @@ PortAudioLayer::PortAudioLayerImpl::initInputStream(PortAudioLayer& parent)
                                                       statusFlags);
             },
             &parent);
+            parent.audioInputFormat_.sampleFormat = AV_SAMPLE_FMT_S16;
+            parent.audioInputFormat_.sample_rate = sample_rate;
     } else {
         SIP_CORE_ERR("Error: No valid input device. There will be no mic.");
         return false;

@@ -44,7 +44,8 @@ AudioReceiveThread::AudioReceiveThread(const std::string& id,
     , mtu_(mtu)
     , loop_(std::bind(&AudioReceiveThread::setup, this),
             std::bind(&AudioReceiveThread::process, this),
-            std::bind(&AudioReceiveThread::cleanup, this))
+            std::bind(&AudioReceiveThread::cleanup, this),
+            ThreadLoop::ThreadPriority::HIGH)
 {}
 
 AudioReceiveThread::~AudioReceiveThread()

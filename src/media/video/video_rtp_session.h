@@ -138,6 +138,10 @@ public:
     void startReceiver();
     void stopReceiver();
 
+    virtual rtcpRRHeader getRtcpRR() override;
+    virtual rtcpREMBHeader getRtcpREMB() override;
+    virtual rtcpSRHeader getRtcpSR() override;
+
 private:
     void setupConferenceVideoPipeline(Conference& conference, Direction dir);
 

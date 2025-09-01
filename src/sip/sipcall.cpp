@@ -2522,9 +2522,33 @@ SIPCall::getDetails() const
                         details.emplace(libsip_core::Call::Details::VIDEO_BITRATE,
                                         std::to_string(curvideoRtpSession->getVideoBitrateInfo()
                                                            .videoBitrateCurrent));
+
+                        if(auto remote = curvideoRtpSession->getVideoReceive()) {
+                            details.emplace(libsip_core::Call::Details::VIDEO_FPS,
+                                        std::to_string(remote->getInfo().frameRate.real()));   
+                        }
                     }
                 } else
                     details.emplace(libsip_core::Call::Details::VIDEO_CODEC, "");
+                    
+                auto rrParams = rtpSession->getRtcpRR();
+                details.emplace(libsip_core::Call::Details::VIDEO_FRACTION_LOST, std::to_string(rrParams.fraction_lost));
+                details.emplace(libsip_core::Call::Details::VIDEO_CUM_LOST_PACKET, std::to_string(rrParams.cum_lost_packet));
+                details.emplace(libsip_core::Call::Details::VIDEO_JITTER, std::to_string(rrParams.jitter));
+                details.emplace(libsip_core::Call::Details::VIDEO_EXT_HIGH, std::to_string(rrParams.ext_high));
+                details.emplace(libsip_core::Call::Details::VIDEO_LSR, std::to_string(rrParams.lsr));
+                details.emplace(libsip_core::Call::Details::VIDEO_DLSR, std::to_string(rrParams.dlsr));
+
+                auto srParams = rtpSession->getRtcpSR();
+                details.emplace(libsip_core::Call::Details::VIDEO_SPC, std::to_string(srParams.spc));
+                details.emplace(libsip_core::Call::Details::VIDEO_SOC, std::to_string(srParams.soc));
+                details.emplace(libsip_core::Call::Details::VIDEO_TIMESTAMP_MSB, std::to_string(srParams.timestampMSB));
+                details.emplace(libsip_core::Call::Details::VIDEO_TIMESTAMP_LSB, std::to_string(srParams.timestampLSB));
+                details.emplace(libsip_core::Call::Details::VIDEO_TIMESTAMP_RTP, std::to_string(srParams.timestampRTP));
+
+                auto rembParams = rtpSession->getRtcpREMB();
+                details.emplace(libsip_core::Call::Details::VIDEO_BR_EXP, std::to_string(rembParams.br_exp));
+                details.emplace(libsip_core::Call::Details::VIDEO_BR_MANTIS, std::to_string(rembParams.br_mantis));
             }
 #endif
         } else if (stream.mediaAttribute_->type_ == MediaType::MEDIA_AUDIO) {
@@ -2542,6 +2566,25 @@ SIPCall::getDetails() const
                     details.emplace(libsip_core::Call::Details::AUDIO_CODEC, "");
                     details.emplace(libsip_core::Call::Details::AUDIO_SAMPLE_RATE, "");
                 }
+
+                auto rrParams = rtpSession->getRtcpRR();
+                details.emplace(libsip_core::Call::Details::AUDIO_FRACTION_LOST, std::to_string(rrParams.fraction_lost));
+                details.emplace(libsip_core::Call::Details::AUDIO_CUM_LOST_PACKET, std::to_string(rrParams.cum_lost_packet));
+                details.emplace(libsip_core::Call::Details::AUDIO_JITTER, std::to_string(rrParams.jitter));
+                details.emplace(libsip_core::Call::Details::AUDIO_EXT_HIGH, std::to_string(rrParams.ext_high));
+                details.emplace(libsip_core::Call::Details::AUDIO_LSR, std::to_string(rrParams.lsr));
+                details.emplace(libsip_core::Call::Details::AUDIO_DLSR, std::to_string(rrParams.dlsr));
+
+                auto srParams = rtpSession->getRtcpSR();
+                details.emplace(libsip_core::Call::Details::AUDIO_SPC, std::to_string(srParams.spc));
+                details.emplace(libsip_core::Call::Details::AUDIO_SOC, std::to_string(srParams.soc));
+                details.emplace(libsip_core::Call::Details::AUDIO_TIMESTAMP_MSB, std::to_string(srParams.timestampMSB));
+                details.emplace(libsip_core::Call::Details::AUDIO_TIMESTAMP_LSB, std::to_string(srParams.timestampLSB));
+                details.emplace(libsip_core::Call::Details::AUDIO_TIMESTAMP_RTP, std::to_string(srParams.timestampRTP));
+
+                auto rembParams = rtpSession->getRtcpREMB();
+                details.emplace(libsip_core::Call::Details::AUDIO_BR_EXP, std::to_string(rembParams.br_exp));
+                details.emplace(libsip_core::Call::Details::AUDIO_BR_MANTIS, std::to_string(rembParams.br_mantis));
             }
         }
     }

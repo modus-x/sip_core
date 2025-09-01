@@ -461,6 +461,31 @@ VideoRtpSession::stopReceiver()
     receiveThread_->stopSink();
 }
 
+rtcpRRHeader VideoRtpSession::getRtcpRR()
+{
+    if(socketPair_)
+        return socketPair_->getLastRtcpRR();
+
+    return {};
+}
+
+rtcpREMBHeader
+VideoRtpSession::getRtcpREMB()
+{
+    if(socketPair_)
+        return socketPair_->getLastRtcpREMB();
+
+    return {};
+}
+
+rtcpSRHeader VideoRtpSession::getRtcpSR()
+{
+    if(socketPair_)
+        return socketPair_->getLastRtcpSR();
+
+    return {};
+}
+
 void
 VideoRtpSession::start()
 {

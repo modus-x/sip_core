@@ -50,21 +50,46 @@ int main() {
         return 1;
     }
 
-    if(!controller.sendRegister(username, password, domain)) {
-        std::cerr << "Error: unable to send register for current account." << std::endl;
-        return 1;
+    // controller.setAudioCaptureDevice(1);
+    // print audio captures
+    auto captures = controller.getAudioCaptureDeviceList();
+    if(captures.empty())
+        std::cout << "\nNo avaliable audio capture devices found." << std::endl;
+    else {
+        std::cout << "\nAvaliable audio capture devices: \n";
+        for(auto dev : captures) {
+            std::cout <<  "\t" << dev << "\n";
+        }
+        std::cout << std::endl;
+    }
+
+    // print audio playbacks
+    auto playbacks = controller.getAudioPlaybackDeviceList();
+    if(playbacks.empty())
+        std::cout << "\nNo avaliable audio playback devices found." << std::endl;
+    else {
+        std::cout << "\nAvaliable audio playback devices:\n";
+        for(auto dev : playbacks) {
+            std::cout <<  "\t" << dev << "\n";
+        }
+        std::cout << std::endl;
     }
 
     // print video cameras info
     auto devices = controller.getVideoDeviceList();
     if(devices.empty())
-        std::cout << "No avaliable video devices found." << std::endl;
+        std::cout << "\nNo avaliable video devices found." << std::endl;
     else {
-        std::cout << "Avaliable video devices:";
+        std::cout << "\nAvaliable video devices:\n";
         for(auto dev : devices) {
-            std::cout <<  " " << dev;
+            std::cout <<  "\t" << dev << "\n";
         }
         std::cout << std::endl;
+    }
+
+    if(!controller.sendRegister(username, password, domain)) {
+        std::cerr << "Error: unable to send register for current account." << std::endl;
+        return 1;
     }
 
     while (true) {
@@ -191,8 +216,21 @@ int main() {
             else std::cout << "Enabling video..." << std::endl;
 
             controller.toggleVideo();
+        } else if (command == "info") {
+            if(!controller.hasActiveCall()) {
+                std::cerr << "No active call..." << std::endl;
+                continue;
+            }
+
+            auto info = controller.getCallDetails(controller.getActiveCall());
+            std::cout << "Current call info:\n";
+            for (auto it = info.begin(); it != info.end(); ++it) {
+                std::cout << " " << it->first 
+                        << " : " << it->second 
+                        << std::endl;
+            }
         } else {
-            std::cerr << "Error: Unknown command. \nFull list of commands:\n call <callee> - initiates call with given ID,\n add <callee> - adds new participant to current call,\n del <callee> - remove participant from conference.\n conf <callee1> ... <calleeN> - creates conference with given participants (>=3),\n switch <device> - switches video source for an active call.\n hangup - hangup current call.\n capOn - start capture of active call in a local file.\n capOff - stops capture of video.\n video - enables video transfer.\n exit - exit program." << std::endl;
+            std::cerr << "Error: Unknown command. \nFull list of commands:\n call <callee> - initiates call with given ID,\n add <callee> - adds new participant to current call,\n del <callee> - remove participant from conference.\n conf <callee1> ... <calleeN> - creates conference with given participants (>=3),\n switch <device> - switches video source for an active call.\n hangup - hangup current call.\n capOn - start capture of active call in a local file.\n capOff - stops capture of video.\n video - enables video transfer.\n info - get current call infos.\n exit - exit program." << std::endl;
         }
     }
 

@@ -8,13 +8,6 @@
 #define PATH_MAX MAX_PATH
 #endif
 
-// Get list of input devices
-//auto inputs = sip_core::Manager::instance().getAudioInputDeviceList();
-// Get list of output devices
-//auto outputs = sip_core::Manager::instance().getAudioOutputDeviceList();
-//sip_core::Manager::instance().setAudioDevice(1, sip_core::AudioDeviceType::CAPTURE);
-//sip_core::Manager::instance().setAudioDevice(1, sip_core::AudioDeviceType::PLAYBACK);
-
 CallController::CallController(const std::string& accountId) :
     m_mtxEvents(),
     m_isVideoEnabled(true),
@@ -30,7 +23,7 @@ CallController::CallController(const std::string& accountId) :
         { "MEDIA_TYPE", "MEDIA_TYPE_VIDEO"},
         { "ENABLED", "true" },
         { "MUTED", "false" },
-        // { "SOURCE", "display://desktop 640x480" }, //640x480
+        // { "SOURCE", "display://desktop" }, //640x480
         // { "SOURCE", R"(camera://video=@device_pnp_\\?\usb#vid_1bcf&pid_2284&mi_00#6&2e99a59a&0&0000#{65e8773d-8f56-11d0-a3b9-00a0c9223196}\global)" }, // 4k
         // { "SOURCE", R"(camera://video=@device_pnp_\\?\usb#vid_09da&pid_2695&mi_00#6&26daa0e0&0&0000#{65e8773d-8f56-11d0-a3b9-00a0c9223196}\global)" }, // aux
         // { "SOURCE", R"(camera://video=@device_pnp_\\?\usb#vid_04f2&pid_b76f&mi_00#6&330c68f9&0&0000#{65e8773d-8f56-11d0-a3b9-00a0c9223196}\global)" }, // front
@@ -338,6 +331,31 @@ const std::string CallController::getVideoDevice() const
     static std::string source;
     source = m_mediaVideo.at("SOURCE");
     return source;
+}
+
+std::map<std::string, std::string> CallController::getCallDetails(const std::string& callId)
+{
+    return libsip_core::getCallDetails(m_accontId, callId);
+}
+
+std::vector<std::string> CallController::getAudioCaptureDeviceList() const
+{
+    return sip_core::Manager::instance().getAudioInputDeviceList();
+}
+
+std::vector<std::string> CallController::getAudioPlaybackDeviceList() const
+{
+    return sip_core::Manager::instance().getAudioOutputDeviceList();
+}
+
+void CallController::setAudioCaptureDevice(int index)
+{
+    sip_core::Manager::instance().setAudioDevice(index, sip_core::AudioDeviceType::CAPTURE);
+}
+
+void CallController::setAudioPlaybackDevice(int index)
+{
+    sip_core::Manager::instance().setAudioDevice(index, sip_core::AudioDeviceType::PLAYBACK);
 }
 
 bool CallController::hangUp()

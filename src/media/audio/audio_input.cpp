@@ -49,7 +49,7 @@ AudioInput::AudioInput(const std::string& id)
                                      }))
     , fileId_(id + "_file")
     , deviceGuard_()
-    , loop_([] { return true; }, [this] { process(); }, [] {})
+    , loop_([] { return true; }, [this] { process(); }, [] {}, ThreadLoop::ThreadPriority::HIGH)
 {
     SIP_CORE_DBG() << "Creating audio input with id: " << id;
 }
