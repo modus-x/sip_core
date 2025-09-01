@@ -2102,18 +2102,10 @@ SIPCall::isReinviteRequired(const std::vector<MediaAttribute>& mediaAttrList)
     for (auto const& newAttr : mediaAttrList) {
         auto streamIdx = findRtpStreamIndex(newAttr.label_);
 
-        if (streamIdx < 0) {
-            // Always needs a re-invite when a new media is added.
-            return true;
-        }
-
-        // Changing the video source currently does not work via reinvite :)
-        if (newAttr.sourceUri_ != rtpStreams_[streamIdx].mediaAttribute_->sourceUri_) {
-            return false;
-        }
-
-        // Also check if 'enabled' has changed
-        if (newAttr.enabled_ != rtpStreams_[streamIdx].mediaAttribute_->enabled_) {
+        if (streamIdx < 0 || // Always needs a re-invite when a new media is added.
+            // newAttr.sourceUri_ != rtpStreams_[streamIdx].mediaAttribute_->sourceUri_ || // Changing the video source currently does not work via reinvite :)
+            newAttr.enabled_ != rtpStreams_[streamIdx].mediaAttribute_->enabled_  // Also check if 'enabled' has changed
+        ) {
             return true;
         }
     }
