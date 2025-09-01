@@ -431,6 +431,7 @@ public:
      * @msg     A JSON object describing the conference
      */
     void setConferenceInfo(const std::string& msg);
+    void setConferenceVoiceActivity(const std::string& msg);
 
     virtual void enterConference(std::shared_ptr<Conference> conference) = 0;
     virtual void exitConference() = 0;
@@ -443,6 +444,7 @@ public:
     std::unique_ptr<AudioDeviceGuard> audioGuard;
     void sendConfOrder(const Json::Value& root);
     void sendConfInfo(const std::string& json);
+    void sendVoiceActivity(const std::string& json);
     void sendObjectJson(const std::string& objectName, const std::string& objectJson);
     void resetConfInfo();
 

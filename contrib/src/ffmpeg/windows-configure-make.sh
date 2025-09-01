@@ -127,7 +127,8 @@ FFMPEGCONF+='
             --enable-filter=aformat
             --enable-filter=fps
             --enable-filter=transpose
-            --enable-filter=pad'
+            --enable-filter=pad
+            --enable-filter=drawbox'
 
 FFMPEGCONF+='
                 --enable-indev=dshow

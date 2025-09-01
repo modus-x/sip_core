@@ -531,7 +531,7 @@ Manager::ManagerPimpl::bindCallToConference(Call& call, Conference& conf)
     const auto& callId = call.getCallId();
     const auto& confId = conf.getConfId();
     const auto& state = call.getStateStr();
-
+    
     // ensure that calls are only in one conference at a time
     if (call.isConferenceParticipant())
         base_.detachParticipant(callId);

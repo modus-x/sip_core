@@ -294,6 +294,16 @@ public:
     void addParticipant(const std::string& participant_id);
 
     /**
+     * Moves position of the given participant to specified index
+     */
+    bool moveParticipant(const std::string& participant_id, size_t to);
+
+    /**
+     * Moves position of participant from index <from> to index <to>
+     */
+    bool moveParticipant(size_t from, size_t to);
+
+    /**
      * Remove a participant from the conference
      */
     void removeParticipant(const std::string& participant_id);
@@ -364,10 +374,11 @@ public:
     void hangupParticipant(const std::string& accountUri, const std::string& deviceId = "");
     void setHandRaised(const std::string& uri, const bool& state);
     void setVoiceActivity(const std::string& streamId, const bool& newState);
+    void setVoiceActivity(const Json::Value& json);
 
     void muteParticipant(const std::string& uri, const bool& state);
     void muteLocalHost(bool is_muted, const std::string& mediaType);
-    bool isRemoteParticipant(const std::string& uri);
+    // bool isRemoteParticipant(const std::string& uri);
     void mergeConfInfo(ConfInfo& newInfo, const std::string& peerURI);
 
     /**
@@ -443,6 +454,7 @@ private:
     ConfInfo confInfo_ {};
 
     void sendConferenceInfos();
+    void sendVoiceActivity();
     std::shared_ptr<RingBuffer> ghostRingBuffer_;
 
 #ifdef ENABLE_VIDEO
@@ -467,6 +479,7 @@ private:
     bool isMuted(std::string_view uri) const;
 
     ConfInfo getConfInfoHostUri(std::string_view localHostURI, std::string_view destURI);
+    std::string voiceActivivtyToString(const ConfInfo&);
     bool isHost(std::string_view uri) const;
     bool isHostDevice(std::string_view deviceId) const;
 

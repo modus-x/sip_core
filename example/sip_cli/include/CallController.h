@@ -32,6 +32,7 @@ public:
     bool addParticipant(const std::string& newParticipant);
     bool removeParticipant(const std::string& participant);
     bool createConfirence(const std::vector<std::string>& participantsList);
+    bool moveParticipant(size_t from_index, size_t to_index);
 
     bool isCaptureInProgress();
     bool startCallCapture();
@@ -76,7 +77,7 @@ private:
     void createConfFromParticipantList(const std::string& accountId,
                                        const std::vector<std::string>& participantList);
 
-    mutable std::mutex m_mtxEvents;
+    mutable std::recursive_mutex m_mtxEvents;
 
     bool m_isVideoEnabled;
     std::map<std::string, std::string> m_mediaAudio;

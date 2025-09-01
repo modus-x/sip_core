@@ -370,6 +370,11 @@ Call::onTextMessage(std::map<std::string, std::string>&& messages)
         return;
     }
 
+    it = messages.find("application/confVoiceActivity+json");
+    if(it != messages.end()) {
+        setConferenceVoiceActivity(it->second);
+    }
+
     {
         std::lock_guard<std::recursive_mutex> lk {callMutex_};
         if (parent_) {
@@ -660,6 +665,44 @@ Call::setConferenceInfo(const std::string& msg)
 }
 
 void
+Call::setConferenceVoiceActivity(const std::string& msg)
+{
+    ConfInfo newInfo;
+    Json::Value json;
+    std::string err;
+    Json::CharReaderBuilder rbuilder;
+    auto reader = std::unique_ptr<Json::CharReader>(rbuilder.newCharReader());
+    if (!reader->parse(msg.data(), msg.data() + msg.size(), &json, &err)) {
+        return;
+    }
+
+    if (not isConferenceParticipant()) {
+        for (const auto& participantInfo : json) {
+            if (!json.isMember("uri") || !json.isMember("state") || !json.isMember("sinkId"))
+                continue;
+                
+            auto uri = json["uri"].asString();
+            auto sinkId = json["sinkId"].asString();
+            auto state = json["state"].asBool();
+            
+            {
+                std::lock_guard<std::mutex> lk(confInfoMutex_);
+                // confID_ empty -> participant set confInfo with the received one
+                auto participant = std::find_if(confInfo_.begin(), confInfo_.end(), [&uri] (const ParticipantInfo& p) {
+                    return uri == p.uri;
+                });
+
+                if(participant != confInfo_.end()) {
+                    participant->voiceActivity = state;
+                }
+            }
+        }
+    } else if (auto conf = conf_.lock()) {
+        conf->setVoiceActivity(json);
+    }
+}
+
+void
 Call::sendConfOrder(const Json::Value& root)
 {
     std::map<std::string, std::string> messages;
@@ -682,6 +725,21 @@ Call::sendConfInfo(const std::string& json)
     wbuilder["commentStyle"] = "None";
     wbuilder["indentation"] = "";
     messages["application/confInfo+json"] = json;
+
+    auto w = getAccount();
+    auto account = w.lock();
+    if (account)
+        sendTextMessage(messages, account->getFromUri());
+}
+
+void
+Call::sendVoiceActivity(const std::string& json)
+{
+    std::map<std::string, std::string> messages;
+    Json::StreamWriterBuilder wbuilder;
+    wbuilder["commentStyle"] = "None";
+    wbuilder["indentation"] = "";
+    messages["application/confVoiceActivity+json"] = json;
 
     auto w = getAccount();
     auto account = w.lock();

@@ -73,7 +73,7 @@ bool CallController::init()
 
     libsip_core::registerSignalHandlers(sigMap);
     
-    if (!libsip_core::init(static_cast<libsip_core::InitFlag>(3)))
+    if (!libsip_core::init(static_cast<libsip_core::InitFlag>(0)))
             return false;
 
     std::string cwd;
@@ -102,7 +102,7 @@ bool CallController::init()
 
 bool CallController::sendRegister(const std::string& user, const std::string& pass, const std::string& domain)
 {
-    std::lock_guard<std::mutex> lock(m_mtxEvents);
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
     
     if(!libsip_core::initialized())
         return false;
@@ -145,8 +145,8 @@ bool CallController::sendRegister(const std::string& user, const std::string& pa
 
 bool CallController::call(const std::string& callTo)
 {
-    std::lock_guard<std::mutex> lock(m_mtxEvents);
-    if(!m_activeCalls.empty() || !m_activeConfirence.empty())
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
+    if(hasActiveCall())
         return false;
 
     // build media list settings according to settings
@@ -167,13 +167,13 @@ bool CallController::call(const std::string& callTo)
 
 bool CallController::hasActiveCall() const
 {
-    std::lock_guard<std::mutex> lock(m_mtxEvents);
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
     return !m_activeConfirence.empty() || m_activeCalls.size() != 0;
 }
 
 const std::string CallController::getActiveCall() const
 {
-    std::lock_guard<std::mutex> lock(m_mtxEvents);
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
     if(!m_activeConfirence.empty())
         return m_activeConfirence;
     else if(m_activeCalls.size() != 0) {
@@ -184,7 +184,7 @@ const std::string CallController::getActiveCall() const
 
 bool CallController::addParticipant(const std::string& newParticipant)
 {
-    std::lock_guard<std::mutex> lock(m_mtxEvents);
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
     if(m_activeCalls.empty())
         return false;
     
@@ -215,7 +215,7 @@ bool CallController::addParticipant(const std::string& newParticipant)
 
 bool CallController::removeParticipant(const std::string& participant)
 {
-    std::lock_guard<std::mutex> lock(m_mtxEvents);
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
     if(m_activeConfirence.empty())
         return false;
 
@@ -250,7 +250,7 @@ bool CallController::createConfirence(const std::vector<std::string>& participan
         if(!libsip_core::addParticipant(m_accontId, callId, m_accontId, m_activeConfirence))
             continue;
 
-        std::lock_guard<std::mutex> lock(m_mtxEvents);
+        std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
         m_activeCalls[participantsList[i]] = callId;
     }
 
@@ -262,6 +262,12 @@ bool CallController::createConfirence(const std::vector<std::string>& participan
 
     return true;
 }
+
+bool CallController::moveParticipant(size_t from_index, size_t to_index)
+{
+    return libsip_core::moveParticipant(m_accontId, m_activeConfirence, from_index, to_index);
+}
+
 
 bool CallController::isCaptureInProgress()
 {
@@ -287,8 +293,8 @@ bool CallController::stopCallCapture()
 
 void CallController::toggleVideo()
 {
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
     if(hasActiveCall()) {
-        std::lock_guard<std::mutex> lock(m_mtxEvents);
         // build media list settings according to settings
         std::vector<std::map<std::string, std::string>> mediaList;
         mediaList.push_back(m_mediaAudio);
@@ -297,19 +303,18 @@ void CallController::toggleVideo()
         libsip_core::requestMediaChange(m_accontId, getActiveCall(), mediaList);
     }
     
-    std::lock_guard<std::mutex> lock(m_mtxEvents);
     m_isVideoEnabled = !m_isVideoEnabled;
 }
 
 bool CallController::isVideoEnabled() const
 {
-    std::lock_guard<std::mutex> lock(m_mtxEvents);
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
     return m_isVideoEnabled;
 }
 
 bool CallController::setVideoDevice(const std::string& videoDevice)
 {
-    std::lock_guard<std::mutex> lock(m_mtxEvents);
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
     if (videoDevice.rfind("display://") == 0 || videoDevice.rfind("camera://") == 0) {
         m_mediaVideo["SOURCE"] = videoDevice;
     } else if(videoDevice == "default") {
@@ -321,13 +326,13 @@ bool CallController::setVideoDevice(const std::string& videoDevice)
 
 std::vector<std::string> CallController::getVideoDeviceList() const
 {
-    std::lock_guard<std::mutex> lock(m_mtxEvents);
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
     return libsip_core::getDeviceList();
 }
 
 const std::string CallController::getVideoDevice() const
 {
-    std::lock_guard<std::mutex> lock(m_mtxEvents);
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
     static std::string source;
     source = m_mediaVideo.at("SOURCE");
     return source;
@@ -363,7 +368,7 @@ bool CallController::hangUp()
     if(!hasActiveCall())
     return true;
     
-    std::lock_guard<std::mutex> lock(m_mtxEvents);
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
     if(m_activeConfirence.empty()) {
         if(!libsip_core::hangUp(m_accontId, m_activeCalls.begin()->second))
             return false;
@@ -385,7 +390,7 @@ void CallController::proccesEvents()
         if (event.type == EVENT_FRAME_READY) {
             std::unique_ptr<std::string> args((std::string*)event.user.data1);
 
-            std::lock_guard<std::mutex> lock(m_mtxEvents);
+            std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
             
             auto it = m_previewWindows.find(*args);
             if(it == m_previewWindows.end())
@@ -397,7 +402,7 @@ void CallController::proccesEvents()
         else if (event.type == EVENT_CREATE_PREVIEW) {
             std::unique_ptr<CreateNewPreviewArgs> args((CreateNewPreviewArgs*)event.user.data1);
 
-            std::lock_guard<std::mutex> lock(m_mtxEvents);
+            std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
             if(m_previewWindows.find(args->id) == m_previewWindows.end()) {
                 if(!OpenVideoPrievew(args->id, args->w, args->h)) {
                     std::cerr << "Error: failed to create window for " << args->id << "." << std::endl;
@@ -429,7 +434,7 @@ void CallController::proccesEvents()
         else if(event.type == EVENT_DESTROY_PREVIEW) {
             std::unique_ptr<std::string> args((std::string*)event.user.data1);
 
-            std::lock_guard<std::mutex> lock(m_mtxEvents);
+            std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
             CloseVideoPreview(*args);
         }
     }

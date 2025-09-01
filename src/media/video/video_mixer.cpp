@@ -51,6 +51,7 @@ struct VideoMixer::VideoMixerSource
     Observable<std::shared_ptr<MediaFrame>>* source {nullptr};
     int rotation {0};
     std::unique_ptr<MediaFilter> rotationFilter {nullptr};
+    std::unique_ptr<MediaFilter> bordersFilter {nullptr};
     std::shared_ptr<VideoFrame> render_frame;
     void atomic_copy(const VideoFrame& other)
     {
@@ -172,6 +173,56 @@ VideoMixer::setActiveStream(const std::string& id)
 {
     activeStream_ = id;
     updateLayout();
+}
+
+void VideoMixer::setVoiceActivity(const std::string& streamId, bool state)
+{
+    std::lock_guard<std::mutex> lock(vocieActivivtyMtx_);
+    voiceActivity_[streamId] = state;
+    updateLayout();
+}
+
+void VideoMixer::setVoiceActivity(const std::map<std::string, bool>& states)
+{
+    std::lock_guard<std::mutex> lock(vocieActivivtyMtx_);
+    voiceActivity_ = states;
+    updateLayout();
+}
+
+void VideoMixer::setVoiceActivity(const std::map<std::string, bool>&& states)
+{
+    std::lock_guard<std::mutex> lock(vocieActivivtyMtx_);
+    voiceActivity_ = std::move(states);
+    updateLayout();
+}
+
+bool
+VideoMixer::moveSource(size_t from_index, size_t to_index) 
+{
+    std::unique_lock lock(rwMutex_);
+    
+    size_t size = sources_.size();
+    if (from_index == to_index || from_index >= size || to_index >= size) 
+        return false;
+
+    auto it_from = sources_.begin();
+    std::advance(it_from, from_index);
+
+    if (from_index < to_index) {
+        if (to_index == sources_.size()) {
+            sources_.splice(sources_.end(), sources_, it_from);
+        } else {
+            auto it_to = sources_.begin();
+            std::advance(it_to, to_index);
+            sources_.splice(std::next(it_to), sources_, it_from);
+        }
+    } else { // from > to
+        auto it_to = sources_.begin();
+        std::advance(it_to, to_index);
+        sources_.splice(it_to, sources_, it_from);
+    }
+    updateLayout();
+    return true;
 }
 
 // just report that layout was updated
@@ -411,8 +462,20 @@ VideoMixer::process()
                     needsUpdate = true;
                 }
 
-                if (needsUpdate)
-                    calc_position(x, fooInput, wantedIndex);
+                // if source aspect ratio changed - recalculate sources positions again
+                if(x->h != 0 && x->w != 0) {
+                    float source_aspect = (float)x->w / (float)x->h;
+                    float input_aspect = (float)fooInput->width() / (float)fooInput->height();
+                    float aspect_diff = source_aspect - input_aspect;
+                    if(aspect_diff < -0.1 || aspect_diff > 0.1)
+                        needsUpdate = true;
+                }
+
+                {
+                    std::lock_guard<std::mutex> lock(vocieActivivtyMtx_);
+                    if (needsUpdate)
+                        calc_position(x, fooInput, wantedIndex, voiceActivity_[sinfo.streamId]);
+                }
 
                 if (!blackFrame) {
                     if (fooInput)
@@ -500,13 +563,23 @@ VideoMixer::render_frame(VideoFrame& output,
     }
 
     scaler_.scale_and_pad(*frame, output, xoff, yoff, cell_width, cell_height, true);
+
+    const constexpr char borderFilter[] = "border";
+    if(source->bordersFilter)
+    {
+        source->bordersFilter->feedInput(output.pointer(), borderFilter);
+        std::unique_ptr<MediaFrame> clone = source->bordersFilter->readOutput();
+        if(clone.get())
+             output.copyFrom(*std::static_pointer_cast<VideoFrame>(std::shared_ptr<MediaFrame>(clone.release())));
+    }
+
     return true;
 }
 
 void
 VideoMixer::calc_position(std::unique_ptr<VideoMixerSource>& source,
                           const std::shared_ptr<VideoFrame>& input,
-                          int index)
+                          int index, bool isActive)
 {
     if (!width_ or !height_)
         return;
@@ -580,10 +653,35 @@ VideoMixer::calc_position(std::unique_ptr<VideoMixerSource>& source,
     frameH_off = cellH_off + (cell_height - frameH) / 2;
 
     // Update source's cache
-    source->w = frameW;
-    source->h = frameH;
-    source->x = frameW_off;
-    source->y = frameH_off;
+    source->w = frameW - ( CONF_PADDING + CONF_BORDER_WIDTH) * 2;
+    source->h = frameH - ( CONF_PADDING + CONF_BORDER_WIDTH) * 2 ;
+    source->x = frameW_off + CONF_PADDING + CONF_BORDER_WIDTH;
+    source->y = frameH_off + CONF_PADDING + CONF_BORDER_WIDTH;
+
+    source->bordersFilter = std::unique_ptr<MediaFilter>(new MediaFilter());
+    if(!initBorderFilter(source->bordersFilter.get(), "border", input->format(), 
+                        source->x, source->y, source->w, source->h, isActive))
+        source->bordersFilter.release();
+}
+
+bool
+VideoMixer::initBorderFilter(MediaFilter* filter, std::string inputName, int format, int x, int y, int width, int height, bool active)
+{
+    std::stringstream ss;
+    ss << "[" << inputName << "] ";
+    ss << "drawbox=x="  << x - (CONF_BORDER_WIDTH) << ":y=" << y - (CONF_BORDER_WIDTH) << ":w=" << width + (CONF_BORDER_WIDTH * 2)
+        << ":h=" << height + (CONF_BORDER_WIDTH * 2)<< ":color=" << (active ? CONF_BORDER_ACTIVE_COLOR : CONF_BORDER_INACTIVE_COLOR) << ":t=" << CONF_BORDER_WIDTH;
+
+    constexpr auto one = rational<int>(1);
+    std::vector<MediaStream> msv;
+    msv.emplace_back(inputName, format, one, width, height, 0, one);
+
+    auto ret = filter->initialize(ss.str(), msv);
+    if (ret < 0) {
+        SIP_CORE_ERR() << "filter init fail";
+        return false;
+    }
+    return true;
 }
 
 void
