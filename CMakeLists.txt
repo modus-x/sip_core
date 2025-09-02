@@ -91,11 +91,11 @@ if(NOT MSVC AND BUILD_DEPS)
   # Local build target
   # ----------------------------------------------------------------------------
 
-  # Get triplet where we build (our local machine)
+  # Get triplet where we build (our local machine, strip any numbers)
   execute_process(
-    COMMAND gcc -dumpmachine
-    COMMAND tr -d '\n'
-    OUTPUT_VARIABLE BUILD_MACHINE)
+    COMMAND bash -c "gcc -dumpmachine | sed 's/[0-9][0-9]*\\.[0-9][0-9]*\\.[0-9][0-9]*\$//'"
+    OUTPUT_VARIABLE BUILD_MACHINE
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
 
   # Host build target with environment variables
   # ----------------------------------------------------------------------------
@@ -136,12 +136,6 @@ if(NOT MSVC AND BUILD_DEPS)
     set(TARGETS ${BUILD_MACHINE})
   elseif(APPLE)
     if(IOS)
-      # ios specific flags and contrib build root
-      execute_process(
-        COMMAND xcrun --sdk "${CMAKE_OSX_SYSROOT}" --show-sdk-version
-        OUTPUT_VARIABLE SDK_VERSION
-        OUTPUT_STRIP_TRAILING_WHITESPACE)
-
       if(NOT DEFINED ENV{IOS_TARGET_PLATFORM})
         message(
           FATAL_ERROR
@@ -163,7 +157,7 @@ if(NOT MSVC AND BUILD_DEPS)
             "-mios-simulator-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
         set(ENV{ASFLAGS}
             "-mios-simulator-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
-        set(TARGETS ${CMAKE_OSX_ARCHITECTURES}-ios${SDK_VERSION}-simulator)
+        set(TARGETS ${CMAKE_OSX_ARCHITECTURES}-ios-simulator)
       elseif($ENV{IOS_TARGET_PLATFORM} STREQUAL "iPhoneOS")
         message("-- iOS Build for iphone")
         set(ENV{LDFLAGS}
@@ -173,7 +167,7 @@ if(NOT MSVC AND BUILD_DEPS)
             "-miphoneos-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
         set(ENV{ASFLAGS}
             "-miphoneos-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
-        set(TARGETS ${CMAKE_OSX_ARCHITECTURES}-ios${SDK_VERSION}-real)
+        set(TARGETS ${CMAKE_OSX_ARCHITECTURES}-ios-real)
       else()
         message(FATAL_ERROR "-- iOS undefined arch for contrib build")
       endif()
