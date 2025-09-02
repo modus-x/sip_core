@@ -58,8 +58,12 @@ constexpr const char* PRESENCE_MODULE_ENABLED_KEY = "presenceModuleEnabled";
 constexpr const char* KEEP_ALIVE_INTERVAL = "keepAliveInterval";
 constexpr const char* KEEP_ALIVE_TYPE = "keepAliveType";
 
+constexpr const char* CRED_KEY = "credentials";
+constexpr const char* CRED_PASSWORD = "password";
+constexpr const char* CRED_REALM = "realm";
+constexpr const char* CRED_USERNAME = "username";
+constexpr const char* CRED_HASH = "hash";
 
-constexpr const char* CRED_KEY = "credential";
 constexpr const char* SRTP_KEY = "srtp";
 constexpr const char* SRTP_ENABLE_KEY = "enable";
 constexpr const char* KEY_EXCHANGE_KEY = "keyExchange";
@@ -91,10 +95,13 @@ SipAccountConfig::serialize(YAML::Emitter& out) const
     // out << YAML::Key << PRESENCE_MODULE_ENABLED_KEY << YAML::Value
     //     << (presence_ and presence_->isEnabled());
 
-    out << YAML::Key << Conf::REGISTRATION_EXPIRE << YAML::Value
-        << registrationExpire;
+    out << YAML::Key << Conf::REGISTRATION_EXPIRE << YAML::Value << registrationExpire;
     out << YAML::Key << Conf::SERVICE_ROUTE_KEY << YAML::Value << serviceRoute;
     out << YAML::Key << Conf::ALLOW_IP_AUTO_REWRITE << YAML::Value << allowIPAutoRewrite;
+
+    if (serializeCredentials) {
+        out << YAML::Key << Conf::CRED_KEY << YAML::Value << getCredentials();
+    }
 
     // srtp submap
     out << YAML::Key << Conf::SRTP_KEY << YAML::Value << YAML::BeginMap;
@@ -135,6 +142,18 @@ SipAccountConfig::unserialize(const YAML::Node& node)
     parseValueOptional(srtpMap, Conf::KEY_EXCHANGE_KEY, tmpKey);
     srtpKeyExchange = sip_utils::getKeyExchangeProtocol(tmpKey);
     parseValueOptional(srtpMap, Conf::RTP_FALLBACK_KEY, srtpFallback);
+
+    const auto& credsMap = node[Conf::CRED_KEY];
+    serializeCredentials = credsMap ? true : false;
+
+    if (serializeCredentials) {
+        auto creds = parseVectorMap(credsMap,
+                                      {Conf::CRED_REALM,
+                                       Conf::CRED_USERNAME,
+                                       Conf::CRED_PASSWORD,
+                                       Conf::CRED_HASH});
+        setCredentials(creds);
+    }
 }
 
 std::map<std::string, std::string>
@@ -200,22 +219,21 @@ SipAccountConfig::fromMap(const std::map<std::string, std::string>& details)
     if (iterKaType != details.end())
         keepAliveType = getKeepAliveType(iterKaType->second);
 
-    SIP_CORE_WARN("No credentials set, inferring them...");
-    std::map<std::string, std::string> map;
-    map[Conf::CONFIG_ACCOUNT_USERNAME] = username;
-    parseString(details, Conf::CONFIG_ACCOUNT_PASSWORD, map[Conf::CONFIG_ACCOUNT_PASSWORD]);
-    parseString(details, Conf::CONFIG_ACCOUNT_HASH, map[Conf::CONFIG_ACCOUNT_HASH]);
-    map[Conf::CONFIG_ACCOUNT_REALM] = "*";
-    setCredentials({map});
+    std::map<std::string, std::string> creds;
+    creds[Conf::CRED_USERNAME] = username;
+    parseString(details, Conf::CONFIG_ACCOUNT_PASSWORD, creds[Conf::CRED_PASSWORD]);
+    parseString(details, Conf::CONFIG_ACCOUNT_HASH, creds[Conf::CRED_HASH]);
+    creds[Conf::CRED_REALM] = "*";
+    setCredentials({creds});
 
 }
 
 SipAccountConfig::Credentials::Credentials(const std::map<std::string, std::string>& cred)
 {
-    auto itrealm = cred.find(Conf::CONFIG_ACCOUNT_REALM);
-    auto user = cred.find(Conf::CONFIG_ACCOUNT_USERNAME);
-    auto passw = cred.find(Conf::CONFIG_ACCOUNT_PASSWORD);
-    auto hash = cred.find(Conf::CONFIG_ACCOUNT_HASH);
+    auto itrealm = cred.find(Conf::CRED_REALM);
+    auto user = cred.find(Conf::CRED_USERNAME);
+    auto passw = cred.find(Conf::CRED_PASSWORD);
+    auto hash = cred.find(Conf::CRED_HASH);
     realm = itrealm != cred.end() ? itrealm->second : "";
     username = user != cred.end() ? user->second : "";
     password = passw != cred.end() ? passw->second : "";
@@ -225,10 +243,10 @@ SipAccountConfig::Credentials::Credentials(const std::map<std::string, std::stri
 std::map<std::string, std::string>
 SipAccountConfig::Credentials::toMap() const
 {
-    return {{Conf::CONFIG_ACCOUNT_REALM, realm},
-            {Conf::CONFIG_ACCOUNT_USERNAME, username},
-            {Conf::CONFIG_ACCOUNT_PASSWORD, password},
-            {Conf::CONFIG_ACCOUNT_HASH, password_h}};
+    return {{Conf::CRED_REALM, realm},
+            {Conf::CRED_USERNAME, username},
+            {Conf::CRED_PASSWORD, password},
+            {Conf::CRED_HASH, password_h}};
 }
 
 void
