@@ -206,7 +206,6 @@ Preferences::serialize(YAML::Emitter& out) const
     out << YAML::Key << HISTORY_LIMIT_KEY << YAML::Value << historyLimit_;
     out << YAML::Key << RINGING_TIMEOUT << YAML::Value << ringingTimeout_;
     out << YAML::Key << HISTORY_MAX_CALLS_KEY << YAML::Value << historyMaxCalls_;
-    // out << YAML::Key << MD5_HASH_KEY << YAML::Value << md5Hash_;
     out << YAML::Key << ORDER_KEY << YAML::Value << accountOrder_;
     out << YAML::Key << PORT_NUM_KEY << YAML::Value << portNum_;
     out << YAML::Key << SEARCH_BAR_DISPLAY_KEY << YAML::Value << searchBarDisplay_;
