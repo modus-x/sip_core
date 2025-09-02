@@ -121,6 +121,9 @@ struct SipAccountConfig : public SipAccountBaseConfig {
     std::vector<Credentials> credentials;
     std::vector<std::map<std::string, std::string>> getCredentials() const;
     void setCredentials(const std::vector<std::map<std::string, std::string>>& creds);
+
+    // should be serialize creds?
+    bool serializeCredentials {false};
 };
 
 }

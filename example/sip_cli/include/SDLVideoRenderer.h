@@ -6,7 +6,8 @@
 #include "manager.h"
 #include "video/video_scaler.h"
 
-class SDLVideoRenderer {
+class SDLVideoRenderer
+{
 public:
     SDLVideoRenderer(const std::string& id, int width, int height);
     ~SDLVideoRenderer();
