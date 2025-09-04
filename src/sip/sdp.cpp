@@ -808,7 +808,7 @@ Sdp::getMediaDescriptions(const pjmedia_sdp_session* session, bool remote) const
 
         descr.onHold = pjmedia_sdp_attr_find2(media->attr_count,
                                               media->attr,
-                                              DIRECTION_STR[MediaDirection::SENDONLY],
+                                              DIRECTION_STR[MediaDirection::RECVONLY],
                                               nullptr)
                        || pjmedia_sdp_attr_find2(media->attr_count,
                                                  media->attr,
@@ -961,8 +961,7 @@ Sdp::getMediaAttributeListFromSdp(const pjmedia_sdp_session* sdpSession, bool ig
 
         // Get mute state.
         auto direction = getMediaDirection(media);
-        mediaAttr.muted_ = direction != MediaDirection::SENDRECV
-                           and direction != MediaDirection::RECVONLY;
+        mediaAttr.muted_ = direction == MediaDirection::RECVONLY;
 
         // Get transport.
         auto transp = getMediaTransport(media);

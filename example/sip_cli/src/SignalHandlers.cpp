@@ -82,6 +82,10 @@ CallController::incomingCallWithMedia(
     
     if(m_activeCalls.empty()) {
         std::cout << "Incoming call with media form user: " << from << ".\nAccapting..." << std::endl;
+
+        std::vector<std::map<std::string, std::string>> answerMediaList;
+        answerMediaList.push_back(m_mediaAudio);
+
         bool incomingWithVideo = false;
         for (auto media : mediaList) {
             auto type = media.find("MEDIA_TYPE");
@@ -93,15 +97,36 @@ CallController::incomingCallWithMedia(
             }
         }
 
-        std::vector<std::map<std::string, std::string>> answerMediaList;
-        answerMediaList.push_back(m_mediaAudio);
-        if (incomingWithVideo && m_isVideoEnabled)
-            answerMediaList.push_back(m_mediaVideo);
-        else if (incomingWithVideo && !m_isVideoEnabled) {
-            auto video = m_mediaVideo;
-            video["ENABLED"] = "false";
-            answerMediaList.push_back(video);
+#ifdef ENABLE_VIDEO
+        if (incomingWithVideo) {
+            if (m_isVideoEnabled) {
+                m_mediaVideo["ENABLED"] = "true";
+                m_mediaVideo["MUTED"] = "false";
+                answerMediaList.push_back(m_mediaVideo);
+            }
+            else {
+                m_mediaVideo["ENABLED"] = "true";
+                m_mediaVideo["MUTED"] = "true";
+                answerMediaList.push_back(m_mediaVideo);
+            }
         }
+        else {
+            if (m_isVideoEnabled) {
+                m_mediaVideo["ENABLED"] = "true";
+                m_mediaVideo["MUTED"] = "false";
+                answerMediaList.push_back(m_mediaVideo);
+            }
+        }
+#elif
+        if (incomingWithVideo) {
+            libsip_core::MediaMap videoMedia = {
+                { "MEDIA_TYPE", "MEDIA_TYPE_VIDEO"},
+                { "MUTED", "true" },
+                { "ENABLED", "false" },
+                { "LABEL", "video_0" }};
+            answerMediaList.push_back(videoMedia);
+        }
+#endif
 
         std::this_thread::sleep_for(1s);
 
@@ -120,6 +145,17 @@ CallController::mediaNegotiationStatus(
 {
     std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
     std::cout << "mediaNegotiationStatus event - " << event << std::endl;
+}
+
+void CallController::mediaChangeRequest(
+    const std::string& accountId, 
+    const std::string& callId, 
+    const std::vector<std::map<std::string, std::string>>& remoteMediaList)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
+    std::cout << "mediaChangeRequest event for call - " << callId << std::endl;
+
+    libsip_core::answerMediaChangeRequest(accountId, callId, remoteMediaList);
 }
 
 void

@@ -37,6 +37,11 @@ class ISignals
         const ::std::string& event,
         const ::std::vector<::std::map<::std::string, ::std::string>>& mediaList)
         = 0;
+    virtual void mediaChangeRequest(
+        const std::string& accountId, 
+        const std::string& callId, 
+        const std::vector<std::map<std::string, std::string>>& remoteMediaList)
+        = 0;
     virtual void startCapture(const std::string& camid) = 0;
     virtual void stopCapture(const std::string& camid) = 0;
     virtual void decodingStarted(const std::string& id,

@@ -398,7 +398,7 @@ VideoMixer::process()
             auto audioSource = std::make_unique<VideoMixer::VideoMixerSource>();
 
             // calc pos, but DO NOT render anything
-            calc_position(audioSource, audioFrame, wantedIndex, false);
+            calc_position(audioSource, audioFrame, wantedIndex, voiceActivity_[streamId]);
             sourcesInfo.emplace_back(SourceInfo { {},
                                         audioSource->x,
                                         audioSource->y,

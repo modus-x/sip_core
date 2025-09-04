@@ -26,6 +26,8 @@ public:
 
     bool call(const std::string& callTo);
     bool hangUp();
+    bool hold();
+    bool resume();
     bool hasActiveCall() const;
     const std::string getActiveCall() const;
 
@@ -78,6 +80,10 @@ private:
         const ::std::string& callId,
         const ::std::string& event,
         const ::std::vector<::std::map<::std::string, ::std::string>>& mediaList) override;
+    virtual void mediaChangeRequest(
+        const std::string& accountId, 
+        const std::string& callId, 
+        const std::vector<std::map<std::string, std::string>>& remoteMediaList) override;
     virtual void startCapture(const std::string& camid) override;
     virtual void stopCapture(const std::string& camid) override;
     virtual void decodingStarted(const std::string& id,
@@ -106,9 +112,12 @@ private:
 
     mutable std::recursive_mutex m_mtxEvents;
 
+#ifdef ENABLE_VIDEO
     bool m_isVideoEnabled;
-    std::map<std::string, std::string> m_mediaAudio;
     std::map<std::string, std::string> m_mediaVideo;
+#endif
+    
+    std::map<std::string, std::string> m_mediaAudio;
 
     std::string m_user;
     std::string m_domain;
