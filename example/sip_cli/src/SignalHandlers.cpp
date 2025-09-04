@@ -158,15 +158,6 @@ void CallController::mediaChangeRequest(
     libsip_core::answerMediaChangeRequest(accountId, callId, remoteMediaList);
 }
 
-void 
-CallController::mediaChangeRequest(const std::string& accountId, const std::string& callId, const std::vector<std::map<std::string, std::string>>& remoteMediaList)
-{
-    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
-    std::cout << "mediaChangeRequest event for call - " << callId << std::endl;
-
-    libsip_core::answerMediaChangeRequest(accountId, callId, remoteMediaList);
-}
-
 void
 CallController::startCapture(const std::string& camid)
 {
