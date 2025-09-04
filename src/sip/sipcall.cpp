@@ -2254,10 +2254,10 @@ SIPCall::onMediaNegotiationComplete()
                               this_->getCallId().c_str());
                 // RESTART the media.
                 this_->stopAllMedia();
+                this_->updateRemoteMedia();
                 this_->startAllMedia();
             }
 
-            this_->updateRemoteMedia();
             this_->reportMediaNegotiationStatus();
         }
     });
