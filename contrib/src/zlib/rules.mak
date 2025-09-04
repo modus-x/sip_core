@@ -1,5 +1,5 @@
 # ZLIB
-ZLIB_VERSION := 1.2.8
+ZLIB_VERSION := 1.3.1
 ZLIB_URL := https://nexus.svetlocal.ru/repository/github-artifacts/zlib-$(ZLIB_VERSION).tar.gz
 
 PKGS += zlib

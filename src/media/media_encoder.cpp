@@ -211,6 +211,8 @@ MediaEncoder::writeContainerToRtp(uint8_t* buf, int buf_size)
         int payload_type = args.payload_type;
 #endif
 
+        av_opt_set_int(outputCtx_, "strict", -2, AV_OPT_SEARCH_CHILDREN);
+
         int ret;
         if (payload_type
             and (ret = av_opt_set_int(outputCtx_, "payload_type", payload_type, AV_OPT_SEARCH_CHILDREN) < 0))

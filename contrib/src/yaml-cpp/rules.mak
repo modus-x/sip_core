@@ -1,5 +1,5 @@
 # YAML
-YAML_CPP_VERSION := yaml-cpp-0.6.3
+YAML_CPP_VERSION := c9371de7836d113c0b14bfa15ca70f00ebb3ac6f
 YAML_CPP_URL := https://nexus.svetlocal.ru/repository/github-artifacts/yaml-cpp-$(YAML_CPP_VERSION).tar.gz
 
 PKGS += yaml-cpp
