@@ -10,14 +10,8 @@
 
 CallController::CallController(const std::string& accountId) :
     m_mtxEvents(),
+#ifdef ENABLE_VIDEO
     m_isVideoEnabled(true),
-    m_mediaAudio
-    {
-        { "MEDIA_TYPE", "MEDIA_TYPE_AUDIO"},
-        { "ENABLED", "true" },
-        { "MUTED", "false" },
-        { "LABEL", "audio_0" }
-    },
     m_mediaVideo
     {
         { "MEDIA_TYPE", "MEDIA_TYPE_VIDEO"},
@@ -26,8 +20,16 @@ CallController::CallController(const std::string& accountId) :
         // { "SOURCE", "display://desktop" }, //640x480
         // { "SOURCE", R"(camera://video=@device_pnp_\\?\usb#vid_1bcf&pid_2284&mi_00#6&2e99a59a&0&0000#{65e8773d-8f56-11d0-a3b9-00a0c9223196}\global)" }, // 4k
         // { "SOURCE", R"(camera://video=@device_pnp_\\?\usb#vid_09da&pid_2695&mi_00#6&26daa0e0&0&0000#{65e8773d-8f56-11d0-a3b9-00a0c9223196}\global)" }, // aux
-        // { "SOURCE", R"(camera://video=@device_pnp_\\?\usb#vid_04f2&pid_b76f&mi_00#6&330c68f9&0&0000#{65e8773d-8f56-11d0-a3b9-00a0c9223196}\global)" }, // front
+        { "SOURCE", R"(camera://video=@device_pnp_\\?\usb#vid_04f2&pid_b76f&mi_00#6&330c68f9&0&0000#{65e8773d-8f56-11d0-a3b9-00a0c9223196}\global)" }, // front
         { "LABEL", "video_0" }
+    },
+#endif
+    m_mediaAudio
+    {
+        { "MEDIA_TYPE", "MEDIA_TYPE_AUDIO"},
+        { "ENABLED", "true" },
+        { "MUTED", "false" },
+        { "LABEL", "audio_0" }
     },
     m_user(),
     m_domain(),
@@ -61,6 +63,7 @@ bool CallController::init()
         libsip_core::exportable_callback<libsip_core::CallSignal::IncomingCall>(std::bind(&CallController::incomingCall, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3)),
         libsip_core::exportable_callback<libsip_core::CallSignal::IncomingCallWithMedia>(std::bind(&CallController::incomingCallWithMedia, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5)),
         libsip_core::exportable_callback<libsip_core::CallSignal::MediaNegotiationStatus>(std::bind(&CallController::mediaNegotiationStatus, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3)),
+        libsip_core::exportable_callback<libsip_core::CallSignal::MediaChangeRequested>(std::bind(&CallController::mediaChangeRequest, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3)),
         libsip_core::exportable_callback<libsip_core::AudioSignal::DeviceEvent>(std::bind(&CallController::audioDeviceEvent, this)),
         libsip_core::exportable_callback<libsip_core::VideoSignal::StartCapture>(std::bind(&CallController::startCapture, this, std::placeholders::_1)),
         libsip_core::exportable_callback<libsip_core::VideoSignal::DecodingStarted>(std::bind(&CallController::decodingStarted, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5)),
@@ -152,8 +155,13 @@ bool CallController::call(const std::string& callTo)
     // build media list settings according to settings
     std::vector<std::map<std::string, std::string>> mediaList;
     mediaList.push_back(m_mediaAudio);
-    if(m_isVideoEnabled) mediaList.push_back(m_mediaVideo);
-    
+#ifdef ENABLE_VIDEO
+    // if(m_isVideoEnabled) mediaList.push_back(m_mediaVideo);
+    if(m_isVideoEnabled) m_mediaVideo["ENABLED"] = "true";
+    else m_mediaVideo["ENABLED"] = "false";
+    mediaList.push_back(m_mediaVideo);
+#endif
+
     std::string id = libsip_core::placeCallWithMedia(m_accontId,
         toSipUri(callTo, m_domain),
         mediaList);
@@ -191,7 +199,12 @@ bool CallController::addParticipant(const std::string& newParticipant)
     // build media list settings according to settings
     std::vector<std::map<std::string, std::string>> mediaList;
     mediaList.push_back(m_mediaAudio);
-    if(m_isVideoEnabled) mediaList.push_back(m_mediaVideo);
+#ifdef ENABLE_VIDEO
+    // if(m_isVideoEnabled) mediaList.push_back(m_mediaVideo);
+    if(m_isVideoEnabled) m_mediaVideo["ENABLED"] = "true";
+    else m_mediaVideo["ENABLED"] = "false";
+    mediaList.push_back(m_mediaVideo);
+#endif
 
     // Create call
     auto callId = libsip_core::placeCallWithMedia(m_accontId, newParticipant, mediaList);
@@ -293,23 +306,34 @@ bool CallController::stopCallCapture()
 
 void CallController::toggleVideo()
 {
+#ifdef ENABLE_VIDEO
+    m_isVideoEnabled = !m_isVideoEnabled;
+
     std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
     if(hasActiveCall()) {
         // build media list settings according to settings
         std::vector<std::map<std::string, std::string>> mediaList;
         mediaList.push_back(m_mediaAudio);
-        if(m_isVideoEnabled) mediaList.push_back(m_mediaVideo);
-        
+        // if(m_isVideoEnabled) mediaList.push_back(m_mediaVideo);
+        if(m_isVideoEnabled) m_mediaVideo["ENABLED"] = "true";
+        else m_mediaVideo["ENABLED"] = "false";
+        mediaList.push_back(m_mediaVideo);
+
         libsip_core::requestMediaChange(m_accontId, getActiveCall(), mediaList);
     }
-    
-    m_isVideoEnabled = !m_isVideoEnabled;
+#elif
+    std::cerr << "Video is unsupported by a kernel build." << std::endl;
+#endif
 }
 
 bool CallController::isVideoEnabled() const
 {
+#ifdef ENABLE_VIDEO
     std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
     return m_isVideoEnabled;
+#elif
+    return false;
+#endif
 }
 
 bool CallController::setVideoDevice(const std::string& videoDevice)

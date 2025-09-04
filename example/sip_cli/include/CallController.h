@@ -61,6 +61,7 @@ private:
     virtual void incomingCall(const std::string& accountId, const std::string& callId, const std::string& from) override;
     virtual void incomingCallWithMedia( const std::string &accountId, const std::string &callId, const std::string &from, const std::vector<std::map<std::string, std::string>> &mediaList, const std::map<std::string, std::string> &headers) override;
     virtual void mediaNegotiationStatus(const ::std::string &callId, const ::std::string &event, const ::std::vector<::std::map<::std::string, ::std::string>> &mediaList) override;
+    virtual void mediaChangeRequest(const std::string& accountId, const std::string& callId, const std::vector<std::map<std::string, std::string>>& remoteMediaList) override;
     virtual void startCapture(const std::string& camid) override;
     virtual void stopCapture(const std::string& camid) override;
     virtual void decodingStarted(const std::string& id, const std::string& shmPath, const int32_t w, const int32_t h, const bool isMixer) override;
@@ -79,9 +80,12 @@ private:
 
     mutable std::recursive_mutex m_mtxEvents;
 
+#ifdef ENABLE_VIDEO
     bool m_isVideoEnabled;
-    std::map<std::string, std::string> m_mediaAudio;
     std::map<std::string, std::string> m_mediaVideo;
+#endif
+    
+    std::map<std::string, std::string> m_mediaAudio;
 
     std::string m_user;
     std::string m_domain;
