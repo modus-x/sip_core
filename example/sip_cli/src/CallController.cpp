@@ -1,4 +1,5 @@
 #include "CallController.h"
+#include "callmanager_interface.h"
 #include "configurationmanager_interface.h"
 #include "manager.h"
 
@@ -236,7 +237,7 @@ CallController::sendRegister(const std::string& user,
         }
     }
 
-    std::cout << "Registring user - " << user << "..." << std::endl;
+    std::cout << "Registering user - " << user << "..." << std::endl;
 
     libsip_core::sendRegister(m_accountId, true);
 
@@ -424,6 +425,34 @@ CallController::stopCallCapture()
 
     // returns fasle if recodring stopped
     return !libsip_core::toggleRecording(m_accountId, getActiveCall());
+}
+
+bool
+CallController::hold()
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
+    if (!hasActiveCall())
+        return false;
+
+    if (m_activeConfirence.empty()) {
+        return libsip_core::hold(m_accountId, m_activeCalls.begin()->second);
+    } else {
+        return libsip_core::holdConference(m_accountId, m_activeConfirence);
+    }
+}
+
+bool
+CallController::resume()
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
+    if (!hasActiveCall())
+        return false;
+
+    if (m_activeConfirence.empty()) {
+        return libsip_core::unhold(m_accountId, m_activeCalls.begin()->second);
+    } else {
+        return libsip_core::unholdConference(m_accountId, m_activeConfirence);
+    }
 }
 
 void

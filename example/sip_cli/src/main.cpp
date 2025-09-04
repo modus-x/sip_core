@@ -42,7 +42,7 @@ main()
 {
     std::cout << "SIP core Console App" << std::endl;
     std::cout << "Available commands: call <callee>, add <callee>, del <callee>, move <from> <to>, "
-                 "conf <callee1> ... <calleeN>, switch <device>, hangup, capOn, capOff, video, exit"
+                 "conf <callee1> ... <calleeN>, switch <device>, hold, resume, hangup, capOn, capOff, video, exit"
               << std::endl;
 
     CallController controller(ACCOUNT_ID);
@@ -204,6 +204,26 @@ main()
                           << std::endl;
                 continue;
             }
+        } else if (command == "hold") {
+            if (!controller.hasActiveCall()) {
+                std::cerr << "Error: no active call" << std::endl;
+                continue;
+            }
+            if (!controller.hold()) {
+                std::cerr << "Error: failed to hold call: " << controller.getActiveCall()
+                          << std::endl;
+                continue;
+            }
+        } else if (command == "resume") {
+            if (!controller.hasActiveCall()) {
+                std::cerr << "Error: no active call" << std::endl;
+                continue;
+            }
+            if (!controller.resume()) {
+                std::cerr << "Error: failed to resume call: " << controller.getActiveCall()
+                          << std::endl;
+                continue;
+            }
         } else if (command == "capon") {
             if (controller.isCaptureInProgress()) {
                 std::cerr << "Error: already recording" << std::endl;
@@ -258,6 +278,7 @@ main()
                          "move <from> <to> - move conference participant position in grid,\n conf "
                          "<callee1> ... <calleeN> - creates conference with given participants "
                          "(>=3),\n switch <device> - switches video source for an active call.\n "
+                         "hold - put current call on hold.\n resume - resume current call.\n "
                          "hangup - hangup current call.\n capOn - start capture of active call in "
                          "a local file.\n capOff - stops capture of video.\n video - enables video "
                          "transfer.\n info - get current call infos.\n exit - exit program."

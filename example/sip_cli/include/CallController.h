@@ -26,6 +26,8 @@ public:
 
     bool call(const std::string& callTo);
     bool hangUp();
+    bool hold();
+    bool resume();
     bool hasActiveCall() const;
     const std::string getActiveCall() const;
 
