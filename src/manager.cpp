@@ -2547,6 +2547,11 @@ Manager::ManagerPimpl::processIncomingCall(const std::string& accountId, Call& i
     auto incomCallId = incomCall.getCallId();
     auto currentCall = base_.getCurrentCall();
 
+    if(currentCall && (currentCall->isConferenceParticipant() || currentCall->isRemoteConferenceParticipant())) {
+        incomCall.refuse();
+        return;
+    }
+
     auto w = incomCall.getAccount();
     auto account = w.lock();
     if (!account) {

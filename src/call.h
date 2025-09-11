@@ -144,6 +144,7 @@ public:
      */
     std::shared_ptr<Conference> getConference() const { return conf_.lock(); }
     bool isConferenceParticipant() const { return not is_uninitialized(conf_); }
+    bool isRemoteConferenceParticipant() const { std::lock_guard<std::mutex> lock(confInfoMutex_); return !confInfo_.empty(); }
 
     std::weak_ptr<Account> getAccount() const { return account_; }
     std::string getAccountId() const;

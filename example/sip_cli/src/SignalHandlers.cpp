@@ -67,6 +67,7 @@ CallController::incomingCall(const std::string& accountId,
             m_activeCalls[callId] = callId;
     } else {
         std::cout << "Incoming call form user: " << from << ".\nDenied..." << std::endl;
+        libsip_core::refuse(accountId, callId);
     }
 }
 
@@ -134,6 +135,7 @@ CallController::incomingCallWithMedia(
             m_activeCalls[callId] = callId;
     } else {
         std::cout << "Incoming call form user: " << from << ".\nDenied..." << std::endl;
+        libsip_core::refuse(accountId, callId);
     }
 }
 
