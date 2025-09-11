@@ -1826,4 +1826,10 @@ Conference::startRecording(const std::string& path)
     return res;
 }
 
+int
+Conference::getLayout() const
+{
+    return confInfo_.layout;
+}
+
 } // namespace sip_core

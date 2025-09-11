@@ -326,7 +326,9 @@ getConferenceDetails(const std::string& accountId, const std::string& confId)
 #ifdef ENABLE_VIDEO
                     {"VIDEO_SOURCE", conf->getVideoInput()},
 #endif
-                    {"RECORDING", conf->isRecording() ? sip_core::TRUE_STR : sip_core::FALSE_STR}};
+                    {"RECORDING", conf->isRecording() ? sip_core::TRUE_STR : sip_core::FALSE_STR}, 
+                    {"LAYOUT", std::to_string(conf->getLayout())}, 
+                    };
     return {};
 }
 

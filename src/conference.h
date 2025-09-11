@@ -416,6 +416,9 @@ public:
     void stopRecording() override;
     bool startRecording(const std::string& path) override;
 
+    // get layout
+    int getLayout() const;
+
     /**
      * @return Conference duration in milliseconds
      */

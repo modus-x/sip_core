@@ -344,6 +344,7 @@ Call::getDetails() const
         {libsip_core::Call::Details::VIDEO_MUTED,
          std::string(bool_to_str(isCaptureDeviceMuted(MediaType::MEDIA_VIDEO)))},
         {libsip_core::Call::Details::AUDIO_ONLY, std::string(bool_to_str(not hasVideo()))},
+        {libsip_core::Call::Details::PEER_MUTED, std::string(isPeerMuted() ? TRUE_STR : FALSE_STR)},
     };
 }
 
