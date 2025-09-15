@@ -165,9 +165,10 @@ public:
      */
     const std::string& getPeerNumber() const { return peerNumber_; }
 
-    void setFromHeader(const std::string& header) { fromHeader_ = header; }
 
-    const std::string& getFromHeader() const { return fromHeader_; }
+    void setInviteBody(const std::string& body) { inviteBody_ = body; }
+
+    const std::string& getInviteBody() const { return inviteBody_; }
     /**
      * Set the display name (caller in ingoing)
      * not protected by mutex (when created)
@@ -526,8 +527,8 @@ protected:
     /** Number of the peer */
     std::string peerNumber_ {};
 
-    /** From header */
-    std::string fromHeader_ {};
+    /** Invite body for parsing by the clients of library */
+    std::string inviteBody_ {};
 
     /** Peer Display Name */
     std::string peerDisplayName_ {};
@@ -539,6 +540,7 @@ protected:
 
     /// Supported conference protocol version
     int peerConfProtocol_ {0};
+
     std::string toUsername_ {};
 };
 

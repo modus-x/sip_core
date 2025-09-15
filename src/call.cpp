@@ -333,7 +333,7 @@ Call::getDetails() const
     return {
         {libsip_core::Call::Details::CALL_TYPE, std::to_string((unsigned) type_)},
         {libsip_core::Call::Details::PEER_NUMBER, peerNumber_},
-        {libsip_core::Call::Details::FROM_HEADER, fromHeader_},
+        {libsip_core::Call::Details::INVITE_BODY, inviteBody_},
         {libsip_core::Call::Details::DISPLAY_NAME, peerDisplayName_},
         {libsip_core::Call::Details::CALL_STATE, getStateStr()},
         {libsip_core::Call::Details::CONF_ID, conference ? conference->getConfId() : ""},

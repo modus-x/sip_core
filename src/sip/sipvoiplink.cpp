@@ -312,9 +312,10 @@ transaction_request_cb(pjsip_rx_data* rdata)
         peerNumber = sip_utils::stripSipUriPrefix(std::string_view(tmp, length));
     }
 
-    auto fromHeader = std::string("");
 
-    fromHeader = std::string(rdata->msg_info.msg_buf, rdata->msg_info.len);
+    auto inviteBody = std::string("");
+
+    inviteBody = std::string(rdata->msg_info.msg_buf, rdata->msg_info.len);
 
     std::shared_ptr<SIPAccount> account
         = Manager::instance().sipVoIPLink().guessAccount(toUsername, viaHostname, remote_hostname);
@@ -481,7 +482,7 @@ transaction_request_cb(pjsip_rx_data* rdata)
     }
 
     call->setPeerNumber(peerNumber);
-    call->setFromHeader(fromHeader);
+    call->setInviteBody(inviteBody);
     call->setPeerUri(account->getToUri(peerNumber));
     call->setPeerDisplayName(peerDisplayName);
     call->getSDP().setPublishedIP(addrSdp);
