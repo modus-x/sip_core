@@ -101,6 +101,7 @@ public:
     void setActiveStream(const std::string& id);
     void resetActiveStream()
     {
+        std::unique_lock lock(rwMutex_);
         activeStream_ = {};
         updateLayout();
     }
@@ -115,9 +116,10 @@ public:
 
     void setVideoLayout(Layout newLayout)
     {
+        std::unique_lock lock(rwMutex_);
         currentLayout_ = newLayout;
         if (currentLayout_ == Layout::GRID)
-            resetActiveStream();
+            activeStream_ = {};
         updateLayout();
     }
 
@@ -143,6 +145,7 @@ public:
         std::unique_lock<std::mutex> lk(audioOnlySourcesMtx_);
         audioOnlySources_.insert({callId, streamId});
         lk.unlock();
+        std::unique_lock lock(rwMutex_);
         updateLayout();
     }
 
@@ -151,6 +154,7 @@ public:
         std::unique_lock<std::mutex> lk(audioOnlySourcesMtx_);
         if (audioOnlySources_.erase({callId, streamId})) {
             lk.unlock();
+            std::unique_lock lock(rwMutex_);
             updateLayout();
         }
     }
@@ -217,7 +221,8 @@ private:
 
     std::mutex audioOnlySourcesMtx_;
 
-    // pair callId, streamId
+    // pair callId -> streamId
+    // in case of local participant, it will be empty
     std::set<std::pair<std::string, std::string>> audioOnlySources_;
     std::string activeStream_ {};
 

@@ -873,6 +873,9 @@ Conference::attachLocalParticipant(const std::string& source)
             videoMixer_->switchInputs(videoInputs);
             if (!isMediaSourceMuted(MediaType::MEDIA_VIDEO)) {
                 videoMixer_->startInputs();
+            } else {
+                // If video is muted on attach, add local host to audio only sources
+                videoMixer_->addAudioOnlySource("", sip_utils::streamId("", sip_utils::DEFAULT_VIDEO_STREAMID));
             }
         }
 #endif
@@ -896,8 +899,11 @@ Conference::detachLocalParticipant()
         });
 
 #ifdef ENABLE_VIDEO
-        if (videoMixer_)
+        if (videoMixer_) {
             videoMixer_->stopInputs();
+            // Remove local host from audio only sources when detaching
+            videoMixer_->removeAudioOnlySource("", sip_utils::streamId("", sip_utils::DEFAULT_VIDEO_STREAMID));
+        }
 #endif
     } else {
         SIP_CORE_WARN(
@@ -1663,10 +1669,14 @@ Conference::muteLocalHost(bool is_muted, const std::string& mediaType)
             if (auto mixer = videoMixer_) {
                 SIP_CORE_DBG("Muting local video sources");
                 mixer->stopInputs();
+                // Add local host to audio only sources so the label is still displayed
+                mixer->addAudioOnlySource("", sip_utils::streamId("", sip_utils::DEFAULT_VIDEO_STREAMID));
             }
         } else {
             if (auto mixer = videoMixer_) {
                 SIP_CORE_DBG("Un-muting local video sources");
+                // Remove local host from audio only sources before starting inputs
+                mixer->removeAudioOnlySource("", sip_utils::streamId("", sip_utils::DEFAULT_VIDEO_STREAMID));
                 mixer->startInputs();
             }
         }

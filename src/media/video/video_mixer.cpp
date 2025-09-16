@@ -172,27 +172,31 @@ void
 VideoMixer::setActiveStream(const std::string& id)
 {
     activeStream_ = id;
+    std::unique_lock lock(rwMutex_);
     updateLayout();
 }
 
 void VideoMixer::setVoiceActivity(const std::string& streamId, bool state)
 {
-    std::lock_guard<std::mutex> lock(vocieActivivtyMtx_);
+    std::lock_guard<std::mutex> voiceLock(vocieActivivtyMtx_);
     voiceActivity_[streamId] = state;
+    std::unique_lock lock(rwMutex_);
     updateLayout();
 }
 
 void VideoMixer::setVoiceActivity(const std::map<std::string, bool>& states)
 {
-    std::lock_guard<std::mutex> lock(vocieActivivtyMtx_);
+    std::lock_guard<std::mutex> voiceLock(vocieActivivtyMtx_);
     voiceActivity_ = states;
+    std::unique_lock lock(rwMutex_);
     updateLayout();
 }
 
 void VideoMixer::setVoiceActivity(const std::map<std::string, bool>&& states)
 {
-    std::lock_guard<std::mutex> lock(vocieActivivtyMtx_);
+    std::lock_guard<std::mutex> voiceLock(vocieActivivtyMtx_);
     voiceActivity_ = std::move(states);
+    std::unique_lock lock(rwMutex_);
     updateLayout();
 }
 
@@ -234,7 +238,8 @@ VideoMixer::updateLayout()
     layoutUpdated_ += 1;
     
     // Force coordinate recalculation for all sources
-    std::unique_lock lock(rwMutex_);
+    // Note: This method assumes that the caller either doesn't need
+    // the rwMutex_ lock or already holds it
     for (auto& source : sources_) {
         // Reset dimensions to force recalculation in next process() call
         source->w = 0;
