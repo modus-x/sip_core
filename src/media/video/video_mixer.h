@@ -118,7 +118,7 @@ public:
         currentLayout_ = newLayout;
         if (currentLayout_ == Layout::GRID)
             resetActiveStream();
-        layoutUpdated_ += 1;
+        updateLayout();
     }
 
     Layout getVideoLayout() const { return currentLayout_; }

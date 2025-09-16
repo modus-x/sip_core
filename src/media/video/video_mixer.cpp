@@ -232,6 +232,14 @@ VideoMixer::updateLayout()
     if (activeStream_ == "")
         currentLayout_ = Layout::GRID;
     layoutUpdated_ += 1;
+    
+    // Force coordinate recalculation for all sources
+    std::unique_lock lock(rwMutex_);
+    for (auto& source : sources_) {
+        // Reset dimensions to force recalculation in next process() call
+        source->w = 0;
+        source->h = 0;
+    }
 }
 
 void
