@@ -236,15 +236,6 @@ VideoMixer::updateLayout()
     if (activeStream_ == "")
         currentLayout_ = Layout::GRID;
     layoutUpdated_ += 1;
-    
-    // Force coordinate recalculation for all sources
-    // Note: This method assumes that the caller either doesn't need
-    // the rwMutex_ lock or already holds it
-    for (auto& source : sources_) {
-        // Reset dimensions to force recalculation in next process() call
-        source->w = 0;
-        source->h = 0;
-    }
 }
 
 void
@@ -475,15 +466,6 @@ VideoMixer::process()
                     needsUpdate = true;
                 }
 
-                // if source aspect ratio changed - recalculate sources positions again
-                if(x->h != 0 && x->w != 0) {
-                    float source_aspect = (float)x->w / (float)x->h;
-                    float input_aspect = (float)fooInput->width() / (float)fooInput->height();
-                    float aspect_diff = source_aspect - input_aspect;
-                    if(aspect_diff < -0.1 || aspect_diff > 0.1)
-                        needsUpdate = true;
-                }
-
                 {
                     std::lock_guard<std::mutex> lock(vocieActivivtyMtx_);
                     if (needsUpdate)
@@ -514,6 +496,9 @@ VideoMixer::process()
             ++i;
         }
         if (needsUpdate and successfullyRendered) {
+            if (layoutUpdated_.load() == 0) {
+                return;
+            }
             layoutUpdated_ -= 1;
             if (layoutUpdated_ == 0) {
                 for (auto& x : sources_) {
@@ -774,6 +759,23 @@ VideoMixer::getStream(const std::string& name) const
     ms.firstTimestamp = lastTimestamp_;
 
     return ms;
+}
+
+void
+VideoMixer::setVideoLayout(Layout newLayout)
+{
+    std::unique_lock lock(rwMutex_);
+    currentLayout_ = newLayout;
+    
+    if (currentLayout_ == Layout::GRID)
+        activeStream_ = {};
+
+    // Force coordinate recalculation for all sources, 
+    // this will trigger updateLayout()
+    for (auto& source : sources_) {
+        source->w = 0;
+        source->h = 0;
+    }
 }
 
 } // namespace video

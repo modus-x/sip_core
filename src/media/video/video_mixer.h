@@ -114,14 +114,7 @@ public:
 
     bool moveSource(size_t from_index, size_t to_index);
 
-    void setVideoLayout(Layout newLayout)
-    {
-        std::unique_lock lock(rwMutex_);
-        currentLayout_ = newLayout;
-        if (currentLayout_ == Layout::GRID)
-            activeStream_ = {};
-        updateLayout();
-    }
+    void setVideoLayout(Layout newLayout);
 
     Layout getVideoLayout() const { return currentLayout_; }
 
