@@ -158,7 +158,7 @@ private:
     NON_COPYABLE(SIPVoIPLink);
 
     mutable pj_caching_pool cp_;
-    std::unique_ptr<pj_pool_t, decltype(pj_pool_release)&> pool_;
+    std::unique_ptr<pj_pool_t, decltype(&pj_pool_release)> pool_;
     std::atomic_bool running_ {true};
     std::thread sipThread_;
 

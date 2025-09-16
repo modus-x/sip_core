@@ -56,8 +56,8 @@ AudioStream::AudioStream(pa_context* c,
     assert(pa_sample_spec_valid(&sample_spec));
     assert(pa_channel_map_valid(&infos.channel_map));
 
-    std::unique_ptr<pa_proplist, decltype(pa_proplist_free)&> pl(pa_proplist_new(),
-                                                                 pa_proplist_free);
+    std::unique_ptr<pa_proplist, decltype(&pa_proplist_free)> pl(pa_proplist_new(),
+                                                                 &pa_proplist_free);
     pa_proplist_sets(pl.get(), PA_PROP_FILTER_WANT, "echo-cancel");
 
     audiostream_ = pa_stream_new_with_proplist(c,

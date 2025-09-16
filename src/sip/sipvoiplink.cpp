@@ -686,7 +686,7 @@ SIPVoIPLink::getCachingPool() noexcept
 }
 
 SIPVoIPLink::SIPVoIPLink()
-    : pool_(nullptr, pj_pool_release)
+    : pool_(nullptr, &pj_pool_release)
 {
 #define TRY(ret) \
     do { \
