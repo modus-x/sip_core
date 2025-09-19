@@ -408,9 +408,6 @@ public:
     void pushNotificationReceived(const std::string& from,
                                   const std::map<std::string, std::string>& data);
 
-    void reportUnregister();
-
-
     struct
     {
         pj_sockaddr socket;
@@ -468,10 +465,6 @@ private:
 
     void scheduleReregistration();
     void autoReregTimerCb();
-
-    std::mutex unregisterLock_;
-    std::condition_variable unregisterCheck_;
-    bool unregisterSend_ = false;
 
     /**
      * Current transport

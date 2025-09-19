@@ -1005,13 +1005,7 @@ static void
 tsx_cb(struct pjsip_regc_tsx_cb_param* param)
 {
     SIP_CORE_DBG() << "regc_tsx_cb -> " << param->cbparam.code << " " << param->cbparam.status;
-    auto account = static_cast<SIPAccount*>(param->cbparam.token);
-    if (!account) {
-        SIP_CORE_ERR("account doesn't exist in tsx_cb callback");
-        return;
-    } else {
-        account->reportUnregister();
-    }
+    // auto account = static_cast<SIPAccount*>(param->cbparam.token);
 }
 
 void
@@ -1037,10 +1031,6 @@ SIPAccount::sendUnregister()
     if (pjsip_regc_set_transport(regc, &tp_sel) != PJ_SUCCESS)
         throw VoipLinkException("Unable to set transport");
 
-    std::unique_lock<std::mutex> locker(unregisterLock_);
-
-    unregisterSend_ = false;
-
     pjsip_regc_set_reg_tsx_cb(regc, tsx_cb);
 
     pj_status_t status;
@@ -1052,18 +1042,7 @@ SIPAccount::sendUnregister()
         throw VoipLinkException("Unable to send request to unregister sip account");
     }
 
-    while (!unregisterSend_) // avoid spurious wakeups
-        unregisterCheck_.wait(locker);
-
     SIP_CORE_DBG() << "Unregister was guaranteed to be already sent";
-}
-
-void
-SIPAccount::reportUnregister()
-{
-    std::unique_lock<std::mutex> locker(unregisterLock_);
-    unregisterSend_ = true;
-    unregisterCheck_.notify_one();
 }
 
 void
