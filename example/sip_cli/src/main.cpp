@@ -42,7 +42,7 @@ main()
 {
     std::cout << "SIP core Console App" << std::endl;
     std::cout << "Available commands: call <callee>, add <callee>, del <callee>, move <from> <to>, "
-                 "conf <callee1> ... <calleeN>, switch <device>, hold, resume, hangup, capOn, capOff, video, exit"
+                 "conf <callee1> ... <calleeN>, switch <device>, hold, resume, hangup, capOn, capOff, video, reregister, unregister, subscribe, unsubscribe, exit"
               << std::endl;
 
     CallController controller(ACCOUNT_ID);
@@ -271,6 +271,40 @@ main()
             for (auto it = info.begin(); it != info.end(); ++it) {
                 std::cout << " " << it->first << " : " << it->second << std::endl;
             }
+} else if (command == "unregister") {
+            if (!controller.unregister()) {
+                std::cerr << "Error: unable to send unregister for current account." << std::endl;
+            } else {
+                std::cout << "Unregister successfully sent" << std::endl;
+            }
+        } else if (command == "subscribe") {
+            if (tokens.size() < 2) {
+                std::cerr << "Error: Usage - subscribe <uri1> <uri2> ..." << std::endl;
+                continue;
+            }
+            std::vector<std::string> uris;
+            for (size_t i = 1; i < tokens.size(); ++i) {
+                uris.push_back(tokens[i]);
+            }
+            controller.subscribe(uris);
+            std::cout << "Subscribe successfully sent" << std::endl;
+        } else if (command == "unsubscribe") {
+            if (tokens.size() < 2) {
+                std::cerr << "Error: Usage - unsubscribe <uri1> <uri2> ..." << std::endl;
+                continue;
+            }
+            std::vector<std::string> uris;
+            for (size_t i = 1; i < tokens.size(); ++i) {
+                uris.push_back(tokens[i]);
+            }
+            controller.unsubscribe(uris);
+            std::cout << "Unsubscribe successfully sent" << std::endl;
+        } else if (command == "reregister") {
+            if (!controller.sendRegister(username, password, domain)) {
+                std::cerr << "Error: unable to send reregister for current account." << std::endl;
+            } else {
+                std::cout << "Reregister successfully sent" << std::endl;
+            }
         } else {
             std::cerr << "Error: Unknown command. \nFull list of commands:\n call <callee> - "
                          "initiates call with given ID,\n add <callee> - adds new participant to "
@@ -281,7 +315,8 @@ main()
                          "hold - put current call on hold.\n resume - resume current call.\n "
                          "hangup - hangup current call.\n capOn - start capture of active call in "
                          "a local file.\n capOff - stops capture of video.\n video - enables video "
-                         "transfer.\n info - get current call infos.\n exit - exit program."
+                         "transfer.\n info - get current call infos.\n reregister - force "
+                         "reregistration.\n unregister - unregister user.\n subscribe <uri1>... - subscribe to events.\n unsubscribe <uri1>... - unsubscribe from events.\n exit - exit program."
                       << std::endl;
         }
     }

@@ -23,6 +23,10 @@ public:
 
     bool init();
     bool sendRegister(const std::string& user, const std::string& pass, const std::string& domain);
+    bool unregister();
+
+    void subscribe(const std::vector<std::string>& uris);
+    void unsubscribe(const std::vector<std::string>& uris);
 
     bool call(const std::string& callTo);
     bool hangUp();

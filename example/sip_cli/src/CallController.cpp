@@ -1,6 +1,7 @@
 #include "CallController.h"
 #include "callmanager_interface.h"
 #include "configurationmanager_interface.h"
+#include "presencemanager_interface.h"
 #include "manager.h"
 
 #include <functional>
@@ -244,6 +245,57 @@ CallController::sendRegister(const std::string& user,
     m_user = actualUser;
     m_domain = actualDomain;
     return true;
+}
+
+bool
+CallController::unregister()
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
+
+    if (!libsip_core::initialized())
+        return false;
+
+    std::cout << "Unregistering user - " << m_user << "..." << std::endl;
+
+    libsip_core::sendRegister(m_accountId, false);
+
+    return true;
+}
+
+void
+CallController::subscribe(const std::vector<std::string>& uris)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
+    if (!libsip_core::initialized())
+        return;
+
+    std::vector<std::string> sipUris;
+    for (const auto& uri : uris) {
+        sipUris.push_back(toSipUri(uri, m_domain));
+    }
+
+    std::cout << "Subscribing to events for specified URIs..." << std::endl;
+    for (const auto& uri : sipUris) {
+        libsip_core::subscribeToEvents(m_accountId, uri, "presence", true);
+    }
+}
+
+void
+CallController::unsubscribe(const std::vector<std::string>& uris)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
+    if (!libsip_core::initialized())
+        return;
+
+    std::vector<std::string> sipUris;
+    for (const auto& uri : uris) {
+        sipUris.push_back(toSipUri(uri, m_domain));
+    }
+
+    std::cout << "Unsubscribing from events for specified URIs..." << std::endl;
+    for (const auto& uri : sipUris) {
+        libsip_core::subscribeToEvents(m_accountId, uri, "presence", false);
+    }
 }
 
 bool
@@ -636,6 +688,11 @@ CallController::toSipUri(const std::string& number, const std::string& domainNam
 {
     std::smatch match;
     std::regex pattern;
+
+    // Case 0. Subscription to domain!
+    if (number == domainName) {
+        return "sip:" + number;
+    }
 
     // Case 1: Already full SIP URI with domain (sip:X@Y)
     pattern = std::regex(R"(^sip:(.+@.+))");
