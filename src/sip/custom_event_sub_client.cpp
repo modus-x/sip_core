@@ -573,7 +573,11 @@ CustomEventSubClient::subscribe()
     event_callback.on_rx_notify = &client_evsub_on_rx_notify;
 
     SIPAccount* acc = manager_->getAccount();
-    SIP_CORE_DBG("CustomEventSubClient [%.*s] %.*s => subscribing ", (int) event_.slen, event_.ptr, (int) uri_.slen, uri_.ptr);
+    SIP_CORE_DBG("CustomEventSubClient [%.*s] %.*s => subscribing ",
+                 (int) event_.slen,
+                 event_.ptr,
+                 (int) uri_.slen,
+                 uri_.ptr);
 
     /* Create UAC dialog */
     pj_str_t from = pj_strdup3(pool_, acc->getFromUri().c_str());
@@ -612,7 +616,7 @@ CustomEventSubClient::subscribe()
     if (pjsip_dlg_set_transport(dlg_, &tp_sel) != PJ_SUCCESS) {
         sub_ = NULL;
         SIP_CORE_ERR("Unable to associate transport for invite session dialog");
-                emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(acc->getAccountID(),
+        emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(acc->getAccountID(),
                                                                           std::string(getURI()),
                                                                           std::string(getEvent()),
                                                                           PJ_FALSE);
@@ -661,10 +665,8 @@ CustomEventSubClient::subscribe()
     }
 
     /* Set route-set */
-    pjsip_regc* regc = acc->getRegistrationInfo();
-    if (regc and acc->hasServiceRoute())
-        pjsip_regc_set_route_set(regc,
-                                 sip_utils::createRouteSet(acc->getServiceRoute(), pool_));
+    if (acc->hasServiceRoute())
+        pjsip_dlg_set_route_set(dlg_, sip_utils::createRouteSet(acc->getServiceRoute(), pool_));
 
     // attach the client data to the sub
     pjsip_evsub_set_mod_data(sub_, modId_, this);
