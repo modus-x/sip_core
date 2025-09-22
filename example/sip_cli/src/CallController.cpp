@@ -311,7 +311,7 @@ CallController::call(const std::string& callTo)
 #ifdef ENABLE_VIDEO
     // if (m_isVideoEnabled) 
     //     mediaList.push_back(m_mediaVideo);
-    if(m_isVideoEnabled) 
+    if (m_isVideoEnabled) 
         m_mediaVideo["ENABLED"] = "true";
     else 
         m_mediaVideo["ENABLED"] = "false";
