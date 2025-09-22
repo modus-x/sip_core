@@ -382,20 +382,6 @@ endif()
 
 add_library(${PROJECT_NAME} STATIC ${ALL_FILES})
 
-if(LINUX)
-  # link with -rtlib=compiler-rt, to include all special builtin functions into
-  # binary
-  target_link_options(${PROJECT_NAME} PUBLIC -rtlib=compiler-rt)
-
-  # link GCC specific CXX, which was used when deps were built
-  find_library(
-    GCC_CXX libstdc++.a
-    PATHS /opt/rh/devtoolset-11/root/usr/lib/gcc/x86_64-redhat-linux/11
-          REQUIRED NO_CACHE)
-
-  target_link_libraries(${PROJECT_NAME} PUBLIC ${GCC_CXX})
-endif()
-
 set_target_properties(${PROJECT_NAME} PROPERTIES FOLDER "sip_core")
 
 target_sources(${PROJECT_NAME} PUBLIC FILE_SET HEADERS BASE_DIRS src FILES
