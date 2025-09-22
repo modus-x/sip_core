@@ -452,7 +452,6 @@ SIPAccount::onTransportStateChanged(pjsip_transport_state state,
             transportError_ = "";
         }
         setRegistrationState(RegistrationState::ERROR_GENERIC, PJSIP_SC_TSX_TRANSPORT_ERROR);
-        setTransport();
     } else {
         // The status can be '0', this is the same as OK
         transportStatus_ = info && info->status ? info->status : PJSIP_SC_OK;
