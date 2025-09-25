@@ -112,21 +112,14 @@ VideoDeviceMonitor::getMRLForDefaultDevice() const
 {
     std::lock_guard<std::mutex> l(lock_);
     const auto it = findDeviceById(defaultDevice_);
-    if (it == std::end(devices_))
+    // do not return nothing for desktop
+    if (it == std::end(devices_) || it->getDeviceId() == DEVICE_DESKTOP)
         return {};
 
-    static const std::string sep = libsip_core::Media::VideoProtocolPrefix::SEPARATOR;
 
-    if (it->getDeviceId() == DEVICE_DESKTOP) {
-#ifdef __linux__
-        const char* display = std::getenv("DISPLAY");
-        return libsip_core::Media::VideoProtocolPrefix::DISPLAY + sep + (display ? display : ":0");
-#else
-        return libsip_core::Media::VideoProtocolPrefix::DISPLAY + sep + "Display";
-#endif
-    } else {
-        return libsip_core::Media::VideoProtocolPrefix::CAMERA + sep + it->getDeviceId();
-    }
+    static const std::string sep = libsip_core::Media::VideoProtocolPrefix::SEPARATOR;
+    
+    return libsip_core::Media::VideoProtocolPrefix::CAMERA + sep + it->getDeviceId();
 }
 
 bool
