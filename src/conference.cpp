@@ -91,8 +91,7 @@ Conference::Conference(const std::shared_ptr<Account>& account,
                         uri = call->getPeerNumber();
                         isLocalMuted = call->isPeerMuted();
                         isPeerRecording = call->isPeerRecording();
-                        if (auto transport = call->getTransport())
-                            deviceId = transport->deviceId();
+                        deviceId = "";
                     }
                     std::string_view peerId = string_remove_suffix(uri, '@');
                     auto isModerator = shared->isModerator(peerId);
@@ -136,8 +135,7 @@ Conference::Conference(const std::shared_ptr<Account>& account,
                             uri = call->getPeerNumber();
                             isLocalMuted = call->isPeerMuted();
                             isPeerRecording = call->isPeerRecording();
-                            if (auto transport = call->getTransport())
-                                deviceId = transport->deviceId();
+                            deviceId = "";
                         }
                     } else {
                         streamId = sip_utils::streamId("", sip_utils::DEFAULT_VIDEO_STREAMID);
@@ -148,9 +146,7 @@ Conference::Conference(const std::shared_ptr<Account>& account,
                     auto isModerator = shared->isModerator(peerId);
                     if (uri.empty() && !hostAdded) {
                         hostAdded = true;
-                        deviceId = Manager::instance()
-                                       .getVideoManager()
-                                       .videoDeviceMonitor.getMRLForDefaultDevice();
+                        deviceId = "";
                         isLocalMuted = shared->isMediaSourceMuted(MediaType::MEDIA_AUDIO);
                         isPeerRecording = shared->isRecording();
                     }
@@ -1818,7 +1814,7 @@ Conference::getCallWith(const std::string& accountUri, const std::string& device
 std::string
 Conference::getRemoteId(const std::shared_ptr<sip_core::Call>& call) const
 {
-    return {};
+    return call->getCallId();
 }
 
 void
