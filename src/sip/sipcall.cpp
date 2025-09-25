@@ -1,4 +1,4 @@
-
+﻿
 /*
  *  Copyright (C) 2004-2022 Savoir-faire Linux Inc.
  *
@@ -1321,7 +1321,7 @@ SIPCall::switchInput(const std::string& source)
     for (auto& media : currentMediaList) {
         if (media.type_ == MediaType::MEDIA_VIDEO) {
             media.sourceUri_ = source;
-    }
+        }
     }
     updateAllMediaStreams(currentMediaList, false);
     reportMediaNegotiationStatus();
@@ -2011,14 +2011,14 @@ SIPCall::updateMediaStream(const MediaAttribute& newMediaAttr, size_t streamIdx)
     // Only update source and type if actually set.
     if ((mediaAttr->type_ == MediaType::MEDIA_VIDEO) and not newMediaAttr.sourceUri_.empty()) {
         mediaAttr->sourceUri_ = newMediaAttr.sourceUri_;
-rtpStream.rtpSession_->setMediaSource(mediaAttr->sourceUri_);
+        rtpStream.rtpSession_->setMediaSource(mediaAttr->sourceUri_);
         std::static_pointer_cast<video::VideoRtpSession>(rtpStream.rtpSession_)
             ->getVideoLocal()
             ->switchInput(newMediaAttr.sourceUri_);
     }
 
     if (notifyMute and mediaAttr->type_ == MediaType::MEDIA_AUDIO) {
-                rtpStream.rtpSession_->setMuted(mediaAttr->muted_);
+        rtpStream.rtpSession_->setMuted(mediaAttr->muted_);
         sendMuteState(mediaAttr->muted_);
         if (not isSubcall())
             emitSignal<libsip_core::CallSignal::AudioMuted>(getCallId(), mediaAttr->muted_);
@@ -2027,7 +2027,7 @@ rtpStream.rtpSession_->setMediaSource(mediaAttr->sourceUri_);
 
 #ifdef ENABLE_VIDEO
     if (notifyMute and mediaAttr->type_ == MediaType::MEDIA_VIDEO) {
-                rtpStream.rtpSession_->setMuted(mediaAttr->muted_);
+        rtpStream.rtpSession_->setMuted(mediaAttr->muted_);
         if (not isSubcall())
             emitSignal<libsip_core::CallSignal::VideoMuted>(getCallId(), mediaAttr->muted_);
     }
@@ -2100,9 +2100,13 @@ SIPCall::isReinviteRequired(const std::vector<MediaAttribute>& mediaAttrList)
     for (auto const& newAttr : mediaAttrList) {
         auto streamIdx = findRtpStreamIndex(newAttr.label_);
 
-        if (streamIdx < 0 || // Always needs a re-invite when a new media is added.
-            // newAttr.sourceUri_ != rtpStreams_[streamIdx].mediaAttribute_->sourceUri_ || // Changing the video source currently does not work via reinvite :)
-            newAttr.enabled_ != rtpStreams_[streamIdx].mediaAttribute_->enabled_  // Also check if 'enabled' has changed
+        if (streamIdx < 0
+            || // Always needs a re-invite when a new media is added.
+               // newAttr.sourceUri_ != rtpStreams_[streamIdx].mediaAttribute_->sourceUri_ || //
+               // Changing the video source currently does not work via reinvite :)
+            newAttr.enabled_
+                != rtpStreams_[streamIdx]
+                       .mediaAttribute_->enabled_ // Also check if 'enabled' has changed
         ) {
             return true;
         }
@@ -2513,32 +2517,42 @@ SIPCall::getDetails() const
                                         std::to_string(curvideoRtpSession->getVideoBitrateInfo()
                                                            .videoBitrateCurrent));
 
-                        if(auto remote = curvideoRtpSession->getVideoReceive()) {
+                        if (auto remote = curvideoRtpSession->getVideoReceive()) {
                             details.emplace(libsip_core::Call::Details::VIDEO_FPS,
-                                        std::to_string(remote->getInfo().frameRate.real()));   
+                                            std::to_string(remote->getInfo().frameRate.real()));
                         }
                     }
                 } else
                     details.emplace(libsip_core::Call::Details::VIDEO_CODEC, "");
-                    
+
                 auto rrParams = rtpSession->getRtcpRR();
-                details.emplace(libsip_core::Call::Details::VIDEO_FRACTION_LOST, std::to_string(rrParams.fraction_lost));
-                details.emplace(libsip_core::Call::Details::VIDEO_CUM_LOST_PACKET, std::to_string(rrParams.cum_lost_packet));
-                details.emplace(libsip_core::Call::Details::VIDEO_JITTER, std::to_string(rrParams.jitter));
-                details.emplace(libsip_core::Call::Details::VIDEO_EXT_HIGH, std::to_string(rrParams.ext_high));
+                details.emplace(libsip_core::Call::Details::VIDEO_FRACTION_LOST,
+                                std::to_string(rrParams.fraction_lost));
+                details.emplace(libsip_core::Call::Details::VIDEO_CUM_LOST_PACKET,
+                                std::to_string(rrParams.cum_lost_packet));
+                details.emplace(libsip_core::Call::Details::VIDEO_JITTER,
+                                std::to_string(rrParams.jitter));
+                details.emplace(libsip_core::Call::Details::VIDEO_EXT_HIGH,
+                                std::to_string(rrParams.ext_high));
                 details.emplace(libsip_core::Call::Details::VIDEO_LSR, std::to_string(rrParams.lsr));
-                details.emplace(libsip_core::Call::Details::VIDEO_DLSR, std::to_string(rrParams.dlsr));
+                details.emplace(libsip_core::Call::Details::VIDEO_DLSR,
+                                std::to_string(rrParams.dlsr));
 
                 auto srParams = rtpSession->getRtcpSR();
                 details.emplace(libsip_core::Call::Details::VIDEO_SPC, std::to_string(srParams.spc));
                 details.emplace(libsip_core::Call::Details::VIDEO_SOC, std::to_string(srParams.soc));
-                details.emplace(libsip_core::Call::Details::VIDEO_TIMESTAMP_MSB, std::to_string(srParams.timestampMSB));
-                details.emplace(libsip_core::Call::Details::VIDEO_TIMESTAMP_LSB, std::to_string(srParams.timestampLSB));
-                details.emplace(libsip_core::Call::Details::VIDEO_TIMESTAMP_RTP, std::to_string(srParams.timestampRTP));
+                details.emplace(libsip_core::Call::Details::VIDEO_TIMESTAMP_MSB,
+                                std::to_string(srParams.timestampMSB));
+                details.emplace(libsip_core::Call::Details::VIDEO_TIMESTAMP_LSB,
+                                std::to_string(srParams.timestampLSB));
+                details.emplace(libsip_core::Call::Details::VIDEO_TIMESTAMP_RTP,
+                                std::to_string(srParams.timestampRTP));
 
                 auto rembParams = rtpSession->getRtcpREMB();
-                details.emplace(libsip_core::Call::Details::VIDEO_BR_EXP, std::to_string(rembParams.br_exp));
-                details.emplace(libsip_core::Call::Details::VIDEO_BR_MANTIS, std::to_string(rembParams.br_mantis));
+                details.emplace(libsip_core::Call::Details::VIDEO_BR_EXP,
+                                std::to_string(rembParams.br_exp));
+                details.emplace(libsip_core::Call::Details::VIDEO_BR_MANTIS,
+                                std::to_string(rembParams.br_mantis));
             }
 #endif
         } else if (stream.mediaAttribute_->type_ == MediaType::MEDIA_AUDIO) {
@@ -2558,23 +2572,33 @@ SIPCall::getDetails() const
                 }
 
                 auto rrParams = rtpSession->getRtcpRR();
-                details.emplace(libsip_core::Call::Details::AUDIO_FRACTION_LOST, std::to_string(rrParams.fraction_lost));
-                details.emplace(libsip_core::Call::Details::AUDIO_CUM_LOST_PACKET, std::to_string(rrParams.cum_lost_packet));
-                details.emplace(libsip_core::Call::Details::AUDIO_JITTER, std::to_string(rrParams.jitter));
-                details.emplace(libsip_core::Call::Details::AUDIO_EXT_HIGH, std::to_string(rrParams.ext_high));
+                details.emplace(libsip_core::Call::Details::AUDIO_FRACTION_LOST,
+                                std::to_string(rrParams.fraction_lost));
+                details.emplace(libsip_core::Call::Details::AUDIO_CUM_LOST_PACKET,
+                                std::to_string(rrParams.cum_lost_packet));
+                details.emplace(libsip_core::Call::Details::AUDIO_JITTER,
+                                std::to_string(rrParams.jitter));
+                details.emplace(libsip_core::Call::Details::AUDIO_EXT_HIGH,
+                                std::to_string(rrParams.ext_high));
                 details.emplace(libsip_core::Call::Details::AUDIO_LSR, std::to_string(rrParams.lsr));
-                details.emplace(libsip_core::Call::Details::AUDIO_DLSR, std::to_string(rrParams.dlsr));
+                details.emplace(libsip_core::Call::Details::AUDIO_DLSR,
+                                std::to_string(rrParams.dlsr));
 
                 auto srParams = rtpSession->getRtcpSR();
                 details.emplace(libsip_core::Call::Details::AUDIO_SPC, std::to_string(srParams.spc));
                 details.emplace(libsip_core::Call::Details::AUDIO_SOC, std::to_string(srParams.soc));
-                details.emplace(libsip_core::Call::Details::AUDIO_TIMESTAMP_MSB, std::to_string(srParams.timestampMSB));
-                details.emplace(libsip_core::Call::Details::AUDIO_TIMESTAMP_LSB, std::to_string(srParams.timestampLSB));
-                details.emplace(libsip_core::Call::Details::AUDIO_TIMESTAMP_RTP, std::to_string(srParams.timestampRTP));
+                details.emplace(libsip_core::Call::Details::AUDIO_TIMESTAMP_MSB,
+                                std::to_string(srParams.timestampMSB));
+                details.emplace(libsip_core::Call::Details::AUDIO_TIMESTAMP_LSB,
+                                std::to_string(srParams.timestampLSB));
+                details.emplace(libsip_core::Call::Details::AUDIO_TIMESTAMP_RTP,
+                                std::to_string(srParams.timestampRTP));
 
                 auto rembParams = rtpSession->getRtcpREMB();
-                details.emplace(libsip_core::Call::Details::AUDIO_BR_EXP, std::to_string(rembParams.br_exp));
-                details.emplace(libsip_core::Call::Details::AUDIO_BR_MANTIS, std::to_string(rembParams.br_mantis));
+                details.emplace(libsip_core::Call::Details::AUDIO_BR_EXP,
+                                std::to_string(rembParams.br_exp));
+                details.emplace(libsip_core::Call::Details::AUDIO_BR_MANTIS,
+                                std::to_string(rembParams.br_mantis));
             }
         }
     }
