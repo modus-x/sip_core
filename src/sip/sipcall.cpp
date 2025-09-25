@@ -1,4 +1,4 @@
-﻿
+
 /*
  *  Copyright (C) 2004-2022 Savoir-faire Linux Inc.
  *
@@ -1314,22 +1314,18 @@ SIPCall::internalOffHold(const std::function<void()>& sdp_cb)
 void
 SIPCall::switchInput(const std::string& source)
 {
+#ifdef ENABLE_VIDEO
     SIP_CORE_DBG("[call:%s] Set selected source to %s", getCallId().c_str(), source.c_str());
 
-    for (auto const& stream : rtpStreams_) {
-        auto mediaAttr = stream.mediaAttribute_;
-        mediaAttr->sourceUri_ = source;
+    auto currentMediaList = getMediaAttributeList();
+    for (auto& media : currentMediaList) {
+        if (media.type_ == MediaType::MEDIA_VIDEO) {
+            media.sourceUri_ = source;
     }
-
-    // Check if the call is being recorded in order to continue
-    // ... the recording after the switch
-    bool isRec = Call::isRecording();
-
-    SIPSessionReinvite(getMediaAttributeList());
-    if (isRec) {
-        readyToRecord_ = false;
-        pendingRecord_ = true;
     }
+    updateAllMediaStreams(currentMediaList, false);
+    reportMediaNegotiationStatus();
+#endif
 }
 
 void
@@ -2013,12 +2009,16 @@ SIPCall::updateMediaStream(const MediaAttribute& newMediaAttr, size_t streamIdx)
     }
 
     // Only update source and type if actually set.
-    if (not newMediaAttr.sourceUri_.empty())
+    if ((mediaAttr->type_ == MediaType::MEDIA_VIDEO) and not newMediaAttr.sourceUri_.empty()) {
         mediaAttr->sourceUri_ = newMediaAttr.sourceUri_;
+rtpStream.rtpSession_->setMediaSource(mediaAttr->sourceUri_);
+        std::static_pointer_cast<video::VideoRtpSession>(rtpStream.rtpSession_)
+            ->getVideoLocal()
+            ->switchInput(newMediaAttr.sourceUri_);
+    }
 
     if (notifyMute and mediaAttr->type_ == MediaType::MEDIA_AUDIO) {
-        rtpStream.rtpSession_->setMediaSource(mediaAttr->sourceUri_);
-        rtpStream.rtpSession_->setMuted(mediaAttr->muted_);
+                rtpStream.rtpSession_->setMuted(mediaAttr->muted_);
         sendMuteState(mediaAttr->muted_);
         if (not isSubcall())
             emitSignal<libsip_core::CallSignal::AudioMuted>(getCallId(), mediaAttr->muted_);
@@ -2027,9 +2027,7 @@ SIPCall::updateMediaStream(const MediaAttribute& newMediaAttr, size_t streamIdx)
 
 #ifdef ENABLE_VIDEO
     if (notifyMute and mediaAttr->type_ == MediaType::MEDIA_VIDEO) {
-        rtpStream.rtpSession_->setMediaSource(mediaAttr->sourceUri_);
-        rtpStream.rtpSession_->setMuted(mediaAttr->muted_);
-
+                rtpStream.rtpSession_->setMuted(mediaAttr->muted_);
         if (not isSubcall())
             emitSignal<libsip_core::CallSignal::VideoMuted>(getCallId(), mediaAttr->muted_);
     }

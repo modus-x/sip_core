@@ -110,7 +110,7 @@ public:
      */
     void restart();
 
-
+    std::shared_future<DeviceParams> switchInput(const std::string& resource);
 
 private:
     NON_COPYABLE(VideoInput);
@@ -119,7 +119,6 @@ private:
 
     // full MRL (camera:// + suffix)
     std::string currentResource_;
-    std::shared_future<DeviceParams> switchInput(const std::string& resource);
     std::atomic<bool> switchPending_ = {false};
     std::atomic_bool isStopped_ = {false};
 
