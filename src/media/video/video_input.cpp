@@ -625,12 +625,6 @@ VideoInput::switchInput(const std::string& resource)
 {
     SIP_CORE_DBG("MRL: '%s'", resource.c_str());
 
-    // if already is true -> skip
-    if (switchPending_.exchange(true)) {
-        SIP_CORE_ERR("Video switch already requested");
-        return {};
-    }
-
     currentResource_ = resource;
     decOptsFound_ = false;
 
@@ -658,6 +652,12 @@ VideoInput::switchInput(const std::string& resource)
         return {};
 
     const auto suffix = resource.substr(pos + sep.size());
+
+    // if already is true -> skip
+    if (switchPending_.exchange(true)) {
+        SIP_CORE_ERR("Video switch already requested");
+        return {};
+    }
 
     bool ready = false;
 
