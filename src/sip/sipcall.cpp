@@ -1321,9 +1321,16 @@ SIPCall::switchInput(const std::string& source)
     for (auto& media : currentMediaList) {
         if (media.type_ == MediaType::MEDIA_VIDEO) {
             media.sourceUri_ = source;
+            media.muted_ = false;
         }
     }
     updateAllMediaStreams(currentMediaList, false);
+
+    for (const auto& videoRtp : getRtpSessionList(MediaType::MEDIA_VIDEO)) {
+        std::static_pointer_cast<video::VideoRtpSession>(videoRtp)->getVideoLocal()->switchInput(
+            source);
+    }
+
     reportMediaNegotiationStatus();
 #endif
 }
@@ -2012,9 +2019,6 @@ SIPCall::updateMediaStream(const MediaAttribute& newMediaAttr, size_t streamIdx)
     if ((mediaAttr->type_ == MediaType::MEDIA_VIDEO) and not newMediaAttr.sourceUri_.empty()) {
         mediaAttr->sourceUri_ = newMediaAttr.sourceUri_;
         rtpStream.rtpSession_->setMediaSource(mediaAttr->sourceUri_);
-        std::static_pointer_cast<video::VideoRtpSession>(rtpStream.rtpSession_)
-            ->getVideoLocal()
-            ->switchInput(newMediaAttr.sourceUri_);
     }
 
     if (notifyMute and mediaAttr->type_ == MediaType::MEDIA_AUDIO) {
