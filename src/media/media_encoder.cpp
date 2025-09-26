@@ -714,15 +714,18 @@ MediaEncoder::writeContainerToRtp(uint8_t* buf, int buf_size)
     }
 
     bool
-    MediaEncoder::send(AVPacket& pkt, int streamIdx)
+    MediaEncoder::send(AVPacket& pkt, int streamIdx, bool dummy)
     {
         if (!initialized_) {
-            streamIdx = initStream(videoCodec_);
+            // do not init stream because 
+            if (!dummy) {
+                streamIdx = initStream(videoCodec_);
+            }
             startIO();
         }
         if (streamIdx < 0)
             streamIdx = currentStreamIdx_;
-        if (streamIdx >= 0 and static_cast<size_t>(streamIdx) < encoders_.size()
+        if (!dummy && streamIdx >= 0 and static_cast<size_t>(streamIdx) < encoders_.size()
             and static_cast<unsigned int>(streamIdx) < outputCtx_->nb_streams) {
             auto encoderCtx = encoders_[streamIdx];
             pkt.stream_index = streamIdx;

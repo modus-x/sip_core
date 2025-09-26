@@ -95,7 +95,7 @@
  
      void encodeAndSendDtmf(dtmf* data);
  
-     bool send(AVPacket& packet, int streamIdx = -1);
+     bool send(AVPacket& packet, int streamIdx = -1, bool dummy = false);
  
      // send raw data
      bool sendBuffer(uint8_t* buf1, unsigned int len, unsigned int samples, int flags);
