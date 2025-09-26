@@ -2031,7 +2031,7 @@ SIPCall::updateMediaStream(const MediaAttribute& newMediaAttr, size_t streamIdx)
     }
 
     // Only update source and type if actually set.
-    if ((mediaAttr->type_ == MediaType::MEDIA_VIDEO) and not newMediaAttr.sourceUri_.empty()) {
+    if (mediaAttr->type_ == MediaType::MEDIA_VIDEO) {
         mediaAttr->sourceUri_ = newMediaAttr.sourceUri_;
         rtpStream.rtpSession_->setMediaSource(mediaAttr->sourceUri_);
     }
