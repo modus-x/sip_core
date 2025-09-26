@@ -431,6 +431,9 @@ VideoInput::stopInput()
 void
 VideoInput::startInput()
 {
+
+    isStopped_ = false;
+
     startLoop();
 
     emitSignal<libsip_core::VideoSignal::StartCapture>(decOpts_.input);
