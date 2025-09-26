@@ -1317,18 +1317,33 @@ SIPCall::switchInput(const std::string& source)
 #ifdef ENABLE_VIDEO
     SIP_CORE_DBG("[call:%s] Set selected source to %s", getCallId().c_str(), source.c_str());
 
-    auto currentMediaList = getMediaAttributeList();
-    for (auto& media : currentMediaList) {
-        if (media.type_ == MediaType::MEDIA_VIDEO) {
-            media.sourceUri_ = source;
-            media.muted_ = false;
+    if (source == "") {
+        auto currentMediaList = getMediaAttributeList();
+        for (const auto& videoRtp : getRtpSessionList(MediaType::MEDIA_VIDEO)) {
+            std::static_pointer_cast<video::VideoRtpSession>(videoRtp)->getVideoLocal()->stopInput();
         }
-    }
-    updateAllMediaStreams(currentMediaList, false);
+        for (auto& media : currentMediaList) {
+            if (media.type_ == MediaType::MEDIA_VIDEO) {
+                media.sourceUri_ = source;
+                media.muted_ = true;
+            }
+        }
+        updateAllMediaStreams(currentMediaList, false);
 
-    for (const auto& videoRtp : getRtpSessionList(MediaType::MEDIA_VIDEO)) {
-        std::static_pointer_cast<video::VideoRtpSession>(videoRtp)->getVideoLocal()->switchInput(
-            source);
+    } else {
+        auto currentMediaList = getMediaAttributeList();
+        for (auto& media : currentMediaList) {
+            if (media.type_ == MediaType::MEDIA_VIDEO) {
+                media.sourceUri_ = source;
+                media.muted_ = false;
+            }
+        }
+        updateAllMediaStreams(currentMediaList, false);
+
+        for (const auto& videoRtp : getRtpSessionList(MediaType::MEDIA_VIDEO)) {
+            std::static_pointer_cast<video::VideoRtpSession>(videoRtp)->getVideoLocal()->switchInput(
+                source);
+        }
     }
 
     reportMediaNegotiationStatus();

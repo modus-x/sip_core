@@ -639,7 +639,7 @@ VideoInput::switchInput(const std::string& resource)
     if (resource.empty()) {
         clearOptions();
         futureDecOpts_ = foundDecOpts_.get_future();
-        startLoop();
+        stopInput();
         return futureDecOpts_;
     }
 
