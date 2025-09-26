@@ -574,7 +574,7 @@ transaction_request_cb(pjsip_rx_data* rdata)
         return PJ_FALSE;
     }
 
-    if (Manager::instance().checkIfDND(account->getAccountID())) {
+    if (account->isDND()) {
         const pj_str_t message = CONST_PJ_STR(
             "Call is declined because user is in DND / away state");
 

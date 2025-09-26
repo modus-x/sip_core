@@ -1738,19 +1738,6 @@ Manager::incomingCallsWaiting()
     return not pimpl_->waitingCalls_.empty();
 }
 
-bool
-Manager::checkIfDND(const std::string& accountId) const
-{
-    auto const& account = getAccount(accountId);
-
-    // always ignore all unknown calls - we do not need them
-    if (not account) {
-        return true;
-    }
-
-    return account->isDND();
-}
-
 void
 Manager::incomingCall(const std::string& accountId, Call& call, const std::map<std::string, std::string>& headers)
 {
