@@ -1051,6 +1051,8 @@ Conference::switchInput(const std::string& input)
             mixer->startInputs();
         }
     }
+
+    reportMediaNegotiationStatus();
 #endif
 }
 
@@ -1661,19 +1663,14 @@ Conference::muteLocalHost(bool is_muted, const std::string& mediaType)
         }
         setLocalHostMuteState(MediaType::MEDIA_VIDEO, is_muted);
         if (is_muted) {
-            // detach local inputs from this conference
             if (auto mixer = videoMixer_) {
                 SIP_CORE_DBG("Muting local video sources");
-                mixer->stopInputs();
-                // Add local host to audio only sources so the label is still displayed
-                mixer->addAudioOnlySource("", sip_utils::streamId("", sip_utils::DEFAULT_VIDEO_STREAMID));
+                mixer->muteInputs(true);
             }
         } else {
             if (auto mixer = videoMixer_) {
                 SIP_CORE_DBG("Un-muting local video sources");
-                // Remove local host from audio only sources before starting inputs
-                mixer->removeAudioOnlySource("", sip_utils::streamId("", sip_utils::DEFAULT_VIDEO_STREAMID));
-                mixer->startInputs();
+                mixer->muteInputs(false);
             }
         }
         emitSignal<libsip_core::CallSignal::VideoMuted>(id_, is_muted);

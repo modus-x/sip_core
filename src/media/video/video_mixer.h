@@ -34,10 +34,10 @@
 #include <memory>
 #include <shared_mutex>
 
-#define CONF_BORDER_WIDTH 6
-#define CONF_PADDING 4
+#define CONF_BORDER_WIDTH          6
+#define CONF_PADDING               4
 #define CONF_BORDER_INACTIVE_COLOR "Blue@1"
-#define CONF_BORDER_ACTIVE_COLOR "CornflowerBlue@1"
+#define CONF_BORDER_ACTIVE_COLOR   "CornflowerBlue@1"
 
 namespace sip_core {
 namespace video {
@@ -97,6 +97,8 @@ public:
     void stopInputs();
 
     void startInputs();
+
+    void muteInputs(bool mute);
 
     void setActiveStream(const std::string& id);
     void resetActiveStream()
@@ -176,9 +178,17 @@ private:
 
     void calc_position(std::unique_ptr<VideoMixerSource>& source,
                        const std::shared_ptr<VideoFrame>& input,
-                       int index, bool isActive);
+                       int index,
+                       bool isActive);
 
-    bool initBorderFilter(MediaFilter* filter, std::string inputName, int format, int x, int y, int width, int height, bool active);
+    bool initBorderFilter(MediaFilter* filter,
+                          std::string inputName,
+                          int format,
+                          int x,
+                          int y,
+                          int width,
+                          int height,
+                          bool active);
 
     void startSink();
     void stopSink();
@@ -208,7 +218,7 @@ private:
     // We need to convert call to frame
     mutable std::mutex videoToStreamInfoMtx_ {};
     std::map<Observable<std::shared_ptr<MediaFrame>>*, StreamInfo> videoToStreamInfo_ {};
-    
+
     mutable std::mutex vocieActivivtyMtx_ {};
     std::map<std::string, bool> voiceActivity_;
 
