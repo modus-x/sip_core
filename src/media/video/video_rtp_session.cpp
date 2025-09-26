@@ -67,6 +67,9 @@ keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
     te->id = PJ_FALSE;
 
     rtp_session = (VideoRtpSession*) te->user_data;
+    if (!rtp_session) {
+        return;
+    }
 
     /* Send some empty rtp packet with correct params */
     rtp_session->natPing();
@@ -577,6 +580,13 @@ VideoRtpSession::setMuted(bool mute, Direction dir)
             sender_->setMuted(mute);
         }
 
+        if (mute) {
+            setupKaTimer();
+        }
+        else {
+            cancelKeepAliveTimer();
+        }
+
         return;
     }
 
@@ -622,7 +632,7 @@ VideoRtpSession::cancelKeepAliveTimer()
 {
     if (ka_timer_.id != PJ_FALSE) {
         pjsip_endpt_cancel_timer(account_->getVoipLink().getEndpoint(), &ka_timer_);
-        ka_timer_.id = PJ_FALSE;
+        ka_timer_ = {};
     }
 }
 
@@ -742,8 +752,6 @@ VideoRtpSession::exitConference()
 
         videoMixer_.reset();
     }
-
-    // setupKaTimer();
 
     conference_ = nullptr;
 }

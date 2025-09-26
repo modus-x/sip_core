@@ -123,7 +123,7 @@ public:
     std::shared_ptr<VideoMixer> videoMixer_;
     std::shared_ptr<VideoInput> videoLocal_;
 
-    int getKaInterval() { return ka_inverval_; }
+    int64_t getKaInterval() { return ka_inverval_; }
     void startSender();
     void stopSender();
 
