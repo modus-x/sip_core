@@ -54,6 +54,9 @@ constexpr auto EXPIRY_TIME_RTCP = std::chrono::seconds(2);
 constexpr auto DELAY_AFTER_REMB_INC = std::chrono::seconds(1);
 constexpr auto DELAY_AFTER_REMB_DEC = std::chrono::milliseconds(500);
 
+constexpr auto NO_DEVICE_WIDTH = 640;
+constexpr auto NO_DEVICE_HEIGHT = 480;
+
 static void
 keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
 {
@@ -184,7 +187,7 @@ VideoRtpSession::natPing()
     SIP_CORE_DEBUG("VideoRtpSession Sending keep-alive BLACK rtp packet to session {:s}",
                    getRemoteRtpUri());
     if (sender_) {
-        sender_->sendBlackFrame(640, 480);
+        sender_->sendBlackFrame(NO_DEVICE_WIDTH, NO_DEVICE_HEIGHT);
     }
 }
 
@@ -230,9 +233,9 @@ VideoRtpSession::startSender()
                     if (newParams.valid()
                         && newParams.wait_for(NEWPARAMS_TIMEOUT) == std::future_status::ready) {
                         localVideoParams_ = newParams.get();
+
                     } else {
-                        SIP_CORE_ERR("VideoRtpSession [%p] No valid new video parameters", this);
-                        return;
+                        SIP_CORE_WARN("VideoRtpSession [%p] No valid new video parameters, this may be non existent input", this);
                     }
                 } catch (const std::exception& e) {
                     SIP_CORE_ERR("VideoRtpSession Exception during retrieving video parameters: %s",
@@ -250,6 +253,11 @@ VideoRtpSession::startSender()
                 input1->setFrameSize(localVideoParams_.width, localVideoParams_.height);
             }
 #endif
+        }
+
+        if (localVideoParams_.width == 0 or localVideoParams_.height == 0) {
+            localVideoParams_.width = NO_DEVICE_WIDTH;
+            localVideoParams_.height = NO_DEVICE_HEIGHT;
         }
 
         // be sure to not send any packets before saving last RTP seq value
