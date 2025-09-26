@@ -1507,7 +1507,7 @@ MediaEncoder::enableAccel(bool enableAccel)
         av_init_packet(&pkt);
         pkt.data = nullptr;
         pkt.size = 0;
-        send(pkt, -1);
+        send(pkt, -1, true);
     }
 
     int
