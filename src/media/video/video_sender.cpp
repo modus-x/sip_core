@@ -101,12 +101,7 @@ VideoSender::encodeAndSendVideo(const std::shared_ptr<VideoFrame>& input_frame)
         }
 
         if (muted_.load()) {
-            auto black_frame = std::make_shared<VideoFrame>();
-            black_frame->reserve(AV_PIX_FMT_YUV420P, stream_.width, stream_.height);
-            libav_utils::fillWithBlack(black_frame->pointer());
-            if (videoEncoder_->encode(black_frame, is_keyframe, frameNumber_++) < 0) {
-                SIP_CORE_ERR("encoding black frame failed");
-            }
+            sendBlackFrame(stream_.width, stream_.height);
             return;
         }
 
@@ -117,6 +112,17 @@ VideoSender::encodeAndSendVideo(const std::shared_ptr<VideoFrame>& input_frame)
     if (frameNumber_ == 1) // video stream is lazy initialized, wait for first frame
         videoEncoder_->print_sdp();
 #endif
+}
+
+void
+VideoSender::sendBlackFrame(int width, int height)
+{
+    auto black_frame = std::make_shared<VideoFrame>();
+    black_frame->reserve(AV_PIX_FMT_YUV420P, width, height);
+    libav_utils::fillWithBlack(black_frame->pointer());
+    if (videoEncoder_->encode(black_frame, true, frameNumber_++) < 0) {
+        SIP_CORE_ERR("encoding black frame failed");
+    }
 }
 
 void

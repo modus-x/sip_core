@@ -181,10 +181,10 @@ VideoRtpSession::updateMedia(const MediaDescription& send, const MediaDescriptio
 void
 VideoRtpSession::natPing()
 {
-    SIP_CORE_DEBUG("VideoRtpSession Sending keep-alive rtp packet to session {:s}",
+    SIP_CORE_DEBUG("VideoRtpSession Sending keep-alive BLACK rtp packet to session {:s}",
                    getRemoteRtpUri());
     if (sender_) {
-        sender_->natPing();
+        sender_->sendBlackFrame(640, 480);
     }
 }
 

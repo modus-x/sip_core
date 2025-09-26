@@ -797,6 +797,12 @@ MediaEncoder::writeContainerToRtp(uint8_t* buf, int buf_size)
             encoderCtx->width = videoOpts_.width;
             encoderCtx->height = videoOpts_.height;
 
+            if (videoOpts_.width == 0 or videoOpts_.height == 0) {
+                SIP_CORE_ERR() << "[" << encoderName << "] Resetting to 640x480! Invalid video resolution: " << videoOpts_.width << "x" << videoOpts_.height;
+                encoderCtx->width = 640;
+                encoderCtx->height = 480;
+            }
+
             // satisfy ffmpeg: denominator must be 16bit or less value
             // time base = 1/FPS
             av_reduce(&encoderCtx->framerate.num,
