@@ -89,7 +89,7 @@ using yaml_utils::parseValueOptional;
 using sip_utils::CONST_PJ_STR;
 
 static constexpr unsigned REGISTRATION_FIRST_RETRY_INTERVAL = 25; // seconds
-static constexpr unsigned REGISTRATION_RETRY_INTERVAL = 50;      // seconds
+static constexpr unsigned REGISTRATION_RETRY_INTERVAL = 50;       // seconds
 
 // keep-alive const values
 static constexpr pj_str_t KA_DATA = CONST_PJ_STR("ping!");
@@ -123,8 +123,8 @@ keep_alive_on_complete(void* token, pjsip_event* event)
     }
 
     // Clear pending flag when the transaction reaches a final state
-    if (event->body.tsx_state.tsx->state == PJSIP_TSX_STATE_COMPLETED ||
-        event->body.tsx_state.tsx->state == PJSIP_TSX_STATE_TERMINATED) {
+    if (event->body.tsx_state.tsx->state == PJSIP_TSX_STATE_COMPLETED
+        || event->body.tsx_state.tsx->state == PJSIP_TSX_STATE_TERMINATED) {
         acc->ka_options_pending_ = false;
     }
 }
@@ -178,45 +178,45 @@ keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
             SIP_CORE_DEBUG("KA: OPTIONS keep-alive skipped because previous is pending");
             status = PJ_EPENDING;
         } else {
-        /* Send SIP Options packet */
-        pjsip_tx_data* tdata;
-        auto to = CONST_PJ_STR(acc->getServerUri());
+            /* Send SIP Options packet */
+            pjsip_tx_data* tdata;
 
-        auto from = CONST_PJ_STR(acc->getFromUri());
+            std::string srvUri(acc->getServerUri());
+            pj_str_t pjSrv {(char*) srvUri.data(), (pj_ssize_t) srvUri.size()};
 
-        auto contact = CONST_PJ_STR(contactHeader);
+            pj_str_t pjContact {(char*) contactHeader.data(), (pj_ssize_t) contactHeader.size()};
 
-        SIP_CORE_DEBUG("KA: Sending OPTIONS keep-alive message for acc {:s} to {:s}",
-                       contactHeader,
-                       acc->getServerUri());
+            SIP_CORE_DEBUG("KA: Sending OPTIONS keep-alive message for acc {:s} to {:s}",
+                           contactHeader,
+                           acc->getServerUri());
 
-        status = pjsip_endpt_create_request(acc->getVoipLink().getEndpoint(),
-                                            &pjsip_options_method,
-                                            &to,
-                                            &contact,
-                                            &contact,
-                                            NULL,
-                                            NULL,
-                                            -1,
-                                            NULL,
-                                            &tdata);
-        SIP_CORE_DEBUG("pjsip_endpt_create_request");
-        if (status == PJ_SUCCESS) {
-            status = pjsip_tx_data_set_transport(tdata, &tp_sel);
-            SIP_CORE_DEBUG("pjsip_tx_data_set_transport");
-
+            status = pjsip_endpt_create_request(acc->getVoipLink().getEndpoint(),
+                                                &pjsip_options_method,
+                                                &pjSrv,
+                                                &pjContact,
+                                                &pjContact,
+                                                NULL,
+                                                NULL,
+                                                -1,
+                                                NULL,
+                                                &tdata);
+            SIP_CORE_DEBUG("pjsip_endpt_create_request");
             if (status == PJ_SUCCESS) {
-                status = pjsip_endpt_send_request(acc->getVoipLink().getEndpoint(),
-                                                  tdata,
-                                                  -1,
-                                                  acc,
-                                                  &keep_alive_on_complete);
-                SIP_CORE_DEBUG("pjsip_endpt_send_request");
+                status = pjsip_tx_data_set_transport(tdata, &tp_sel);
+                SIP_CORE_DEBUG("pjsip_tx_data_set_transport");
+
                 if (status == PJ_SUCCESS) {
-                    acc->ka_options_pending_ = true;
+                    status = pjsip_endpt_send_request(acc->getVoipLink().getEndpoint(),
+                                                      tdata,
+                                                      -1,
+                                                      acc,
+                                                      &keep_alive_on_complete);
+                    SIP_CORE_DEBUG("pjsip_endpt_send_request");
+                    if (status == PJ_SUCCESS) {
+                        acc->ka_options_pending_ = true;
+                    }
                 }
             }
-        }
         }
 
     } else {
@@ -866,7 +866,6 @@ SIPAccount::sendRegister()
     if (pjsip_regc_register(regc, isRegistrationRefreshEnabled(), &tdata) != PJ_SUCCESS)
         throw VoipLinkException("Unable to initialize transaction data for account registration");
 
-
     // pjsip_regc_send increment the transport ref count by one,
     if ((status = pjsip_regc_send(regc, tdata)) != PJ_SUCCESS) {
         SIP_CORE_ERR("pjsip_regc_send failed with error %d: %s",
@@ -1257,9 +1256,7 @@ SIPAccount::initContactAddress()
     pj_uint16_t port;
 
     // Init the address to the local address.
-    link_.findLocalAddressFromTransport(transport_, config().hostname,
-                                        address,
-                                        port);
+    link_.findLocalAddressFromTransport(transport_, config().hostname, address, port);
 
     if (not config().publishedSameasLocal) {
         address = getPublishedIpAddress().toString();
