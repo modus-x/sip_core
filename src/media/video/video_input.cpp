@@ -635,7 +635,9 @@ VideoInput::switchInput(const std::string& resource)
     // Switch off video input?
     if (resource.empty()) {
         clearOptions();
-        futureDecOpts_ = foundDecOpts_.get_future();
+        // some default params
+        foundDecOpts(DeviceParams{});
+        futureDecOpts_ = foundDecOpts_.get_future().share();
         stopInput();
         return futureDecOpts_;
     }
