@@ -88,8 +88,8 @@ using yaml_utils::parseValue;
 using yaml_utils::parseValueOptional;
 using sip_utils::CONST_PJ_STR;
 
-static constexpr unsigned REGISTRATION_FIRST_RETRY_INTERVAL = 60; // seconds
-static constexpr unsigned REGISTRATION_RETRY_INTERVAL = 300;      // seconds
+static constexpr unsigned REGISTRATION_FIRST_RETRY_INTERVAL = 25; // seconds
+static constexpr unsigned REGISTRATION_RETRY_INTERVAL = 50;      // seconds
 
 // keep-alive const values
 static constexpr pj_str_t KA_DATA = CONST_PJ_STR("ping!");
@@ -106,6 +106,27 @@ randomSvAuthString(int length)
     }
     result[length] = '\0'; // Add null terminator
     return result;
+}
+
+/* Keep alive timer callback */
+static void
+keep_alive_on_complete(void* token, pjsip_event* event)
+{
+    auto* acc = static_cast<SIPAccount*>(token);
+    if (!acc || !event || event->type != PJSIP_EVENT_TSX_STATE || !event->body.tsx_state.tsx)
+        return;
+
+    int code = event->body.tsx_state.tsx->status_code;
+    if (code == PJSIP_SC_REQUEST_TIMEOUT || code == PJSIP_SC_TSX_TRANSPORT_ERROR) {
+        SIP_CORE_WARN("KA: OPTIONS keep-alive failed with code %d", code);
+        acc->setRegistrationState(RegistrationState::ERROR_GENERIC, PJSIP_SC_TSX_TRANSPORT_ERROR);
+    }
+
+    // Clear pending flag when the transaction reaches a final state
+    if (event->body.tsx_state.tsx->state == PJSIP_TSX_STATE_COMPLETED ||
+        event->body.tsx_state.tsx->state == PJSIP_TSX_STATE_TERMINATED) {
+        acc->ka_options_pending_ = false;
+    }
 }
 
 /* Keep alive timer callback */
@@ -132,6 +153,7 @@ keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
      */
     if (transport == NULL) {
         SIP_CORE_ERR() << "KA: no transport is available for contact " << contactHeader;
+        acc->setRegistrationState(RegistrationState::ERROR_GENERIC, PJSIP_SC_TSX_TRANSPORT_ERROR);
         return;
     }
 
@@ -150,7 +172,12 @@ keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
 
     /* Send keep-alive packet options */
 
-    if (acc->config().keepAliveType == KeepAliveType::Options) {
+    if (true) {
+        // Avoid sending a new OPTIONS keep-alive if one is already in flight
+        if (acc->ka_options_pending_) {
+            SIP_CORE_DEBUG("KA: OPTIONS keep-alive skipped because previous is pending");
+            status = PJ_EPENDING;
+        } else {
         /* Send SIP Options packet */
         pjsip_tx_data* tdata;
         auto to = CONST_PJ_STR(acc->getServerUri());
@@ -182,10 +209,14 @@ keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
                 status = pjsip_endpt_send_request(acc->getVoipLink().getEndpoint(),
                                                   tdata,
                                                   -1,
-                                                  NULL,
-                                                  NULL);
+                                                  acc,
+                                                  &keep_alive_on_complete);
                 SIP_CORE_DEBUG("pjsip_endpt_send_request");
+                if (status == PJ_SUCCESS) {
+                    acc->ka_options_pending_ = true;
+                }
             }
+        }
         }
 
     } else {
@@ -208,6 +239,7 @@ keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
 
     if (status != PJ_SUCCESS && status != PJ_EPENDING) {
         SIP_CORE_ERROR("KA: Error sending keep-alive: {:d}", status);
+        acc->setRegistrationState(RegistrationState::ERROR_GENERIC, PJSIP_SC_TSX_TRANSPORT_ERROR);
     }
 
     uint32_t seconds = acc->config().keepAliveInterval;

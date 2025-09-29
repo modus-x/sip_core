@@ -32,6 +32,10 @@ CallController::registrationStateChanged(const std::string& accountId,
 {
     std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
     std::cout << "Registration state - " << state << "..." << std::endl;
+
+    // if (state == "REGISTERED") {
+    //     call("n.plaksin2");
+    // }
 }
 
 void

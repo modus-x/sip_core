@@ -415,6 +415,12 @@ public:
         pj_timer_entry timer {};
     } kaTarget;
 
+    /**
+     * Flag indicating an in-flight OPTIONS keep-alive transaction.
+     * Used to prevent sending a new keep-alive while one is pending.
+     */
+    bool ka_options_pending_ {false};
+
 
     void setCredentials(const std::vector<SipAccountConfig::Credentials>& creds);
 
