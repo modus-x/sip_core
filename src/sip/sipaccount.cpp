@@ -202,19 +202,16 @@ keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
                                                 &tdata);
             SIP_CORE_DEBUG("pjsip_endpt_create_request");
             if (status == PJ_SUCCESS) {
-                status = pjsip_tx_data_set_transport(tdata, &tp_sel);
-                SIP_CORE_DEBUG("pjsip_tx_data_set_transport");
+                acc->setUpTransmissionData(tdata);
 
+                status = pjsip_endpt_send_request(acc->getVoipLink().getEndpoint(),
+                                                  tdata,
+                                                  -1,
+                                                  acc,
+                                                  &keep_alive_on_complete);
+                SIP_CORE_DEBUG("pjsip_endpt_send_request");
                 if (status == PJ_SUCCESS) {
-                    status = pjsip_endpt_send_request(acc->getVoipLink().getEndpoint(),
-                                                      tdata,
-                                                      -1,
-                                                      acc,
-                                                      &keep_alive_on_complete);
-                    SIP_CORE_DEBUG("pjsip_endpt_send_request");
-                    if (status == PJ_SUCCESS) {
-                        acc->ka_options_pending_ = true;
-                    }
+                    acc->ka_options_pending_ = true;
                 }
             }
         }
@@ -798,7 +795,6 @@ SIPAccount::sendRegister()
     setRegistrationState(RegistrationState::TRYING);
 
     pjsip_regc* regc = nullptr;
-    pjsip_endpoint* endpoint = link_.getEndpoint();
     if (pjsip_regc_create(link_.getEndpoint(), (void*) this, &registration_cb, &regc) != PJ_SUCCESS)
         throw VoipLinkException("UserAgent: Unable to create regc structure.");
 
@@ -812,9 +808,6 @@ SIPAccount::sendRegister()
     // Generate the FROM header
     std::string from(getFromUri());
     pj_str_t pjFrom(sip_utils::CONST_PJ_STR(from));
-
-    // Get the received header
-    const std::string& received(getReceivedParameter());
 
     std::string contact = getContactHeader();
 
@@ -878,13 +871,13 @@ SIPAccount::sendRegister()
 }
 
 void
-SIPAccount::setUpTransmissionData(pjsip_tx_data* tdata, pjsip_transport_type_e transportType)
+SIPAccount::setUpTransmissionData(pjsip_tx_data* tdata)
 {
     if (hostIp_) {
         auto ai = &tdata->dest_info;
         ai->name = pj_strdup3(tdata->pool, config().hostname.c_str());
         ai->addr.count = 1;
-        ai->addr.entry[0].type = transportType;
+        ai->addr.entry[0].type = transport_->getPjSipTransportType();
         pj_memcpy(&ai->addr.entry[0].addr, hostIp_.pjPtr(), sizeof(pj_sockaddr));
         ai->addr.entry[0].addr_len = hostIp_.getLength();
         ai->cur_addr = 0;

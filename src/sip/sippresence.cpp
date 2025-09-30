@@ -425,8 +425,8 @@ SIPPresence::send_publish(SIPPresence* pres)
     pj_str_t entity;
 
     status = pjsip_publishc_publish(pres->publish_sess_, PJ_TRUE, &tdata);
-    const pjsip_tpselector tp_sel = acc->getTransportSelector();
-    pjsip_tx_data_set_transport(tdata, &tp_sel);
+
+    acc->setUpTransmissionData(tdata);
 
     pj_str_t from = pj_strdup3(pres->pool_, acc->getFromUri().c_str());
 
@@ -529,13 +529,6 @@ SIPPresence::publish(SIPPresence* pres)
         SIP_CORE_ERR("Could not initialize credentials for invite session authentication");
         return status;
     }
-
-    /* Set route-set */
-    // FIXME: is this really necessary?
-    pjsip_regc* regc = acc->getRegistrationInfo();
-    if (regc and acc->hasServiceRoute())
-        pjsip_regc_set_route_set(regc,
-                                 sip_utils::createRouteSet(acc->getServiceRoute(), pres->getPool()));
 
     /* Send initial PUBLISH request */
     status = send_publish(pres);

@@ -424,6 +424,10 @@ public:
 
     void setCredentials(const std::vector<SipAccountConfig::Credentials>& creds);
 
+
+    // set explicit transport destination and params for tdata
+    void setUpTransmissionData(pjsip_tx_data* tdata);
+
 private:
     void doRegister1_();
     void doRegister2_();
@@ -433,7 +437,6 @@ private:
     bool initContactAddress();
     void updateContactHeader();
 
-    void setUpTransmissionData(pjsip_tx_data* tdata, pjsip_transport_type_e transportType);
 
     NON_COPYABLE(SIPAccount);
 

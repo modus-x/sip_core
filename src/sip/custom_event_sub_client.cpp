@@ -661,6 +661,9 @@ CustomEventSubClient::subscribe()
                                                                           std::string(getURI()),
                                                                           std::string(getEvent()),
                                                                           PJ_FALSE);
+        if (dlg_) {
+            pjsip_dlg_dec_lock(dlg_);
+        }
         return false;
     }
 
@@ -688,7 +691,6 @@ CustomEventSubClient::subscribe()
         return false;
     }
 
-    // Add user-agent header
     sip_utils::addUserAgentHeader(manager_->getAccount()->getUserAgentName(), tdata);
 
     status = pjsip_evsub_send_request(sub_, tdata);
