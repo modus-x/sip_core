@@ -74,6 +74,8 @@
 #include <charconv>
 
 #include "pj/string.h"
+#include <pjsip.h>
+#include <pjsip/sip_config.h>
 
 #ifdef _WIN32
 #include <lmcons.h>
@@ -204,11 +206,27 @@ keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
             if (status == PJ_SUCCESS) {
                 acc->setUpTransmissionData(tdata);
 
+                // Minimize retransmissions for this OPTIONS by temporarily shrinking
+                // PJSIP transaction timers. Scheduled timers are captured at tsx creation
+                // time, so restoring immediately after send will not affect this tsx.
+                unsigned prev_t1 = pjsip_cfg()->tsx.t1;
+                unsigned prev_td = pjsip_cfg()->tsx.td;
+
+                // Set T1 greater than TD so retransmit timer won't fire before timeout.
+                // Keep T2/T4 unchanged (pass 0).
+                const unsigned ka_t1 = 500; // ms
+                const unsigned ka_td = 200;  // ms
+
+                pjsip_tsx_set_timers(ka_t1, 0, 0, ka_td);
+
                 status = pjsip_endpt_send_request(acc->getVoipLink().getEndpoint(),
                                                   tdata,
                                                   -1,
                                                   acc,
                                                   &keep_alive_on_complete);
+                // Restore previous timers immediately; this won't change timers already
+                // scheduled for the OPTIONS transaction just created above.
+                pjsip_tsx_set_timers(prev_t1, 0, 0, prev_td);
                 SIP_CORE_DEBUG("pjsip_endpt_send_request");
                 if (status == PJ_SUCCESS) {
                     acc->ka_options_pending_ = true;
