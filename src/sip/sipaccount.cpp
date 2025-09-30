@@ -1079,7 +1079,7 @@ SIPAccount::loadConfig()
 bool
 SIPAccount::fullMatch(std::string_view username, std::string_view hostname) const
 {
-    return userMatch(username) and (hostnameMatch(hostname) or proxyMatch(hostname));
+    return userMatch(username) and (proxyMatch(hostname) || hostnameMatch(hostname));
 }
 
 bool
