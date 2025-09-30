@@ -42,7 +42,7 @@ main()
 {
     std::cout << "SIP core Console App" << std::endl;
     std::cout << "Available commands: call <callee>, add <callee>, del <callee>, move <from> <to>, "
-                 "conf <callee1> ... <calleeN>, switch <device>, hold, resume, hangup, capOn, capOff, video, reregister, unregister, subscribe, unsubscribe, exit"
+                 "conf <callee1> ... <calleeN>, switch <device>, hold, resume, hangup, capOn, capOff, video, reregister, unregister, subscribe, unsubscribe, publish, exit"
               << std::endl;
 
     CallController controller(ACCOUNT_ID);
@@ -289,6 +289,32 @@ main()
             controller.subscribe(uris);
             std::cout << "Subscribe successfully sent" << std::endl;
         } else if (command == "unsubscribe") {
+        } else if (command == "publish") {
+            // Usage: publish on|off [note]
+            if (tokens.size() < 2) {
+                std::cerr << "Error: Usage - publish on|off [note]" << std::endl;
+                continue;
+            }
+            std::string state = tokens[1];
+            std::string note;
+            if (tokens.size() > 2) {
+                // reassemble the rest of tokens as note (allow spaces)
+                for (size_t i = 2; i < tokens.size(); ++i) {
+                    if (!note.empty()) note += " ";
+                    note += tokens[i];
+                }
+            }
+            bool available;
+            if (state == "on" || state == "available" || state == "online") {
+                available = true;
+            } else if (state == "off" || state == "away" || state == "offline") {
+                available = false;
+            } else {
+                std::cerr << "Error: publish expects 'on' or 'off'" << std::endl;
+                continue;
+            }
+            controller.publishPresence(available, note);
+            std::cout << "Publish sent" << std::endl;
             if (tokens.size() < 2) {
                 std::cerr << "Error: Usage - unsubscribe <uri1> <uri2> ..." << std::endl;
                 continue;

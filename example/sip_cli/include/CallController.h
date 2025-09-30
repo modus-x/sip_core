@@ -59,6 +59,9 @@ public:
 
     void proccesEvents();
 
+    // Presence testing helper
+    void publishPresence(bool available, const std::string& note);
+
 private:
     virtual void audioDeviceEvent();
     virtual void callStateChanged(const std::string& accountId,

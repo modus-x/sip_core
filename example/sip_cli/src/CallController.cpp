@@ -182,6 +182,16 @@ CallController::init()
     return true;
 }
 
+void
+CallController::publishPresence(bool available, const std::string& note)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
+    if (!libsip_core::initialized())
+        return;
+
+    libsip_core::publish(m_accountId, available, note);
+}
+
 bool
 CallController::sendRegister(const std::string& user,
                              const std::string& pass,
@@ -238,6 +248,8 @@ CallController::sendRegister(const std::string& user,
         }
     }
 
+    libsip_core::registerEventPackage("x-lostcalls", 600);
+
     std::cout << "Registering user - " << user << "..." << std::endl;
 
     libsip_core::sendRegister(m_accountId, true);
@@ -276,7 +288,7 @@ CallController::subscribe(const std::vector<std::string>& uris)
 
     std::cout << "Subscribing to events for specified URIs..." << std::endl;
     for (const auto& uri : sipUris) {
-        libsip_core::subscribeToEvents(m_accountId, uri, "presence", true);
+        libsip_core::subscribeToEvents(m_accountId, uri, "x-lostcalls", true);
     }
 }
 
@@ -294,7 +306,7 @@ CallController::unsubscribe(const std::vector<std::string>& uris)
 
     std::cout << "Unsubscribing from events for specified URIs..." << std::endl;
     for (const auto& uri : sipUris) {
-        libsip_core::subscribeToEvents(m_accountId, uri, "presence", false);
+        libsip_core::subscribeToEvents(m_accountId, uri, "x-lostcalls", false);
     }
 }
 
