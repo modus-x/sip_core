@@ -4,7 +4,7 @@ cmake_policy(VERSION 3.25...3.31)
 
 project(
   sip_core
-  VERSION 0.13.9
+  VERSION 0.14.5
   LANGUAGES C CXX)
 
 set(BUILD_NUMBER 1)
