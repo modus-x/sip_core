@@ -1773,8 +1773,7 @@ SIPAccount::sendMessage(const std::string& to,
         return;
     }
 
-    const pjsip_tpselector tp_sel = getTransportSelector();
-    status = pjsip_tx_data_set_transport(tdata, &tp_sel);
+    setUpTransmissionData(tdata);
 
     if (status != PJ_SUCCESS) {
         SIP_CORE_ERR("Unable to set transport: %s", sip_utils::sip_strerror(status).c_str());
