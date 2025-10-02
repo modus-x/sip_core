@@ -1,5 +1,4 @@
-﻿
-/*
+﻿/*
  *  Copyright (C) 2004-2022 Savoir-faire Linux Inc.
  *
  *  Author: Emmanuel Milou <emmanuel.milou@savoirfairelinux.com>
@@ -1015,6 +1014,14 @@ SIPCall::refuse()
     removeCall();
 }
 
+namespace {
+struct TransferClientCtx
+{
+    std::string accountId;
+    std::string callId;
+};
+} // anonymous namespace
+
 static void
 transfer_client_cb(pjsip_evsub* sub, pjsip_event* event)
 {
@@ -1024,7 +1031,7 @@ transfer_client_cb(pjsip_evsub* sub, pjsip_event* event)
 
     pjsip_status_line status_line {};
 
-    pjsip_rx_data* r_data = event->body.rx_msg.rdata;
+    pjsip_rx_data* r_data = event ? event->body.rx_msg.rdata : nullptr;
 
     switch (state) {
     case PJSIP_EVSUB_STATE_ACTIVE:
@@ -1052,15 +1059,13 @@ transfer_client_cb(pjsip_evsub* sub, pjsip_event* event)
         break;
     }
 
-    auto call = static_cast<SIPCall*>(pjsip_evsub_get_mod_data(sub, mod_ua_id));
-    if (call) {
-        emitSignal<libsip_core::CallSignal::TransferStateChange>(call->getSIPAccount()
-                                                                     ->getAccountID(),
-                                                                 call->getCallId(),
+    auto ctx = static_cast<TransferClientCtx*>(pjsip_evsub_get_mod_data(sub, mod_ua_id));
+    if (ctx) {
+        emitSignal<libsip_core::CallSignal::TransferStateChange>(ctx->accountId,
+                                                                 ctx->callId,
                                                                  state,
                                                                  status_line.code,
-                                                                 sip_utils::as_string(
-                                                                     status_line.reason));
+                                                                 sip_utils::as_string(status_line.reason));
     }
 
     switch (state) {
@@ -1074,7 +1079,10 @@ transfer_client_cb(pjsip_evsub* sub, pjsip_event* event)
 
     case PJSIP_EVSUB_STATE_TERMINATED: {
         // clean mod data on sub termination
-        pjsip_evsub_set_mod_data(sub, mod_ua_id, NULL);
+        if (ctx) {
+            delete ctx;
+            pjsip_evsub_set_mod_data(sub, mod_ua_id, NULL);
+        }
         break;
     }
 
@@ -1082,12 +1090,15 @@ transfer_client_cb(pjsip_evsub* sub, pjsip_event* event)
         if (!event)
             return;
 
-        if (!r_data->msg_info.cid)
+        if (!r_data || !r_data->msg_info.cid)
             return;
 
         if (status_line.code / 100 == 2) {
             // clean mod data on success
-            pjsip_evsub_set_mod_data(sub, mod_ua_id, NULL);
+            if (ctx) {
+                delete ctx;
+                pjsip_evsub_set_mod_data(sub, mod_ua_id, NULL);
+            }
         }
 
         break;
@@ -1125,20 +1136,20 @@ SIPCall::transferCommon(const pj_str_t* dst)
     if (pjsip_xfer_create_uac(inviteSession_->dlg, &xfer_cb, &sub) != PJ_SUCCESS)
         return false;
 
-    /* Associate this voiplink of call with the client subscription
-     * We can not just associate call with the client subscription
-     * because after this function, we can no find the cooresponding
-     * voiplink from the call any more. But the voiplink is useful!
-     */
-    pjsip_evsub_set_mod_data(sub, Manager::instance().sipVoIPLink().getModId(), this);
+    /* Associate context with the client subscription */
+    auto* ctx = new TransferClientCtx{acc->getAccountID(), getCallId()};
+    pjsip_evsub_set_mod_data(sub, Manager::instance().sipVoIPLink().getModId(), ctx);
 
     /*
      * Create REFER request.
      */
     pjsip_tx_data* tdata;
 
-    if (pjsip_xfer_initiate(sub, dst, &tdata) != PJ_SUCCESS)
+    if (pjsip_xfer_initiate(sub, dst, &tdata) != PJ_SUCCESS) {
+        delete ctx;
+        pjsip_evsub_set_mod_data(sub, Manager::instance().sipVoIPLink().getModId(), NULL);
         return false;
+    }
 
     // add user agent and Referred-by header
     pjsip_generic_string_hdr* gs_hdr
@@ -1150,8 +1161,11 @@ SIPCall::transferCommon(const pj_str_t* dst)
     sip_utils::addUserAgentHeader(acc->getUserAgentName(), tdata);
 
     /* Send. */
-    if (pjsip_xfer_send_request(sub, tdata) != PJ_SUCCESS)
+    if (pjsip_xfer_send_request(sub, tdata) != PJ_SUCCESS) {
+        delete ctx;
+        pjsip_evsub_set_mod_data(sub, Manager::instance().sipVoIPLink().getModId(), NULL);
         return false;
+    }
 
     return true;
 }
