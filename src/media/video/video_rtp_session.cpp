@@ -759,6 +759,8 @@ VideoRtpSession::exitConference()
         }
 
         videoMixer_.reset();
+
+        attachVideoInput();
     }
 
     conference_ = nullptr;
