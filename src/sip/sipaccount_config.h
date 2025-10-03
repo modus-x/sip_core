@@ -83,6 +83,11 @@ struct SipAccountConfig : public SipAccountBaseConfig {
     std::string serviceRoute;
 
     /**
+     * Backup Outbound Proxy Server Address
+     */
+    std::string backServiceRoute;
+
+    /**
      * Determine if the softphone should fallback on non secured media channel if SRTP negotiation
      * fails. Make sure other SIP endpoints share the same behavior since it could result in
      * encrypted data to be played through the audio device.

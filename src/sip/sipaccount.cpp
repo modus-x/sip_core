@@ -121,6 +121,40 @@ keep_alive_on_complete(void* token, pjsip_event* event)
     int code = event->body.tsx_state.tsx->status_code;
     if (code == PJSIP_SC_REQUEST_TIMEOUT || code == PJSIP_SC_TSX_TRANSPORT_ERROR) {
         SIP_CORE_WARN("KA: OPTIONS keep-alive failed with code %d", code);
+
+        // Implement proxy hopping based on keep-alive failures
+        if (acc->isUsingBackupRoute()) {
+            // If backup route fails, try switching back to main route
+            if (acc->hasServiceRoute()) {
+                SIP_CORE_WARN("KA: Backup route keep-alive failed, switching back to main route");
+                acc->switchToMainRoute();
+                // Trigger re-registration with main route
+                acc->doUnregister([acc_weak = acc->weak()](bool /* transport_free */) {
+                    if (auto acc_locked = acc_weak.lock()) {
+                        if (acc_locked->isUsable())
+                            acc_locked->doRegister();
+                    }
+                });
+                acc->ka_options_pending_ = false;
+                return;
+            }
+        } else {
+            // If main route fails, try switching to backup route
+            if (acc->hasBackServiceRoute()) {
+                SIP_CORE_WARN("KA: Main route keep-alive failed, switching to backup route");
+                acc->switchToBackupRoute();
+                // Trigger re-registration with backup route
+                acc->doUnregister([acc_weak = acc->weak()](bool /* transport_free */) {
+                    if (auto acc_locked = acc_weak.lock()) {
+                        if (acc_locked->isUsable())
+                            acc_locked->doRegister();
+                    }
+                });
+                acc->ka_options_pending_ = false;
+                return;
+            }
+        }
+
         acc->setRegistrationState(RegistrationState::ERROR_GENERIC, PJSIP_SC_TSX_TRANSPORT_ERROR);
     }
 
@@ -215,7 +249,7 @@ keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
                 // Set T1 greater than TD so retransmit timer won't fire before timeout.
                 // Keep T2/T4 unchanged (pass 0).
                 const unsigned ka_t1 = 500; // ms
-                const unsigned ka_td = 200;  // ms
+                const unsigned ka_td = 200; // ms
 
                 pjsip_tsx_set_timers(ka_t1, 0, 0, ka_td);
 
@@ -498,6 +532,19 @@ SIPAccount::onTransportStateChanged(pjsip_transport_state state,
             transportStatus_ = PJSIP_SC_SERVICE_UNAVAILABLE;
             transportError_ = "";
         }
+
+        // Try switching to backup route if transport fails
+        if (!isUsingBackupRoute() && hasBackServiceRoute()) {
+            SIP_CORE_WARN("Transport disconnected, switching to backup route");
+            switchToBackupRoute();
+            // Trigger re-registration with backup route
+            doUnregister([acc = shared()](bool /* transport_free */) {
+                if (acc->isUsable())
+                    acc->doRegister();
+            });
+            return;
+        }
+
         setRegistrationState(RegistrationState::ERROR_GENERIC, PJSIP_SC_TSX_TRANSPORT_ERROR);
     } else {
         // The status can be '0', this is the same as OK
@@ -609,10 +656,10 @@ SIPAccount::SIPStartCall(std::shared_ptr<SIPCall>& call)
 
     updateDialogViaSentBy(dialog);
 
-    if (hasServiceRoute())
+    std::string activeRoute = getActiveServiceRoute();
+    if (!activeRoute.empty())
         pjsip_dlg_set_route_set(dialog,
-                                sip_utils::createRouteSet(getServiceRoute(),
-                                                          call->inviteSession_->pool));
+                                sip_utils::createRouteSet(activeRoute, call->inviteSession_->pool));
 
     if (hasCredentials()
         and pjsip_auth_clt_set_credentials(&dialog->auth_sess, getCredentialCount(), getCredInfo())
@@ -728,22 +775,34 @@ SIPAccount::doRegister()
 void
 SIPAccount::doRegister1_()
 {
-    link_.resolveSrvName(hasServiceRoute() ? getServiceRoute() : config().hostname,
-                         PJSIP_TRANSPORT_UDP,
-                         [w = weak()](std::vector<IpAddr> host_ips) {
-                             if (auto acc = w.lock()) {
-                                 std::lock_guard<std::recursive_mutex> lock(
-                                     acc->configurationMutex_);
-                                 if (host_ips.empty()) {
-                                     SIP_CORE_ERR("Can't resolve hostname for registration.");
-                                     acc->setRegistrationState(RegistrationState::ERROR_GENERIC,
-                                                               PJSIP_SC_NOT_FOUND);
-                                     return;
-                                 }
-                                 acc->hostIp_ = host_ips[0];
-                                 acc->doRegister2_();
-                             }
-                         });
+    std::string targetHost;
+    if (hasServiceRoute() || hasBackServiceRoute()) {
+        targetHost = getActiveServiceRoute();
+    } else {
+        targetHost = config().hostname;
+    }
+
+    link_.resolveSrvName(targetHost, PJSIP_TRANSPORT_UDP, [w = weak()](std::vector<IpAddr> host_ips) {
+        if (auto acc = w.lock()) {
+            std::lock_guard<std::recursive_mutex> lock(acc->configurationMutex_);
+            if (host_ips.empty()) {
+                SIP_CORE_ERR("Can't resolve hostname for registration.");
+
+                // Try backup route if main route resolution failed
+                if (!acc->isUsingBackupRoute() && acc->hasBackServiceRoute()) {
+                    SIP_CORE_WARN("Main route resolution failed, trying backup route");
+                    acc->switchToBackupRoute();
+                    acc->doRegister1_();
+                    return;
+                }
+
+                acc->setRegistrationState(RegistrationState::ERROR_GENERIC, PJSIP_SC_NOT_FOUND);
+                return;
+            }
+            acc->hostIp_ = host_ips[0];
+            acc->doRegister2_();
+        }
+    });
 }
 
 void
@@ -847,9 +906,9 @@ SIPAccount::sendRegister()
     if (pjsip_regc_set_transport(regc, &tp_sel) != PJ_SUCCESS)
         throw VoipLinkException("Unable to set transport");
 
-    if (hasServiceRoute())
-        pjsip_regc_set_route_set(regc,
-                                 sip_utils::createRouteSet(getServiceRoute(), link_.getPool()));
+    std::string activeRoute = getActiveServiceRoute();
+    if (!activeRoute.empty())
+        pjsip_regc_set_route_set(regc, sip_utils::createRouteSet(activeRoute, link_.getPool()));
 
     pjsip_regc_set_credentials(regc, getCredentialCount(), getCredInfo());
 
@@ -912,6 +971,16 @@ SIPAccount::onRegister(pjsip_regc_cbparam* param)
         // cancel ka timer if everything is BAD
         cancelKeepAliveTimer();
         SIP_CORE_ERR("SIP registration error %d", param->status);
+
+        // Try backup route if not already using it
+        if (!isUsingBackupRoute() && hasBackServiceRoute()) {
+            SIP_CORE_WARN("Registration failed, trying backup route");
+            destroyRegistrationInfo();
+            switchToBackupRoute();
+            doRegister();
+            return;
+        }
+
         destroyRegistrationInfo();
         setRegistrationState(RegistrationState::ERROR_GENERIC, param->code);
     } else if (param->code < 0 || param->code >= 300) {
@@ -925,6 +994,25 @@ SIPAccount::onRegister(pjsip_regc_cbparam* param)
                      param->code,
                      (int) param->reason.slen,
                      param->reason.ptr);
+
+        // Try backup route if not already using it (for certain error codes)
+        bool shouldRetryBackup = false;
+        switch (param->code) {
+        case PJSIP_SC_REQUEST_TIMEOUT:
+        case PJSIP_SC_SERVICE_UNAVAILABLE:
+        case PJSIP_SC_NOT_FOUND:
+            shouldRetryBackup = !isUsingBackupRoute() && hasBackServiceRoute();
+            break;
+        }
+
+        if (shouldRetryBackup) {
+            SIP_CORE_WARN("Registration failed with code %d, trying backup route", param->code);
+            destroyRegistrationInfo();
+            switchToBackupRoute();
+            doRegister();
+            return;
+        }
+
         destroyRegistrationInfo();
         switch (param->code) {
         case PJSIP_SC_FORBIDDEN:
@@ -979,9 +1067,10 @@ SIPAccount::onRegister(pjsip_regc_cbparam* param)
                 // update_rfc5626_status(acc, param->rdata);
 
                 /* TODO Check and update Service-Route header */
-                if (hasServiceRoute())
+                std::string activeRoute = getActiveServiceRoute();
+                if (!activeRoute.empty())
                     pjsip_regc_set_route_set(param->regc,
-                                             sip_utils::createRouteSet(getServiceRoute(),
+                                             sip_utils::createRouteSet(activeRoute,
                                                                        link_.getPool()));
 
                 setRegistrationState(RegistrationState::REGISTERED, param->code);
@@ -1119,7 +1208,7 @@ SIPAccount::hostnameMatch(std::string_view hostname) const
 bool
 SIPAccount::proxyMatch(std::string_view hostname) const
 {
-    if (hostname == config().serviceRoute)
+    if (hostname == config().serviceRoute || hostname == config().backServiceRoute)
         return true;
     const auto a = ip_utils::getAddrList(hostname);
     const auto b = ip_utils::getAddrList(config().hostname);
@@ -1210,6 +1299,44 @@ SIPAccount::getServerUri() const
         host = config().hostname;
 
     return "<" + scheme + host + transport + ">";
+}
+
+std::string
+SIPAccount::getActiveServiceRoute() const
+{
+    if (usingBackupRoute_ && hasBackServiceRoute()) {
+        return config().backServiceRoute;
+    }
+    return config().serviceRoute;
+}
+
+void
+SIPAccount::switchToBackupRoute()
+{
+    if (!hasBackServiceRoute()) {
+        SIP_CORE_WARN("No backup service route available");
+        return;
+    }
+
+    if (usingBackupRoute_) {
+        SIP_CORE_DBG("Already using backup service route");
+        return;
+    }
+
+    SIP_CORE_WARN("Switching to backup service route: %s", config().backServiceRoute.c_str());
+    usingBackupRoute_ = true;
+}
+
+void
+SIPAccount::switchToMainRoute()
+{
+    if (!usingBackupRoute_) {
+        SIP_CORE_DBG("Already using main service route");
+        return;
+    }
+
+    SIP_CORE_WARN("Switching back to main service route: %s", config().serviceRoute.c_str());
+    usingBackupRoute_ = false;
 }
 
 IpAddr
