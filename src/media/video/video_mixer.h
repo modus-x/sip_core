@@ -33,6 +33,7 @@
 #include <chrono>
 #include <memory>
 #include <shared_mutex>
+#include <vector>
 
 #define CONF_BORDER_WIDTH          6
 #define CONF_PADDING               4
@@ -195,6 +196,12 @@ private:
 
     void process();
 
+    // Process any pending observer detaches in a safe context
+    void processPendingDetaches();
+
+    // Enqueue an observable to be detached from sources_ without blocking
+    void enqueueDetach(Observable<std::shared_ptr<MediaFrame>>* ob);
+
     const std::string id_;
     int width_ = 0;
     int height_ = 0;
@@ -218,6 +225,10 @@ private:
     // We need to convert call to frame
     mutable std::mutex videoToStreamInfoMtx_ {};
     std::map<Observable<std::shared_ptr<MediaFrame>>*, StreamInfo> videoToStreamInfo_ {};
+
+    // Queue of observables pending removal to avoid locking in callbacks
+    std::mutex pendingDetachMtx_ {};
+    std::vector<Observable<std::shared_ptr<MediaFrame>>*> pendingDetaches_ {};
 
     mutable std::mutex vocieActivivtyMtx_ {};
     std::map<std::string, bool> voiceActivity_;

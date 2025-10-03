@@ -37,6 +37,7 @@
 #include <cmath>
 #include <unistd.h>
 #include <mutex>
+#include <unordered_map>
 
 #include "videomanager_interface.h"
 
@@ -322,17 +323,8 @@ VideoMixer::attached(Observable<std::shared_ptr<MediaFrame>>* ob)
 void
 VideoMixer::detached(Observable<std::shared_ptr<MediaFrame>>* ob)
 {
-    std::unique_lock lock(rwMutex_);
-
-    for (const auto& x : sources_) {
-        if (x->source == ob) {
-            SIP_CORE_DBG("Remove source [%p]", x.get());
-            sources_.remove(x);
-            SIP_CORE_DEBUG("Total sources: {:d}", sources_.size());
-            updateLayout();
-            break;
-        }
-    }
+    // Avoid taking rwMutex_ inside observable callback; enqueue and process in mixer loop
+    enqueueDetach(ob);
 }
 
 void
@@ -363,8 +355,62 @@ VideoMixer::update(Observable<std::shared_ptr<MediaFrame>>* ob,
 }
 
 void
+VideoMixer::enqueueDetach(Observable<std::shared_ptr<MediaFrame>>* ob)
+{
+    std::lock_guard<std::mutex> ql(pendingDetachMtx_);
+    pendingDetaches_.push_back(ob);
+}
+
+void
+VideoMixer::processPendingDetaches()
+{
+    std::vector<Observable<std::shared_ptr<MediaFrame>>*> local;
+    {
+        std::lock_guard<std::mutex> ql(pendingDetachMtx_);
+        if (pendingDetaches_.empty())
+            return;
+        local.swap(pendingDetaches_);
+    }
+
+    if (local.empty())
+        return;
+
+    std::unique_lock lock(rwMutex_);
+    for (auto* ob : local) {
+        for (const auto& x : sources_) {
+            if (x->source == ob) {
+                SIP_CORE_DBG("Remove source [%p]", x.get());
+                sources_.remove(x);
+                SIP_CORE_DEBUG("Total sources: {:d}", sources_.size());
+                updateLayout();
+                break;
+            }
+        }
+    }
+}
+
+void
 VideoMixer::process()
 {
+    // First, process any pending detach requests safely
+    processPendingDetaches();
+
+    // Build a cache of stream infos to avoid taking videoToStreamInfoMtx_ while holding rwMutex_
+    std::unordered_map<Observable<std::shared_ptr<MediaFrame>>*, StreamInfo> streamInfoCache;
+    {
+        std::lock_guard<std::mutex> lk(videoToStreamInfoMtx_);
+        streamInfoCache.reserve(videoToStreamInfo_.size());
+        for (const auto& kv : videoToStreamInfo_)
+            streamInfoCache.emplace(kv.first, kv.second);
+    }
+
+    // Snapshot voice activity to avoid locking vocieActivivtyMtx_ under rwMutex_
+    std::map<std::string, bool> voiceActivitySnapshot;
+    {
+        std::lock_guard<std::mutex> lock(vocieActivivtyMtx_);
+        voiceActivitySnapshot = voiceActivity_;
+    }
+
     nextProcess_ += std::chrono::duration_cast<std::chrono::microseconds>(FRAME_DURATION);
     const auto delay = nextProcess_ - std::chrono::steady_clock::now();
     if (delay.count() > 0)
@@ -432,7 +478,10 @@ VideoMixer::process()
             auto audioSource = std::make_unique<VideoMixer::VideoMixerSource>();
 
             // calc pos, but DO NOT render anything
-            calc_position(audioSource, audioFrame, wantedIndex, voiceActivity_[streamId]);
+            bool voiceActive = false;
+            if (auto itVA = voiceActivitySnapshot.find(streamId); itVA != voiceActivitySnapshot.end())
+                voiceActive = itVA->second;
+            calc_position(audioSource, audioFrame, wantedIndex, voiceActive);
             sourcesInfo.emplace_back(SourceInfo {{},
                                                  audioSource->x.load(),
                                                  audioSource->y.load(),
@@ -450,7 +499,9 @@ VideoMixer::process()
             if (!loop_.isRunning())
                 return;
 
-            auto sinfo = streamInfo(x->source);
+            StreamInfo sinfo = {};
+            if (auto itSI = streamInfoCache.find(x->source); itSI != streamInfoCache.end())
+                sinfo = itSI->second;
             auto activeSource = verifyActive(sinfo.streamId);
 
             if (currentLayout_ != Layout::ONE_BIG or activeSource) {
@@ -496,10 +547,12 @@ VideoMixer::process()
                     needsUpdate = true;
                 }
 
-                {
-                    std::lock_guard<std::mutex> lock(vocieActivivtyMtx_);
-                    if (needsUpdate)
-                        calc_position(x, fooInput, wantedIndex, voiceActivity_[sinfo.streamId]);
+                if (needsUpdate) {
+                    bool voiceActive = false;
+                    if (auto itVA = voiceActivitySnapshot.find(sinfo.streamId);
+                        itVA != voiceActivitySnapshot.end())
+                        voiceActive = itVA->second;
+                    calc_position(x, fooInput, wantedIndex, voiceActive);
                 }
 
                 if (!blackFrame) {
@@ -532,7 +585,9 @@ VideoMixer::process()
             layoutUpdated_ -= 1;
             if (layoutUpdated_ == 0) {
                 for (auto& x : sources_) {
-                    auto sinfo = streamInfo(x->source);
+                    StreamInfo sinfo = {};
+                    if (auto itSI = streamInfoCache.find(x->source); itSI != streamInfoCache.end())
+                        sinfo = itSI->second;
                     sourcesInfo.emplace_back(SourceInfo {x->source,
                                                          x->x.load(),
                                                          x->y.load(),
