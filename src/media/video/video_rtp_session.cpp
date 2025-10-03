@@ -156,7 +156,6 @@ VideoRtpSession::VideoRtpSession(const string& callId,
 
 VideoRtpSession::~VideoRtpSession()
 {
-
     stop();
 
     deinitRecorder();
@@ -235,7 +234,9 @@ VideoRtpSession::startSender()
                         localVideoParams_ = newParams.get();
 
                     } else {
-                        SIP_CORE_WARN("VideoRtpSession [%p] No valid new video parameters, this may be non existent input", this);
+                        SIP_CORE_WARN("VideoRtpSession [%p] No valid new video parameters, this "
+                                      "may be non existent input",
+                                      this);
                     }
                 } catch (const std::exception& e) {
                     SIP_CORE_ERR("VideoRtpSession Exception during retrieving video parameters: %s",
@@ -278,7 +279,6 @@ VideoRtpSession::startSender()
             initSeqVal_ = socketPair_->lastSeqValOut();
 
         try {
-
             auto lastSeq = initSeqVal_ + 1;
             if (sender_) {
                 lastSeq = sender_->getLastSeqValue() + 1;
@@ -293,19 +293,13 @@ VideoRtpSession::startSender()
                                     localVideoParams_.width,
                                     localVideoParams_.height,
                                     send_.bitrate,
-                                    static_cast<rational<int>>(localVideoParams_.framerate), 
-                                    localVideoParams_.no_color, 
+                                    static_cast<rational<int>>(localVideoParams_.framerate),
+                                    localVideoParams_.no_color,
                                     localVideoParams_.down_scale_factor,
                                     localVideoParams_.quality)
                       : videoMixer_->getStream("Video Sender");
-            sender_.reset(new VideoSender(getRemoteRtpUri(),
-                                          ms,
-                                          send_,
-                                          *socketPair_,
-                                          lastSeq,
-                                          mtu_,
-                                          callId_,
-                                          allowHwAccel));
+            sender_.reset(new VideoSender(
+                getRemoteRtpUri(), ms, send_, *socketPair_, lastSeq, mtu_, callId_, allowHwAccel));
 
             sender_->setSource(input_);
 
@@ -313,7 +307,6 @@ VideoRtpSession::startSender()
                 sender_->setChangeOrientationCallback(changeOrientationCallback_);
             if (socketPair_)
                 socketPair_->setPacketLossCallback([this]() { cbKeyFrameRequest_(); });
-
 
             // attach video input!
             attachVideoInput();
@@ -390,19 +383,19 @@ VideoRtpSession::startReceiver()
             if (socketPair_)
                 socketPair_->setReadBlockingMode(false);
         }
-          
+
         receiveThread_.reset(
             new VideoReceiveThread(callId_, !conference_, receive_.receiving_sdp, mtu_));
 
         // XXX keyframe requests can timeout if unanswered
         receiveThread_->addIOContext(*socketPair_);
-        receiveThread_->setSuccessfulSetupCb(
-            [this](MediaType media, bool success) { 
-                if (receiveThread_) {
-                    if (socketPair_)
-                        socketPair_->setReadBlockingMode(true);
-                    }
-                onSuccessfulSetup_(media, success); });
+        receiveThread_->setSuccessfulSetupCb([this](MediaType media, bool success) {
+            if (receiveThread_) {
+                if (socketPair_)
+                    socketPair_->setReadBlockingMode(true);
+            }
+            onSuccessfulSetup_(media, success);
+        });
         receiveThread_->setResolutionChangedCallback([this]() { restartSender(); });
         receiveThread_->setDeviceParams(remoteVideoParams_);
         receiveThread_->startLoop();
@@ -433,7 +426,6 @@ VideoRtpSession::startReceiver()
                 videoMixer_->setActiveStream(audioId_);
         }
     }
-
 }
 
 void
@@ -472,9 +464,10 @@ VideoRtpSession::stopReceiver()
     receiveThread_->stopSink();
 }
 
-rtcpRRHeader VideoRtpSession::getRtcpRR()
+rtcpRRHeader
+VideoRtpSession::getRtcpRR()
 {
-    if(socketPair_)
+    if (socketPair_)
         return socketPair_->getLastRtcpRR();
 
     return {};
@@ -483,15 +476,16 @@ rtcpRRHeader VideoRtpSession::getRtcpRR()
 rtcpREMBHeader
 VideoRtpSession::getRtcpREMB()
 {
-    if(socketPair_)
+    if (socketPair_)
         return socketPair_->getLastRtcpREMB();
 
     return {};
 }
 
-rtcpSRHeader VideoRtpSession::getRtcpSR()
+rtcpSRHeader
+VideoRtpSession::getRtcpSR()
 {
-    if(socketPair_)
+    if (socketPair_)
         return socketPair_->getLastRtcpSR();
 
     return {};
@@ -512,9 +506,8 @@ VideoRtpSession::start()
     }
 
     try {
-
         socketPair_.reset(new SocketPair(getRemoteRtpUri().c_str(), receive_.addr.getPort()));
-        
+
         last_REMB_inc_ = clock::now();
         last_REMB_dec_ = clock::now();
 
@@ -590,8 +583,7 @@ VideoRtpSession::setMuted(bool mute, Direction dir)
 
         if (mute) {
             setupKaTimer();
-        }
-        else {
+        } else {
             cancelKeepAliveTimer();
         }
 
@@ -620,7 +612,6 @@ VideoRtpSession::setMuted(bool mute, Direction dir)
         }
     }
 }
-
 
 void
 VideoRtpSession::forceKeyFrame()
@@ -963,7 +954,8 @@ VideoRtpSession::attachRemoteRecorder(const MediaStream& ms)
 void
 VideoRtpSession::attachLocalRecorder(const MediaStream& ms)
 {
-    if (!mutex_.try_lock() || !recorder_ || !videoLocal_ || !Manager::instance().videoPreferences.getRecordPreview())
+    if (!mutex_.try_lock() || !recorder_ || !videoLocal_
+        || !Manager::instance().videoPreferences.getRecordPreview())
         return;
     if (auto ob = recorder_->addStream(ms)) {
         videoLocal_->attach(ob);
