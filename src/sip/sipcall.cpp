@@ -2151,17 +2151,17 @@ SIPCall::isReinviteRequired(const std::vector<MediaAttribute>& mediaAttrList)
 bool
 SIPCall::isRestartRequired(const std::vector<MediaAttribute>& mediaAttrList)
 {
-    if (mediaAttrList.size() != rtpStreams_.size())
-        return false;
+    // if (mediaAttrList.size() != rtpStreams_.size())
+    //     return false;
 
-    for (auto const& newAttr : mediaAttrList) {
-        auto streamIdx = findRtpStreamIndex(newAttr.label_);
+    // for (auto const& newAttr : mediaAttrList) {
+    //     auto streamIdx = findRtpStreamIndex(newAttr.label_);
 
-        // Changing the source in current setup needs a restart
-        if (newAttr.sourceUri_ != rtpStreams_[streamIdx].mediaAttribute_->sourceUri_) {
-            return true;
-        }
-    }
+    //     // Changing the source in current setup needs a restart
+    //     if (newAttr.sourceUri_ != rtpStreams_[streamIdx].mediaAttribute_->sourceUri_) {
+    //         return true;
+    //     }
+    // }
     return false;
 }
 
@@ -2269,33 +2269,30 @@ SIPCall::getMediaAttributeList() const
 void
 SIPCall::onMediaNegotiationComplete()
 {
-    runOnMainThread([w = weak()] {
-        if (auto this_ = w.lock()) {
-            std::lock_guard<std::recursive_mutex> lk {this_->callMutex_};
-            SIP_CORE_DBG("[call:%s] Media negotiation complete", this_->getCallId().c_str());
+    std::lock_guard<std::recursive_mutex> lk {callMutex_};
+    SIP_CORE_DBG("[call:%s] Media negotiation complete", getCallId().c_str());
 
-            // If the call has already ended, we don't need to start the media.
-            if (not this_->inviteSession_
-                or this_->inviteSession_->state == PJSIP_INV_STATE_DISCONNECTED
-                or not this_->sdp_) {
-                return;
-            }
+    // If the call has already ended, we don't need to start the media.
+    if (not inviteSession_
+        or inviteSession_->state == PJSIP_INV_STATE_DISCONNECTED
+        or not sdp_) {
+        return;
+    }
 
-            // Update the negotiated media.
-            if (this_->mediaRestartRequired_) {
-                this_->setupNegotiatedMedia();
-                // No ICE, start media now.
-                SIP_CORE_WARN("[call:%s] ICE media disabled, using default media ports",
-                              this_->getCallId().c_str());
-                // RESTART the media.
-                this_->stopAllMedia();
-                this_->updateRemoteMedia();
-                this_->startAllMedia();
-            }
+    // Update the negotiated media.
+    if (mediaRestartRequired_) {
+        setupNegotiatedMedia();
+        // No ICE, start media now.
+        SIP_CORE_WARN("[call:%s] ICE media disabled, using default media ports",
+                        getCallId().c_str());
+        // RESTART the media always....
+        stopAllMedia();
+        updateRemoteMedia();
+        startAllMedia();
+        mediaRestartRequired_ = false;
+    }
 
-            this_->reportMediaNegotiationStatus();
-        }
-    });
+    reportMediaNegotiationStatus();
 }
 
 void

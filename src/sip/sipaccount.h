@@ -274,6 +274,30 @@ public:
 
     bool hasServiceRoute() const { return not config().serviceRoute.empty(); }
 
+    std::string getBackServiceRoute() const { return config().backServiceRoute; }
+
+    bool hasBackServiceRoute() const { return not config().backServiceRoute.empty(); }
+
+    /**
+     * Get the currently active service route (main or backup)
+     */
+    std::string getActiveServiceRoute() const;
+
+    /**
+     * Check if currently using backup service route
+     */
+    bool isUsingBackupRoute() const { return usingBackupRoute_; }
+
+    /**
+     * Switch to backup service route
+     */
+    void switchToBackupRoute();
+
+    /**
+     * Switch back to main service route
+     */
+    void switchToMainRoute();
+
     virtual bool getSrtpFallback() const override { return config().srtpFallback; }
 
     void setReceivedParameter(const std::string& received)
@@ -591,6 +615,11 @@ private:
      * configured port is already used by another client
      */
     pj_uint16_t publishedPortUsed_ {sip_utils::DEFAULT_SIP_PORT};
+
+    /**
+     * Flag indicating if backup service route is currently being used
+     */
+    bool usingBackupRoute_ {false};
 
 };
 
