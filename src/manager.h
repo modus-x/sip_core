@@ -903,6 +903,8 @@ public:
     void setAllModerators(const std::string& accountID, bool allModerators);
     bool isAllModerators(const std::string& accountID);
 
+    void setTsxTimers(const uint32_t t1, const uint32_t t2, const uint32_t t4, const uint32_t td);
+
 private:
     std::mt19937_64 rand_;
     Manager();

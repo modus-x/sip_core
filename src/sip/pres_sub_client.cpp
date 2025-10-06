@@ -686,9 +686,9 @@ PresSubClient::subscribe()
     }
 
     /* Set route-set */
-    if (acc->hasServiceRoute())
+    if (!acc->getActiveServiceRoute().empty())
         pjsip_dlg_set_route_set(dlg_,
-                                sip_utils::createRouteSet(acc->getServiceRoute(), pres_->getPool()));
+                                sip_utils::createRouteSet(acc->getActiveServiceRoute(), pres_->getPool()));
     // attach the client data to the sub
     pjsip_evsub_set_mod_data(sub_, modId_, this);
 

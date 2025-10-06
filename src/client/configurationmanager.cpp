@@ -846,4 +846,10 @@ isAllModerators(const std::string& accountID)
     return sip_core::Manager::instance().isAllModerators(accountID);
 }
 
+void
+setTsxTimers(const uint32_t t1, const uint32_t t2, const uint32_t t4, const uint32_t td)
+{
+    sip_core::Manager::instance().setTsxTimers(t1, t2, t4, td);
+}
+
 } // namespace libsip_core

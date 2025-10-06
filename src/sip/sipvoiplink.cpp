@@ -994,6 +994,32 @@ invite_session_state_changed_cb(pjsip_inv_session* inv, pjsip_event* ev)
             call->onClosed();
             break;
 
+        // Transport/timeout errors - can be retried with backup route
+        case PJSIP_SC_REQUEST_TIMEOUT:
+        case PJSIP_SC_SERVICE_UNAVAILABLE: {
+            // Check if this is an outgoing call that can be retried
+            auto sipCall = std::dynamic_pointer_cast<SIPCall>(call);
+            if (inv->role == PJSIP_ROLE_UAC) {
+                auto sipAccount = std::dynamic_pointer_cast<SIPAccount>(sipCall->getAccount().lock());
+                
+                if (sipAccount && sipAccount->hasServiceRoute() && sipAccount->hasBackServiceRoute()) {
+                    
+                    SIP_CORE_WARN("[call:%s] INVITE failed with code %d, retrying LATER",
+                                 sipCall->getCallId().c_str(),
+                                 inv->cause);
+                    
+                    sipAccount->needsCall_ = true;
+                    sipAccount->callUri_ = sipCall->getPeerNumber();
+                    
+                    return;
+                }
+            }
+            
+            // If we can't retry, treat as normal failure
+            call->onFailure(inv->cause);
+            break;
+        }
+
         // Error/unhandled conditions
         default:
             call->onFailure(inv->cause);

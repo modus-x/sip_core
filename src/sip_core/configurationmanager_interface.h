@@ -140,6 +140,8 @@ LIBSIP_CORE_PUBLIC void muteRingtone(bool mute);
 LIBSIP_CORE_PUBLIC bool getRingtoneEnabled(const std::string& accountId);
 LIBSIP_CORE_PUBLIC void setRingtoneEnabled(const std::string& accountId, bool enabled);
 
+LIBSIP_CORE_PUBLIC void setTsxTimers(const uint32_t t1, const uint32_t t2, const uint32_t t4, const uint32_t td);
+
 LIBSIP_CORE_PUBLIC std::vector<std::string> getAudioInputDeviceList();
 LIBSIP_CORE_PUBLIC std::vector<int> getCurrentAudioDevicesIndex();
 LIBSIP_CORE_PUBLIC int32_t getAudioInputDeviceIndex(const std::string& name);

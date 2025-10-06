@@ -93,6 +93,7 @@ SIPCall::SIPCall(const std::shared_ptr<SIPAccountBase>& account,
     : Call(account, callId, type)
     , sdp_(new Sdp(callId))
     , srtpEnabled_(account->isSrtpEnabled())
+    , canRetryWithBackupRoute_(type == Call::CallType::OUTGOING)
 {
     sip_core_tracepoint(call_start, callId.c_str());
 

@@ -278,6 +278,8 @@ public:
 
     bool hasBackServiceRoute() const { return not config().backServiceRoute.empty(); }
 
+    const IpAddr& getActualIpAddress() const;
+
     /**
      * Get the currently active service route (main or backup)
      */
@@ -339,6 +341,35 @@ public:
      * Abort currently registered timer if any
      */
     void cancelKeepAliveTimer();
+
+    /**
+     * Starts a separate keep-alive timer to check main route availability
+     * when using backup route.
+     */
+    void registerMainRouteKeepAliveTimer();
+
+    /**
+     * Cancels the main route keep-alive timer.
+     */
+    void cancelMainRouteKeepAliveTimer();
+
+    /**
+     * Check if we should switch back to main route when calls end.
+     * Called when a call is detached from the account.
+     */
+    void checkSwitchToMainRouteOnCallEnd();
+
+    /**
+     * Override detach to check for route switching when calls end
+     */
+    bool detach(const std::shared_ptr<Call>& call)
+    {
+        bool result = Account::detach(call);
+        if (result) {
+            checkSwitchToMainRouteOnCallEnd();
+        }
+        return result;
+    }
 
     // current transport
     virtual inline std::shared_ptr<SipTransport> getTransport() { return transport_; }
@@ -440,10 +471,31 @@ public:
     } kaTarget;
 
     /**
+     * Separate keep-alive for main route when using backup
+     */
+    struct
+    {
+        pj_sockaddr socket;
+        unsigned length {};
+        pj_timer_entry timer {};
+    } kaMainRoute;
+
+    /**
      * Flag indicating an in-flight OPTIONS keep-alive transaction.
      * Used to prevent sending a new keep-alive while one is pending.
      */
-    bool ka_options_pending_ {false};
+    std::atomic<bool> ka_options_pending_ {false};
+
+    /**
+     * Flag indicating an in-flight OPTIONS keep-alive transaction for main route.
+     */
+    std::atomic<bool> ka_main_route_options_pending_ {false};
+
+    /**
+     * Flag indicating if main route is available (last keep-alive succeeded)
+     * Public to allow access from static keep-alive callback
+     */
+    bool mainRouteAvailable_ {false};
 
 
     void setCredentials(const std::vector<SipAccountConfig::Credentials>& creds);
@@ -451,6 +503,13 @@ public:
 
     // set explicit transport destination and params for tdata
     void setUpTransmissionData(pjsip_tx_data* tdata);
+
+    const IpAddr& getServiceRouteIp() { return serviceRouteIp_; };
+    const IpAddr& getBackServiceRouteIp() { return backServiceRouteIp_; };
+
+    std::atomic<bool> needsResubscribe_ {false};
+    std::atomic<bool> needsCall_ {false};
+    std::string callUri_ {};
 
 private:
     void doRegister1_();
@@ -525,6 +584,17 @@ private:
      * Resolved IP of hostname_ (for registration)
      */
     IpAddr hostIp_;
+
+    /**
+     * Resolved IP of serviceRoute_ (for registration)
+     */
+     IpAddr serviceRouteIp_;
+
+
+    /**
+     * Resolved IP of backServiceRoute_ (for registration)
+     */
+     IpAddr backServiceRouteIp_;
 
     /**
      * The pjsip client registration information
@@ -620,6 +690,7 @@ private:
      * Flag indicating if backup service route is currently being used
      */
     bool usingBackupRoute_ {false};
+
 
 };
 

@@ -55,7 +55,7 @@ struct SipAccountConfig : public SipAccountBaseConfig {
     /**
      * How often should be ka called?
      */
-    uint32_t keepAliveInterval {15};
+    uint32_t keepAliveInterval {25};
 
     /**
      * What should be send

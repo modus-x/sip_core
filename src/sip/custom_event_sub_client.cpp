@@ -668,8 +668,8 @@ CustomEventSubClient::subscribe()
     }
 
     /* Set route-set */
-    if (acc->hasServiceRoute())
-        pjsip_dlg_set_route_set(dlg_, sip_utils::createRouteSet(acc->getServiceRoute(), pool_));
+    if (!acc->getActiveServiceRoute().empty())
+        pjsip_dlg_set_route_set(dlg_, sip_utils::createRouteSet(acc->getActiveServiceRoute(), pool_));
 
     // attach the client data to the sub
     pjsip_evsub_set_mod_data(sub_, modId_, this);

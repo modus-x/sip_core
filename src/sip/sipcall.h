@@ -203,6 +203,16 @@ public:
      * @param cause Optional error code
      */
     void onFailure(signed cause = 0);
+    
+    /**
+     * Check if this call can be retried with backup route
+     */
+    bool canRetryWithBackupRoute() const { return canRetryWithBackupRoute_; }
+    
+    /**
+     * Disable retry with backup route (after first attempt)
+     */
+    void disableRetryWithBackupRoute() { canRetryWithBackupRoute_ = false; }
     /**
      * Peer answered busy
      */
@@ -410,6 +420,12 @@ private:
     OnReadyCb offHoldCb_ {};
 
     std::atomic_bool waitForIceInit_ {false};
+
+    /**
+     * Flag to track if INVITE can be retried with backup route.
+     * Set to true for outgoing calls, reset after first failure attempt.
+     */
+    bool canRetryWithBackupRoute_ {false};
 
     void detachAudioFromConference();
 
