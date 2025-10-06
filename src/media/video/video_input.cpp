@@ -471,7 +471,7 @@ VideoInput::initCamera(const std::string& device)
 {
     decOpts_ = sip_core::getVideoDeviceMonitor().getDeviceParams(device);
 #if defined(_WIN32) && !defined(USE_GDIGRAB)
-    if(decOpts_.input == "video=screen-capture-recorder") {
+    if(decOpts_.name == "screen-capture-recorder") {
         initScreenCaptureRecorder(device);
     }
 #endif
