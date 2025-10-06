@@ -98,7 +98,10 @@ MediaDemuxer::openInput(const DeviceParams& params)
     if (!iformat && !params.format.empty())
         SIP_CORE_WARN("Cannot find format \"%s\"", params.format.c_str());
 
-    if (params.width and params.height) {
+    if (params.width and 
+        params.height and 
+        params.input != "video=screen-capture-recorder") // video_size option doesn't work for this filter
+    {
         auto sizeStr = fmt::format("{}x{}", params.width, params.height);
         av_dict_set(&options_, "video_size", sizeStr.c_str(), 0);
     }

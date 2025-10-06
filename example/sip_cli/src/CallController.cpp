@@ -25,14 +25,25 @@ CallController::CallController(const std::string& accountId)
     , m_mediaVideo {{"MEDIA_TYPE", "MEDIA_TYPE_VIDEO"},
                     {"ENABLED", "true"},
                     {"MUTED", "false"},
-                    // { "SOURCE", "display://desktop 640x480" }, //640x480
+                    { "SOURCE", "display://desktop 640x480" }, //640x480
+                    // { "SOURCE",
+                    // R"(camera://video=@device_sw_{860BB310-5D01-11D0-BD3B-00A0C911CE86}\{4EA69364-2C8A-4AE6-A561-56E4B5044439})"
+                    // }, // desktop
                     // { "SOURCE",
                     // R"(camera://video=@device_pnp_\\?\usb#vid_1bcf&pid_2284&mi_00#6&2e99a59a&0&0000#{65e8773d-8f56-11d0-a3b9-00a0c9223196}\global)"
-                    // }, // 4k { "SOURCE",
+                    // }, // 4k 
+                    // { "SOURCE",
                     // R"(camera://video=@device_pnp_\\?\usb#vid_09da&pid_2695&mi_00#6&26daa0e0&0&0000#{65e8773d-8f56-11d0-a3b9-00a0c9223196}\global)"
-                    // }, // aux { "SOURCE",
+                    // }, // aux 
+                    // { "SOURCE",
                     // R"(camera://video=@device_pnp_\\?\usb#vid_04f2&pid_b76f&mi_00#6&330c68f9&0&0000#{65e8773d-8f56-11d0-a3b9-00a0c9223196}\global)"
                     // }, // front
+                    // { "SOURCE",
+                    // R"(camera://video=@device_pnp_\\?\usb#vid_046d&pid_0825&mi_00#7&1e2afdec&0&0000#{65e8773d-8f56-11d0-a3b9-00a0c9223196}\global)"
+                    // }, // logitech 1
+                    // { "SOURCE",
+                    // R"(camera://video=@device_pnp_\\?\usb#vid_046d&pid_0825&mi_00#7&d2462&0&0000#{65e8773d-8f56-11d0-a3b9-00a0c9223196}\global)"
+                    // }, // logitech 2
                     {"LABEL", "video_0"}}
 #endif
     , m_mediaAudio {{"MEDIA_TYPE", "MEDIA_TYPE_AUDIO"},
@@ -154,7 +165,7 @@ CallController::init()
 
     libsip_core::registerSignalHandlers(sigMap);
 
-    if (!libsip_core::init(static_cast<libsip_core::InitFlag>(3)))
+    if (!libsip_core::init(static_cast<libsip_core::InitFlag>(0)))
         return false;
 
     std::string cwd;

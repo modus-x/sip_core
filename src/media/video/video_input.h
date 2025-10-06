@@ -140,7 +140,9 @@ private:
     bool initAVFoundation(const std::string& display);
     bool initFile(std::string path);
     bool initGdiGrab(const std::string& params);
-
+    #if defined(_WIN32) && !defined(USE_GDIGRAB)
+    bool initScreenCaptureRecorder(const std::string& params);
+    #endif
     bool isCapturing() const noexcept;
 
     void switchDevice();

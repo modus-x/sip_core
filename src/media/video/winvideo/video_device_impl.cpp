@@ -277,7 +277,12 @@ VideoDeviceImpl::getDeviceParams() const
     params.unique_id = id;
     params.input = id;
     if (id == DEVICE_DESKTOP) {
+#if defined(_WIN32) && !defined(USE_GDIGRAB)
+        params.format = "dshow";
+        params.input = "video=screen-capture-recorder";
+#elif
         params.format = "gdigrab";
+#endif
         params.framerate = desktopFrameRate_;
         return params;
     }
