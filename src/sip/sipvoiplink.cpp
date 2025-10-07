@@ -1000,21 +1000,52 @@ invite_session_state_changed_cb(pjsip_inv_session* inv, pjsip_event* ev)
             // Check if this is an outgoing call that can be retried
             auto sipCall = std::dynamic_pointer_cast<SIPCall>(call);
             if (inv->role == PJSIP_ROLE_UAC) {
-                auto sipAccount = std::dynamic_pointer_cast<SIPAccount>(sipCall->getAccount().lock());
-                
-                if (sipAccount && sipAccount->hasServiceRoute() && sipAccount->hasBackServiceRoute()) {
-                    
-                    SIP_CORE_WARN("[call:%s] INVITE failed with code %d, retrying LATER",
-                                 sipCall->getCallId().c_str(),
-                                 inv->cause);
-                    
-                    sipAccount->needsCall_ = true;
-                    sipAccount->callUri_ = sipCall->getPeerNumber();
-                    
-                    return;
+                auto sipAccount = std::dynamic_pointer_cast<SIPAccount>(
+                    sipCall->getAccount().lock());
+
+                std::lock_guard<std::mutex> lk(sipAccount->switchFromCallRetry);
+
+                // we have some route to retry
+                if (sipAccount
+                    && (sipAccount->hasServiceRoute() || sipAccount->hasBackServiceRoute())) {
+                    if (sipCall->getInitialServiceRoute() == sipAccount->getActiveServiceRoute()) {
+                        if (sipAccount->isUsingBackupRoute()) {
+                            sipAccount->switchToMainRoute();
+                        } else {
+                            sipAccount->switchToBackupRoute();
+                        }
+                    }
+
+                    sipAccount->newOutgoingCall(sipCall->getPeerNumber(), sipCall->currentMediaList());
+
+                    // SIP_CORE_WARN(
+                    //     "[call:%s] INVITE failed with code %d, performing switch and restart",
+                    //     sipCall->getCallId().c_str(),
+                    //     inv->cause);
+
+                    // /* Must invalidate the message! */
+                    // pjsip_tx_data_invalidate_msg(inv->invite_req);
+
+                    // if (pjsip_inv_uac_restart(inv, true) != PJ_SUCCESS) {
+                    //     SIP_CORE_ERR("[call:%s] INVITE restart failed",
+                    //                  sipCall->getCallId().c_str());
+                    // }
+
+                    // std::string activeRoute = sipAccount->getActiveServiceRoute();
+                    // if (!activeRoute.empty())
+                    //     call->setInitialServiceRoute(activeRoute);
+                    // pjsip_dlg_set_route_set(inv->dlg,
+                    //                         sip_utils::createRouteSet(activeRoute,
+                    //                                                   call->inviteSession_->pool));
+
+                    // /* Send the request. */
+                    // pj_status_t status = pjsip_inv_send_msg(inv, inv->invite_req);
+                    // if (status != PJ_SUCCESS) {
+                    //     SIP_CORE_ERR("[call:%s] INVITE send failed", sipCall->getCallId().c_str());
+                    // }
                 }
             }
-            
+
             // If we can't retry, treat as normal failure
             call->onFailure(inv->cause);
             break;

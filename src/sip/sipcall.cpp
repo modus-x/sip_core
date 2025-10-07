@@ -2290,7 +2290,6 @@ SIPCall::onMediaNegotiationComplete()
         stopAllMedia();
         updateRemoteMedia();
         startAllMedia();
-        mediaRestartRequired_ = false;
     }
 
     reportMediaNegotiationStatus();

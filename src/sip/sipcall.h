@@ -291,6 +291,10 @@ public:
      */
     void reportMediaNegotiationStatus();
 
+    void setInitialServiceRoute(const std::string& serviceRoute) { initialServiceRoute_ = serviceRoute; }
+
+    std::string getInitialServiceRoute() const { return initialServiceRoute_; }
+
 private:
     void generateMediaPorts();
 
@@ -433,6 +437,8 @@ private:
 #ifdef ENABLE_VIDEO
     int rotation_ {0};
 #endif
+
+    std::string initialServiceRoute_ {};
 };
 
 // Helpers

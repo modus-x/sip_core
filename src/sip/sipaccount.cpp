@@ -123,18 +123,23 @@ keep_alive_on_complete(void* token, pjsip_event* event)
     if (code == PJSIP_SC_REQUEST_TIMEOUT || code == PJSIP_SC_TSX_TRANSPORT_ERROR) {
         SIP_CORE_WARN("KA: OPTIONS keep-alive failed with code %d", code);
 
-        if (acc->hasServiceRoute() and acc->hasBackServiceRoute() and !acc->isUsingBackupRoute()) {
-            SIP_CORE_WARN("KA: Main route keep-alive failed, switching to backup route");
-            acc->switchToBackupRoute();
-            // Trigger re-registration with backup route
-            acc->doUnregister([acc_weak = acc->weak()](bool /* transport_free */) {
-                if (auto acc_locked = acc_weak.lock()) {
-                    if (acc_locked->isUsable())
-                        acc_locked->doRegister();
-                }
-            });
-            acc->ka_options_pending_ = false;
-            return;
+        if (acc->switchFromCallRetry.try_lock()) {
+            if (acc->hasServiceRoute() and acc->hasBackServiceRoute()
+                and !acc->isUsingBackupRoute()) {
+                SIP_CORE_WARN("KA: Main route keep-alive failed, switching to backup route");
+                acc->switchToBackupRoute();
+                // Trigger re-registration with backup route
+                acc->doUnregister([acc_weak = acc->weak()](bool /* transport_free */) {
+                    if (auto acc_locked = acc_weak.lock()) {
+                        if (acc_locked->isUsable())
+                            acc_locked->doRegister();
+                    }
+                });
+                acc->ka_options_pending_ = false;
+                acc->switchFromCallRetry.unlock();
+                return;
+            }
+            acc->switchFromCallRetry.unlock();
         }
 
         acc->setRegistrationState(RegistrationState::ERROR_GENERIC, PJSIP_SC_TSX_TRANSPORT_ERROR);
@@ -159,17 +164,20 @@ main_route_keep_alive_on_complete(void* token, pjsip_event* event)
 
     // Main route responded successfully - switch back!
     if (code >= 200 && code < 300) {
-        SIP_CORE_WARN("Main route keep-alive succeeded (code %d), switching back to main route",
-                      code);
-        acc->cancelMainRouteKeepAliveTimer();
-        acc->switchToMainRoute();
-        // Trigger re-registration with main route
-        acc->doUnregister([acc_weak = acc->weak()](bool /* transport_free */) {
-            if (auto acc_locked = acc_weak.lock()) {
-                if (acc_locked->isUsable())
-                    acc_locked->doRegister();
-            }
-        });
+        if (acc->switchFromCallRetry.try_lock()) {
+            SIP_CORE_WARN("Main route keep-alive succeeded (code %d), switching back to main route",
+                          code);
+            acc->cancelMainRouteKeepAliveTimer();
+            acc->switchToMainRoute();
+            // Trigger re-registration with main route
+            acc->doUnregister([acc_weak = acc->weak()](bool /* transport_free */) {
+                if (auto acc_locked = acc_weak.lock()) {
+                    if (acc_locked->isUsable())
+                        acc_locked->doRegister();
+                }
+            });
+            acc->switchFromCallRetry.unlock();
+        }
     } else {
         SIP_CORE_DBG("Main route keep-alive failed with code %d, staying on backup", code);
     }
@@ -575,7 +583,9 @@ SIPAccount::registerMainRouteKeepAliveTimer()
 
     // Parse and resolve the main route address
     link_.resolveSrvName(
-        mainRoute, PJSIP_TRANSPORT_UDP, [w = weak(), mainRoute, seconds](std::vector<IpAddr> host_ips) {
+        mainRoute,
+        PJSIP_TRANSPORT_UDP,
+        [w = weak(), mainRoute, seconds](std::vector<IpAddr> host_ips) {
             if (auto acc = w.lock()) {
                 if (host_ips.empty()) {
                     SIP_CORE_ERR("Main route KA: Can't resolve main route address");
@@ -886,9 +896,11 @@ SIPAccount::SIPStartCall(std::shared_ptr<SIPCall>& call)
     updateDialogViaSentBy(dialog);
 
     std::string activeRoute = getActiveServiceRoute();
-    if (!activeRoute.empty())
+    if (!activeRoute.empty()) {
+        call->setInitialServiceRoute(activeRoute);
         pjsip_dlg_set_route_set(dialog,
                                 sip_utils::createRouteSet(activeRoute, call->inviteSession_->pool));
+    }
 
     if (hasCredentials()
         and pjsip_auth_clt_set_credentials(&dialog->auth_sess, getCredentialCount(), getCredInfo())
@@ -1351,10 +1363,6 @@ SIPAccount::onRegister(pjsip_regc_cbparam* param)
                     }
                 }
 
-                if (needsCall_.exchange(false)) {
-                    SIP_CORE_DBG("Calling %s", callUri_.c_str());
-                }
-
                 /* https://github.com/pjsip/pjproject/issues/1607:
                  * Calculate the destination address from the original request. Some
                  * (broken) servers send the response using different source address
@@ -1542,6 +1550,11 @@ SIPAccount::getFromUri() const
 std::string
 SIPAccount::getToUri(const std::string& username) const
 {
+
+    if (username.size() >= 5 && username.compare(0, 5, "<sip:") == 0) {
+        return username;
+    }
+
     std::string scheme;
     std::string transport;
     std::string hostname;
@@ -1549,7 +1562,7 @@ SIPAccount::getToUri(const std::string& username) const
     scheme = "sip:";
 
     // Check if scheme is already specified
-    if (username.size() >= 3 && username.compare(0, 4, scheme) == 0)
+    if (username.size() >= 3 && (username.compare(0, 4, scheme) == 0))
         scheme = "";
 
     // Check if hostname is already specified

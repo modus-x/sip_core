@@ -23,6 +23,7 @@
 
 #pragma once
 
+#include <mutex>
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
@@ -508,8 +509,9 @@ public:
     const IpAddr& getBackServiceRouteIp() { return backServiceRouteIp_; };
 
     std::atomic<bool> needsResubscribe_ {false};
-    std::atomic<bool> needsCall_ {false};
     std::string callUri_ {};
+
+    std::mutex switchFromCallRetry;
 
 private:
     void doRegister1_();
