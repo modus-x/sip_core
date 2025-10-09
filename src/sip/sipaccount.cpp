@@ -2333,14 +2333,6 @@ void
 SIPAccount::setActiveCodecs(const std::vector<unsigned>& list)
 {
     Account::setActiveCodecs(list);
-    if (!hasActiveCodec(MEDIA_AUDIO)) {
-        SIP_CORE_WARN("All audio codecs disabled, enabling all");
-        setAllCodecsActive(MEDIA_AUDIO, true);
-    }
-    if (!hasActiveCodec(MEDIA_VIDEO)) {
-        SIP_CORE_WARN("All video codecs disabled, enabling all");
-        setAllCodecsActive(MEDIA_VIDEO, true);
-    }
     config_->activeCodecs = getActiveCodecs(MEDIA_ALL);
 }
 
