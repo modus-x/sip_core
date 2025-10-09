@@ -481,7 +481,9 @@ VideoMixer::process()
             bool voiceActive = false;
             if (auto itVA = voiceActivitySnapshot.find(streamId); itVA != voiceActivitySnapshot.end())
                 voiceActive = itVA->second;
-            calc_position(audioSource, audioFrame, wantedIndex, voiceActive);
+            if (needsUpdate) {
+                calc_position(audioSource, audioFrame, wantedIndex, voiceActive);
+            }
             sourcesInfo.emplace_back(SourceInfo {{},
                                                  audioSource->x.load(),
                                                  audioSource->y.load(),
