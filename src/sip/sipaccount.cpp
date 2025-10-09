@@ -127,14 +127,9 @@ keep_alive_on_complete(void* token, pjsip_event* event)
             if (acc->hasServiceRoute() and acc->hasBackServiceRoute()
                 and !acc->isUsingBackupRoute()) {
                 SIP_CORE_WARN("KA: Main route keep-alive failed, switching to backup route");
-                acc->switchToBackupRoute();
                 // Trigger re-registration with backup route
-                acc->doUnregister([acc_weak = acc->weak()](bool /* transport_free */) {
-                    if (auto acc_locked = acc_weak.lock()) {
-                        if (acc_locked->isUsable())
-                            acc_locked->doRegister();
-                    }
-                });
+                acc->switchToBackupRoute();
+                acc->doRegister();
                 acc->ka_options_pending_ = false;
                 acc->switchFromCallRetry.unlock();
                 return;
@@ -167,15 +162,9 @@ main_route_keep_alive_on_complete(void* token, pjsip_event* event)
         if (acc->switchFromCallRetry.try_lock()) {
             SIP_CORE_WARN("Main route keep-alive succeeded (code %d), switching back to main route",
                           code);
-            acc->cancelMainRouteKeepAliveTimer();
-            acc->switchToMainRoute();
             // Trigger re-registration with main route
-            acc->doUnregister([acc_weak = acc->weak()](bool /* transport_free */) {
-                if (auto acc_locked = acc_weak.lock()) {
-                    if (acc_locked->isUsable())
-                        acc_locked->doRegister();
-                }
-            });
+            acc->switchToMainRoute();
+            acc->doRegister();
             acc->switchFromCallRetry.unlock();
         }
     } else {
@@ -763,12 +752,9 @@ SIPAccount::onTransportStateChanged(pjsip_transport_state state,
         // Try switching to backup route if transport fails
         if (!isUsingBackupRoute() && hasBackServiceRoute()) {
             SIP_CORE_WARN("Transport disconnected, switching to backup route");
-            switchToBackupRoute();
             // Trigger re-registration with backup route
-            doUnregister([acc = shared()](bool /* transport_free */) {
-                if (acc->isUsable())
-                    acc->doRegister();
-            });
+            switchToBackupRoute();
+            doRegister();
             return;
         }
 
@@ -781,12 +767,9 @@ SIPAccount::onTransportStateChanged(pjsip_transport_state state,
         // Auto-switch back to main route when transport becomes alive
         if (isUsingBackupRoute() && hasServiceRoute()) {
             SIP_CORE_WARN("Transport connected, switching back to main route");
-            switchToMainRoute();
             // Trigger re-registration with main route
-            doUnregister([acc = shared()](bool /* transport_free */) {
-                if (acc->isUsable())
-                    acc->doRegister();
-            });
+            switchToMainRoute();
+            doRegister();
             return;
         }
     }
@@ -1108,6 +1091,7 @@ SIPAccount::doUnregister(std::function<void(bool)> released_cb)
     std::unique_lock<std::recursive_mutex> lock(configurationMutex_);
 
     cancelKeepAliveTimer();
+    cancelMainRouteKeepAliveTimer();
 
     try {
         sendUnregister();
@@ -1130,10 +1114,7 @@ SIPAccount::connectivityChanged()
         return;
     }
 
-    doUnregister([acc = shared()](bool /* transport_free */) {
-        if (acc->isUsable())
-            acc->doRegister();
-    });
+    doRegister();
 }
 
 void
@@ -1259,12 +1240,6 @@ SIPAccount::onRegister(pjsip_regc_cbparam* param)
         destroyRegistrationInfo();
         setRegistrationState(RegistrationState::ERROR_GENERIC, param->code);
     } else if (param->code < 0 || param->code >= 300) {
-        // if code is wrong cancel ka timer
-        cancelKeepAliveTimer();
-
-        if (param->code == 503) {
-            return;
-        }
         SIP_CORE_ERR("SIP registration failed, status=%d (%.*s)",
                      param->code,
                      (int) param->reason.slen,
@@ -1319,6 +1294,7 @@ SIPAccount::onRegister(pjsip_regc_cbparam* param)
             if (param->expiration < 1) {
                 // if unregister check that ka timer is already destroyed
                 cancelKeepAliveTimer();
+                cancelMainRouteKeepAliveTimer();
                 destroyRegistrationInfo();
                 SIP_CORE_DBG("Unregistration success");
                 setRegistrationState(RegistrationState::UNREGISTERED, param->code);
