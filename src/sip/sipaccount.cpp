@@ -1113,6 +1113,8 @@ SIPAccount::doUnregister(std::function<void(bool)> released_cb)
         sendUnregister();
     } catch (const VoipLinkException& e) {
         SIP_CORE_ERR("doUnregister %s", e.what());
+        // inform that error occured
+        setRegistrationState(RegistrationState::ERROR_GENERIC);
     }
 
     lock.unlock();
