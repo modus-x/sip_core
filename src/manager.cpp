@@ -1327,12 +1327,22 @@ Manager::joinParticipant(const std::string& accountId,
         return false;
     }
 
+    bool attachLocalVideo = false;
+
     // Set corresponding conference ids for call 1
     auto call1 = account->getCall(callId1);
     if (!call1) {
         SIP_CORE_ERR("Could not find call %s", callId1.c_str());
         return false;
     }
+
+    auto call1Media = call1->getMediaAttributeList();
+
+    attachLocalVideo = std::any_of(call1Media.begin(),
+                                     call1Media.end(),
+                                     [](const MediaAttribute& media) {
+                                         return media.hasValidVideo();
+                                     });
 
     // Set corresponding conference details
     auto call2 = account2->getCall(callId2);
@@ -1343,14 +1353,17 @@ Manager::joinParticipant(const std::string& accountId,
 
     auto call2Media = call2->getMediaAttributeList();
 
+    // is that true for call2 ?
+    if (!attachLocalVideo) {
+        attachLocalVideo = std::any_of(call2Media.begin(),
+                                     call2Media.end(),
+                                     [](const MediaAttribute& media) {
+                                         return media.hasValidVideo();
+                                     });
+    }
+
     // use default source if not found
     std::string source;
-
-    for (auto m : call2Media) {
-        if (m.type_ == MediaType::MEDIA_VIDEO) {
-            source = m.sourceUri_;
-        }
-    }
 
     auto conf = std::make_shared<Conference>(account, "");
     account->attach(conf);
@@ -1358,13 +1371,15 @@ Manager::joinParticipant(const std::string& accountId,
                                                            conf->getConfId());
 
     // Bind calls according to their state
+    // if audio only, they will be added as AUDIO only sources
     pimpl_->bindCallToConference(*call1, *conf);
     pimpl_->bindCallToConference(*call2, *conf);
 
     // Switch current call id to this conference
     if (attached) {
         // attach local participant
-        conf->attachLocalParticipant(source);
+        conf->setLocalHostDefaultMediaSource(attachLocalVideo, source);
+        conf->attachLocalParticipant();
         pimpl_->switchCall(conf->getConfId());
         conf->setState(Conference::State::ACTIVE_ATTACHED);
     } else {

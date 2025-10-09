@@ -202,6 +202,6 @@ MediaAttribute::toString(bool full) const
 bool
 MediaAttribute::hasValidVideo() const
 {
-    return type_ == MediaType::MEDIA_VIDEO && enabled_&& !muted_ && !onHold_;
+    return type_ == MediaType::MEDIA_VIDEO && enabled_;
 }
 } // namespace jami

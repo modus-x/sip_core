@@ -291,15 +291,12 @@ Conference::setState(State state)
 }
 
 void
-Conference::setLocalHostDefaultMediaSource(const std::string& source)
+Conference::setLocalHostDefaultMediaSource(bool addVideo, const std::string& source)
 {
     hostSources_.clear();
     // Setup local audio source
     MediaAttribute audioAttr;
-    if (confState_ == State::ACTIVE_ATTACHED) {
-        audioAttr
-            = {MediaType::MEDIA_AUDIO, false, false, true, {}, sip_utils::DEFAULT_AUDIO_STREAMID};
-    }
+    audioAttr = {MediaType::MEDIA_AUDIO, false, false, true, {}, sip_utils::DEFAULT_AUDIO_STREAMID};
 
     SIP_CORE_DEBUG("[conf {:s}] Setting local host audio source to [{:s}]",
                    id_,
@@ -307,25 +304,24 @@ Conference::setLocalHostDefaultMediaSource(const std::string& source)
     hostSources_.emplace_back(audioAttr);
 
 #ifdef ENABLE_VIDEO
-    if (isVideoEnabled()) {
-        MediaAttribute videoAttr;
-        // Setup local video source
-        if (confState_ == State::ACTIVE_ATTACHED) {
-            videoAttr
-                = {MediaType::MEDIA_VIDEO,
-                   false,
-                   false,
-                   true,
-                   source.empty() ? Manager::instance().getVideoManager().videoDeviceMonitor.getMRLForDefaultDevice() : source,
-                   sip_utils::DEFAULT_VIDEO_STREAMID};
-        }
+    if (isVideoEnabled() && addVideo) {
+        MediaAttribute videoAttr = {MediaType::MEDIA_VIDEO,
+                                    false,
+                                    false,
+                                    true,
+                                    source.empty()
+                                        ? Manager::instance()
+                                              .getVideoManager()
+                                              .videoDeviceMonitor.getMRLForDefaultDevice()
+                                        : source,
+                                    sip_utils::DEFAULT_VIDEO_STREAMID};
         SIP_CORE_DEBUG("[conf {:s}] Setting local host video source to [{:s}]",
                        id_,
                        videoAttr.toString());
         hostSources_.emplace_back(videoAttr);
     }
-#endif
 
+#endif
     reportMediaNegotiationStatus();
 }
 
@@ -419,7 +415,8 @@ Conference::takeOverMediaSourceControl(const std::string& callId)
             if (participants_.size() == 1) {
                 setLocalHostMuteState(iter->type_, iter->muted_);
             } else {
-                // The best logic here is to set local state as muted only if: previous local state was muted AND call media is muted
+                // The best logic here is to set local state as muted only if: previous local state
+                // was muted AND call media is muted
                 setLocalHostMuteState(iter->type_, iter->muted_ and isMediaSourceMuted(iter->type_));
             }
         }
@@ -835,13 +832,12 @@ Conference::removeParticipant(const std::string& participant_id)
 }
 
 void
-Conference::attachLocalParticipant(const std::string& source)
+Conference::attachLocalParticipant()
 {
     SIP_CORE_INFO("Attach local participant to conference %s", id_.c_str());
 
     if (getState() == State::ACTIVE_DETACHED) {
         setState(State::ACTIVE_ATTACHED);
-        setLocalHostDefaultMediaSource(source);
 
         auto& rbPool = Manager::instance().getRingBufferPool();
         for (const auto& participant : getParticipantList()) {
@@ -867,12 +863,6 @@ Conference::attachLocalParticipant(const std::string& source)
             }
 
             videoMixer_->switchInputs(videoInputs);
-            if (!isMediaSourceMuted(MediaType::MEDIA_VIDEO)) {
-                videoMixer_->startInputs();
-            } else {
-                // If video is muted on attach, add local host to audio only sources
-                videoMixer_->addAudioOnlySource("", sip_utils::streamId("", sip_utils::DEFAULT_VIDEO_STREAMID));
-            }
         }
 #endif
     } else {
@@ -909,7 +899,7 @@ Conference::detachLocalParticipant()
         return;
     }
 
-    setLocalHostDefaultMediaSource();
+    setLocalHostDefaultMediaSource(false);
     setState(State::ACTIVE_DETACHED);
 }
 
