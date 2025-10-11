@@ -242,22 +242,22 @@ Conference::~Conference()
         call->resetConfInfo();
         // Trigger the SIP negotiation to update the resolution for the remaining call
 
-        call->switchInput(
-            Manager::instance().getVideoManager().videoDeviceMonitor.getMRLForDefaultDevice());
+        // call->switchInput(
+        //     Manager::instance().getVideoManager().videoDeviceMonitor.getMRLForDefaultDevice());
 
         // Continue the recording for the call if the conference was recorded
-        if (isRecording()) {
-            SIP_CORE_DEBUG("Stop recording for conf {:s}", getConfId());
-            toggleRecording();
-            if (not call->isRecording()) {
-                SIP_CORE_DEBUG("Conference was recorded, start recording for conf {:s}",
-                               call->getCallId());
-                call->toggleRecording();
-            }
-        }
-        // Notify that the remaining peer is still recording after conference
-        if (call->isPeerRecording())
-            call->peerRecording(true);
+        // if (isRecording()) {
+        //     SIP_CORE_DEBUG("Stop recording for conf {:s}", getConfId());
+        //     toggleRecording();
+        //     if (not call->isRecording()) {
+        //         SIP_CORE_DEBUG("Conference was recorded, start recording for conf {:s}",
+        //                        call->getCallId());
+        //         call->toggleRecording();
+        //     }
+        // }
+        // // Notify that the remaining peer is still recording after conference
+        // if (call->isPeerRecording())
+        //     call->peerRecording(true);
     });
     if (videoMixer_) {
         auto& sink = videoMixer_->getSink();
@@ -818,8 +818,6 @@ Conference::removeParticipant(const std::string& participant_id)
         if (auto transport = call->getTransport())
             handsRaised_.erase(std::string(transport->deviceId()));
 #ifdef ENABLE_VIDEO
-        auto sinkId = getConfId() + peerId;
-        // Remove if active
         // TODO all streams
         if (videoMixer_->verifyActive(
                 sip_utils::streamId(participant_id, sip_utils::DEFAULT_VIDEO_STREAMID)))
