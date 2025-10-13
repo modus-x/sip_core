@@ -592,6 +592,12 @@ VideoInput::initGdiGrab(const std::string& params)
 bool
 VideoInput::initScreenCaptureRecorder(const std::string& params)
 {
+    // Paterns
+    // capture area : 1920x1080 - SCREEN 0, POSITION 0X0, RESOLUTION 1920x1080
+    // capture area with offset : 1920x1080 +28x28 - SCREEN 0, POSITION 28x28, RESOLUTION 1920x1080
+    // capture non default screen : 1920x1080 +28x28  source:1- SCREEN 1, POSITION 28x28, RESOLUTION 1920x1080
+    // capture window : source:0x0340021e
+
     size_t space = params.find(' ');
     clearOptions();
     decOpts_ = sip_core::getVideoDeviceMonitor().getDeviceParams(DEVICE_DESKTOP);
@@ -603,7 +609,23 @@ VideoInput::initScreenCaptureRecorder(const std::string& params)
     PathAppend(appDataPath, TEXT("ScreenCaptureRecorder.ini"));
     WritePrivateProfileString(TEXT("all_settings"), NULL, NULL, appDataPath); // clear all section content
 
-    if (space != std::string::npos) {
+    std::string sourceStr = " source:";
+    size_t sourcePos = params.find(sourceStr);
+    if (sourcePos != std::string::npos) {
+        std::string source = params.substr(sourcePos + sourceStr.size()); // "0x0340021e";
+        if(source.rfind("0x", 0) == 0) // starts with
+        {
+            std::wstring wsSource = std::wstring(source.begin(), source.end());
+            BOOL result = WritePrivateProfileString(TEXT("all_settings"), TEXT("hwnd_to_track"), wsSource.c_str(), appDataPath);
+        }
+        else
+        {
+            std::wstring wsSource = std::wstring(source.begin(), source.end());
+            BOOL result = WritePrivateProfileString(TEXT("all_settings"), TEXT("capture_particular_display_number_starting_at_zero"), wsSource.c_str(), appDataPath);
+        }
+    }
+
+    if (space != std::string::npos && space != sourcePos) {
         std::istringstream iss(params.substr(space + 1));
         char sep;
         unsigned w, h;

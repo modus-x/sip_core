@@ -25,7 +25,7 @@ CallController::CallController(const std::string& accountId)
     , m_mediaVideo {{"MEDIA_TYPE", "MEDIA_TYPE_VIDEO"},
                     {"ENABLED", "true"},
                     {"MUTED", "false"},
-                    { "SOURCE", "display://desktop 640x480" }, //640x480
+                    { "SOURCE", "display://desktop source:0x0002033E" }, //640x480
                     // { "SOURCE",
                     // R"(camera://video=@device_sw_{860BB310-5D01-11D0-BD3B-00A0C911CE86}\{4EA69364-2C8A-4AE6-A561-56E4B5044439})"
                     // }, // desktop
