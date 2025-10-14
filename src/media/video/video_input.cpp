@@ -642,6 +642,10 @@ VideoInput::switchInput(const std::string& resource)
         return futureDecOpts_;
     }
 
+    if (!isStopped_) {
+        stopInput();
+    }
+
     // Supported MRL schemes
     static const std::string sep = libsip_core::Media::VideoProtocolPrefix::SEPARATOR;
 
@@ -683,6 +687,7 @@ VideoInput::switchInput(const std::string& resource)
     if (ready) {
         foundDecOpts(decOpts_);
     }
+
     futureDecOpts_ = foundDecOpts_.get_future().share();
 
     startInput();
