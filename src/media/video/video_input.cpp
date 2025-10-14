@@ -642,9 +642,6 @@ VideoInput::switchInput(const std::string& resource)
         return futureDecOpts_;
     }
 
-    if (!isStopped_) {
-        stopInput();
-    }
 
     // Supported MRL schemes
     static const std::string sep = libsip_core::Media::VideoProtocolPrefix::SEPARATOR;
@@ -663,6 +660,11 @@ VideoInput::switchInput(const std::string& resource)
     if (switchPending_.exchange(true)) {
         SIP_CORE_ERR("Video switch already requested");
         return {};
+    }
+
+    if (!isStopped_) {
+        stopInput();
+        sink_ = Manager::instance().createSinkClient(resource);
     }
 
     bool ready = false;
