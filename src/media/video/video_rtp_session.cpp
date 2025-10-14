@@ -651,6 +651,10 @@ VideoRtpSession::attachVideoInput()
 
     } else if (videoMixer_) {
         videoMixer_->attach(sender_.get());
+    } else {
+        // create video input
+        videoLocal_ = getVideoInput(input_);
+        videoLocal_->attach(sender_.get());
     }
 }
 
