@@ -81,9 +81,11 @@ private:
     bool initFile(const std::string& path);
     bool createDecoder();
     void frameResized(std::shared_ptr<AudioFrame>&& ptr);
+    void updateMuteStateForDeviceAvailability();
 
     std::string id_;
     bool muteState_ = false;
+    bool forceMuteNoDevice_ = false;
     uint64_t sent_samples = 0;
     mutable std::mutex fmtMutex_ {};
     AudioFormat format_;
