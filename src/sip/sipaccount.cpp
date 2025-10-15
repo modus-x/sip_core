@@ -147,6 +147,25 @@ keep_alive_on_complete(void* token, pjsip_event* event)
     }
 }
 
+/* Backup route keep-alive completion callback */
+static void
+backup_keep_alive_on_complete(void* token, pjsip_event* event)
+{
+    auto* acc = static_cast<SIPAccount*>(token);
+    if (!acc || !event || event->type != PJSIP_EVENT_TSX_STATE || !event->body.tsx_state.tsx)
+        return;
+
+    int code = event->body.tsx_state.tsx->status_code;
+    if (code == PJSIP_SC_REQUEST_TIMEOUT || code == PJSIP_SC_TSX_TRANSPORT_ERROR) {
+        SIP_CORE_WARN("Backup route KA: OPTIONS keep-alive failed with code %d", code);
+    }
+
+    if (event->body.tsx_state.tsx->state == PJSIP_TSX_STATE_COMPLETED
+        || event->body.tsx_state.tsx->state == PJSIP_TSX_STATE_TERMINATED) {
+        acc->ka_backup_route_options_pending_ = false;
+    }
+}
+
 /* Main route keep alive completion callback - checks if main route is available */
 static void
 main_route_keep_alive_on_complete(void* token, pjsip_event* event)
@@ -288,6 +307,56 @@ main_route_keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
         te->id = PJ_TRUE;
     } else {
         SIP_CORE_ERROR("Main route KA: Error rescheduling timer: %d", status);
+    }
+}
+
+/* Backup route keep alive timer callback - sends OPTIONS to backup route */
+static void
+backup_route_keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
+{
+    SIPAccount* acc;
+    pj_time_val delay;
+    pj_status_t status;
+
+    PJ_UNUSED_ARG(th);
+
+    te->id = PJ_FALSE;
+
+    acc = (SIPAccount*) te->user_data;
+
+    if (!acc) {
+        return;
+    }
+
+    // Do not run while backup route is in use
+    if (acc->isUsingBackupRoute()) {
+        SIP_CORE_DBG("Backup route KA: currently using backup route, skipping");
+        return;
+    }
+
+    if (!acc->hasBackServiceRoute()) {
+        SIP_CORE_DBG("Backup route KA: no backup route configured");
+        return;
+    }
+
+    if (!acc->sendBackupRouteKeepAlive()) {
+        SIP_CORE_DBG("Backup route KA: send attempt skipped or failed");
+    }
+
+    uint32_t seconds = acc->config().keepAliveInterval;
+    if (seconds == 0) {
+        SIP_CORE_INFO("Backup route KA: 0 seconds is set, skipping");
+        return;
+    }
+
+    delay.sec = seconds;
+    delay.msec = 0;
+
+    status = pjsip_endpt_schedule_timer(acc->getVoipLink().getEndpoint(), te, &delay);
+    if (status == PJ_SUCCESS) {
+        te->id = PJ_TRUE;
+    } else {
+        SIP_CORE_ERROR("Backup route KA: Error rescheduling timer: %d", status);
     }
 }
 
@@ -630,6 +699,66 @@ SIPAccount::registerMainRouteKeepAliveTimer()
 }
 
 void
+SIPAccount::registerBackupRouteKeepAliveTimer()
+{
+    cancelBackupRouteKeepAliveTimer();
+
+    if (isUsingBackupRoute()) {
+        SIP_CORE_DBG("Backup route KA: Using backup route, skipping dedicated timer");
+        return;
+    }
+
+    if (!hasBackServiceRoute()) {
+        SIP_CORE_DBG("Backup route KA: No backup route configured");
+        return;
+    }
+
+    uint32_t seconds = config().keepAliveInterval;
+    if (seconds == 0) {
+        SIP_CORE_INFO("Backup route KA: 0 seconds is set, skipping");
+        return;
+    }
+
+    if (!transport_) {
+        SIP_CORE_ERR("Backup route KA: no transport available");
+        return;
+    }
+
+    if (getTransportType() != PJSIP_TRANSPORT_UDP) {
+        SIP_CORE_INFO("Backup route KA: will not be sent for non UDP transport");
+        return;
+    }
+
+    auto backupIp = getBackServiceRouteIp();
+    if (!backupIp) {
+        SIP_CORE_DBG("Backup route KA: backup route address not resolved yet");
+        return;
+    }
+
+    kaBackupRoute.socket = {};
+    pj_memcpy(&kaBackupRoute.socket, backupIp.pjPtr(), backupIp.getLength());
+    kaBackupRoute.length = backupIp.getLength();
+
+    kaBackupRoute.timer.cb = &backup_route_keep_alive_timer_cb;
+    kaBackupRoute.timer.user_data = (void*) this;
+
+    pj_time_val delay;
+    delay.sec = seconds;
+    delay.msec = 0;
+
+    pj_status_t status = pjsip_endpt_schedule_timer(link_.getEndpoint(), &kaBackupRoute.timer, &delay);
+    if (status == PJ_SUCCESS) {
+        kaBackupRoute.timer.id = PJ_TRUE;
+        SIP_CORE_DBG("Backup route KA: Timer started for %s with delay %u",
+                     config().backServiceRoute.c_str(),
+                     seconds);
+    } else {
+        kaBackupRoute.timer.id = PJ_FALSE;
+        SIP_CORE_ERR("Backup route KA: error starting timer, status: %d", status);
+    }
+}
+
+void
 SIPAccount::cancelMainRouteKeepAliveTimer()
 {
     if (kaMainRoute.timer.id != PJ_FALSE) {
@@ -637,6 +766,137 @@ SIPAccount::cancelMainRouteKeepAliveTimer()
         pjsip_endpt_cancel_timer(link_.getEndpoint(), &kaMainRoute.timer);
         kaMainRoute.timer = {};
     }
+}
+
+void
+SIPAccount::cancelBackupRouteKeepAliveTimer()
+{
+    if (kaBackupRoute.timer.id != PJ_FALSE) {
+        SIP_CORE_INFO("Backup route KA: Timer is removed");
+        pjsip_endpt_cancel_timer(link_.getEndpoint(), &kaBackupRoute.timer);
+        kaBackupRoute.timer = {};
+    }
+    kaBackupRoute.length = 0;
+    pj_bzero(&kaBackupRoute.socket, sizeof(kaBackupRoute.socket));
+    ka_backup_route_options_pending_ = false;
+    pendingBackupKeepAliveStart_.store(false);
+}
+
+void
+SIPAccount::startBackupKeepAliveAfterRegister()
+{
+    pendingBackupKeepAliveStart_.store(false);
+
+    if (!hasBackServiceRoute()) {
+        cancelBackupRouteKeepAliveTimer();
+        return;
+    }
+
+    if (isUsingBackupRoute()) {
+        cancelBackupRouteKeepAliveTimer();
+        return;
+    }
+
+    uint32_t seconds = config().keepAliveInterval;
+    if (seconds == 0) {
+        cancelBackupRouteKeepAliveTimer();
+        return;
+    }
+
+    if (!transport_) {
+        SIP_CORE_ERR("Backup route KA: no transport available");
+        return;
+    }
+
+    if (getTransportType() != PJSIP_TRANSPORT_UDP) {
+        SIP_CORE_INFO("Backup route KA: will not be sent for non UDP transport");
+        return;
+    }
+
+    auto backupIp = getBackServiceRouteIp();
+    if (!backupIp) {
+        SIP_CORE_DBG("Backup route KA: backup route address not resolved yet, deferring");
+        pendingBackupKeepAliveStart_.store(true);
+        return;
+    }
+
+    if (!sendBackupRouteKeepAlive()) {
+        SIP_CORE_DBG("Backup route KA: Immediate send failed or skipped");
+    }
+
+    registerBackupRouteKeepAliveTimer();
+}
+
+bool
+SIPAccount::sendBackupRouteKeepAlive()
+{
+    if (!hasBackServiceRoute()) {
+        return false;
+    }
+
+    if (isUsingBackupRoute()) {
+        return false;
+    }
+
+    if (!transport_) {
+        SIP_CORE_ERR("Backup route KA: no transport available");
+        return false;
+    }
+
+    if (getTransportType() != PJSIP_TRANSPORT_UDP) {
+        SIP_CORE_INFO("Backup route KA: will not be sent for non UDP transport");
+        return false;
+    }
+
+    auto backupIp = getBackServiceRouteIp();
+    if (!backupIp) {
+        SIP_CORE_DBG("Backup route KA: backup route address not resolved yet");
+        return false;
+    }
+
+    if (ka_backup_route_options_pending_) {
+        SIP_CORE_DBG("Backup route KA: OPTIONS already in flight, skipping");
+        return true;
+    }
+
+    pjsip_tx_data* tdata = nullptr;
+
+    auto server_uri = getServerUri();
+    pj_str_t pjServer = sip_utils::CONST_PJ_STR(server_uri);
+    auto contact = getContactHeader();
+    pj_str_t pjContact = sip_utils::CONST_PJ_STR(contact);
+
+    pj_status_t status = pjsip_endpt_create_request(link_.getEndpoint(),
+                                                    &pjsip_options_method,
+                                                    &pjServer,
+                                                    &pjContact,
+                                                    &pjServer,
+                                                    &pjContact,
+                                                    nullptr,
+                                                    -1,
+                                                    nullptr,
+                                                    &tdata);
+
+    if (status != PJ_SUCCESS) {
+        SIP_CORE_ERR("Backup route KA: Error creating OPTIONS: %d", status);
+        return false;
+    }
+
+    setUpTransmissionData(tdata, backupIp);
+
+    status = pjsip_endpt_send_request(link_.getEndpoint(),
+                                      tdata,
+                                      -1,
+                                      this,
+                                      &backup_keep_alive_on_complete);
+    if (status == PJ_SUCCESS) {
+        ka_backup_route_options_pending_ = true;
+        SIP_CORE_DBG("Backup route KA: OPTIONS sent to backup route");
+        return true;
+    }
+
+    SIP_CORE_ERR("Backup route KA: Error sending OPTIONS: %d", status);
+    return false;
 }
 
 std::shared_ptr<SIPCall>
@@ -1027,6 +1287,9 @@ SIPAccount::doRegister1_()
                                              return;
                                          }
                                          acc->backServiceRouteIp_ = host_ips[0];
+                                         if (acc->pendingBackupKeepAliveStart_.exchange(false)) {
+                                             acc->startBackupKeepAliveAfterRegister();
+                                         }
                                      }
                                  });
         }
@@ -1092,6 +1355,7 @@ SIPAccount::doUnregister(std::function<void(bool)> released_cb)
 
     cancelKeepAliveTimer();
     cancelMainRouteKeepAliveTimer();
+    cancelBackupRouteKeepAliveTimer();
 
     try {
         sendUnregister();
@@ -1206,16 +1470,29 @@ SIPAccount::sendRegister()
 void
 SIPAccount::setUpTransmissionData(pjsip_tx_data* tdata)
 {
-    auto ip = getActualIpAddress();
-    if (ip) {
-        auto ai = &tdata->dest_info;
-        ai->name = pj_strdup3(tdata->pool, config().hostname.c_str());
-        ai->addr.count = 1;
-        ai->addr.entry[0].type = transport_->getPjSipTransportType();
-        pj_memcpy(&ai->addr.entry[0].addr, ip.pjPtr(), sizeof(pj_sockaddr));
-        ai->addr.entry[0].addr_len = ip.getLength();
-        ai->cur_addr = 0;
+    setUpTransmissionData(tdata, getActualIpAddress());
+}
+
+void
+SIPAccount::setUpTransmissionData(pjsip_tx_data* tdata, const IpAddr& ip)
+{
+    if (!ip || !transport_) {
+        return;
     }
+
+    auto length = ip.getLength();
+    if (length == 0) {
+        SIP_CORE_DBG("setUpTransmissionData: target IP has no length");
+        return;
+    }
+
+    auto ai = &tdata->dest_info;
+    ai->name = pj_strdup3(tdata->pool, config().hostname.c_str());
+    ai->addr.count = 1;
+    ai->addr.entry[0].type = transport_->getPjSipTransportType();
+    pj_memcpy(&ai->addr.entry[0].addr, ip.pjPtr(), length);
+    ai->addr.entry[0].addr_len = length;
+    ai->cur_addr = 0;
 }
 
 void
@@ -1227,6 +1504,8 @@ SIPAccount::onRegister(pjsip_regc_cbparam* param)
     if (param->status != PJ_SUCCESS) {
         // cancel ka timer if everything is BAD
         SIP_CORE_ERR("SIP registration error %d", param->status);
+        cancelBackupRouteKeepAliveTimer();
+        pendingBackupKeepAliveStart_.store(false);
 
         // Try backup route if not already using it
         if (!isUsingBackupRoute() && hasBackServiceRoute()) {
@@ -1244,6 +1523,8 @@ SIPAccount::onRegister(pjsip_regc_cbparam* param)
                      param->code,
                      (int) param->reason.slen,
                      param->reason.ptr);
+        cancelBackupRouteKeepAliveTimer();
+        pendingBackupKeepAliveStart_.store(false);
 
         // Try backup route if not already using it (for certain error codes)
         bool shouldRetryBackup = false;
@@ -1295,6 +1576,7 @@ SIPAccount::onRegister(pjsip_regc_cbparam* param)
                 // if unregister check that ka timer is already destroyed
                 cancelKeepAliveTimer();
                 cancelMainRouteKeepAliveTimer();
+                cancelBackupRouteKeepAliveTimer();
                 destroyRegistrationInfo();
                 SIP_CORE_DBG("Unregistration success");
                 setRegistrationState(RegistrationState::UNREGISTERED, param->code);
@@ -1362,6 +1644,7 @@ SIPAccount::onRegister(pjsip_regc_cbparam* param)
 
                 // only now set timer
                 registerKeepAliveTimer();
+                startBackupKeepAliveAfterRegister();
             }
         }
     }
@@ -1598,6 +1881,9 @@ SIPAccount::switchToBackupRoute()
 
     SIP_CORE_WARN("Switching to backup service route: %s", config().backServiceRoute.c_str());
     usingBackupRoute_ = true;
+
+    // Stop backup route keep-alive since backup becomes active route
+    cancelBackupRouteKeepAliveTimer();
 
     // Start the separate keep-alive to monitor main route availability
     registerMainRouteKeepAliveTimer();

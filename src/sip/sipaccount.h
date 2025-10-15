@@ -348,11 +348,20 @@ public:
      * when using backup route.
      */
     void registerMainRouteKeepAliveTimer();
+    /**
+     * Starts a keep-alive timer to maintain NAT mapping towards backup route
+     * while operating on the main route.
+     */
+    void registerBackupRouteKeepAliveTimer();
 
     /**
      * Cancels the main route keep-alive timer.
      */
     void cancelMainRouteKeepAliveTimer();
+    /**
+     * Cancels the backup route keep-alive timer.
+     */
+    void cancelBackupRouteKeepAliveTimer();
 
     /**
      * Check if we should switch back to main route when calls end.
@@ -480,6 +489,15 @@ public:
         unsigned length {};
         pj_timer_entry timer {};
     } kaMainRoute;
+    /**
+     * Separate keep-alive for backup route when using main route
+     */
+    struct
+    {
+        pj_sockaddr socket;
+        unsigned length {};
+        pj_timer_entry timer {};
+    } kaBackupRoute;
 
     /**
      * Flag indicating an in-flight OPTIONS keep-alive transaction.
@@ -491,6 +509,10 @@ public:
      * Flag indicating an in-flight OPTIONS keep-alive transaction for main route.
      */
     std::atomic<bool> ka_main_route_options_pending_ {false};
+    /**
+     * Flag indicating an in-flight OPTIONS keep-alive transaction for backup route.
+     */
+    std::atomic<bool> ka_backup_route_options_pending_ {false};
 
     /**
      * Flag indicating if main route is available (last keep-alive succeeded)
@@ -504,12 +526,18 @@ public:
 
     // set explicit transport destination and params for tdata
     void setUpTransmissionData(pjsip_tx_data* tdata);
+    void setUpTransmissionData(pjsip_tx_data* tdata, const IpAddr& ip);
 
     const IpAddr& getServiceRouteIp() { return serviceRouteIp_; };
     const IpAddr& getBackServiceRouteIp() { return backServiceRouteIp_; };
 
     std::atomic<bool> needsResubscribe_ {false};
     std::string callUri_ {};
+
+    void startBackupKeepAliveAfterRegister();
+    bool sendBackupRouteKeepAlive();
+
+    std::atomic<bool> pendingBackupKeepAliveStart_ {false};
 
     std::mutex switchFromCallRetry;
 
