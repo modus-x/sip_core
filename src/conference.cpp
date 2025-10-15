@@ -1337,35 +1337,42 @@ Conference::updateHandsRaised()
 void
 Conference::updateVoiceActivity()
 {
-    std::lock_guard<std::mutex> lk(confInfoMutex_);
-
-    // streamId is actually sinkId
-    for (ParticipantInfo& participantInfo : confInfo_) {
-        bool newActivity;
-
-        if (auto call = getCallWith(std::string(string_remove_suffix(participantInfo.uri, '@')),
-                                    participantInfo.device)) {
-            // if this participant is in a direct call with us
-            // grab voice activity info directly from the call
-            newActivity = call->hasPeerVoice();
-        } else {
-            // check for it
-            newActivity = isVoiceActive(participantInfo.sinkId);
-        }
-
-        // why such optimization for bool
-        if (participantInfo.voiceActivity != newActivity) {
-            participantInfo.voiceActivity = newActivity;
-        }
-    }
-
     std::map<std::string, bool> voiceStates;
-    for (auto p : confInfo_) {
-        voiceStates[p.sinkId] = p.voiceActivity;
-    }
-    videoMixer_->setVoiceActivity(std::move(voiceStates));
+    {
+        std::lock_guard<std::mutex> lk(confInfoMutex_);
 
-    sendVoiceActivity(); // also emits signal to client
+        // streamId is actually sinkId
+        for (ParticipantInfo& participantInfo : confInfo_) {
+            bool newActivity;
+
+            if (auto call = getCallWith(std::string(string_remove_suffix(participantInfo.uri, '@')),
+                                        participantInfo.device)) {
+                // if this participant is in a direct call with us
+                // grab voice activity info directly from the call
+                newActivity = call->hasPeerVoice();
+            } else {
+                // check for it
+                newActivity = isVoiceActive(participantInfo.sinkId);
+            }
+
+            // why such optimization for bool
+            if (participantInfo.voiceActivity != newActivity) {
+                participantInfo.voiceActivity = newActivity;
+            }
+        }
+
+        for (auto p : confInfo_) {
+            voiceStates[p.sinkId] = p.voiceActivity;
+        }
+    }
+
+    if (videoMixer_)
+        videoMixer_->setVoiceActivity(std::move(voiceStates));
+
+    {
+        std::lock_guard<std::mutex> lk(confInfoMutex_);
+        sendVoiceActivity(); // also emits signal to client
+    }
 }
 
 void
