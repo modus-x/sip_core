@@ -64,7 +64,7 @@ createMessageBody(pj_pool_t* pool,
     // split mime type to type and subtype
     sep = mimeType.find('/');
     if (std::string::npos == sep) {
-        SIP_CORE_DBG("bad mime type: '%.*s'", (int) mimeType.size(), mimeType.data());
+        SIP_CORE_DBG("im: bad mime type: '%.*s'", (int) mimeType.size(), mimeType.data());
         throw im::InstantMessageException("invalid mime type");
     }
 
@@ -88,7 +88,7 @@ createMessageBody(pj_pool_t* pool,
         // split paramPair into arg and value by '='
         auto paramSplit = paramPair.find('=');
         if (std::string::npos == paramSplit) {
-            SIP_CORE_DBG("bad parameter: '%.*s'", (int) paramPair.size(), paramPair.data());
+            SIP_CORE_DBG("im: bad parameter: '%.*s'", (int) paramPair.size(), paramPair.data());
             throw im::InstantMessageException("invalid parameter");
         }
 
@@ -128,7 +128,7 @@ im::fillPJSIPMessageBody(pjsip_tx_data& tdata, const std::map<std::string, std::
     for (const auto& pair : payloads) {
         auto part = pjsip_multipart_create_part(tdata.pool);
         if (not part) {
-            SIP_CORE_ERR("pjsip_multipart_create_part failed: not enough memory");
+            SIP_CORE_ERR("im: pjsip_multipart_create_part failed: not enough memory");
             throw InstantMessageException("Internal SIP error");
         }
 
@@ -136,7 +136,8 @@ im::fillPJSIPMessageBody(pjsip_tx_data& tdata, const std::map<std::string, std::
 
         auto status = pjsip_multipart_add_part(tdata.pool, tdata.msg->body, part);
         if (status != PJ_SUCCESS) {
-            SIP_CORE_ERR("pjsip_multipart_add_part failed: %s", sip_utils::sip_strerror(status).c_str());
+            SIP_CORE_ERR("im: pjsip_multipart_add_part failed: %s",
+                         sip_utils::sip_strerror(status).c_str());
             throw InstantMessageException("Internal SIP error");
         }
     }
@@ -146,21 +147,23 @@ void
 im::sendSipMessage(pjsip_inv_session* session, const std::map<std::string, std::string>& payloads)
 {
     if (payloads.empty()) {
-        SIP_CORE_WARN("the payloads argument is empty; ignoring message");
+        SIP_CORE_WARN("im: the payloads argument is empty; ignoring message");
         return;
     }
 
-    constexpr pjsip_method msg_method = {PJSIP_OTHER_METHOD,
-                                         CONST_PJ_STR(sip_utils::SIP_METHODS::INFO)};
+    auto dialog = session->dlg;
+    if (pjsip_dlg_try_inc_lock(dialog) == PJ_SUCCESS) {
+        constexpr pjsip_method msg_method = {PJSIP_OTHER_METHOD,
+                                             CONST_PJ_STR(sip_utils::SIP_METHODS::INFO)};
 
-    {
-        auto dialog = session->dlg;
-        sip_utils::PJDialogLock dialog_lock {dialog};
-
+        // successfully locked the dialog
         pjsip_tx_data* tdata = nullptr;
         auto status = pjsip_dlg_create_request(dialog, &msg_method, -1, &tdata);
         if (status != PJ_SUCCESS) {
-            SIP_CORE_ERR("pjsip_dlg_create_request failed: %s", sip_utils::sip_strerror(status).c_str());
+            SIP_CORE_ERR("im: pjsip_dlg_create_request failed: %s",
+                         sip_utils::sip_strerror(status).c_str());
+
+            pjsip_dlg_dec_lock(dialog);
             throw InstantMessageException("Internal SIP error");
         }
 
@@ -168,9 +171,16 @@ im::sendSipMessage(pjsip_inv_session* session, const std::map<std::string, std::
 
         status = pjsip_dlg_send_request(dialog, tdata, -1, nullptr);
         if (status != PJ_SUCCESS) {
-            SIP_CORE_ERR("pjsip_dlg_send_request failed: %s", sip_utils::sip_strerror(status).c_str());
+            SIP_CORE_ERR("im: pjsip_dlg_send_request failed: %s",
+                         sip_utils::sip_strerror(status).c_str());
+
+            pjsip_dlg_dec_lock(dialog);
             throw InstantMessageException("Internal SIP error");
         }
+
+        pjsip_dlg_dec_lock(dialog);
+    } else {
+        SIP_CORE_WARN() << "im: could not acquire lock to send messages";
     }
 }
 
@@ -213,12 +223,13 @@ im::parseSipMessage(const pjsip_msg* msg)
     std::map<std::string, std::string> ret;
 
     if (!msg->body) {
-        SIP_CORE_WARN("message body is empty");
+        SIP_CORE_WARN("im: message body is empty");
         auto* header = pjsip_msg_find_hdr(msg, PJSIP_H_CONTENT_TYPE, NULL);
         if (header) {
             pjsip_ctype_hdr* genericHeader = (pjsip_ctype_hdr*) header;
             ret.emplace(sip_utils::as_view(genericHeader->media.type) + "/"
-                         + sip_utils::as_view(genericHeader->media.subtype), "");
+                            + sip_utils::as_view(genericHeader->media.subtype),
+                        "");
         }
         return ret;
     }
