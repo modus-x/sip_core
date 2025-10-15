@@ -35,6 +35,7 @@
 #include "connectivity/sip_utils.h"
 
 #include <cmath>
+#include <atomic>
 #include <unistd.h>
 #include <mutex>
 #include <unordered_map>
@@ -87,6 +88,10 @@ struct VideoMixer::VideoMixerSource
     std::atomic<int> y {0};
     int w {};
     int h {};
+    int lastLayoutFrameWidth {0};
+    int lastLayoutFrameHeight {0};
+    int lastLayoutOrientation {0};
+    bool geometryPending {false};
     bool hasVideo {true};
     std::atomic<bool> muted {false};
 
@@ -201,7 +206,7 @@ VideoMixer::setActiveStream(const std::string& id)
 {
     activeStream_ = id;
     std::unique_lock lock(rwMutex_);
-    updateLayout();
+    updateLayout("setActiveStream");
 }
 
 void
@@ -210,7 +215,7 @@ VideoMixer::setVoiceActivity(const std::string& streamId, bool state)
     std::lock_guard<std::mutex> voiceLock(vocieActivivtyMtx_);
     voiceActivity_[streamId] = state;
     std::unique_lock lock(rwMutex_);
-    updateLayout();
+    updateLayout("setVoiceActivity(single)");
 }
 
 void
@@ -219,7 +224,7 @@ VideoMixer::setVoiceActivity(const std::map<std::string, bool>& states)
     std::lock_guard<std::mutex> voiceLock(vocieActivivtyMtx_);
     voiceActivity_ = states;
     std::unique_lock lock(rwMutex_);
-    updateLayout();
+    updateLayout("setVoiceActivity(map)");
 }
 
 void
@@ -228,7 +233,7 @@ VideoMixer::setVoiceActivity(const std::map<std::string, bool>&& states)
     std::lock_guard<std::mutex> voiceLock(vocieActivivtyMtx_);
     voiceActivity_ = std::move(states);
     std::unique_lock lock(rwMutex_);
-    updateLayout();
+    updateLayout("setVoiceActivity(move)");
 }
 
 bool
@@ -256,17 +261,54 @@ VideoMixer::moveSource(size_t from_index, size_t to_index)
         std::advance(it_to, to_index);
         sources_.splice(it_to, sources_, it_from);
     }
-    updateLayout();
+    updateLayout("moveSource");
     return true;
 }
 
 // just report that layout was updated
 void
-VideoMixer::updateLayout()
+VideoMixer::updateLayout(const char* reason)
 {
-    if (activeStream_ == "")
+    if (activeStream_.empty())
         currentLayout_ = Layout::GRID;
-    layoutUpdated_ += 1;
+    addLayoutUpdate(reason);
+}
+
+int
+VideoMixer::addLayoutUpdate(const char* reason)
+{
+    const int previous = layoutUpdated_.fetch_add(1, std::memory_order_acq_rel);
+    const int current = previous + 1;
+    SIP_CORE_DBG("[mixer:%s] layoutUpdated_ += 1 (%s) %d -> %d",
+                 id_.c_str(),
+                 reason ? reason : "unknown",
+                 previous,
+                 current);
+    return current;
+}
+
+void
+VideoMixer::consumeLayoutUpdates(int count, const char* reason)
+{
+    if (count <= 0)
+        return;
+    int previous = layoutUpdated_.fetch_sub(count, std::memory_order_acq_rel);
+    int current = previous - count;
+    if (current < 0) {
+        SIP_CORE_WARN("[mixer:%s] layoutUpdated_ underflow (%s): %d - %d < 0, clamping to 0",
+                      id_.c_str(),
+                      reason ? reason : "unknown",
+                      previous,
+                      count);
+        current = 0;
+        layoutUpdated_.store(0, std::memory_order_release);
+    }
+    SIP_CORE_DBG("[mixer:%s] layoutUpdated_ -= %d (%s) %d -> %d",
+                 id_.c_str(),
+                 count,
+                 reason ? reason : "unknown",
+                 previous,
+                 current);
 }
 
 void
@@ -317,7 +359,7 @@ VideoMixer::attached(Observable<std::shared_ptr<MediaFrame>>* ob)
     SIP_CORE_DBG("Add new source [%p]", src.get());
     sources_.emplace_back(std::move(src));
     SIP_CORE_DEBUG("Total sources: {:d}", sources_.size());
-    updateLayout();
+    updateLayout("attached()");
 }
 
 void
@@ -382,7 +424,7 @@ VideoMixer::processPendingDetaches()
                 SIP_CORE_DBG("Remove source [%p]", x.get());
                 sources_.remove(x);
                 SIP_CORE_DEBUG("Total sources: {:d}", sources_.size());
-                updateLayout();
+                updateLayout("processPendingDetaches");
                 break;
             }
         }
@@ -448,8 +490,23 @@ VideoMixer::process()
         // did active stream was found?
         bool activeFound = false;
 
-        // did updateLayout was called before
-        bool needsUpdate = layoutUpdated_ > 0;
+        const int pendingLayoutUpdates = layoutUpdated_.load(std::memory_order_acquire);
+        bool needsUpdate = pendingLayoutUpdates > 0;
+        int layoutUpdatesGenerated = 0;
+        bool layoutInvalidated = false;
+
+        auto requestLayoutUpdate = [&](const char* reason) {
+            addLayoutUpdate(reason);
+            ++layoutUpdatesGenerated;
+            needsUpdate = true;
+        };
+
+        auto invalidateAndRequestLayoutUpdate = [&](const char* reason) {
+            addLayoutUpdate(reason);
+            ++layoutUpdatesGenerated;
+            needsUpdate = true;
+            layoutInvalidated = true;
+        };
 
         // first, iterate and draw audioOnlySources_
         for (auto& [callId, streamId] : audioOnlySources_) {
@@ -530,7 +587,7 @@ VideoMixer::process()
                     }
                 }
 
-                auto hasVideo = x->hasVideo;
+                auto previousHasVideo = x->hasVideo;
                 bool blackFrame = false;
 
                 if (!input->height() or !input->width()) {
@@ -541,12 +598,21 @@ VideoMixer::process()
                     fooInput.swap(input);
                 }
 
-                // If orientation changed or if the first valid frame for source
-                // is received -> trigger layout calculation and confInfo update
-                if (x->rotation != fooInput->getOrientation() or !x->w or !x->h) {
-                    // layoutUpdated_ += 1;
-                    updateLayout();
-                    needsUpdate = true;
+                const int frameWidth = fooInput->width();
+                const int frameHeight = fooInput->height();
+                const int frameOrientation = fooInput->getOrientation();
+                const bool requiresInitialLayout = (x->w == 0 || x->h == 0);
+                const bool geometryChanged = !blackFrame
+                    && (frameWidth != x->lastLayoutFrameWidth
+                        || frameHeight != x->lastLayoutFrameHeight
+                        || frameOrientation != x->lastLayoutOrientation);
+
+                if (requiresInitialLayout)
+                    requestLayoutUpdate("initial source layout");
+
+                if (geometryChanged && !x->geometryPending) {
+                    requestLayoutUpdate("frame geometry changed");
+                    x->geometryPending = true;
                 }
 
                 if (needsUpdate) {
@@ -555,6 +621,12 @@ VideoMixer::process()
                         itVA != voiceActivitySnapshot.end())
                         voiceActive = itVA->second;
                     calc_position(x, fooInput, wantedIndex, voiceActive);
+                    if (!blackFrame) {
+                        x->lastLayoutFrameWidth = frameWidth;
+                        x->lastLayoutFrameHeight = frameHeight;
+                        x->lastLayoutOrientation = frameOrientation;
+                        x->geometryPending = false;
+                    }
                 }
 
                 if (!blackFrame) {
@@ -565,10 +637,8 @@ VideoMixer::process()
                 }
 
                 x->hasVideo = !blackFrame && successfullyRendered;
-                if (hasVideo != x->hasVideo) {
-                    // layoutUpdated_ += 1;
-                    updateLayout();
-                    needsUpdate = true;
+                if (previousHasVideo != x->hasVideo) {
+                    invalidateAndRequestLayoutUpdate("video availability changed");
                 }
             } else if (needsUpdate) {
                 x->x.store(0);
@@ -580,28 +650,25 @@ VideoMixer::process()
 
             ++i;
         }
-        if (needsUpdate and successfullyRendered) {
-            if (layoutUpdated_.load() == 0) {
-                return;
+        if (needsUpdate && successfullyRendered && !layoutInvalidated) {
+            const int totalUpdatesToConsume = pendingLayoutUpdates + layoutUpdatesGenerated;
+            if (totalUpdatesToConsume > 0)
+                consumeLayoutUpdates(totalUpdatesToConsume, "layout processed");
+            for (auto& x : sources_) {
+                StreamInfo sinfo = {};
+                if (auto itSI = streamInfoCache.find(x->source); itSI != streamInfoCache.end())
+                    sinfo = itSI->second;
+                sourcesInfo.emplace_back(SourceInfo {x->source,
+                                                     x->x.load(),
+                                                     x->y.load(),
+                                                     x->w,
+                                                     x->h,
+                                                     x->hasVideo,
+                                                     sinfo.callId,
+                                                     sinfo.streamId});
             }
-            layoutUpdated_ -= 1;
-            if (layoutUpdated_ == 0) {
-                for (auto& x : sources_) {
-                    StreamInfo sinfo = {};
-                    if (auto itSI = streamInfoCache.find(x->source); itSI != streamInfoCache.end())
-                        sinfo = itSI->second;
-                    sourcesInfo.emplace_back(SourceInfo {x->source,
-                                                         x->x.load(),
-                                                         x->y.load(),
-                                                         x->w,
-                                                         x->h,
-                                                         x->hasVideo,
-                                                         sinfo.callId,
-                                                         sinfo.streamId});
-                }
-                if (onSourcesUpdated_)
-                    onSourcesUpdated_(std::move(sourcesInfo));
-            }
+            if (onSourcesUpdated_)
+                onSourcesUpdated_(std::move(sourcesInfo));
         }
     }
 
@@ -801,7 +868,7 @@ VideoMixer::setParameters(int width, int height, AVPixelFormat format)
         libav_utils::fillWithBlack(previous_p->pointer());
 
     startSink();
-    updateLayout();
+    updateLayout("setParameters");
     startTime_ = av_gettime();
 }
 

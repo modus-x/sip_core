@@ -132,7 +132,7 @@ public:
         return {};
     }
 
-    void updateLayout();
+    void updateLayout(const char* reason = "updateLayout()");
 
     std::shared_ptr<SinkClient>& getSink() { return sink_; }
 
@@ -190,6 +190,9 @@ private:
                           int width,
                           int height,
                           bool active);
+
+    int addLayoutUpdate(const char* reason);
+    void consumeLayoutUpdates(int count, const char* reason);
 
     void startSink();
     void stopSink();
