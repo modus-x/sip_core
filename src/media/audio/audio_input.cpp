@@ -125,12 +125,14 @@ AudioInput::readFromDevice()
 
     auto& bufferPool = Manager::instance().getRingBufferPool();
     auto audioFrame = bufferPool.getData(id_);
-    bool gotAudioFrame = bool(audioFrame);
-    if (not audioFrame) {
-        audioFrame = std::make_shared<AudioFrame>(bufferPool.getInternalAudioFormat(), frameSize_);
+    if (not audioFrame && !muteState_) {
+        return;
     }
 
-    if (muteState_ || !gotAudioFrame) {
+    if (muteState_) {
+        if (not audioFrame) {
+            audioFrame = std::make_shared<AudioFrame>(bufferPool.getInternalAudioFormat(), frameSize_);
+        }
         libav_utils::fillWithSilence(audioFrame->pointer());
         audioFrame->has_voice = false; // force no voice activity when muted
     }
