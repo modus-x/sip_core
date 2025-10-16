@@ -504,9 +504,8 @@ VideoInput::initX11(const std::string& display)
         p.is_area = 0;
     }
     if (space != std::string::npos) {
-        p.input = display.substr(1, space);
+        p.input = display.substr(0, space);
         if (p.window_id.empty()) {
-            p.input = display.substr(0, space);
             SIP_CORE_INFO() << "p.window_id.empty()";
             auto splits = sip_core::split_string_to_unsigned(display.substr(space + 1), 'x');
             // round to 8 pixel block
