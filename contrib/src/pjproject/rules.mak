@@ -42,9 +42,8 @@ pjproject: pjproject-$(PJPROJECT_VERSION).tar.gz .sum-pjproject
 	$(UNPACK)
 	$(APPLY) $(SRC)/pjproject/0009-add-config-site.patch
 	$(APPLY) $(SRC)/pjproject/0010-fix-unix-bzero.patch
-	$(APPLY) $(SRC)/pjproject/0011-presence-notify.patch
+	$(APPLY) $(SRC)/pjproject/0011-presence.patch
 	$(APPLY) $(SRC)/pjproject/0012-remove-extra-headers-evsub.patch
-	$(APPLY) $(SRC)/pjproject/0013-regc-tsx-cb.patch
 ifdef HAVE_ANDROID
 	$(APPLY) $(SRC)/pjproject/0001-android.patch
 endif
