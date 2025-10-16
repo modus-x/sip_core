@@ -253,13 +253,6 @@ ffmpeg: ffmpeg-$(FFMPEG_HASH).tar.gz
 	rm -Rf $@ $@-$(FFMPEG_HASH)
 	mkdir -p $@-$(FFMPEG_HASH)
 	(cd $@-$(FFMPEG_HASH) && tar x $(if ${BATCH_MODE},,-v) --strip-components=1 -f $<)
-	$(APPLY) $(SRC)/ffmpeg/remove-mjpeg-log.patch
-	$(APPLY) $(SRC)/ffmpeg/change-RTCP-ratio.patch
-	$(APPLY) $(SRC)/ffmpeg/rtp_ext_abs_send_time.patch
-	$(APPLY) $(SRC)/ffmpeg/rtp_any_payload.patch
-	$(APPLY) $(SRC)/ffmpeg/rtp_dtmf.patch
-	$(APPLY) $(SRC)/ffmpeg/libopusdec-enable-FEC.patch
-	$(APPLY) $(SRC)/ffmpeg/libopusenc-reload-packet-loss-at-encode.patch
 	$(APPLY) $(SRC)/ffmpeg/ios-disable-b-frames.patch
 	$(APPLY) $(SRC)/ffmpeg/screen-sharing-x11-fix.patch
 	$(UPDATE_AUTOCONFIG)
