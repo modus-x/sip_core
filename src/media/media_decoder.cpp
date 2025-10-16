@@ -375,12 +375,6 @@ MediaDemuxer::Status
 MediaDemuxer::decode()
 {
     if (inputParams_.format == "x11grab") {
-        auto ret = inputCtx_->iformat->read_header(inputCtx_);
-        if (ret == AVERROR_EXTERNAL) {
-            SIP_CORE_ERR("Couldn't read frame: %s\n",
-                         libav_utils::getError(ret).c_str());
-            return Status::ReadError;
-        }
         auto codecpar = inputCtx_->streams[0]->codecpar;
         if (baseHeight_ != codecpar->height || baseWidth_ != codecpar->width) {
             baseHeight_ = codecpar->height;
@@ -731,8 +725,8 @@ MediaDecoder::decode(AVPacket& packet)
 
     if (frameFinished) {
         // channel layout is needed if frame will be resampled
-        if (!frame->channel_layout)
-            frame->channel_layout = av_get_default_channel_layout(frame->channels);
+        if (frame->ch_layout.order == AVChannelOrder::AV_CHANNEL_ORDER_UNSPEC)
+            av_channel_layout_default(&frame->ch_layout, frame->ch_layout.nb_channels);
 
         frame->format = (AVPixelFormat) correctPixFmt(frame->format);
         auto packetTimestamp = frame->pts;

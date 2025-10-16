@@ -137,7 +137,7 @@ struct MediaStream
                 format = c->sample_fmt;
                 isVideo = false;
                 sampleRate = c->sample_rate;
-                nbChannels = c->channels;
+                nbChannels = c->ch_layout.nb_channels;
                 frameSize = c->frame_size;
                 break;
             default:
@@ -170,7 +170,7 @@ struct MediaStream
             height = f->height;
         } else {
             sampleRate = f->sample_rate;
-            nbChannels = f->channels;
+            nbChannels = f->ch_layout.nb_channels;
             timeBase = rational<int>(1, f->sample_rate);
             if (!frameSize)
                 frameSize = f->nb_samples;

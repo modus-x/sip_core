@@ -1,21 +1,14 @@
 {
     "name": "ffmpeg",
-    "version": "n5.0",
-    "url": "https://nexus.svetlocal.ru/repository/github-artifacts/ffmpeg-__VERSION__.tar.gz",
+    "version": "n7.1.2",
+    "url": "https://nexus.svetlocal.ru/repository/github-artifacts/FFmpeg-__VERSION__.tar.gz",
     "deps": [
         "vpx",
         "x264",
         "opus"
     ],
     "patches": [
-        "change-RTCP-ratio.patch",
-        "rtp_ext_abs_send_time.patch",
-        "rtp_any_payload.patch",
-        "rtp_dtmf.patch",
-        "libopusenc-reload-packet-loss-at-encode.patch",
-        "libopusdec-enable-FEC.patch",
-        "windows-configure.patch",
-        "gdigrab.patch"
+        "windows-configure.patch"
     ],
     "win_patches": [
     ],
