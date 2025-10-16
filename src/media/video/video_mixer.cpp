@@ -60,7 +60,7 @@ struct VideoMixer::VideoMixerSource
         std::lock_guard<std::mutex> lock(mutex_);
         if (muted.load()) {
             auto black_frame = std::make_shared<VideoFrame>();
-            black_frame->reserve(AV_PIX_FMT_YUV420P, w, h);
+            black_frame->reserve(AV_PIX_FMT_YUV420P, other.width(), other.height());
             libav_utils::fillWithBlack(black_frame->pointer());
             render_frame = black_frame;
         } else {
