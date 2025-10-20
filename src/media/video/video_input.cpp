@@ -37,6 +37,7 @@
 
 #include <libavformat/avio.h>
 
+#include <chrono>
 #include <string>
 #include <sstream>
 #include <cassert>
@@ -315,6 +316,10 @@ VideoInput::createDecoder()
 
     if (emulateRate_)
         decoder->emulateRate();
+
+    if (decOpts_.format == "video4linux2") {
+        decoder->enableLateFrameDrop(std::chrono::milliseconds(200));
+    }
 
     decoder->setInterruptCallback(
         [](void* data) -> int { return not static_cast<VideoInput*>(data)->isCapturing(); }, this);
