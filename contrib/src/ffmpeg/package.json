@@ -1,6 +1,6 @@
 {
     "name": "ffmpeg",
-    "version": "n7.1.2",
+    "version": "ddeec523a252cd3d0d04e45e1d225ffd7f1eea43",
     "url": "https://nexus.svetlocal.ru/repository/github-artifacts/FFmpeg-__VERSION__.tar.gz",
     "deps": [
         "vpx",
@@ -17,8 +17,7 @@
     "custom_scripts": {
         "pre_build": [],
         "build": [
-            "call \"%CONTRIB_SRC_DIR%\\ffmpeg\\build_ffmpeg.bat\"",
-            "cd \"%INSTALL_PREFIX%\\lib\" && ren *.a *.lib"
+            "call \"%CONTRIB_SRC_DIR%\\ffmpeg\\build_ffmpeg.bat\""
         ],
         "post_build": []
     }

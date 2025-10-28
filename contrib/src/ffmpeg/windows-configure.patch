@@ -1,6 +1,6 @@
---- a/configure	2025-09-14 01:32:13.000000000 +0300
-+++ b/configure	2025-10-14 19:14:10.847914100 +0300
-@@ -1692,7 +1692,7 @@
+--- a/configure	2025-10-25 02:01:15.000000000 +0300
++++ b/configure	2025-10-27 16:46:32.000000000 +0300
+@@ -1740,7 +1740,7 @@ require_cpp_condition(){
  require_pkg_config(){
      log require_pkg_config "$@"
      pkg_version="$2"
@@ -9,9 +9,9 @@
  }
  
  require_pkg_config_cpp(){
-@@ -7035,28 +7035,6 @@
- enabled libvorbis         && require_pkg_config libvorbis vorbis vorbis/codec.h vorbis_info_init &&
-                              require_pkg_config libvorbisenc vorbisenc vorbis/vorbisenc.h vorbis_encode_init
+@@ -7258,28 +7258,6 @@ enabled libvorbis         && require_pkg_config libvorbis vorbis vorbis/codec.h
+ 
+ enabled whisper           && require_pkg_config whisper "whisper >= 1.7.5" whisper.h whisper_init_from_file_with_params
  
 -enabled libvpx            && {
 -    enabled libvpx_vp8_decoder && {
@@ -38,7 +38,7 @@
  enabled libvvenc          && require_pkg_config libvvenc "libvvenc >= 1.6.1" "vvenc/vvenc.h" vvenc_get_version
  enabled libwebp           && {
      enabled libwebp_encoder      && require_pkg_config libwebp "libwebp >= 0.2.0" webp/encode.h WebPGetEncoderVersion
-@@ -7775,17 +7753,6 @@
+@@ -8041,17 +8019,6 @@ flatten_extralibs_wrapper(){
      eval printf \''%s'\' \""\$$list_name"\"
  }
  
@@ -56,3 +56,4 @@
  for linkunit in $LIBRARY_LIST $PROGRAM_LIST $EXTRALIBS_LIST; do
      eval ${linkunit}_extralibs=\$\(flatten_extralibs_wrapper ${linkunit}_extralibs\)
  done
+ 

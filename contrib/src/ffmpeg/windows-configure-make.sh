@@ -20,9 +20,7 @@ FFMPEGCONF='
 FFMPEGCONF+='
             --disable-everything
             --disable-programs
-            --disable-d3d11va
             --disable-dxva2
-            --disable-postproc
             --disable-filters'
 
 FFMPEGCONF+='
@@ -32,7 +30,8 @@ FFMPEGCONF+='
             --enable-gpl
             --enable-swscale
             --enable-protocols
-            --enable-bsfs'
+            --enable-bsfs
+            --enable-d3d11va'
 
 #enable muxers/demuxers
 FFMPEGCONF+='
@@ -128,12 +127,12 @@ FFMPEGCONF+='
             --enable-filter=fps
             --enable-filter=transpose
             --enable-filter=pad
-            --enable-filter=drawbox
-            --enable-filter=crop'
+            --enable-filter=gfxcapture'
 
 FFMPEGCONF+='
                 --enable-indev=dshow
-                --enable-indev=gdigrab'
+                --enable-indev=gdigrab
+                --enable-indev=lavfi'
 
 echo "configure and make ffmpeg for win32-x64... in $(pwd)"
 
@@ -143,16 +142,18 @@ EXTRALDFLAGS="libopus.lib libx264.lib libvpx.lib"
 # configure debug / release libs
 if [ "$1" == "Debug" ]; then
   EXTRACFLAGS="-MDd"
+  EXTRACXXFLAGS="${EXTRACFLAGS}"
   FFMPEGCONF+=' --enable-debug --disable-optimizations'
   # IGNORE LIBCMT -> read https://trac.ffmpeg.org/wiki/CompilationGuide/MSVC#DebugBuilds
   EXTRALDFLAGS=" ${EXTRALDFLAGS} /NODEFAULTLIB:libcmt"
 else
   EXTRACFLAGS="-MD"
+  EXTRACXXFLAGS="${EXTRACFLAGS}"
 fi
 
-EXTRACFLAGS="${EXTRACFLAGS} -D_WINDLL -D_WIN32_WINNT=0x0601 -I${INCLUDE_DIR} -I${INCLUDE_DIR}/opus"
+EXTRACFLAGS="${EXTRACFLAGS} -D_WINDLL -D_WIN32_WINNT=0x0A00 -DWINDOWS_FOUNDATION_UNIVERSALAPICONTRACT_VERSION=0x130000 -I${INCLUDE_DIR} -I${INCLUDE_DIR}/opus"
 
-EXTRALDFLAGS="${EXTRALDFLAGS} -APPCONTAINER:NO -MACHINE:x64 Ole32.lib Kernel32.lib Gdi32.lib User32.lib Strmiids.lib Advapi32.lib OleAut32.lib Shlwapi.lib Vfw32.lib Secur32.lib Advapi32.lib -LIBPATH:${LIB_DIR}"
+EXTRALDFLAGS="${EXTRALDFLAGS} -APPCONTAINER:NO -MACHINE:x64 /VERBOSE:LIB Ole32.lib Kernel32.lib Gdi32.lib User32.lib Strmiids.lib Advapi32.lib OleAut32.lib Shlwapi.lib Vfw32.lib Secur32.lib Crypt32.lib ncrypt.lib Advapi32.lib -LIBPATH:${LIB_DIR}"
 FFMPEGCONF+=' --arch=x86_64'
 
 # DO NOT mix debug and release builds
@@ -165,6 +166,6 @@ FFMPEGCONF=$(echo $FFMPEGCONF | sed -e "s/[[:space:]]\+/ /g")
 
 set -x
 set -e
-../../../../configure $FFMPEGCONF --extra-cflags="${EXTRACFLAGS}" --extra-ldflags="${EXTRALDFLAGS}" --prefix="${INSTALL_DIR}" --extra-cxxflags="-std:c++20"
+../../../../configure $FFMPEGCONF --extra-cflags="${EXTRACFLAGS}" --extra-ldflags="${EXTRALDFLAGS}" --prefix="${INSTALL_DIR}" --extra-cxxflags="${EXTRACXXFLAGS} -std:c++20"
 make -j8 install
 cd ../../../..
