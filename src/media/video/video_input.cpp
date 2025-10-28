@@ -50,7 +50,7 @@ extern "C" {
 #include <libavutil/display.h>
 }
 
-#if defined(_WIN32) && !defined(USE_GDIGRAB)
+#if defined(_WIN32) && defined(USE_DSHOW_SCREEN_CAPTURE)
 #include <windows.h>
 #include <Shlobj.h>
 #include "Shlwapi.h"
@@ -470,8 +470,11 @@ bool
 VideoInput::initCamera(const std::string& device)
 {
     decOpts_ = sip_core::getVideoDeviceMonitor().getDeviceParams(device);
-#if defined(_WIN32) && !defined(USE_GDIGRAB)
+#if defined(_WIN32) && defined(USE_DSHOW_SCREEN_CAPTURE)
     if(decOpts_.name == "screen-capture-recorder") {
+        // screen-capture-recorder plugin can appear 
+        // in the list of available cameras. 
+        // Initialize it explicitly in this case.
         initScreenCaptureRecorder(device);
     }
 #endif
@@ -563,6 +566,12 @@ VideoInput::initGdiGrab(const std::string& params)
     clearOptions();
     decOpts_ = sip_core::getVideoDeviceMonitor().getDeviceParams(DEVICE_DESKTOP);
 
+    std::string sourceStr = " source:";
+    size_t sourcePos = params.find(sourceStr);
+    if (sourcePos != std::string::npos) {
+        decOpts_.window_id = params.substr(sourcePos + sourceStr.size()); // "0x0340021e";
+    }
+
     if (space != std::string::npos) {
         std::istringstream iss(params.substr(space + 1));
         char sep;
@@ -588,7 +597,7 @@ VideoInput::initGdiGrab(const std::string& params)
     return true;
 }
 
-#if defined(_WIN32) && !defined(USE_GDIGRAB)
+#if defined(_WIN32) && defined(USE_DSHOW_SCREEN_CAPTURE)
 bool
 VideoInput::initScreenCaptureRecorder(const std::string& params)
 {
@@ -767,7 +776,7 @@ VideoInput::switchInput(const std::string& resource)
         /* X11 display name */
 #ifdef __APPLE__
         ready = initAVFoundation(suffix);
-#elif defined(_WIN32) && !defined(USE_GDIGRAB)
+#elif defined(_WIN32) && defined(USE_DSHOW_SCREEN_CAPTURE)
         ready = initScreenCaptureRecorder(suffix);
 #elif defined(_WIN32)
         ready = initGdiGrab(suffix);
