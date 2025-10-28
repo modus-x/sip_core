@@ -1,5 +1,5 @@
 # FFMPEG
-FFMPEG_HASH := n7.1.2
+FFMPEG_HASH := ddeec523a252cd3d0d04e45e1d225ffd7f1eea43
 FFMPEG_URL := https://nexus.svetlocal.ru/repository/github-artifacts/FFmpeg-$(FFMPEG_HASH).tar.gz
 
 PKGS+=ffmpeg
@@ -20,7 +20,6 @@ FFMPEGCONF += \
 	--disable-filters \
 	--disable-autodetect \
 	--disable-programs \
-	--disable-postproc \
 	--disable-autodetect
 
 FFMPEGCONF += \
