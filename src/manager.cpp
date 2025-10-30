@@ -2153,25 +2153,14 @@ Manager::startAudio()
 #if (defined(TARGET_OS_IOS) && TARGET_OS_IOS)
     SIP_CORE_INFO("ios -> startAudio");
 
-    constexpr std::array<AudioDeviceType, 3> TYPES {AudioDeviceType::CAPTURE};
+    // Recreate audio driver with new settings
+    pimpl_->audiodriver_.reset(pimpl_->base_.audioPreference.createAudioLayer());
+
+    constexpr std::array<AudioDeviceType, 1> TYPES {AudioDeviceType::CAPTURE};
 
     for (const auto& type : TYPES)
         if (pimpl_->audioStreamUsers_[(unsigned) type])
             pimpl_->audiodriver_->startStream(type);
-#endif
-}
-
-void
-Manager::configureAudioForCall()
-{
-#if (defined(TARGET_OS_IOS) && TARGET_OS_IOS)
-    SIP_CORE_INFO("ios -> configureAudioForCall");
-
-    if (pimpl_->audiodriver_ == nullptr)
-        return;
-
-    auto iosDriver = std::static_pointer_cast<CoreLayer>(pimpl_->audiodriver_);
-    iosDriver->configureAudioForCall();
 #endif
 }
 

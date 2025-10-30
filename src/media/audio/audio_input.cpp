@@ -437,6 +437,9 @@ AudioInput::getInfo(const std::string& name) const
 void
 AudioInput::updateMuteStateForDeviceAvailability()
 {
+#if defined(TARGET_OS_IOS) && TARGET_OS_IOS
+    return;
+#endif
     bool hasCaptureDevice = false;
     if (auto driver = Manager::instance().getAudioDriver()) {
         hasCaptureDevice = !driver->getCaptureDeviceList().empty();

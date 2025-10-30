@@ -28,6 +28,36 @@
 
 const int MAX_IO_INIT_TRIES = 5;
 
+enum AVSampleFormat
+getFormatFromStreamDescription(const AudioStreamBasicDescription& descr) {
+    if(descr.mFormatID == kAudioFormatLinearPCM) {
+        BOOL isPlanar = descr.mFormatFlags & kAudioFormatFlagIsNonInterleaved;
+        if(descr.mBitsPerChannel == 16) {
+            if(descr.mFormatFlags & kAudioFormatFlagIsSignedInteger) {
+                return isPlanar ? AV_SAMPLE_FMT_S16P : AV_SAMPLE_FMT_S16;
+            }
+        }
+        else if(descr.mBitsPerChannel == 32) {
+            if(descr.mFormatFlags & kAudioFormatFlagIsFloat) {
+                return isPlanar ? AV_SAMPLE_FMT_FLTP : AV_SAMPLE_FMT_FLT;
+            }
+            else if(descr.mFormatFlags & kAudioFormatFlagIsSignedInteger) {
+                return isPlanar ? AV_SAMPLE_FMT_S32P : AV_SAMPLE_FMT_S32;
+            }
+        }
+    }
+    NSLog(@"Unsupported core audio format");
+    return AV_SAMPLE_FMT_NONE;
+}
+
+sip_core::AudioFormat
+audioFormatFromDescription(const AudioStreamBasicDescription& descr) {
+    return sip_core::AudioFormat {static_cast<unsigned int>(descr.mSampleRate),
+                        static_cast<unsigned int>(descr.mChannelsPerFrame),
+                        getFormatFromStreamDescription(descr)};
+}
+
+
 namespace sip_core {
 dispatch_queue_t
 audioConfigurationQueueIOS()
@@ -54,13 +84,7 @@ CoreLayer::CoreLayer(const AudioPreference& pref)
 
 CoreLayer::~CoreLayer()
 {
-    dispatch_sync(audioConfigurationQueueIOS(), ^{
-        if (status_ != Status::Started)
-            return;
-        destroyAudioLayer();
-        flushUrgent();
-        flushMain();
-    });
+    stopStream(AudioDeviceType::ALL);
 }
 
 std::vector<std::string>
@@ -238,7 +262,6 @@ CoreLayer::setupInputBus()
     AVAudioSession* session = [AVAudioSession sharedInstance];
     // Replace AudioSessionGetProperty with AVAudioSession
     Float64 inSampleRate = session.sampleRate;
-    Float32 bufferDuration = session.IOBufferDuration;
 
     inputASBD.mSampleRate = inSampleRate;
     inputASBD.mFormatID = kAudioFormatLinearPCM;
@@ -253,7 +276,8 @@ CoreLayer::setupInputBus()
                                   &size));
     inputASBD.mSampleRate = inSampleRate;
     audioInputFormat_ = {static_cast<unsigned int>(inputASBD.mSampleRate),
-                         static_cast<unsigned int>(inputASBD.mChannelsPerFrame)};
+                         static_cast<unsigned int>(inputASBD.mChannelsPerFrame),
+                         getFormatFromStreamDescription(inputASBD)};
     hardwareInputFormatAvailable(audioInputFormat_);
 
     // Keep some values to not ask them every time the read callback is fired up
@@ -277,22 +301,6 @@ CoreLayer::setupInputBus()
                          inputBus,
                          &flag,
                          sizeof(flag));
-
-    UInt32 bufferSizeFrames = std::round(inSampleRate_ * bufferDuration);
-    UInt32 bufferSizeBytes = bufferSizeFrames * sizeof(Float32);
-    size = offsetof(AudioBufferList, mBuffers[0])
-           + (sizeof(AudioBuffer) * inputASBD.mChannelsPerFrame);
-    rawBuff_.reset(new Byte[size + bufferSizeBytes * inputASBD.mChannelsPerFrame]);
-    captureBuff_ = reinterpret_cast<::AudioBufferList*>(rawBuff_.get());
-    captureBuff_->mNumberBuffers = inputASBD.mChannelsPerFrame;
-
-    auto bufferBasePtr = rawBuff_.get() + size;
-    for (UInt32 i = 0; i < captureBuff_->mNumberBuffers; ++i) {
-        captureBuff_->mBuffers[i].mNumberChannels = 1;
-        captureBuff_->mBuffers[i].mDataByteSize = bufferSizeBytes;
-        captureBuff_->mBuffers[i].mData = bufferBasePtr + bufferSizeBytes * i;
-    }
-    SIP_CORE_DBG("iOS CoreLayer - initializing input bus FINISHED");
 }
 
 void
@@ -327,6 +335,7 @@ CoreLayer::bindCallbacks()
 }
 
 // deviceType if not used here :)
+// called by core to start audio stream
 void
 CoreLayer::startStream(AudioDeviceType stream)
 {
@@ -352,7 +361,7 @@ CoreLayer::startStream(AudioDeviceType stream)
                 return;
             }
 
-            status_ = Status::Starting;
+            status_ = Status::Configured;
         }
 
         // if starting, try to load ioUnit
@@ -372,38 +381,13 @@ CoreLayer::startStream(AudioDeviceType stream)
 }
 
 void
-CoreLayer::configureAudioForCall()
-{
-    dispatch_sync(audioConfigurationQueueIOS(), ^{
-        SIP_CORE_DBG("iOS CoreLayer configureAudioForCall");
-
-        const std::lock_guard<std::mutex> lock(layerLock_);
-
-        if (status_ == Status::Idle) {
-            bool result = initAudioLayerIO();
-
-            if (result) {
-                SIP_CORE_DBG("iOS CoreLayer configureAudioForCall initAudioLayer OK");
-            } else {
-                SIP_CORE_ERR("iOS CoreLayer configureAudioForCall initAudioLayer ERROR, exiting");
-                return;
-            }
-
-            status_ = Status::Starting;
-        } else {
-            SIP_CORE_DBG("iOS CoreLayer configureAudioForCall not in idle state, exiting");
-        }
-    });
-}
-
-void
 CoreLayer::destroyAudioLayer()
 {
     const std::lock_guard<std::mutex> lock(layerLock_);
 
     // if not started, exit
-    if (status_ != Status::Started) {
-        SIP_CORE_DBG("iOS CoreLayer - destroyAudioLayer not in started state, exiting");
+    if (status_ == Status::Idle) {
+        SIP_CORE_DBG("iOS CoreLayer - destroyAudioLayer: core layer is in idle state, exiting");
         return;
     }
 
@@ -417,10 +401,8 @@ CoreLayer::destroyAudioLayer()
 void
 CoreLayer::stopStream(AudioDeviceType stream)
 {
-    dispatch_async(audioConfigurationQueueIOS(), ^{
-        SIP_CORE_DBG("iOS CoreLayer - Stop Stream START");
+    dispatch_sync(audioConfigurationQueueIOS(), ^{
         destroyAudioLayer();
-        SIP_CORE_DBG("iOS CoreLayer - Stop Stream COMPLETE");
     });
     /* Flush the ring buffers */
     flushUrgent();
@@ -460,13 +442,13 @@ CoreLayer::write(AudioUnitRenderActionFlags* ioActionFlags,
 
     if (auto toPlay = getPlayback(currentOutFormat, inNumberFrames)) {
         const auto& frame = *toPlay->pointer();
-        for (unsigned i = 0; i < frame.channels; ++i) {
+        for (int i = 0; i < frame.channels; ++i) {
             std::copy_n((Float32*) frame.extended_data[i],
                         inNumberFrames,
                         (Float32*) ioData->mBuffers[i].mData);
         }
     } else {
-        for (int i = 0; i < currentOutFormat.nb_channels; ++i)
+        for (unsigned i = 0; i < currentOutFormat.nb_channels; ++i)
             std::fill_n(reinterpret_cast<Float32*>(ioData->mBuffers[i].mData), inNumberFrames, 0);
     }
 }
@@ -497,55 +479,32 @@ CoreLayer::read(AudioUnitRenderActionFlags* ioActionFlags,
     (void) ioData;
 
     if (inNumberFrames <= 0) {
-        SIP_CORE_WARN("iOS CoreLayer - No frames for input.");
+        SIP_CORE_WARN("No frames for input.");
         return;
     }
-
-    // Check if buffer is large enough for inNumberFrames
-    UInt32 bufferSizeFrames = captureBuff_->mBuffers[0].mDataByteSize / sizeof(Float32);
-
-    if (inNumberFrames > bufferSizeFrames) {
-        // Buffer is too small, need to reallocate
-        SIP_CORE_DBG("iOS CoreLayer - Reallocating capture buffer...");
-
-        UInt32 bufferSizeBytes = inNumberFrames * sizeof(Float32);
-        UInt32 size = offsetof(AudioBufferList, mBuffers[0])
-                      + (sizeof(AudioBuffer) * inChannelsPerFrame_);
-
-        rawBuff_.reset(new Byte[size + bufferSizeBytes * inChannelsPerFrame_]);
-        captureBuff_ = reinterpret_cast<::AudioBufferList*>(rawBuff_.get());
-        captureBuff_->mNumberBuffers = inChannelsPerFrame_;
-
-        auto bufferBasePtr = rawBuff_.get() + size;
-        for (UInt32 i = 0; i < captureBuff_->mNumberBuffers; ++i) {
-            captureBuff_->mBuffers[i].mNumberChannels = 1;
-            captureBuff_->mBuffers[i].mDataByteSize = bufferSizeBytes;
-            captureBuff_->mBuffers[i].mData = bufferBasePtr + bufferSizeBytes * i;
-        }
-
-        // Update bufferSizeFrames
-        bufferSizeFrames = inNumberFrames;
-    }
-
-    // Write the mic samples in our buffer
-    checkErr(AudioUnitRender(ioUnit_,
-                             ioActionFlags,
-                             inTimeStamp,
-                             inBusNumber,
-                             inNumberFrames,
-                             captureBuff_));
 
     auto format = audioInputFormat_;
     format.sampleFormat = AV_SAMPLE_FMT_FLTP;
     auto inBuff = std::make_shared<AudioFrame>(format, inNumberFrames);
+    AudioBufferList buffer;
+    UInt32 bufferSize = inNumberFrames * sizeof(Float32);
+    buffer.mNumberBuffers = inChannelsPerFrame_;
+    for (UInt32 i = 0; i < buffer.mNumberBuffers; ++i) {
+        buffer.mBuffers[i].mNumberChannels = 1;
+        buffer.mBuffers[i].mDataByteSize = bufferSize;
+        buffer.mBuffers[i].mData = inBuff->pointer()->extended_data[i];
+    }
+
+    // Write the mic samples in our buffer
+    checkErr(AudioUnitRender(ioUnit_,
+            ioActionFlags,
+            inTimeStamp,
+            inBusNumber,
+            inNumberFrames,
+            &buffer));
+
     if (isCaptureMuted_) {
         libav_utils::fillWithSilence(inBuff->pointer());
-    } else {
-        auto& in = *inBuff->pointer();
-        for (unsigned i = 0; i < inChannelsPerFrame_; ++i)
-            std::copy_n((Float32*) captureBuff_->mBuffers[i].mData,
-                        inNumberFrames,
-                        (Float32*) in.extended_data[i]);
     }
     putRecorded(std::move(inBuff));
 }

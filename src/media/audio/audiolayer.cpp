@@ -74,6 +74,7 @@ AudioLayer::hardwareFormatAvailable(AudioFormat playback, size_t bufSize)
 {
     SIP_CORE_DBG("Hardware audio format available : %s %zu", playback.toString().c_str(), bufSize);
     audioFormat_ = Manager::instance().hardwareAudioFormatChanged(playback);
+    audioInputFormat_.sampleFormat = audioFormat_.sampleFormat;
     urgentRingBuffer_.setFormat(audioFormat_);
     nativeFrameSize_ = bufSize;
 }
