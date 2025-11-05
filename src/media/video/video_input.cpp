@@ -559,16 +559,17 @@ VideoInput::initAVFoundation(const std::string& display)
 }
 
 bool
-VideoInput::initGdiGrab(const std::string& params)
+VideoInput::initWindowsCapture(const std::string& params)
 {
     size_t space = params.find(' ');
     clearOptions();
     decOpts_ = sip_core::getVideoDeviceMonitor().getDeviceParams(DEVICE_DESKTOP);
 
-    std::string sourceStr = " source:";
+    const std::string sourceStr = " source:";
     size_t sourcePos = params.find(sourceStr);
     if (sourcePos != std::string::npos) {
         decOpts_.window_id = params.substr(sourcePos + sourceStr.size()); // "0x0340021e";
+        space = params.find(sourcePos, ' ');
     }
 
     if (space != std::string::npos) {
@@ -778,7 +779,7 @@ VideoInput::switchInput(const std::string& resource)
 #elif defined(_WIN32) && defined(USE_DSHOW_SCREEN_CAPTURE)
         ready = initScreenCaptureRecorder(suffix);
 #elif defined(_WIN32)
-        ready = initGdiGrab(suffix);
+        ready = initWindowsCapture(suffix);
 #else
         ready = initX11(suffix);
 #endif

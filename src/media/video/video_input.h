@@ -139,7 +139,7 @@ private:
     bool initX11(const std::string& display);
     bool initAVFoundation(const std::string& display);
     bool initFile(std::string path);
-    bool initGdiGrab(const std::string& params);
+    bool initWindowsCapture(const std::string& params);
     #if defined(_WIN32) && defined(USE_DSHOW_SCREEN_CAPTURE)
     bool initScreenCaptureRecorder(const std::string& params);
     #endif

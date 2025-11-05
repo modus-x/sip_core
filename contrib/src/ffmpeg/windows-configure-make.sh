@@ -127,7 +127,8 @@ FFMPEGCONF+='
             --enable-filter=fps
             --enable-filter=transpose
             --enable-filter=pad
-            --enable-filter=gfxcapture'
+            --enable-filter=gfxcapture
+            --enable-filter=hwdownload'
 
 FFMPEGCONF+='
                 --enable-indev=dshow

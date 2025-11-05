@@ -106,6 +106,9 @@ MediaDemuxer::openInput(const DeviceParams& params)
             else
                 filter += fmt::format("monitor_idx={}:", params.window_id);
         }
+        else {
+            filter += "monitor_idx=0";
+        }
 
         if (params.width and params.height)
             filter += fmt::format("width={}:height={}:", params.width, params.height);
@@ -113,10 +116,13 @@ MediaDemuxer::openInput(const DeviceParams& params)
         if (params.framerate)
             filter += fmt::format("max_framerate={}:", params.framerate.real());
 
+        filter.pop_back(); // remove last ':'
         filter += ",hwdownload,format=bgra";
         if (not params.pixel_format.empty())
-            filter += fmt::format("format={}:", params.format);
-        
+            filter += fmt::format(",format={}", params.pixel_format);
+        else {
+            filter += ",format=yuv420p";
+        }
     }
     else {
         if (params.width and 
@@ -180,12 +186,9 @@ MediaDemuxer::openInput(const DeviceParams& params)
     std::string input = params.name;
 #else
     std::string input = params.input;
-    if (params.format == "lavfi" && params.input == "gfxcapture") {
-        if (not filter.empty())
-            filter.pop_back();
-        
+    if (params.format == "lavfi" && params.input == "gfxcapture") {        
         input += "=";
-        input += filter;
+        input += std::move(filter);
     }
 #endif
 
