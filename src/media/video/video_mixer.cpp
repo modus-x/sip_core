@@ -921,30 +921,33 @@ VideoMixer::calc_position_fixed(std::unique_ptr<VideoMixerSource>& source,
             double source_aspect = (double)width_ / (double)height_;
             
             // calculate optimal grid. Can be cached for optimization
+            bool isVerticalAlign = source_aspect < grid_aspect_;
             {
-                if(source_aspect < grid_aspect_) { 
+                if(isVerticalAlign) { 
                     // vertical alignment
                     rows = 2 * height_ * grid_aspect_ / width_;
                     rows = std::min(rows, n);
-                    columns = n / rows;
+                    columns = ((n + 1) / rows) + 1;
+                    if(columns == 1)
+                        isVerticalAlign = !isVerticalAlign;
                 }
                 else { 
                     // horizontal alignment
                     columns = 2 * width_ / (height_ * grid_aspect_);
                     columns = std::min(columns, n);
-                    rows = n / columns;
+                    rows = ((n - 1) / columns) + 1;
+                    if(rows == 1)
+                        isVerticalAlign = !isVerticalAlign;
                 }
             }
 
-            if(source_aspect < grid_aspect_) { 
-                // vertical alignment
-                frameH = height_ / rows;
-                frameW = height_ * grid_aspect_;
-            }
-            else { 
-                // horizontal alignment
+            if(isVerticalAlign) { 
                 frameW = width_ / columns;
                 frameH = frameW / grid_aspect_;
+            }
+            else { 
+                frameH = height_ / rows;
+                frameW = frameH * grid_aspect_;
             }
 
             frameH_off = (index / columns) * frameH;
@@ -952,7 +955,7 @@ VideoMixer::calc_position_fixed(std::unique_ptr<VideoMixerSource>& source,
 
             // center participants
             frameH_off += (height_ - (rows * frameH)) / 2;
-            if(n % columns != 0 && index >= ((columns - 1) * rows)) // if we draw last and not full row
+            if(n % columns != 0 && index >= (columns * (rows - 1))) // if we draw last and not full row
                 frameW_off += (width_ - (n % columns) * frameW) / 2;
             else
                 frameW_off += (width_ - (columns * frameW)) / 2;
