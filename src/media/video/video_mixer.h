@@ -34,11 +34,7 @@
 #include <memory>
 #include <shared_mutex>
 #include <vector>
-
-#define CONF_BORDER_WIDTH          6
-#define CONF_PADDING               4
-#define CONF_BORDER_INACTIVE_COLOR "Blue@1"
-#define CONF_BORDER_ACTIVE_COLOR   "CornflowerBlue@1"
+#include <tuple>
 
 namespace sip_core {
 namespace video {
@@ -69,10 +65,23 @@ enum class Layout { GRID, ONE_BIG_WITH_SMALL, ONE_BIG };
 class VideoMixer : public VideoGenerator, public VideoFramePassiveReader
 {
 public:
+    struct Parameters
+    {
+        int width;
+        int height;
+        AVPixelFormat format {AV_PIX_FMT_YUV422P};
+        double grid_aspect {1.}; // = 0 to match mixer aspect
+        int padding {4};
+        int border_size {6};
+        std::string active_border_color {"CornflowerBlue@1"}; // ffmpeg compatible colors only
+        std::string inactive_border_color {"Blue@1"};         // ffmpeg compatible colors only
+        bool remove_black_borders {true};
+    };
+
     VideoMixer(const std::string& id, const std::string& localInput = {}, bool attachHost = true);
     ~VideoMixer();
 
-    void setParameters(int width, int height, AVPixelFormat format = AV_PIX_FMT_YUV422P);
+    void setParameters(const Parameters& params);
 
     int getWidth() const override;
     int getHeight() const override;
@@ -172,17 +181,29 @@ public:
 private:
     NON_COPYABLE(VideoMixer);
     struct VideoMixerSource;
+    using gripRect = std::tuple<int, int, int, int>;
 
     bool render_frame(VideoFrame& output,
                       const std::shared_ptr<VideoFrame>& input,
-                      std::unique_ptr<VideoMixerSource>& source);
+                      std::unique_ptr<VideoMixerSource>& source,
+                      bool positionChanged);
 
     void calc_position(std::unique_ptr<VideoMixerSource>& source,
                        const std::shared_ptr<VideoFrame>& input,
                        int index,
                        bool isActive);
 
-    bool initBorderFilter(MediaFilter* filter,
+    gripRect calc_position_rel(std::unique_ptr<VideoMixerSource>& source,
+                       const std::shared_ptr<VideoFrame>& input,
+                       int index,
+                       bool isActive);
+    
+    gripRect calc_position_fixed(std::unique_ptr<VideoMixerSource>& source,
+                       const std::shared_ptr<VideoFrame>& input,
+                       int index,
+                       bool isActive);
+
+    bool initBorderFilter(MediaFilter& filter,
                           std::string inputName,
                           int format,
                           int x,
@@ -209,6 +230,12 @@ private:
     int width_ = 0;
     int height_ = 0;
     AVPixelFormat format_ = AV_PIX_FMT_YUV422P;
+    double grid_aspect_ {1.};
+    int padding_ {4};
+    int border_size_ {6};
+    std::string active_border_color_ {"CornflowerBlue@1"}; // ffmpeg declared colors only
+    std::string inactive_border_color_ {"Blue@1"};         // ffmpeg declared colors only
+    bool remove_black_borders_ {true};
     std::shared_mutex rwMutex_;
 
     std::shared_ptr<SinkClient> sink_;

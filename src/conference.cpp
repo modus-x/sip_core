@@ -191,9 +191,9 @@ Conference::Conference(const std::shared_ptr<Account>& account,
                                              'x');
     if (conf_res.size() == 2u) {
 #if defined(__APPLE__) && TARGET_OS_MAC
-        videoMixer_->setParameters(conf_res[0], conf_res[1], AV_PIX_FMT_NV12);
+        videoMixer_->setParameters({(int)conf_res[0], (int)conf_res[1], AV_PIX_FMT_NV12});
 #else
-        videoMixer_->setParameters(conf_res[0], conf_res[1]);
+        videoMixer_->setParameters({(int)conf_res[0], (int)conf_res[1]});
 #endif
     } else {
         SIP_CORE_ERR("Conference resolution is invalid");

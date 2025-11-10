@@ -52,7 +52,7 @@ struct VideoMixer::VideoMixerSource
 {
     Observable<std::shared_ptr<MediaFrame>>* source {nullptr};
     int rotation {0};
-    std::unique_ptr<MediaFilter> rotationFilter {nullptr};
+    std::unique_ptr<MediaFilter> transposeFilter {nullptr};
     std::unique_ptr<MediaFilter> bordersFilter {nullptr};
     std::shared_ptr<VideoFrame> render_frame;
     void atomic_copy(const VideoFrame& other)
@@ -91,6 +91,7 @@ struct VideoMixer::VideoMixerSource
     int lastLayoutFrameWidth {0};
     int lastLayoutFrameHeight {0};
     int lastLayoutOrientation {0};
+    bool isBig {false};
     bool geometryPending {false};
     bool hasVideo {true};
     std::atomic<bool> muted {false};
@@ -631,7 +632,7 @@ VideoMixer::process()
 
                 if (!blackFrame) {
                     if (fooInput)
-                        successfullyRendered |= render_frame(output, fooInput, x);
+                        successfullyRendered |= render_frame(output, fooInput, x, needsUpdate);
                     else
                         SIP_CORE_WARN("[mixer:%s] Nothing to render for %p", id_.c_str(), x->source);
                 }
@@ -684,7 +685,8 @@ VideoMixer::process()
 bool
 VideoMixer::render_frame(VideoFrame& output,
                          const std::shared_ptr<VideoFrame>& input,
-                         std::unique_ptr<VideoMixerSource>& source)
+                         std::unique_ptr<VideoMixerSource>& source,
+                         bool positionChanged)
 {
     if (!width_ or !height_ or !input->pointer() or input->pointer()->format == -1)
         return false;
@@ -696,20 +698,31 @@ VideoMixer::render_frame(VideoFrame& output,
 
     int angle = input->getOrientation();
     const constexpr char filterIn[] = "mixin";
-    if (angle != source->rotation) {
-        source->rotationFilter = video::getTransposeFilter(angle,
-                                                           filterIn,
-                                                           input->width(),
-                                                           input->height(),
-                                                           input->format(),
-                                                           false);
+    if (angle != source->rotation || positionChanged) {
+        int width = 0, height = 0;
+        if(remove_black_borders_ && not source->isBig) {
+            // calculte cropping according to aspects
+            if(grid_aspect_ > input->width() / input->height()) {
+                width = input->width();
+                height = width / grid_aspect_;
+            }
+            else {
+                height = input->height();
+                width = height * grid_aspect_;
+            }
+        }
+        source->transposeFilter = video::getTransposeFilterWithCrop(filterIn,
+                                                                    angle,
+                                                                    width,
+                                                                    height,
+                                                                    input->format());
         source->rotation = angle;
     }
     std::shared_ptr<VideoFrame> frame;
-    if (source->rotationFilter) {
-        source->rotationFilter->feedInput(input->pointer(), filterIn);
+    if (source->transposeFilter) {
+        source->transposeFilter->feedInput(input->pointer(), filterIn);
         frame = std::static_pointer_cast<VideoFrame>(
-            std::shared_ptr<MediaFrame>(source->rotationFilter->readOutput()));
+            std::shared_ptr<MediaFrame>(source->transposeFilter->readOutput()));
     } else {
         frame = input;
     }
@@ -737,6 +750,40 @@ VideoMixer::calc_position(std::unique_ptr<VideoMixerSource>& source,
     if (!width_ or !height_)
         return;
 
+    int frameW, frameH, frameW_off, frameH_off;
+    if(grid_aspect_ == 0.) {
+        std::tie(frameW, frameH, frameW_off, frameH_off) 
+            = calc_position_rel(source, input, index, isActive);
+    } else {
+        std::tie(frameW, frameH, frameW_off, frameH_off) 
+            = calc_position_fixed(source, input, index, isActive);
+    }
+
+    // Update source's cache
+    source->w = frameW - (padding_ + border_size_) * 2;
+    source->h = frameH - (padding_ + border_size_) * 2;
+    source->x.store(frameW_off + padding_ + border_size_);
+    source->y.store(frameH_off + padding_ + border_size_);
+
+    // Update border filter
+    source->bordersFilter = std::unique_ptr<MediaFilter>(new MediaFilter());
+    if (!initBorderFilter(*source->bordersFilter.get(),
+                          "border",
+                          input->format(),
+                          source->x.load(),
+                          source->y.load(),
+                          source->w,
+                          source->h,
+                          isActive))
+        source->bordersFilter.release();
+}
+
+VideoMixer::gripRect
+VideoMixer::calc_position_rel(std::unique_ptr<VideoMixerSource>& source,
+                       const std::shared_ptr<VideoFrame>& input,
+                       int index,
+                       bool isActive)
+{
     // Compute cell size/position
     int cell_width, cell_height, cellW_off, cellH_off;
     const int n = currentLayout_ == Layout::ONE_BIG ? 1
@@ -806,26 +853,120 @@ VideoMixer::calc_position(std::unique_ptr<VideoMixerSource>& source,
     frameW_off = cellW_off + (cell_width - frameW) / 2;
     frameH_off = cellH_off + (cell_height - frameH) / 2;
 
-    // Update source's cache
-    source->w = frameW - (CONF_PADDING + CONF_BORDER_WIDTH) * 2;
-    source->h = frameH - (CONF_PADDING + CONF_BORDER_WIDTH) * 2;
-    source->x.store(frameW_off + CONF_PADDING + CONF_BORDER_WIDTH);
-    source->y.store(frameH_off + CONF_PADDING + CONF_BORDER_WIDTH);
+    return {frameW, frameH, frameW_off, frameH_off};
+}
+    
+VideoMixer::gripRect
+VideoMixer::calc_position_fixed(std::unique_ptr<VideoMixerSource>& source,
+                       const std::shared_ptr<VideoFrame>& input,
+                       int index,
+                       bool isActive)
+{
+    int frameW, frameH, frameW_off, frameH_off;
+    const int n = sources_.size() + audioOnlySources_.size();
 
-    source->bordersFilter = std::unique_ptr<MediaFilter>(new MediaFilter());
-    if (!initBorderFilter(source->bordersFilter.get(),
-                          "border",
-                          input->format(),
-                          source->x.load(),
-                          source->y.load(),
-                          source->w,
-                          source->h,
-                          isActive))
-        source->bordersFilter.release();
+    auto layout_to_draw = n == 1 ? Layout::ONE_BIG : currentLayout_;
+    switch(layout_to_draw)
+    {
+        case Layout::ONE_BIG:
+            // On some platforms (at least macOS/android) - Having one frame at the same
+            // size of the mixer cause it to be grey.
+            // Removing some pixels solve this. We use 16 because it's a multiple of 8
+            // (value that we prefer for video management)
+            frameW = width_ - 16;
+            frameH = height_ - 16;
+
+            frameW_off = index * frameW;
+            frameH_off = index * frameH;
+
+            // Centerize (cellwidth = width_ - 16)
+            frameW_off += 8;
+            frameH_off += 8;
+
+            source->isBig = true;
+            break;
+
+        case Layout::ONE_BIG_WITH_SMALL:
+        {
+            const int max_preview_height = height_ / MIN_LINE_ZOOM;
+            const int preview_height = std::min(static_cast<int>(width_ / (n * grid_aspect_)),
+                                                max_preview_height);
+            const int preview_width = preview_height * grid_aspect_;
+
+            if(index == 0) {
+                // In ONE_BIG_WITH_SMALL, the first line at the top is the previews
+                // The rest is the active source
+                frameH = height_ - preview_height;
+                frameW = width_;
+
+                frameW_off = 0;
+                frameH_off = preview_height; // First line height
+                source->isBig = true;
+            }
+            else {
+                frameW = preview_width;
+                frameH = preview_height;
+
+                frameW_off = (index - 1) * frameW;
+                // Show sources in center
+                frameW_off += (width_ - (n - 1) * frameW) / 2;
+                frameH_off = 0;
+                source->isBig = false;
+            }
+            break;
+        }
+        case Layout::GRID:
+        {
+            int rows = 0, columns = 0;
+            double source_aspect = (double)width_ / (double)height_;
+            
+            // calculate optimal grid. Can be cached for optimization
+            {
+                if(source_aspect < grid_aspect_) { 
+                    // vertical alignment
+                    rows = 2 * height_ * grid_aspect_ / width_;
+                    rows = std::min(rows, n);
+                    columns = n / rows;
+                }
+                else { 
+                    // horizontal alignment
+                    columns = 2 * width_ / (height_ * grid_aspect_);
+                    columns = std::min(columns, n);
+                    rows = n / columns;
+                }
+            }
+
+            if(source_aspect < grid_aspect_) { 
+                // vertical alignment
+                frameH = height_ / rows;
+                frameW = height_ * grid_aspect_;
+            }
+            else { 
+                // horizontal alignment
+                frameW = width_ / columns;
+                frameH = frameW / grid_aspect_;
+            }
+
+            frameH_off = (index / columns) * frameH;
+            frameW_off = (index % columns) * frameW;
+
+            // center participants
+            frameH_off += (height_ - (rows * frameH)) / 2;
+            if(n % columns != 0 && index >= ((columns - 1) * rows)) // if we draw last and not full row
+                frameW_off += (width_ - (n % columns) * frameW) / 2;
+            else
+                frameW_off += (width_ - (columns * frameW)) / 2;
+
+            source->isBig = false;
+            break;
+        }
+    }
+
+    return {frameW, frameH, frameW_off, frameH_off};
 }
 
 bool
-VideoMixer::initBorderFilter(MediaFilter* filter,
+VideoMixer::initBorderFilter(MediaFilter& filter,
                              std::string inputName,
                              int format,
                              int x,
@@ -834,33 +975,42 @@ VideoMixer::initBorderFilter(MediaFilter* filter,
                              int height,
                              bool active)
 {
+    if(border_size_ <= 0)
+        return false;
+
     std::stringstream ss;
     ss << "[" << inputName << "] ";
-    ss << "drawbox=x=" << x - (CONF_BORDER_WIDTH) << ":y=" << y - (CONF_BORDER_WIDTH)
-       << ":w=" << width + (CONF_BORDER_WIDTH * 2) << ":h=" << height + (CONF_BORDER_WIDTH * 2)
-       << ":color=" << (active ? CONF_BORDER_ACTIVE_COLOR : CONF_BORDER_INACTIVE_COLOR)
-       << ":t=" << CONF_BORDER_WIDTH;
+    ss << "drawbox=x=" << x - (border_size_) << ":y=" << y - (border_size_)
+       << ":w=" << width + (border_size_ * 2) << ":h=" << height + (border_size_ * 2)
+       << ":color=" << (active ? active_border_color_ : inactive_border_color_)
+       << ":t=" << border_size_;
 
     constexpr auto one = rational<int>(1);
     std::vector<MediaStream> msv;
     msv.emplace_back(inputName, format, one, width, height, 0, one);
 
-    auto ret = filter->initialize(ss.str(), msv);
+    auto ret = filter.initialize(ss.str(), msv);
     if (ret < 0) {
         SIP_CORE_ERR() << "filter init fail";
         return false;
     }
     return true;
 }
-
+    
 void
-VideoMixer::setParameters(int width, int height, AVPixelFormat format)
+VideoMixer::setParameters(const Parameters& params)
 {
     std::unique_lock lock(rwMutex_);
 
-    width_ = width;
-    height_ = height;
-    format_ = format;
+    width_ = params.width;
+    height_ = params.height;
+    format_ = params.format;
+    grid_aspect_ = fabs(params.grid_aspect);
+    padding_ = params.padding < 0 ? 0 : params.padding;
+    border_size_ = params.border_size < 0 ? 0 : params.border_size;
+    active_border_color_ = params.active_border_color;
+    inactive_border_color_ = params.inactive_border_color;
+    remove_black_borders_ = params.remove_black_borders;
 
     // cleanup the previous frame to have a nice copy in rendering method
     std::shared_ptr<VideoFrame> previous_p(obtainLastFrame());
@@ -946,6 +1096,7 @@ VideoMixer::setVideoLayout(Layout newLayout)
     for (auto& source : sources_) {
         source->w = 0;
         source->h = 0;
+        source->isBig = false;
     }
 }
 

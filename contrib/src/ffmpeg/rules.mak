@@ -136,7 +136,8 @@ FFMPEGCONF += \
 	--enable-filter=fps \
 	--enable-filter=transpose \
 	--enable-filter=pad \
-	--enable-filter=drawbox
+	--enable-filter=drawbox \
+	--enable-filter=crop
 
 # platform specific options (LINUX / MAC)
 ifdef HAVE_LINUX
