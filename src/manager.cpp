@@ -2156,7 +2156,7 @@ Manager::startAudio()
     // Recreate audio driver with new settings
     pimpl_->audiodriver_.reset(pimpl_->base_.audioPreference.createAudioLayer());
 
-    constexpr std::array<AudioDeviceType, 1> TYPES {AudioDeviceType::CAPTURE};
+    constexpr std::array<AudioDeviceType, 2> TYPES {AudioDeviceType::CAPTURE, AudioDeviceType::PLAYBACK};
 
     for (const auto& type : TYPES)
         if (pimpl_->audioStreamUsers_[(unsigned) type])
