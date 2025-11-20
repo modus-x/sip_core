@@ -1344,6 +1344,16 @@ Manager::joinParticipant(const std::string& accountId,
                                          return media.hasValidVideo();
                                      });
 
+    // use default source if not found
+    std::string source;
+    if(attachLocalVideo) {
+        for (auto m : call1Media) {
+            if (m.type_ == MediaType::MEDIA_VIDEO) {
+                source = m.sourceUri_;
+            }
+        }
+    }
+
     // Set corresponding conference details
     auto call2 = account2->getCall(callId2);
     if (!call2) {
@@ -1362,8 +1372,13 @@ Manager::joinParticipant(const std::string& accountId,
                                      });
     }
 
-    // use default source if not found
-    std::string source;
+    if(attachLocalVideo) {
+        for (auto m : call2Media) {
+            if (m.type_ == MediaType::MEDIA_VIDEO) {
+                source = m.sourceUri_;
+            }
+        }
+    }
 
     auto conf = std::make_shared<Conference>(account, "");
     account->attach(conf);
