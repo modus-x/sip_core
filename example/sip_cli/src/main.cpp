@@ -41,8 +41,9 @@ int
 main()
 {
     std::cout << "SIP core Console App" << std::endl;
-    std::cout << "Available commands: call <callee>, add <callee>, del <callee>, move <from> <to>, "
-                 "conf <callee1> ... <calleeN>, switch <device>, hold, resume, hangup, capOn, capOff, video, reregister, unregister, subscribe, unsubscribe, publish, exit"
+    std::cout << "Available commands:\n\tcall <callee>,\n\tadd <callee>,\n\tdel <callee>,\n\tmove <from> <to>,\n\t"
+                 "conf <callee1> ... <calleeN>,\n\tswitch <device>,\n\thold,\n\tresume,\n\thangup,\n\tcapOn,\n\t"
+                 "capOff,\n\tvideo,\n\treregister,\n\tunregister,\n\tsubscribe,\n\tunsubscribe,\n\tpublish,\n\texit"
               << std::endl;
 
     CallController controller(ACCOUNT_ID);
@@ -342,8 +343,9 @@ main()
                          "hangup - hangup current call.\n capOn - start capture of active call in "
                          "a local file.\n capOff - stops capture of video.\n video - enables video "
                          "transfer.\n info - get current call infos.\n reregister - force "
-                         "reregistration.\n unregister - unregister user.\n subscribe <uri1>... - subscribe to events.\n unsubscribe <uri1>... - unsubscribe from events.\n exit - exit program."
-                      << std::endl;
+                         "reregistration.\n unregister - unregister user.\n subscribe <uri1>... - "
+                         "subscribe to events.\n unsubscribe <uri1>... - unsubscribe from events.\n"
+                         "exit - exit program." << std::endl;
         }
     }
 

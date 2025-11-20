@@ -4,7 +4,6 @@
 #include <SDL3/SDL.h>
 
 #include "manager.h"
-#include "video/video_scaler.h"
 
 class SDLVideoRenderer
 {

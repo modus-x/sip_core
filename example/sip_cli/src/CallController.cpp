@@ -667,7 +667,7 @@ CallController::proccesEvents()
 
             auto ptrWindow = m_previewWindows.find(args->id)->second;
             libsip_core::SinkTarget target;
-            target.preferredFormat = AV_PIX_FMT_RGBA;
+            target.preferredFormat = AV_PIX_FMT_ARGB;
 
             target.push = [this, id = args->id, ptrWindow](libsip_core::FrameBuffer frame) {
                 ptrWindow->update(frame);

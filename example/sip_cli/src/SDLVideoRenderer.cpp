@@ -45,7 +45,7 @@ SDLVideoRenderer::init()
     }
 
     m_texture = SDL_CreateTexture(m_renderer,
-                                  SDL_PIXELFORMAT_RGB24,
+                                  SDL_PIXELFORMAT_ARGB8888,
                                   SDL_TEXTUREACCESS_STREAMING,
                                   m_width,
                                   m_height);
@@ -65,7 +65,7 @@ SDLVideoRenderer::init()
     SDL_SetRenderDrawColor(m_renderer, 255, 255, 255, 255); // White
     SDL_RenderClear(m_renderer);
     SDL_RenderPresent(m_renderer);
-
+    
     return true;
 }
 
@@ -79,7 +79,7 @@ SDLVideoRenderer::update(libsip_core::FrameBuffer& frame)
 
     av_frame_free(&m_frame);
     m_frame = av_frame_alloc();
-    m_frame->format = AV_PIX_FMT_RGB24;
+    m_frame->format = AV_PIX_FMT_ARGB;
     m_frame->width = frame->width;
     m_frame->height = frame->height;
 
@@ -93,13 +93,6 @@ SDLVideoRenderer::update(libsip_core::FrameBuffer& frame)
 void
 SDLVideoRenderer::render()
 {
-    void* dst_pixels;
-    int dst_pitch;
-
-    if (!SDL_LockTexture(m_texture, NULL, &dst_pixels, &dst_pitch)) {
-        return;
-    }
-
     SDL_LockMutex(m_mtxFrame);
     // Copy data from AVFrame to texture
     uint8_t* src_data = m_frame->data[0];
@@ -111,8 +104,6 @@ SDLVideoRenderer::render()
 
     bool same_size = (m_frame->width == m_width) && (m_frame->width == m_height);
     if (!same_size) {
-        SDL_UnlockTexture(m_texture);
-
         if (!SDL_SetWindowSize(m_window, m_frame->width, m_frame->height)) {
             SDL_UnlockMutex(m_mtxFrame);
             return;
@@ -120,7 +111,7 @@ SDLVideoRenderer::render()
 
         SDL_DestroyTexture(m_texture);
         m_texture = SDL_CreateTexture(m_renderer,
-                                      SDL_PIXELFORMAT_RGB24,
+                                      SDL_PIXELFORMAT_BGRA8888,
                                       SDL_TEXTUREACCESS_STREAMING,
                                       m_frame->width,
                                       m_frame->height);
@@ -133,10 +124,13 @@ SDLVideoRenderer::render()
         m_width = m_frame->width;
         m_height = m_frame->height;
 
-        if (!SDL_LockTexture(m_texture, NULL, &dst_pixels, &dst_pitch)) {
-            SDL_UnlockMutex(m_mtxFrame);
-            return;
-        }
+    }
+
+    void* dst_pixels;
+    int dst_pitch;
+    if (!SDL_LockTexture(m_texture, NULL, &dst_pixels, &dst_pitch)) {
+        SDL_UnlockMutex(m_mtxFrame);
+        return;
     }
 
     int src_linesize = m_frame->linesize[0];
@@ -146,7 +140,7 @@ SDLVideoRenderer::render()
     for (int y = 0; y < height; y++) {
         uint8_t* src_row = src_data + y * src_linesize;
         uint8_t* dst_row = (uint8_t*) dst_pixels + y * dst_pitch;
-        memcpy(dst_row, src_row, width * 3);
+        memcpy(dst_row, src_row, width * 4);
     }
     SDL_UnlockMutex(m_mtxFrame);
 
