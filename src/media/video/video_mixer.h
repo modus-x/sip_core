@@ -64,6 +64,7 @@ enum class Layout { GRID, ONE_BIG_WITH_SMALL, ONE_BIG };
 
 class VideoMixer : public VideoGenerator, public VideoFramePassiveReader
 {
+    using VideoToStream = std::map<Observable<std::shared_ptr<MediaFrame>>*, StreamInfo>;
 public:
     struct Parameters
     {
@@ -71,8 +72,8 @@ public:
         int height;
         AVPixelFormat format {AV_PIX_FMT_YUV422P};
         double grid_aspect {1.}; // = 0 to match mixer aspect
-        int padding {4};
-        int border_size {6};
+        int padding {5};
+        int border_size {8};
         std::string active_border_color {"CornflowerBlue@1"}; // ffmpeg compatible colors only
         std::string inactive_border_color {"Blue@1"};         // ffmpeg compatible colors only
         bool remove_black_borders {true};
@@ -122,15 +123,33 @@ public:
     void setVoiceActivity(const std::map<std::string, bool>& states);
     void setVoiceActivity(const std::map<std::string, bool>&& states);
 
-    bool verifyActive(const std::string& id) { return activeStream_ == id; }
+    bool hasActive()
+    {
+        std::shared_lock lock(rwMutex_);
+        return !activeStream_.empty();
+    }
+
+    bool verifyActive(const std::string& id)
+    {
+        std::shared_lock lock(rwMutex_);
+        return activeStream_ == id;
+    }
 
     bool moveSource(size_t from_index, size_t to_index);
 
     void setVideoLayout(Layout newLayout);
 
-    Layout getVideoLayout() const { return currentLayout_; }
+    Layout getVideoLayout() 
+    {
+        std::shared_lock lk(rwMutex_);
+        return currentLayout_; 
+    }
 
-    void setOnSourcesUpdated(OnSourcesUpdatedCb&& cb) { onSourcesUpdated_ = std::move(cb); }
+    void setOnSourcesUpdated(OnSourcesUpdatedCb&& cb) 
+    {
+        std::unique_lock lk(rwMutex_);
+        onSourcesUpdated_ = std::move(cb); 
+    }
 
     MediaStream getStream(const std::string& name) const;
 
@@ -147,19 +166,15 @@ public:
 
     void addAudioOnlySource(const std::string& callId, const std::string& streamId)
     {
-        std::unique_lock<std::mutex> lk(audioOnlySourcesMtx_);
-        audioOnlySources_.insert({callId, streamId});
-        lk.unlock();
         std::unique_lock lock(rwMutex_);
+        audioOnlySources_.insert({callId, streamId});
         updateLayout();
     }
 
     void removeAudioOnlySource(const std::string& callId, const std::string& streamId)
     {
-        std::unique_lock<std::mutex> lk(audioOnlySourcesMtx_);
+        std::unique_lock lock(rwMutex_);
         if (audioOnlySources_.erase({callId, streamId})) {
-            lk.unlock();
-            std::unique_lock lock(rwMutex_);
             updateLayout();
         }
     }
@@ -177,6 +192,10 @@ public:
             return {};
         return it->second;
     }
+
+protected:
+    VideoToStream getVideoToStreamInfo() const;
+    std::map<std::string, bool> getVoiceActivity();
 
 private:
     NON_COPYABLE(VideoMixer);
@@ -219,6 +238,11 @@ private:
     void stopSink();
 
     void process();
+    void processSource(std::unique_ptr<VideoMixer::VideoMixerSource>& source,
+                       const std::shared_ptr<VideoFrame> frame,
+                       int& i,
+                       const std::string& streamId,
+                       bool isVoiceActive);
 
     // Process any pending observer detaches in a safe context
     void processPendingDetaches();
@@ -231,8 +255,8 @@ private:
     int height_ = 0;
     AVPixelFormat format_ = AV_PIX_FMT_YUV422P;
     double grid_aspect_ {1.};
-    int padding_ {4};
-    int border_size_ {6};
+    int padding_ {5};
+    int border_size_ {8};
     std::string active_border_color_ {"CornflowerBlue@1"}; // ffmpeg declared colors only
     std::string inactive_border_color_ {"Blue@1"};         // ffmpeg declared colors only
     bool remove_black_borders_ {true};
@@ -254,16 +278,14 @@ private:
 
     // We need to convert call to frame
     mutable std::mutex videoToStreamInfoMtx_ {};
-    std::map<Observable<std::shared_ptr<MediaFrame>>*, StreamInfo> videoToStreamInfo_ {};
+    VideoToStream videoToStreamInfo_ {};
 
     // Queue of observables pending removal to avoid locking in callbacks
     std::mutex pendingDetachMtx_ {};
     std::vector<Observable<std::shared_ptr<MediaFrame>>*> pendingDetaches_ {};
 
-    mutable std::mutex vocieActivivtyMtx_ {};
+    // pair streamId -> activity state
     std::map<std::string, bool> voiceActivity_;
-
-    std::mutex audioOnlySourcesMtx_;
 
     // pair callId -> streamId
     // in case of local participant, it will be empty

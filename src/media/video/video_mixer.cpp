@@ -205,35 +205,32 @@ VideoMixer::startInputs()
 void
 VideoMixer::setActiveStream(const std::string& id)
 {
-    activeStream_ = id;
     std::unique_lock lock(rwMutex_);
+    activeStream_ = id;
     updateLayout("setActiveStream");
 }
 
 void
 VideoMixer::setVoiceActivity(const std::string& streamId, bool state)
 {
-    std::lock_guard<std::mutex> voiceLock(vocieActivivtyMtx_);
-    voiceActivity_[streamId] = state;
     std::unique_lock lock(rwMutex_);
+    voiceActivity_[streamId] = state;
     updateLayout("setVoiceActivity(single)");
 }
 
 void
 VideoMixer::setVoiceActivity(const std::map<std::string, bool>& states)
 {
-    std::lock_guard<std::mutex> voiceLock(vocieActivivtyMtx_);
-    voiceActivity_ = states;
     std::unique_lock lock(rwMutex_);
+    voiceActivity_ = states;
     updateLayout("setVoiceActivity(map)");
 }
 
 void
 VideoMixer::setVoiceActivity(const std::map<std::string, bool>&& states)
 {
-    std::lock_guard<std::mutex> voiceLock(vocieActivivtyMtx_);
-    voiceActivity_ = std::move(states);
     std::unique_lock lock(rwMutex_);
+    voiceActivity_ = std::move(states);
     updateLayout("setVoiceActivity(move)");
 }
 
@@ -349,6 +346,20 @@ VideoMixer::detachVideo(Observable<std::shared_ptr<MediaFrame>>* frame)
         frame->detach(this);
 }
 
+VideoMixer::VideoToStream 
+VideoMixer::getVideoToStreamInfo() const
+{
+    std::lock_guard<std::mutex> lk(videoToStreamInfoMtx_);
+    return videoToStreamInfo_;
+}
+
+std::map<std::string, bool> 
+VideoMixer::getVoiceActivity()
+{
+    std::shared_lock lk(rwMutex_);
+    return voiceActivity_;
+}
+
 void
 VideoMixer::attached(Observable<std::shared_ptr<MediaFrame>>* ob)
 {
@@ -438,22 +449,6 @@ VideoMixer::process()
     // First, process any pending detach requests safely
     processPendingDetaches();
 
-    // Build a cache of stream infos to avoid taking videoToStreamInfoMtx_ while holding rwMutex_
-    std::unordered_map<Observable<std::shared_ptr<MediaFrame>>*, StreamInfo> streamInfoCache;
-    {
-        std::lock_guard<std::mutex> lk(videoToStreamInfoMtx_);
-        streamInfoCache.reserve(videoToStreamInfo_.size());
-        for (const auto& kv : videoToStreamInfo_)
-            streamInfoCache.emplace(kv.first, kv.second);
-    }
-
-    // Snapshot voice activity to avoid locking vocieActivivtyMtx_ under rwMutex_
-    std::map<std::string, bool> voiceActivitySnapshot;
-    {
-        std::lock_guard<std::mutex> lock(vocieActivivtyMtx_);
-        voiceActivitySnapshot = voiceActivity_;
-    }
-
     nextProcess_ += std::chrono::duration_cast<std::chrono::microseconds>(FRAME_DURATION);
     const auto delay = nextProcess_ - std::chrono::steady_clock::now();
     if (delay.count() > 0)
@@ -476,78 +471,56 @@ VideoMixer::process()
     libav_utils::fillWithBlack(output.pointer());
 
     {
-        std::lock_guard<std::mutex> lk(audioOnlySourcesMtx_);
         std::shared_lock lock(rwMutex_);
 
         // does current frame is SUCCESSFULLY rendered?
-        bool successfullyRendered = audioOnlySources_.size() != 0 && sources_.size() == 0;
+        bool layoutRendered = audioOnlySources_.size() != 0 && sources_.size() == 0;
 
         // collection of patricipants, both audio & video
         std::vector<SourceInfo> sourcesInfo;
         sourcesInfo.reserve(sources_.size() + audioOnlySources_.size());
 
-        int i = 0;
+        // Build a cache of stream infos to avoid taking videoToStreamInfoMtx_ while holding rwMutex_
+        VideoToStream streamInfoCache = getVideoToStreamInfo();
 
-        // did active stream was found?
-        bool activeFound = false;
+        // Snapshot voice activity to avoid locking vocieActivivtyMtx_ under rwMutex_
+        std::map<std::string, bool> voiceActivitySnapshot = getVoiceActivity();
 
         const int pendingLayoutUpdates = layoutUpdated_.load(std::memory_order_acquire);
         bool needsUpdate = pendingLayoutUpdates > 0;
         int layoutUpdatesGenerated = 0;
         bool layoutInvalidated = false;
 
-        auto requestLayoutUpdate = [&](const char* reason) {
-            addLayoutUpdate(reason);
-            ++layoutUpdatesGenerated;
-            needsUpdate = true;
-        };
-
-        auto invalidateAndRequestLayoutUpdate = [&](const char* reason) {
-            addLayoutUpdate(reason);
-            ++layoutUpdatesGenerated;
-            needsUpdate = true;
-            layoutInvalidated = true;
-        };
+        int i = 0;
+        if(hasActive())
+            i++; // reserve 0 index place for active stream
 
         // first, iterate and draw audioOnlySources_
         for (auto& [callId, streamId] : audioOnlySources_) {
-            auto isActiveSource = verifyActive(streamId);
+            /* thread stop pending? */
+            if (!loop_.isRunning())
+                return;
+                
             std::shared_ptr<VideoFrame> audioFrame = std::make_shared<VideoFrame>();
             audioFrame->reserve(format_, 640, 480);
 
-            // set "wantedIndex" to current index of video source, for GRID layout
-            auto wantedIndex = i;
-            if (currentLayout_ == Layout::ONE_BIG) {
-                // reset to zero if ONE_BIG layout
-                wantedIndex = 0;
-                activeFound = true;
-            } else if (currentLayout_ == Layout::ONE_BIG_WITH_SMALL) {
-                // show active stream FIRST
-                if (isActiveSource) {
-                    wantedIndex = 0;
-                    activeFound = true;
-                } else if (not activeFound) {
-                    // active streams appears at i == 3
-                    // 1 2 3 0 4 5 6
-                    wantedIndex += 1;
-                }
-            }
-
             auto audioSource = std::make_unique<VideoMixer::VideoMixerSource>();
+            audioSource->hasVideo = false;
 
-            // calc pos, but DO NOT render anything
             bool voiceActive = false;
             if (auto itVA = voiceActivitySnapshot.find(streamId); itVA != voiceActivitySnapshot.end())
                 voiceActive = itVA->second;
-            if (needsUpdate) {
-                calc_position(audioSource, audioFrame, wantedIndex, voiceActive);
-            }
+
+            // calc pos, but DO NOT render anything
+            if(needsUpdate)
+                processSource(audioSource, audioFrame, i, streamId, voiceActive);
+
             sourcesInfo.emplace_back(SourceInfo {{},
                                                  audioSource->x.load(),
                                                  audioSource->y.load(),
                                                  audioSource->w,
                                                  audioSource->h,
-                                                 false,
+                                                 audioSource->hasVideo,
                                                  callId,
                                                  streamId});
             i++;
@@ -559,115 +532,67 @@ VideoMixer::process()
             if (!loop_.isRunning())
                 return;
 
+            if (x->w == 0 || x->h == 0)
+                needsUpdate;
+
             StreamInfo sinfo = {};
             if (auto itSI = streamInfoCache.find(x->source); itSI != streamInfoCache.end())
                 sinfo = itSI->second;
-            auto activeSource = verifyActive(sinfo.streamId);
 
-            if (currentLayout_ != Layout::ONE_BIG or activeSource) {
-                // make rendered frame temporarily unavailable for update()
-                // to avoid concurrent access.
-                std::shared_ptr<VideoFrame> input = x->getRenderFrame();
-                std::shared_ptr<VideoFrame> fooInput = std::make_shared<VideoFrame>();
+            bool voiceActive = false;
+            if (auto itVA = voiceActivitySnapshot.find(sinfo.streamId);
+                itVA != voiceActivitySnapshot.end())
+                voiceActive = itVA->second;
 
-                // set "wantedIndex" to current index of video source, for GRID layout
-                auto wantedIndex = i;
-                if (currentLayout_ == Layout::ONE_BIG) {
-                    // reset to zero if ONE_BIG layout
-                    wantedIndex = 0;
-                    activeFound = true;
-                } else if (currentLayout_ == Layout::ONE_BIG_WITH_SMALL) {
-                    // show active stream FIRST
-                    if (activeSource) {
-                        wantedIndex = 0;
-                        activeFound = true;
-                    } else if (not activeFound) {
-                        // active streams appears at i == 3
-                        // 1 2 3 0 4 5 6
-                        wantedIndex += 1;
-                    }
+            // make rendered frame temporarily unavailable for update()
+            // to avoid concurrent access.
+            std::shared_ptr<VideoFrame> input = x->getRenderFrame();
+            bool geometryChanged = false;
+            if (input->height() and input->width()) {
+                if (input->width() != x->lastLayoutFrameWidth
+                        || input->height() != x->lastLayoutFrameHeight
+                        || input->getOrientation() != x->lastLayoutOrientation)
+                {
+                    needsUpdate = true;
+                    x->lastLayoutFrameWidth = input->width();
+                    x->lastLayoutFrameHeight = input->height();
+                    x->lastLayoutOrientation = input->getOrientation();
                 }
-
-                auto previousHasVideo = x->hasVideo;
-                bool blackFrame = false;
-
-                if (!input->height() or !input->width()) {
-                    successfullyRendered = true;
-                    fooInput->reserve(format_, width_, height_);
-                    blackFrame = true;
-                } else {
-                    fooInput.swap(input);
-                }
-
-                const int frameWidth = fooInput->width();
-                const int frameHeight = fooInput->height();
-                const int frameOrientation = fooInput->getOrientation();
-                const bool requiresInitialLayout = (x->w == 0 || x->h == 0);
-                const bool geometryChanged = !blackFrame
-                    && (frameWidth != x->lastLayoutFrameWidth
-                        || frameHeight != x->lastLayoutFrameHeight
-                        || frameOrientation != x->lastLayoutOrientation);
-
-                if (requiresInitialLayout)
-                    requestLayoutUpdate("initial source layout");
-
-                if (geometryChanged && !x->geometryPending) {
-                    requestLayoutUpdate("frame geometry changed");
-                    x->geometryPending = true;
-                }
-
-                if (needsUpdate) {
-                    bool voiceActive = false;
-                    if (auto itVA = voiceActivitySnapshot.find(sinfo.streamId);
-                        itVA != voiceActivitySnapshot.end())
-                        voiceActive = itVA->second;
-                    calc_position(x, fooInput, wantedIndex, voiceActive);
-                    if (!blackFrame) {
-                        x->lastLayoutFrameWidth = frameWidth;
-                        x->lastLayoutFrameHeight = frameHeight;
-                        x->lastLayoutOrientation = frameOrientation;
-                        x->geometryPending = false;
-                    }
-                }
-
-                if (!blackFrame) {
-                    if (fooInput)
-                        successfullyRendered |= render_frame(output, fooInput, x, needsUpdate);
-                    else
-                        SIP_CORE_WARN("[mixer:%s] Nothing to render for %p", id_.c_str(), x->source);
-                }
-
-                x->hasVideo = !blackFrame && successfullyRendered;
-                if (previousHasVideo != x->hasVideo) {
-                    invalidateAndRequestLayoutUpdate("video availability changed");
-                }
-            } else if (needsUpdate) {
-                x->x.store(0);
-                x->y.store(0);
-                x->w = 0;
-                x->h = 0;
-                x->hasVideo = false;
             }
 
+            if(needsUpdate)
+                processSource(x, input, i, sinfo.streamId, voiceActive);
+
+            bool frameRendered = false;
+            if (input and input->height() and input->width()) {
+                    frameRendered = render_frame(output, input, x, needsUpdate);
+                    layoutRendered |= frameRendered;
+            }
+            else
+                SIP_CORE_WARN("[mixer:%s] Nothing to render for %p", id_.c_str(), x->source);
+
+            if (frameRendered != x->hasVideo) {
+                x->hasVideo = frameRendered;
+                layoutInvalidated = true;
+            }
+
+            sourcesInfo.emplace_back(SourceInfo {x->source,
+                                                 x->x.load(),
+                                                 x->y.load(),
+                                                 x->w,
+                                                 x->h,
+                                                 x->hasVideo,
+                                                 sinfo.callId,
+                                                 sinfo.streamId});
+            
             ++i;
         }
-        if (needsUpdate && successfullyRendered && !layoutInvalidated) {
+
+        if (needsUpdate && layoutRendered && !layoutInvalidated) {
             const int totalUpdatesToConsume = pendingLayoutUpdates + layoutUpdatesGenerated;
             if (totalUpdatesToConsume > 0)
                 consumeLayoutUpdates(totalUpdatesToConsume, "layout processed");
-            for (auto& x : sources_) {
-                StreamInfo sinfo = {};
-                if (auto itSI = streamInfoCache.find(x->source); itSI != streamInfoCache.end())
-                    sinfo = itSI->second;
-                sourcesInfo.emplace_back(SourceInfo {x->source,
-                                                     x->x.load(),
-                                                     x->y.load(),
-                                                     x->w,
-                                                     x->h,
-                                                     x->hasVideo,
-                                                     sinfo.callId,
-                                                     sinfo.streamId});
-            }
+
             if (onSourcesUpdated_)
                 onSourcesUpdated_(std::move(sourcesInfo));
         }
@@ -680,6 +605,39 @@ VideoMixer::process()
                                                                      | AV_ROUND_PASS_MINMAX));
     lastTimestamp_ = output.pointer()->pts;
     publishFrame();
+}
+
+void
+VideoMixer::processSource(std::unique_ptr<VideoMixer::VideoMixerSource>& source,
+                          const std::shared_ptr<VideoFrame> frame,
+                          int& i,
+                          const std::string& streamId,
+                          bool isVoiceActive)
+{
+    // set "wantedIndex" to current index of video source, for GRID layout
+    auto wantedIndex = i;
+    if(currentLayout_ == Layout::ONE_BIG) {
+        // show active stream FIRST
+        if (verifyActive(streamId)) {
+            wantedIndex = 0;
+            i--; // negilate i++ further
+        }
+        else {
+            source->x.store(0);
+            source->y.store(0);
+            source->w = 0;
+            source->h = 0;
+            source->hasVideo = false;
+        }
+    }
+    else {
+        if (currentLayout_ == Layout::ONE_BIG_WITH_SMALL && verifyActive(streamId)) {
+            wantedIndex = 0;
+            i--; // negilate i++ further
+        }
+    }
+    
+    calc_position(source, frame, wantedIndex, isVoiceActive);
 }
 
 bool
@@ -699,6 +657,7 @@ VideoMixer::render_frame(VideoFrame& output,
     int angle = input->getOrientation();
     const constexpr char filterIn[] = "mixin";
     if (angle != source->rotation || positionChanged) {
+        // calculate width and height for cropping
         int width = 0, height = 0;
         if(remove_black_borders_ && not source->isBig) {
             // calculte cropping according to aspects
