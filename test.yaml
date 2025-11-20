@@ -1,0 +1,91 @@
+accounts:
+  - id: test_acc
+    type: SIP
+    hostname: 10.sip.voip.mosreg.ru
+    username: 10444
+    transport: udp
+    activeCodecs: 167/65543/65542
+    upnpEnabled: false
+    bindAddress: ""
+    port: 0
+    publishPort: 5060
+    keepAliveInterval: 5
+    keepAliveType: sip-options
+    registrationExpire: 60
+    serviceRoute: 10.49.120.11
+    backServiceRoute: 10.49.120.12
+    allowIPAutoRewrite: false
+    srtp:
+      keyExchange: ""
+      rtpFallback: false
+preferences:
+  historyLimit: 0
+  ringingTimeout: 30
+  historyMaxCalls: 20
+  order: test_acc/test_acc/
+  portNum: 5060
+  searchBarDisplay: true
+  zoneToneChoice: Russia
+voipPreferences:
+  playDtmf: true
+  playTones: true
+  pulseLength: 250
+audio:
+  alsa:
+    cardIn: 0
+    cardOut: 0
+    cardRing: 0
+    plugin: default
+    smplRate: 44100
+  alwaysRecording: false
+  audioApi: coreaudio
+  captureMuted: false
+  playbackMuted: false
+  pulse:
+    devicePlayback: ""
+    deviceRecord: ""
+    deviceRingtone: ""
+  portaudio:
+    devicePlayback: ""
+    deviceRecord: ""
+    deviceRingtone: ""
+  recordPath: ""
+  volumeMic: 1.00
+  volumeSpkr: 1.00
+  audioProcessor: webrtc
+  noiseReduce: off
+  echoCancel: off
+  voiceActivityDetection: false
+  automaticGainControl: true
+video:
+  recordPreview: true
+  recordQuality: 0
+  conferenceResolution: 1280x720
+  devices:
+    - name: iPhone (2) Camera
+      id: 00AEFF7C-4765-45F9-BC41-45F300000001
+      input: 00AEFF7C-4765-45F9-BC41-45F300000001
+      video_size: 640x480
+      channel: ""
+      framerate: 60
+      quality: 0
+      no_color: false
+      down_scale_factor: 0
+    - name: FaceTime HD Camera
+      id: EAB7A68F-EC2B-4487-AADF-D8A91C1CB782
+      input: EAB7A68F-EC2B-4487-AADF-D8A91C1CB782
+      video_size: 640x480
+      channel: ""
+      framerate: 30
+      quality: 0
+      no_color: false
+      down_scale_factor: 0
+    - name: desktop
+      id: desktop
+      input: desktop
+      video_size: 0x0
+      channel: ""
+      framerate: 30
+      quality: 0
+      no_color: false
+      down_scale_factor: 0

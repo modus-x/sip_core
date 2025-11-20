@@ -25,8 +25,8 @@
 // getPassword();
 
 std::string username = "dev_user";
-std::string password = "!QAZxsw2";
-std::string domain = "192.168.92.27";
+std::string password = "12345";
+std::string domain = "192.168.92.43";
 
 std::atomic_bool g_needFinish(false);
 std::queue<std::vector<std::string>> g_command_queue;
@@ -40,7 +40,7 @@ std::vector<std::string> split(const std::string& s);
 int
 main()
 {
-    std::cout << "SIP core Console App" << std::endl;
+            std::cout << "SIP core Console App" << std::endl;
     std::cout << "Available commands:\n\tcall <callee>,\n\tadd <callee>,\n\tdel <callee>,\n\tmove <from> <to>,\n\t"
                  "conf <callee1> ... <calleeN>,\n\tswitch <device>,\n\thold,\n\tresume,\n\thangup,\n\tcapOn,\n\t"
                  "capOff,\n\tvideo,\n\treregister,\n\tunregister,\n\tsubscribe,\n\tunsubscribe,\n\tpublish,\n\texit"
@@ -272,7 +272,7 @@ main()
             for (auto it = info.begin(); it != info.end(); ++it) {
                 std::cout << " " << it->first << " : " << it->second << std::endl;
             }
-} else if (command == "unregister") {
+        } else if (command == "unregister") {
             if (!controller.unregister()) {
                 std::cerr << "Error: unable to send unregister for current account." << std::endl;
             } else {
