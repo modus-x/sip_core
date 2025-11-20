@@ -494,7 +494,7 @@ SIPCall::SIPSessionReinvite()
 void
 SIPCall::sendSIPInfo(std::string_view body, std::string_view subtype)
 {
-    if (subtype == "media_control+xml") {
+    if (subtype != "media_control+xml" && subtype != "dtmf-relay") {
         return;
     }
     std::lock_guard<std::recursive_mutex> lk {callMutex_};
@@ -541,7 +541,7 @@ SIPCall::updateRecState(bool state)
     SIP_CORE_DBG("Sending recording state via SIP INFO");
 
     try {
-        sendSIPInfo(BODY, "media_control+xml");
+        // sendSIPInfo(BODY, "media_control+xml");
     } catch (const std::exception& e) {
         SIP_CORE_ERR("Error sending recording state: %s", e.what());
     }
@@ -565,7 +565,7 @@ SIPCall::requestKeyframe(int streamIdx)
                          "</to_encoder></vc_primitive></media_control>";
     SIP_CORE_DBG("Sending video keyframe request via SIP INFO");
     try {
-        sendSIPInfo(BODY, "media_control+xml");
+        // sendSIPInfo(BODY, "media_control+xml");
     } catch (const std::exception& e) {
         SIP_CORE_ERR("Error sending video keyframe request: %s", e.what());
     }
@@ -586,7 +586,7 @@ SIPCall::sendMuteState(bool state)
     SIP_CORE_DBG("Sending mute state via SIP INFO");
 
     try {
-        sendSIPInfo(BODY, "media_control+xml");
+        // sendSIPInfo(BODY, "media_control+xml");
     } catch (const std::exception& e) {
         SIP_CORE_ERR("Error sending mute state: %s", e.what());
     }
@@ -1440,7 +1440,7 @@ SIPCall::setVideoOrientation(int streamIdx, int rotation)
 
     SIP_CORE_DBG("Sending device orientation via SIP INFO %d for stream %u", rotation, streamIdx);
 
-    sendSIPInfo(sip_body, "media_control+xml");
+    // sendSIPInfo(sip_body, "media_control+xml");
 }
 
 void
@@ -2983,9 +2983,23 @@ SIPCall::peerVoice(bool voice)
     peerVoice_ = voice;
 
     if (auto conference = conf_.lock()) {
-        conference->updateVoiceActivity();
+            conference->setVoiceActivity(this->getCallId(), voice);
     } else {
         // one-to-one call
+
+        {
+            std::lock_guard<std::mutex> lk(confInfoMutex_);
+            // confID_ empty -> participant set confInfo with the received one
+            auto participant = std::find_if(confInfo_.begin(), confInfo_.end(), [&] (const ParticipantInfo& p) {
+                return p.uri == this->getCallId();
+            });
+
+            if(participant != confInfo_.end()) {
+                participant->voiceActivity = voice;
+            }
+        }
+
+
         // maybe emit signal with partner voice activity
     }
 }

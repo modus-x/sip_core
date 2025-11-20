@@ -671,13 +671,19 @@ Call::setConferenceVoiceActivity(const std::string& msg)
     }
 
     if (not isConferenceParticipant()) {
+        
+        if(!json.isObject())
+            return;
+
         for (const auto& participantInfo : json) {
-            if (!json.isMember("uri") || !json.isMember("state") || !json.isMember("sinkId"))
+
+            if (!participantInfo.isObject() || !participantInfo.isMember("uri") || 
+                     !participantInfo.isMember("state") || !participantInfo.isMember("sinkId"))
                 continue;
                 
-            auto uri = json["uri"].asString();
-            auto sinkId = json["sinkId"].asString();
-            auto state = json["state"].asBool();
+            auto uri = participantInfo["uri"].asString();
+            auto sinkId = participantInfo["sinkId"].asString();
+            auto state = participantInfo["state"].asBool();
             
             {
                 std::lock_guard<std::mutex> lk(confInfoMutex_);

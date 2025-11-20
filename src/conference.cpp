@@ -1202,14 +1202,25 @@ Conference::isVoiceActive(std::string_view streamId) const
 }
 
 void
-Conference::setVoiceActivity(const std::string& streamId, const bool& newState)
+Conference::setVoiceActivity(const std::string& id, const bool& newState)
 {
+    std::string streamId= id;
     // verify that streamID exists in our confInfo
     bool exists = false;
     for (auto& participant : confInfo_) {
         if (participant.sinkId == streamId) {
             exists = true;
             break;
+        }
+    }
+
+    if(!exists) {
+        for (auto& participant : confInfo_) {
+            if (participant.callId == streamId) {
+                streamId = participant.sinkId;
+                exists = true;
+                break;
+            }
         }
     }
 
