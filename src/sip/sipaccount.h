@@ -92,6 +92,7 @@ public:
     {
         return std::make_unique<SipAccountConfig>(getAccountID());
     }
+    void setAccountDetails(const std::map<std::string, std::string>& details) override;
     inline void editConfig(std::function<void(SipAccountConfig& conf)>&& edit)
     {
         Account::editConfig(
