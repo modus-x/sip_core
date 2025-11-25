@@ -1417,8 +1417,10 @@ onRequestRefer(pjsip_inv_session* inv, pjsip_rx_data* rdata, pjsip_msg* msg, SIP
 static void
 onRequestInfo(pjsip_inv_session* inv, pjsip_rx_data* rdata, pjsip_msg* msg, SIPCall& call)
 {
-    if (!msg->body or handleMediaControl(call, msg->body))
-        replyToRequest(inv, rdata, PJSIP_SC_OK);
+    if (msg->body) {
+        handleMediaControl(call, msg->body);
+    }
+    replyToRequest(inv, rdata, PJSIP_SC_OK);
 }
 
 static void
