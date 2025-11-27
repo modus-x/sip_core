@@ -95,7 +95,7 @@ static constexpr unsigned REGISTRATION_FIRST_RETRY_INTERVAL = 25; // seconds
 static constexpr unsigned REGISTRATION_RETRY_INTERVAL = 50;       // seconds
 
 // keep-alive const values
-static constexpr pj_str_t KA_DATA = CONST_PJ_STR("ping!");
+static constexpr pj_str_t KA_DATA = CONST_PJ_STR("");
 
 static char*
 randomSvAuthString(int length)
@@ -367,7 +367,7 @@ keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
     SIPAccount* acc;
     pj_time_val delay;
     char addrtxt[PJ_INET6_ADDRSTRLEN];
-    pj_status_t status;
+    pj_status_t status = PJ_SUCCESS;
 
     PJ_UNUSED_ARG(th);
 
@@ -388,8 +388,11 @@ keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
         return;
     }
 
-    // ignore if not udp
-    if (acc->getTransportType() != PJSIP_TRANSPORT_UDP) {
+    auto transportType = acc->getTransportType();
+    const bool isUdp = transportType == PJSIP_TRANSPORT_UDP;
+    const bool isTcp = transportType == PJSIP_TRANSPORT_TCP;
+    if (!isUdp && !isTcp) {
+        SIP_CORE_DEBUG("KA: transport type %d not supported for keep-alive", transportType);
         return;
     }
 
@@ -402,8 +405,14 @@ keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
     const pjsip_tpselector tp_sel = acc->getTransportSelector();
 
     /* Send keep-alive packet options */
+    const bool forcedOptions = !isUdp && acc->config().keepAliveType != KeepAliveType::Options;
+    const bool useOptions = forcedOptions || acc->config().keepAliveType == KeepAliveType::Options
+                            || !isUdp;
 
-    if (true) {
+    if (useOptions) {
+        if (forcedOptions) {
+            SIP_CORE_DEBUG("KA: TCP transport detected, forcing SIP OPTIONS keep-alive");
+        }
         // Avoid sending a new OPTIONS keep-alive if one is already in flight
         if (acc->ka_options_pending_) {
             SIP_CORE_DEBUG("KA: OPTIONS keep-alive skipped because previous is pending");
@@ -449,8 +458,8 @@ keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
         }
 
     } else {
-        /* Send raw packet */
-        SIP_CORE_DEBUG("KA: Sending {:d} bytes keep-alive packet for acc {:s} to {:s}",
+        /* Send raw empty UDP NAT ping */
+        SIP_CORE_DEBUG("KA: Sending {}-byte keep-alive packet for acc {:s} to {:s}",
                        KA_DATA.slen,
                        contactHeader,
                        pj_sockaddr_print(&acc->kaTarget.socket, addrtxt, sizeof(addrtxt), 3));
@@ -561,8 +570,9 @@ SIPAccount::registerKeepAliveTimer()
         return;
     }
 
-    if (getTransportType() != PJSIP_TRANSPORT_UDP) {
-        SIP_CORE_INFO() << "KA: ka won'be send for non UDP transport";
+    auto transportType = getTransportType();
+    if (transportType != PJSIP_TRANSPORT_UDP && transportType != PJSIP_TRANSPORT_TCP) {
+        SIP_CORE_INFO() << "KA: keep-alive disabled for transport type " << transportType;
         return;
     }
 
@@ -1096,6 +1106,62 @@ SIPAccount::switchTransport(libsip_core::TransportType transportType)
 
     SIP_CORE_ERR("Creation of transport failed.");
     return false;
+}
+
+void
+SIPAccount::setAccountDetails(const std::map<std::string, std::string>& details)
+{
+    SipAccountConfig defaults;
+    KeepAliveType oldKeepAliveType = defaults.keepAliveType;
+    uint32_t oldKeepAliveInterval = defaults.keepAliveInterval;
+    bool wasEnabled = defaults.enabled;
+
+    {
+        std::lock_guard<std::recursive_mutex> lock(configurationMutex_);
+        if (config_) {
+            const auto& cfg = config();
+            oldKeepAliveType = cfg.keepAliveType;
+            oldKeepAliveInterval = cfg.keepAliveInterval;
+            wasEnabled = cfg.enabled;
+        }
+    }
+
+    Account::setAccountDetails(details);
+
+    KeepAliveType newKeepAliveType;
+    uint32_t newKeepAliveInterval;
+    bool isEnabled;
+    {
+        std::lock_guard<std::recursive_mutex> lock(configurationMutex_);
+        const auto& cfg = config();
+        newKeepAliveType = cfg.keepAliveType;
+        newKeepAliveInterval = cfg.keepAliveInterval;
+        isEnabled = cfg.enabled;
+    }
+
+    const bool keepAliveChanged =
+        (oldKeepAliveType != newKeepAliveType) || (oldKeepAliveInterval != newKeepAliveInterval);
+    if (!keepAliveChanged && wasEnabled == isEnabled)
+        return;
+
+    // Clear pending state and restart timers based on the new configuration.
+    ka_options_pending_ = false;
+    ka_main_route_options_pending_ = false;
+    ka_backup_route_options_pending_ = false;
+
+    cancelKeepAliveTimer();
+    cancelMainRouteKeepAliveTimer();
+    cancelBackupRouteKeepAliveTimer();
+
+    if (isUsable() && transport_) {
+        registerKeepAliveTimer();
+        if (hasBackServiceRoute()) {
+            if (isUsingBackupRoute())
+                registerMainRouteKeepAliveTimer();
+            else
+                registerBackupRouteKeepAliveTimer();
+        }
+    }
 }
 
 pjsip_tpselector

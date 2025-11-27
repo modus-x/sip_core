@@ -27,7 +27,12 @@ extern "C" {
 namespace sip_core {
 
 static KeepAliveType getKeepAliveType(const std::string& value) {
-    return value == "sip-options" ? KeepAliveType::Options : KeepAliveType::Packet;
+    if (value == "packet")
+        return KeepAliveType::Packet;
+    if (value == "sip-options")
+        return KeepAliveType::Options;
+    // Default to SIP OPTIONS when unspecified or unrecognized
+    return KeepAliveType::Options;
 }
 
 static constexpr const char*

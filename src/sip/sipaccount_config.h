@@ -60,7 +60,7 @@ struct SipAccountConfig : public SipAccountBaseConfig {
     /**
      * What should be send
      */
-    KeepAliveType keepAliveType {KeepAliveType::Packet};
+    KeepAliveType keepAliveType {KeepAliveType::Options};
 
     /**
      * interface name on which this account is bound
