@@ -260,36 +260,25 @@ SIPCall::setupVoiceCallback(const std::shared_ptr<RtpSession>& rtpSession)
     // need to downcast to access setVoiceCallback
     auto audioRtp = std::dynamic_pointer_cast<AudioRtpSession>(rtpSession);
 
-    audioRtp->setVoiceCallback([w = weak()](bool voice) {
+    audioRtp->setVoiceCallback([w = weak()](const std::string& streamId, bool voice) {
         // this is called whenever voice is detected on the local audio
 
-        runOnMainThread([w, voice] {
+        runOnMainThread([w, &streamId, voice] {
             if (auto thisPtr = w.lock()) {
-                // TODO: once we support multiple streams, change this to the right one
-                std::string streamId = "";
-
+                std::string defaultId = "";
 #ifdef ENABLE_VIDEO
                 if (not sip_core::getVideoDeviceMonitor().getDeviceList().empty()) {
                     // if we have a video device
-                    streamId = sip_utils::streamId("", sip_utils::DEFAULT_VIDEO_STREAMID);
+                    defaultId = sip_utils::streamId("", sip_utils::DEFAULT_VIDEO_STREAMID);
                 }
 #endif
-
-                // send our local voice activity
-                if (auto conference = thisPtr->conf_.lock()) {
-                    // we are in a conference
-
-                    // updates conference info and sends it to others via ConfInfo
-                    // (only if there was a change)
-                    // also emits signal with updated conference info
-                    conference->setVoiceActivity(streamId, voice);
-                } else {
-                    // we are in a one-to-one call
-                    // send voice activity over SIP
-                    // TODO: change the streamID once multiple streams are supported
-                    thisPtr->sendVoiceActivity("-1", voice);
-
-                    // TODO: maybe emit signal here for local voice activity
+                if (defaultId != streamId) {
+                    // remote participant audio
+                    thisPtr->peerVoice(voice);
+                }
+                else {
+                    // local mic voice activity
+                    thisPtr->localVoice(voice);
                 }
             } else {
                 SIP_CORE_ERR("voice activity callback unable to lock weak ptr to SIPCall");
@@ -592,30 +581,30 @@ SIPCall::sendMuteState(bool state)
     }
 }
 
-void
-SIPCall::sendVoiceActivity(std::string_view streamId, bool state)
-{
-    // dont send streamId if it's -1
-    std::string streamIdPart = "";
-    if (streamId != "-1" && !streamId.empty()) {
-        streamIdPart = fmt::format("<stream_id>{}</stream_id>", streamId);
-    }
+// void
+// SIPCall::sendVoiceActivity(std::string_view streamId, bool state)
+// {
+//     // dont send streamId if it's -1
+//     std::string streamIdPart = "";
+//     if (streamId != "-1" && !streamId.empty()) {
+//         streamIdPart = fmt::format("<stream_id>{}</stream_id>", streamId);
+//     }
 
-    std::string BODY = "<?xml version=\"1.0\" encoding=\"utf-8\" ?>"
-                       "<media_control><vc_primitive>"
-                       + streamIdPart
-                       + "<to_encoder>"
-                         "<voice_activity="
-                       + std::to_string(state)
-                       + "/>"
-                         "</to_encoder></vc_primitive></media_control>";
+//     std::string BODY = "<?xml version=\"1.0\" encoding=\"utf-8\" ?>"
+//                        "<media_control><vc_primitive>"
+//                        + streamIdPart
+//                        + "<to_encoder>"
+//                          "<voice_activity="
+//                        + std::to_string(state)
+//                        + "/>"
+//                          "</to_encoder></vc_primitive></media_control>";
 
-    try {
-        sendSIPInfo(BODY, "media_control+xml");
-    } catch (const std::exception& e) {
-        SIP_CORE_ERR("Error sending voice activity state: %s", e.what());
-    }
-}
+//     try {
+//         sendSIPInfo(BODY, "media_control+xml");
+//     } catch (const std::exception& e) {
+//         SIP_CORE_ERR("Error sending voice activity state: %s", e.what());
+//     }
+// }
 
 void
 SIPCall::setInviteSession(pjsip_inv_session* inviteSession)
@@ -2983,7 +2972,12 @@ SIPCall::peerVoice(bool voice)
     peerVoice_ = voice;
 
     if (auto conference = conf_.lock()) {
-            conference->setVoiceActivity(this->getCallId(), voice);
+            if (auto sink = sip_core::Manager::instance().getSinkClient(this->getCallId())) {
+                conference->setVoiceActivity(
+                    sip_utils::streamId(sink->getId(), 
+                                        sip_utils::DEFAULT_VIDEO_STREAMID), 
+                    voice);
+            }
     } else {
         // one-to-one call
 

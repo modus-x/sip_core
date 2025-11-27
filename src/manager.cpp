@@ -71,6 +71,9 @@
 #include "client/ring_signal.h"
 #include "sip_core/call_const.h"
 #include "sip_core/account_const.h"
+#include "sip/sipcall.h"
+#include "media/audio/audio_rtp_session.h"
+#include "media/audio/audio_receive_thread.h"
 
 #include "libav_utils.h"
 #ifdef ENABLE_VIDEO
@@ -2498,6 +2501,19 @@ Manager::setAudioProcessor(const std::string& processor)
         pimpl_->initAudioDriver();
     }
 
+    if(audioPreference.getVadEnabled()) {
+        for (auto& call : callFactory.getAllCalls()) {
+            if (auto sipCall = std::dynamic_pointer_cast<SIPCall>(call)) {
+                for (auto& audioRtp : sipCall->getRtpSessionList(MediaType::MEDIA_AUDIO)) {
+                    auto& recv = std::static_pointer_cast<AudioRtpSession>(audioRtp)
+                            ->getAudioReceive();
+                    recv->setVAD(false);
+                    recv->setVAD(true);
+                }
+            }
+        }
+    }
+
     saveConfig();
 }
 
@@ -2509,6 +2525,16 @@ Manager::setVADState(bool state)
         audioPreference.setVad(state);
         pimpl_->audiodriver_.reset();
         pimpl_->initAudioDriver();
+    }
+
+    for (auto& call : callFactory.getAllCalls()) {
+        if (auto sipCall = std::dynamic_pointer_cast<SIPCall>(call)) {
+            for (auto& audioRtp : sipCall->getRtpSessionList(MediaType::MEDIA_AUDIO)) {
+                auto& recv = std::static_pointer_cast<AudioRtpSession>(audioRtp)
+                        ->getAudioReceive();
+                recv->setVAD(state);
+            }
+        }
     }
 
     saveConfig();

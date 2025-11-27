@@ -40,6 +40,9 @@
 #include <algorithm>
 #include <functional>
 #include <utility>
+#ifdef ENABLE_VIDEO
+#include "videomanager.h"
+#endif
 
 namespace sip_core {
 
@@ -540,6 +543,34 @@ Call::merge(Call& subcall)
         if (auto subcall = subCallWeak.lock())
             subcall->removeCall();
     });
+}
+
+void Call::localVoice(bool state)
+{
+    if (auto conference = conf_.lock()) {
+    // we are in a conference
+
+    std::string streamId = "";
+#ifdef ENABLE_VIDEO
+    if (not sip_core::getVideoDeviceMonitor().getDeviceList().empty()) {
+        // if we have a video device
+        streamId = sip_utils::streamId("", sip_utils::DEFAULT_VIDEO_STREAMID);
+    }
+#endif
+
+    // updates conference info and sends it to others via ConfInfo
+    // (only if there was a change)
+    // also emits signal with updated conference info
+    conference->setVoiceActivity(streamId, state);
+
+    } else {
+        // we are in a one-to-one call
+        // send voice activity over SIP
+        // TODO: change the streamID once multiple streams are supported
+        // thisPtr->sendVoiceActivity("-1", voice);
+
+        // TODO: maybe emit signal here for local voice activity
+    }
 }
 
 /// Handle pending IM message

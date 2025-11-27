@@ -470,6 +470,8 @@ protected:
          Call::CallType type,
          const std::map<std::string, std::string>& details = {});
 
+    virtual void localVoice(bool state);
+
     // TODO all these members are not protected against multi-thread access
 
     const std::string id_ {};
