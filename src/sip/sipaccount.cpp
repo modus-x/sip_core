@@ -234,6 +234,19 @@ main_route_keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
         return;
     }
 
+    const unsigned targetLen = pj_sockaddr_get_len(&acc->kaMainRoute.socket);
+    if (targetLen == 0) {
+        SIP_CORE_ERR("Main route KA: invalid target length");
+        return;
+    }
+    acc->kaMainRoute.length = targetLen;
+    if (targetLen > sizeof(pj_sockaddr_in)) {
+        SIP_CORE_WARN("Main route KA: skipping IPv6-sized target (%u bytes) on UDP transport to "
+                      "avoid pj_ioqueue_sendto assert",
+                      targetLen);
+        return;
+    }
+
     const pjsip_tpselector tp_sel = acc->getTransportSelector();
 
     // Send OPTIONS keep-alive to main route
@@ -268,7 +281,7 @@ main_route_keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
                     ai->name = pj_strdup3(tdata->pool, acc->config().hostname.c_str());
                     ai->addr.count = 1;
                     ai->addr.entry[0].type = acc->getTransportType();
-                    pj_memcpy(&ai->addr.entry[0].addr, ip.pjPtr(), sizeof(pj_sockaddr));
+                    pj_memcpy(&ai->addr.entry[0].addr, ip.pjPtr(), ip.getLength());
                     ai->addr.entry[0].addr_len = ip.getLength();
                     ai->cur_addr = 0;
                 }
@@ -378,6 +391,10 @@ keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
     auto contactHeader = acc->getContactHeader();
 
     auto transport = acc->getTransport();
+    const unsigned targetLen = pj_sockaddr_get_len(&acc->kaTarget.socket);
+    const unsigned maxUdpAddrLen = sizeof(pj_sockaddr_in);
+    const unsigned actualLen = acc->getActualIpAddress().getLength();
+    bool skipSend = false;
 
     /* Check if the account is still active. It might have just been deleted
      * while the keep-alive timer was about to be called (race condition).
@@ -402,6 +419,22 @@ keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
         return;
     }
 
+    if (targetLen == 0) {
+        SIP_CORE_ERR() << "KA: target address has zero length for contact " << contactHeader;
+        return;
+    }
+
+    // Clamp incorrect length to the real sockaddr size. Passing an oversized
+    // length (e.g., IPv6 sockaddr with an IPv4-only pj_ioqueue build) into
+    // pj_ioqueue_sendto triggers a PJ_ASSERT on iOS.
+    if (targetLen != acc->kaTarget.length) {
+        SIP_CORE_WARN("KA: correcting target length from %u to %u for %s",
+                      acc->kaTarget.length,
+                      targetLen,
+                      contactHeader.c_str());
+        acc->kaTarget.length = targetLen;
+    }
+
     const pjsip_tpselector tp_sel = acc->getTransportSelector();
 
     /* Send keep-alive packet options */
@@ -409,7 +442,22 @@ keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
     const bool useOptions = forcedOptions || acc->config().keepAliveType == KeepAliveType::Options
                             || !isUdp;
 
-    if (useOptions) {
+    // Avoid crashing inside pj_ioqueue_sendto on IPv6 destinations when we're
+    // bound to an IPv4 UDP transport.
+    if (isUdp && targetLen > maxUdpAddrLen) {
+        SIP_CORE_WARN("KA: UDP target is IPv6-sized (%u bytes), skipping keep-alive to avoid "
+                      "pj_ioqueue_sendto assert",
+                      targetLen);
+        skipSend = true;
+    }
+    if (isUdp && actualLen > maxUdpAddrLen) {
+        SIP_CORE_WARN("KA: account destination is IPv6-sized (%u bytes) on UDP transport, skipping "
+                      "keep-alive to avoid pj_ioqueue_sendto assert",
+                      actualLen);
+        skipSend = true;
+    }
+
+    if (!skipSend && useOptions) {
         if (forcedOptions) {
             SIP_CORE_DEBUG("KA: TCP transport detected, forcing SIP OPTIONS keep-alive");
         }
@@ -442,22 +490,26 @@ keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
                                                 &tdata);
             SIP_CORE_DEBUG("pjsip_endpt_create_request");
             if (status == PJ_SUCCESS) {
-                acc->setUpTransmissionData(tdata);
+                if (acc->setUpTransmissionData(tdata)) {
 
-                status = pjsip_endpt_send_request(acc->getVoipLink().getEndpoint(),
-                                                  tdata,
-                                                  -1,
-                                                  acc,
-                                                  &keep_alive_on_complete);
+                    status = pjsip_endpt_send_request(acc->getVoipLink().getEndpoint(),
+                                                      tdata,
+                                                      -1,
+                                                      acc,
+                                                      &keep_alive_on_complete);
 
-                SIP_CORE_DEBUG("pjsip_endpt_send_request");
-                if (status == PJ_SUCCESS) {
-                    acc->ka_options_pending_ = true;
+                    SIP_CORE_DEBUG("pjsip_endpt_send_request");
+                    if (status == PJ_SUCCESS) {
+                        acc->ka_options_pending_ = true;
+                    }
+                } else {
+                    status = PJSIP_SC_TSX_TRANSPORT_ERROR;
+                    pjsip_tx_data_dec_ref(tdata);
                 }
             }
         }
 
-    } else {
+    } else if (!skipSend) {
         /* Send raw empty UDP NAT ping */
         SIP_CORE_DEBUG("KA: Sending {}-byte keep-alive packet for acc {:s} to {:s}",
                        KA_DATA.slen,
@@ -470,7 +522,7 @@ keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
                                       KA_DATA.ptr,
                                       KA_DATA.slen,
                                       &acc->kaTarget.socket,
-                                      acc->kaTarget.length,
+                                      targetLen,
                                       NULL,
                                       NULL);
     }
@@ -578,6 +630,19 @@ SIPAccount::registerKeepAliveTimer()
 
     if (kaTarget.length == 0) {
         SIP_CORE_ERR() << "KA: no target is available for contact " << contactHeader;
+        return;
+    }
+
+    const unsigned targetLen = pj_sockaddr_get_len(&kaTarget.socket);
+    if (targetLen == 0) {
+        SIP_CORE_ERR() << "KA: invalid target length for contact " << contactHeader;
+        return;
+    }
+    kaTarget.length = targetLen;
+
+    if (transportType == PJSIP_TRANSPORT_UDP && targetLen > sizeof(pj_sockaddr_in)) {
+        SIP_CORE_WARN() << "KA: UDP keep-alive target is IPv6-sized (" << targetLen
+                        << " bytes); skipping timer registration to avoid pj_ioqueue_sendto assert";
         return;
     }
 
@@ -864,6 +929,13 @@ SIPAccount::sendBackupRouteKeepAlive()
         return false;
     }
 
+    if (getTransportType() == PJSIP_TRANSPORT_UDP
+        && backupIp.getLength() > sizeof(pj_sockaddr_in)) {
+        SIP_CORE_WARN("Backup route KA: skipping IPv6 target on UDP transport to avoid "
+                      "pj_ioqueue_sendto assert");
+        return false;
+    }
+
     if (ka_backup_route_options_pending_) {
         SIP_CORE_DBG("Backup route KA: OPTIONS already in flight, skipping");
         return true;
@@ -892,7 +964,10 @@ SIPAccount::sendBackupRouteKeepAlive()
         return false;
     }
 
-    setUpTransmissionData(tdata, backupIp);
+    if (!setUpTransmissionData(tdata, backupIp)) {
+        pjsip_tx_data_dec_ref(tdata);
+        return false;
+    }
 
     status = pjsip_endpt_send_request(link_.getEndpoint(),
                                       tdata,
@@ -1533,23 +1608,31 @@ SIPAccount::sendRegister()
     setRegistrationInfo(regc);
 }
 
-void
+bool
 SIPAccount::setUpTransmissionData(pjsip_tx_data* tdata)
 {
-    setUpTransmissionData(tdata, getActualIpAddress());
+    return setUpTransmissionData(tdata, getActualIpAddress());
 }
 
-void
+bool
 SIPAccount::setUpTransmissionData(pjsip_tx_data* tdata, const IpAddr& ip)
 {
     if (!ip || !transport_) {
-        return;
+        return false;
     }
 
     auto length = ip.getLength();
     if (length == 0) {
         SIP_CORE_DBG("setUpTransmissionData: target IP has no length");
-        return;
+        return false;
+    }
+
+    if (transport_->getTransportType() == TransportType::UDP
+        && length > sizeof(pj_sockaddr_in)) {
+        SIP_CORE_WARN("setUpTransmissionData: skipping IPv6 target (%u bytes) on UDP transport "
+                      "to avoid pj_ioqueue_sendto assert",
+                      length);
+        return false;
     }
 
     auto ai = &tdata->dest_info;
@@ -1559,6 +1642,8 @@ SIPAccount::setUpTransmissionData(pjsip_tx_data* tdata, const IpAddr& ip)
     pj_memcpy(&ai->addr.entry[0].addr, ip.pjPtr(), length);
     ai->addr.entry[0].addr_len = length;
     ai->cur_addr = 0;
+
+    return true;
 }
 
 void
@@ -1704,8 +1789,8 @@ SIPAccount::onRegister(pjsip_regc_cbparam* param)
 
                     req = tsx->last_tx;
 
-                    kaTarget.length = req->tp_info.dst_addr_len;
                     pj_memcpy(&kaTarget.socket, &req->tp_info.dst_addr, req->tp_info.dst_addr_len);
+                    kaTarget.length = pj_sockaddr_get_len(&kaTarget.socket);
                 }
 
                 // only now set timer
@@ -2556,10 +2641,8 @@ SIPAccount::sendMessage(const std::string& to,
         return;
     }
 
-    setUpTransmissionData(tdata);
-
-    if (status != PJ_SUCCESS) {
-        SIP_CORE_ERR("Unable to set transport: %s", sip_utils::sip_strerror(status).c_str());
+    if (!setUpTransmissionData(tdata)) {
+        SIP_CORE_ERR("Unable to set transport: destination not usable with current transport");
         messageEngine_.onMessageSent(to, id, false);
         return;
     }

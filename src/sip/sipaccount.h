@@ -526,8 +526,8 @@ public:
 
 
     // set explicit transport destination and params for tdata
-    void setUpTransmissionData(pjsip_tx_data* tdata);
-    void setUpTransmissionData(pjsip_tx_data* tdata, const IpAddr& ip);
+    bool setUpTransmissionData(pjsip_tx_data* tdata);
+    bool setUpTransmissionData(pjsip_tx_data* tdata, const IpAddr& ip);
 
     const IpAddr& getServiceRouteIp() { return serviceRouteIp_; };
     const IpAddr& getBackServiceRouteIp() { return backServiceRouteIp_; };

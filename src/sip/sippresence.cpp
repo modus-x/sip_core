@@ -426,7 +426,15 @@ SIPPresence::send_publish(SIPPresence* pres)
 
     status = pjsip_publishc_publish(pres->publish_sess_, PJ_TRUE, &tdata);
 
-    acc->setUpTransmissionData(tdata);
+    if (!acc->setUpTransmissionData(tdata)) {
+        status = PJSIP_SC_TSX_TRANSPORT_ERROR;
+        if (pres->publish_sess_) {
+            pjsip_publishc_destroy(pres->publish_sess_);
+            pres->publish_sess_ = NULL;
+        }
+
+        return status;
+    }
 
     pj_str_t from = pj_strdup3(pres->pool_, acc->getFromUri().c_str());
 
