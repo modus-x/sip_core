@@ -191,7 +191,7 @@ AudioReceiveThread::createAudioProcessor()
 #else
         SIP_CORE_ERR("[audio_receive_thread] audioProcessor preference is webrtc, but library not linked! "
                      "using NullAudioProcessor instead");
-        audioProcessor.reset(new NullAudioProcessor(format_, frame_size));
+        audioProcessor_.reset(new NullAudioProcessor(format_, frame_size));
 #endif
     } else if (sip_core::Manager::instance().audioPreference.getAudioProcessor() == "speex") {
 #if HAVE_SPEEXDSP
@@ -200,7 +200,7 @@ AudioReceiveThread::createAudioProcessor()
 #else
         SIP_CORE_ERR("[audio_receive_thread] audioProcessor preference is speex, but library not linked! "
                      "using NullAudioProcessor instead");
-        audioProcessor.reset(new NullAudioProcessor(format_, frame_size));
+        audioProcessor_.reset(new NullAudioProcessor(format_, frame_size));
 #endif
     } else if (sip_core::Manager::instance().audioPreference.getAudioProcessor() == "null") {
         SIP_CORE_WARN("[audio_receive_thread] using NullAudioProcessor");
