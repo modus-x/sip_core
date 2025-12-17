@@ -11,7 +11,8 @@
         "yaml-cpp",
         "jsoncpp",
         "fmt",
-        "webrtc-audio-processing"
+        "webrtc-audio-processing",
+        "zlib"
     ],
     "use_cmake": true
 }
