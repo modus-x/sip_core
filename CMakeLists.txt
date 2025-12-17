@@ -700,12 +700,13 @@ else()
     pkg_search_module(swresample_${TARGET} REQUIRED IMPORTED_TARGET
                       libswresample)
     pkg_search_module(swscale_${TARGET} REQUIRED IMPORTED_TARGET libswscale)
-    pkg_search_module(avutil_${TARGET} REQUIRED IMPORTED_TARGET GLOBAL
-                      libavutil)
-    pkg_search_module(yaml_${TARGET} REQUIRED IMPORTED_TARGET yaml-cpp)
-    pkg_search_module(json_${TARGET} REQUIRED IMPORTED_TARGET jsoncpp)
-    pkg_search_module(speex_${TARGET} REQUIRED IMPORTED_TARGET speex)
-    pkg_search_module(speexdsp_${TARGET} REQUIRED IMPORTED_TARGET speexdsp)
+	    pkg_search_module(avutil_${TARGET} REQUIRED IMPORTED_TARGET GLOBAL
+	                      libavutil)
+	    pkg_search_module(yaml_${TARGET} REQUIRED IMPORTED_TARGET yaml-cpp)
+	    pkg_search_module(json_${TARGET} REQUIRED IMPORTED_TARGET jsoncpp)
+	    pkg_search_module(speex_${TARGET} REQUIRED IMPORTED_TARGET speex)
+	    pkg_search_module(speexdsp_${TARGET} REQUIRED IMPORTED_TARGET speexdsp)
+	    pkg_search_module(zlib_${TARGET} REQUIRED IMPORTED_TARGET zlib)
 
     # LD_FLAGS are broken on Apple, erase them
     if(APPLE)
@@ -729,23 +730,24 @@ else()
                             PROPERTIES INTERFACE_LINK_OPTIONS "")
     endif()
 
-    target_link_libraries(
-      ${PROJECT_NAME}
-      PUBLIC PkgConfig::avformat_${TARGET}
-             PkgConfig::pjproject_${TARGET}
-             PkgConfig::avdevice_${TARGET}
-             PkgConfig::avfilter_${TARGET}
-             PkgConfig::vpx_${TARGET}
-             PkgConfig::avcodec_${TARGET}
-             PkgConfig::swresample_${TARGET}
-             PkgConfig::swscale_${TARGET}
-             PkgConfig::yaml_${TARGET}
-             PkgConfig::json_${TARGET}
-             PkgConfig::speex_${TARGET}
-             PkgConfig::speexdsp_${TARGET}
-             PkgConfig::fmt_${TARGET}
-      # for passing video frames to external libraries
-      PUBLIC PkgConfig::avutil_${TARGET})
+	    target_link_libraries(
+	      ${PROJECT_NAME}
+	      PUBLIC PkgConfig::avformat_${TARGET}
+	             PkgConfig::pjproject_${TARGET}
+	             PkgConfig::avdevice_${TARGET}
+	             PkgConfig::avfilter_${TARGET}
+	             PkgConfig::vpx_${TARGET}
+	             PkgConfig::avcodec_${TARGET}
+	             PkgConfig::swresample_${TARGET}
+	             PkgConfig::swscale_${TARGET}
+	             PkgConfig::yaml_${TARGET}
+	             PkgConfig::json_${TARGET}
+	             PkgConfig::speex_${TARGET}
+	             PkgConfig::speexdsp_${TARGET}
+	             PkgConfig::fmt_${TARGET}
+	             PkgConfig::zlib_${TARGET}
+	      # for passing video frames to external libraries
+	      PUBLIC PkgConfig::avutil_${TARGET})
 
     if(LINUX)
       target_link_libraries(${PROJECT_NAME}
