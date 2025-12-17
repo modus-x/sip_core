@@ -392,7 +392,7 @@ public:
     {
 #ifdef __ANDROID__
         __android_log_print(msg.level_, APP_NAME, "%s%s", msg.header_.c_str(), msg.payload_.c_str());
-#elifndef _WIN32
+#elif !defined(_WIN32)
         ::syslog(msg.level_, "%.*s", (int) msg.payload_.size(), msg.payload_.data());
 #endif
     }
@@ -533,7 +533,7 @@ public:
     }
 
 private:
-    static constexpr uint64_t DEFAULT_ROTATION_SIZE = 100ull * 1024ull * 1024ull;
+    static constexpr uint64_t DEFAULT_ROTATION_SIZE = 1ull * 1024ull * 1024ull;
     static constexpr std::size_t DEFAULT_ROTATION_KEEP_COUNT = 5;
 
     template<typename T>
@@ -608,6 +608,15 @@ private:
 #endif
     }
 
+    static int removeFile(const std::string& path)
+    {
+#ifdef _WIN32
+        return _wremove(sip_core::to_wstring(path).c_str());
+#else
+        return std::remove(path.c_str());
+#endif
+    }
+
     static bool compressFileGz(const std::string& srcPath, const std::string& dstPath, int level)
     {
         std::ifstream src;
@@ -623,8 +632,7 @@ private:
 
 #ifdef _WIN32
         auto wdst = sip_core::to_wstring(dstPath);
-        auto wmode = sip_core::to_wstring(mode);
-        gzFile dst = gzopen_w(wdst.c_str(), wmode.c_str());
+        gzFile dst = gzopen_w(wdst.c_str(), mode.c_str());
 #else
         gzFile dst = gzopen(dstPath.c_str(), mode.c_str());
 #endif
@@ -752,7 +760,7 @@ private:
         });
 
         for (std::size_t i = keep; i < candidates.size(); ++i) {
-            fileutils::remove(candidates[i].path);
+            removeFile(candidates[i].path);
         }
     }
 
@@ -819,7 +827,7 @@ private:
         const auto level = compression_level_.load(std::memory_order_relaxed);
         const auto gzPath = rotatedPath + ".gz";
         if (compressFileGz(rotatedPath, gzPath, level)) {
-            std::remove(rotatedPath.c_str());
+            removeFile(rotatedPath);
         }
 
         pruneRotatedFiles();
