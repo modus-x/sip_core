@@ -1,0 +1,13 @@
+diff --git a/SMP/config.h b/SMP/config.h
+index dc16f2d..a7e350b 100644
+--- a/SMP/config.h
++++ b/SMP/config.h
+@@ -25,7 +25,7 @@
+ /* #undef FC_ARCHITECTURE */
+ 
+ /* System font directory */
+-#define FC_DEFAULT_FONTS "WINDOWSFONTDIR"
++#define FC_DEFAULT_FONTS "<dir>WINDOWSFONTDIR</dir><dir>WINDOWSUSERFONTDIR</dir>"
+ 
+ /* The type of len parameter of the gperf hash/lookup function */
+ #define FC_GPERF_SIZE_T size_t

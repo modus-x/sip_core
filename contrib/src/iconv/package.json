@@ -12,6 +12,6 @@
     "custom_scripts": {
         "pre_build": [],
         "build": [],
-        "post_build": []
+        "post_build": ["if /I %BUILD_TYPE%==debug cd \"%INSTALL_PREFIX%\\lib\\x64\" && if not exist libiconv.lib mklink libiconv.lib libiconvd.lib"]
     }
 }

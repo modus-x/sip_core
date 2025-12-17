@@ -4,7 +4,7 @@ FFMPEG_URL := https://nexus.svetlocal.ru/repository/github-artifacts/FFmpeg-$(FF
 
 PKGS+=ffmpeg
 
-DEPS_ffmpeg = iconv zlib vpx opus speex x264
+DEPS_ffmpeg = iconv zlib vpx opus speex x264 freetype
 
 FFMPEGCONF = \
 	--cc="$(CC)" \
@@ -17,6 +17,10 @@ FFMPEGCONF += \
 	--enable-gpl \
 	--enable-swscale \
 	--enable-bsfs \
+	--enable-libfreetype \
+	--enable-libfontconfig \
+	--enable-iconv \
+    --enable-libxml2 \
 	--disable-filters \
 	--disable-autodetect \
 	--disable-programs \
@@ -136,7 +140,8 @@ FFMPEGCONF += \
 	--enable-filter=transpose \
 	--enable-filter=pad \
 	--enable-filter=drawbox \
-	--enable-filter=crop
+	--enable-filter=crop \
+	--enable-filter=drawtext
 
 # platform specific options (LINUX / MAC)
 ifdef HAVE_LINUX

@@ -5,7 +5,9 @@
     "deps": [
         "vpx",
         "x264",
-        "opus"
+        "opus",
+        "freetype2",
+        "fontconfig"
     ],
     "patches": [
         "windows-configure.patch"

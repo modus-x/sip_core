@@ -1,0 +1,23 @@
+{
+    "name": "fontconfig",
+    "version": "2.16.2",
+    "url": "https://nexus.svetlocal.ru/repository/github-artifacts/fontconfig-__VERSION__.tar.gz",
+    "deps": [
+        "freetype2",
+        "iconv",
+        "xml2"
+    ],
+    "patches": [
+        "smp_config.patch"
+    ],
+    "win_patches": [],
+    "project_paths": [
+        "SMP/libfontconfig.vcxproj"
+    ],
+    "with_env" : "",
+    "custom_scripts": {
+        "pre_build": [],
+        "build": [],
+        "post_build": ["if /I %BUILD_TYPE%==debug cd \"%INSTALL_PREFIX%\\lib\\x64\" && if not exist libfontconfig.lib mklink libfontconfig.lib libfontconfigd.lib"]
+    }
+}
