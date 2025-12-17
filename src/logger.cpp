@@ -533,7 +533,7 @@ public:
     }
 
 private:
-    static constexpr uint64_t DEFAULT_ROTATION_SIZE = 1ull * 1024ull * 1024ull;
+    static constexpr uint64_t DEFAULT_ROTATION_SIZE = 100ull * 1024ull * 1024ull;
     static constexpr std::size_t DEFAULT_ROTATION_KEEP_COUNT = 5;
 
     template<typename T>
