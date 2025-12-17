@@ -51,6 +51,13 @@
 #include <mutex>
 #include <thread>
 #include <array>
+#include <algorithm>
+
+#include <zlib.h>
+
+#ifdef _WIN32
+#include <cwchar>
+#endif
 
 #include "fileutils.h"
 #include "logger.h"
@@ -439,51 +446,96 @@ public:
 
     void setFile(const std::string& path)
     {
-        if (thread_.joinable()) {
-            notify([this] { enable(false); });
-            thread_.join();
-        }
+        setFile(path, synchronous_.load(std::memory_order_relaxed));
+    }
 
-        std::ofstream file;
-        if (not path.empty()) {
-            file.open(path, std::ofstream::out | std::ofstream::app);
-            enable(true);
-        } else {
+    void setFile(const std::string& path, bool synchronous)
+    {
+        stop();
+
+        std::lock_guard lk(mtx_);
+        synchronous_.store(synchronous, std::memory_order_relaxed);
+        path_ = path;
+
+        if (path_.empty()) {
             enable(false);
             return;
         }
 
-        thread_ = std::thread([this, file = std::move(file)]() mutable {
-            std::vector<Logger::Msg> pendingQ_;
-            while (isEnable()) {
-                {
-                    std::unique_lock lk(mtx_);
-                    cv_.wait(lk, [&] { return not isEnable() or not currentQ_.empty(); });
-                    if (not isEnable())
-                        break;
+        fileutils::openStream(file_,
+                              path_,
+                              std::ios_base::out | std::ios_base::app | std::ios_base::binary);
+        if (not file_.is_open()) {
+            enable(false);
+            return;
+        }
 
-                    std::swap(currentQ_, pendingQ_);
-                }
+        const auto existing_size = fileutils::size(path_);
+        current_size_ = existing_size > 0 ? static_cast<uint64_t>(existing_size) : 0;
 
-                do_consume(file, pendingQ_);
-                pendingQ_.clear();
-            }
-        });
+        enable(true);
+
+        if (not synchronous_.load(std::memory_order_relaxed)) {
+            startThread();
+        }
+    }
+
+    void setSynchronous(bool synchronous)
+    {
+        std::string path;
+        {
+            std::lock_guard lk(mtx_);
+            path = path_;
+        }
+        setFile(path, synchronous);
+    }
+
+    void setRotationSize(uint64_t bytes)
+    {
+        if (bytes == 0) {
+            bytes = DEFAULT_ROTATION_SIZE;
+        }
+        rotation_size_.store(bytes, std::memory_order_relaxed);
+    }
+
+    void setRotationCount(std::size_t files)
+    {
+        rotation_keep_count_.store(files, std::memory_order_relaxed);
+    }
+
+    void setCompressionLevel(int level)
+    {
+        if (level < Z_DEFAULT_COMPRESSION)
+            level = Z_DEFAULT_COMPRESSION;
+        if (level > 9)
+            level = 9;
+        compression_level_.store(level, std::memory_order_relaxed);
     }
 
     ~FileLog()
     {
-        notify([=] { enable(false); });
-        if (thread_.joinable())
-            thread_.join();
+        stop();
     }
 
     virtual void consume(Logger::Msg& msg) override
     {
+        if (synchronous_.load(std::memory_order_relaxed)) {
+            std::lock_guard lk(mtx_);
+            if (not(isEnable() and file_.is_open())) {
+                return;
+            }
+            writeMsg(msg);
+            file_.flush();
+            return;
+        }
+
         notify([&, this] { currentQ_.emplace_back(std::move(msg)); });
     }
 
 private:
+    static constexpr uint64_t DEFAULT_ROTATION_SIZE = 100ull * 1024ull * 1024ull;
+    static constexpr std::size_t DEFAULT_ROTATION_KEEP_COUNT = 5;
+
     template<typename T>
     void notify(T func)
     {
@@ -492,17 +544,350 @@ private:
         cv_.notify_one();
     }
 
-    void do_consume(std::ofstream& file, const std::vector<Logger::Msg>& messages)
+    void stop()
     {
-        for (const auto& msg : messages) {
-            file << msg.header_ << "{" << Logger::logLevelToString(msg.level_) << "} " << msg.payload_;
-
-            if (msg.linefeed_)
-                file << ENDL;
+        std::thread threadToJoin;
+        {
+            std::lock_guard lk(mtx_);
+            if (thread_.joinable()) {
+                enable(false);
+                cv_.notify_one();
+                threadToJoin = std::move(thread_);
+            } else {
+                enable(false);
+            }
         }
-        file.flush();
+
+        if (threadToJoin.joinable()) {
+            threadToJoin.join();
+        }
+
+        std::lock_guard lk(mtx_);
+        if (file_.is_open()) {
+            file_.flush();
+            file_.close();
+        }
+        currentQ_.clear();
+        current_size_ = 0;
     }
 
+    static std::string rotationSuffix()
+    {
+        struct timeval tv;
+        if (gettimeofday(&tv, NULL) != 0) {
+            tv.tv_sec = time(NULL);
+            tv.tv_usec = 0;
+        }
+
+        std::time_t t = tv.tv_sec;
+        std::tm tm {};
+#ifdef _WIN32
+        localtime_s(&tm, &t);
+#else
+        localtime_r(&t, &tm);
+#endif
+
+        char buf[32] = {0};
+        std::strftime(buf, sizeof(buf), "%Y%m%d-%H%M%S", &tm);
+
+        char suffix[48] = {0};
+        std::snprintf(suffix,
+                      sizeof(suffix),
+                      "%s.%03ld",
+                      buf,
+                      static_cast<long>(tv.tv_usec / 1000));
+        return suffix;
+    }
+
+    static int renameFile(const std::string& from, const std::string& to)
+    {
+#ifdef _WIN32
+        return _wrename(sip_core::to_wstring(from).c_str(), sip_core::to_wstring(to).c_str());
+#else
+        return std::rename(from.c_str(), to.c_str());
+#endif
+    }
+
+    static bool compressFileGz(const std::string& srcPath, const std::string& dstPath, int level)
+    {
+        std::ifstream src;
+        fileutils::openStream(src, srcPath, std::ios_base::in | std::ios_base::binary);
+        if (not src.is_open()) {
+            return false;
+        }
+
+        std::string mode = "wb";
+        if (level >= 0 && level <= 9) {
+            mode += std::to_string(level);
+        }
+
+#ifdef _WIN32
+        auto wdst = sip_core::to_wstring(dstPath);
+        auto wmode = sip_core::to_wstring(mode);
+        gzFile dst = gzopen_w(wdst.c_str(), wmode.c_str());
+#else
+        gzFile dst = gzopen(dstPath.c_str(), mode.c_str());
+#endif
+        if (dst == nullptr) {
+            return false;
+        }
+
+        std::array<char, 64 * 1024> buffer;
+        while (src.good()) {
+            src.read(buffer.data(), buffer.size());
+            const auto got = src.gcount();
+            if (got <= 0) {
+                continue;
+            }
+            const auto toWrite = static_cast<unsigned int>(got);
+            const int written = gzwrite(dst, buffer.data(), toWrite);
+            if (written != static_cast<int>(toWrite)) {
+                gzclose(dst);
+                return false;
+            }
+        }
+
+        const int closeResult = gzclose(dst);
+        return closeResult == Z_OK;
+    }
+
+    static void splitDirAndFilename(const std::string& path, std::string& dir, std::string& filename)
+    {
+        const auto pos = path.find_last_of("/\\");
+        if (pos == std::string::npos) {
+            dir = ".";
+            filename = path;
+            return;
+        }
+
+        if (pos == 0) {
+            dir = path.substr(0, 1);
+        } else {
+            dir = path.substr(0, pos);
+        }
+        filename = path.substr(pos + 1);
+
+        if (dir.empty()) {
+            dir = ".";
+        }
+    }
+
+    static std::string joinPath(const std::string& dir, const std::string& filename)
+    {
+        if (dir.empty() or dir == ".") {
+            return filename;
+        }
+
+        const char last = dir.back();
+        if (last == '/' || last == '\\') {
+            return dir + filename;
+        }
+
+        return dir + DIR_SEPARATOR_CH + filename;
+    }
+
+    static bool startsWith(const std::string& value, const std::string& prefix)
+    {
+        return value.size() >= prefix.size() && value.compare(0, prefix.size(), prefix) == 0;
+    }
+
+    void pruneRotatedFiles()
+    {
+        const auto keep = rotation_keep_count_.load(std::memory_order_relaxed);
+        if (keep == 0) {
+            return;
+        }
+
+        std::string dir;
+        std::string filename;
+        splitDirAndFilename(path_, dir, filename);
+
+        const auto entries = fileutils::readDirectory(dir);
+        const std::string prefix = filename + ".";
+        const auto isRotatedLogName = [&](const std::string& name) -> bool {
+            const auto start = prefix.size();
+            if (name.size() <= start + 8) {
+                return false;
+            }
+            for (std::size_t i = 0; i < 8; ++i) {
+                const char c = name[start + i];
+                if (c < '0' || c > '9') {
+                    return false;
+                }
+            }
+            return name[start + 8] == '-';
+        };
+
+        struct Candidate
+        {
+            std::string path;
+            uint64_t lastWriteTime;
+            std::string name;
+        };
+
+        std::vector<Candidate> candidates;
+        candidates.reserve(entries.size());
+        for (const auto& entry : entries) {
+            if (not startsWith(entry, prefix)) {
+                continue;
+            }
+            if (not isRotatedLogName(entry)) {
+                continue;
+            }
+
+            auto fullPath = joinPath(dir, entry);
+            const auto lastWriteTime = fileutils::lastWriteTime(fullPath);
+            candidates.emplace_back(Candidate {std::move(fullPath), lastWriteTime, entry});
+        }
+
+        if (candidates.size() <= keep) {
+            return;
+        }
+
+        std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
+            if (a.lastWriteTime != b.lastWriteTime) {
+                return a.lastWriteTime > b.lastWriteTime;
+            }
+            return a.name > b.name;
+        });
+
+        for (std::size_t i = keep; i < candidates.size(); ++i) {
+            fileutils::remove(candidates[i].path);
+        }
+    }
+
+    void rotateIfNeeded(uint64_t nextWriteSize)
+    {
+        const auto limit = rotation_size_.load(std::memory_order_relaxed);
+        if (limit == 0) {
+            return;
+        }
+
+        if (current_size_ == 0) {
+            return;
+        }
+
+        if (current_size_ + nextWriteSize < limit) {
+            return;
+        }
+
+        rotate();
+    }
+
+    void rotate()
+    {
+        if (path_.empty() or not file_.is_open()) {
+            return;
+        }
+
+        file_.flush();
+        file_.close();
+
+        const auto suffix = rotationSuffix();
+
+        std::string rotatedPath;
+        bool renamed = false;
+        for (int attempt = 0; attempt < 10; ++attempt) {
+            rotatedPath = path_ + "." + suffix;
+            if (attempt != 0) {
+                rotatedPath += fmt::format(".{}", attempt);
+            }
+            if (renameFile(path_, rotatedPath) == 0) {
+                renamed = true;
+                break;
+            }
+        }
+
+        if (not renamed) {
+            fileutils::openStream(file_,
+                                  path_,
+                                  std::ios_base::out | std::ios_base::app | std::ios_base::binary);
+            const auto existing_size = fileutils::size(path_);
+            current_size_ = existing_size > 0 ? static_cast<uint64_t>(existing_size) : 0;
+            return;
+        }
+
+        fileutils::openStream(file_, path_, std::ios_base::out | std::ios_base::trunc | std::ios_base::binary);
+        if (not file_.is_open()) {
+            // Fallback to append mode if we can't recreate the log file.
+            fileutils::openStream(file_,
+                                  path_,
+                                  std::ios_base::out | std::ios_base::app | std::ios_base::binary);
+        }
+        current_size_ = 0;
+
+        const auto level = compression_level_.load(std::memory_order_relaxed);
+        const auto gzPath = rotatedPath + ".gz";
+        if (compressFileGz(rotatedPath, gzPath, level)) {
+            std::remove(rotatedPath.c_str());
+        }
+
+        pruneRotatedFiles();
+    }
+
+    static uint64_t estimateWriteSize(const Logger::Msg& msg, const std::string& level)
+    {
+        // header + "{" + level + "} " + payload + optional '\n'
+        uint64_t size = msg.header_.size() + 1 + level.size() + 2 + msg.payload_.size();
+        if (msg.linefeed_) {
+            size += 1;
+        }
+        return size;
+    }
+
+    void writeMsg(const Logger::Msg& msg)
+    {
+        const auto level = Logger::logLevelToString(msg.level_);
+        const auto writeSize = estimateWriteSize(msg, level);
+        rotateIfNeeded(writeSize);
+
+        file_.write(msg.header_.data(), static_cast<std::streamsize>(msg.header_.size()));
+        file_.put('{');
+        file_.write(level.data(), static_cast<std::streamsize>(level.size()));
+        file_.write("} ", 2);
+        file_.write(msg.payload_.data(), static_cast<std::streamsize>(msg.payload_.size()));
+        if (msg.linefeed_) {
+            file_.put(ENDL);
+        }
+        current_size_ += writeSize;
+    }
+
+    void do_consume(const std::vector<Logger::Msg>& messages)
+    {
+        for (const auto& msg : messages) {
+            writeMsg(msg);
+        }
+        file_.flush();
+    }
+
+    void startThread()
+    {
+        thread_ = std::thread([this]() mutable {
+            std::vector<Logger::Msg> pendingQ_;
+            while (true) {
+                {
+                    std::unique_lock lk(mtx_);
+                    cv_.wait(lk, [&] { return not isEnable() or not currentQ_.empty(); });
+                    if (not isEnable() and currentQ_.empty())
+                        break;
+
+                    std::swap(currentQ_, pendingQ_);
+                }
+
+                do_consume(pendingQ_);
+                pendingQ_.clear();
+            }
+        });
+    }
+
+    std::atomic_bool synchronous_ {false};
+    std::atomic<uint64_t> rotation_size_ {DEFAULT_ROTATION_SIZE};
+    std::atomic_size_t rotation_keep_count_ {DEFAULT_ROTATION_KEEP_COUNT};
+    std::atomic_int compression_level_ {Z_DEFAULT_COMPRESSION};
+
+    std::string path_;
+    std::ofstream file_;
+    uint64_t current_size_ {0};
     std::vector<Logger::Msg> currentQ_;
     std::mutex mtx_;
     std::condition_variable cv_;
@@ -513,6 +898,36 @@ void
 Logger::setFileLog(const std::string& path)
 {
     FileLog::instance().setFile(path);
+}
+
+void
+Logger::setFileLog(const std::string& path, bool synchronous)
+{
+    FileLog::instance().setFile(path, synchronous);
+}
+
+void
+Logger::setFileLogSync(bool enable)
+{
+    FileLog::instance().setSynchronous(enable);
+}
+
+void
+Logger::setFileLogRotationSize(std::size_t bytes)
+{
+    FileLog::instance().setRotationSize(bytes);
+}
+
+void
+Logger::setFileLogRotationCount(std::size_t files)
+{
+    FileLog::instance().setRotationCount(files);
+}
+
+void
+Logger::setFileLogCompressionLevel(int level)
+{
+    FileLog::instance().setCompressionLevel(level);
 }
 
 LIBSIP_CORE_PUBLIC void

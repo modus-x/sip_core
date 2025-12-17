@@ -30,6 +30,7 @@
 
 #include <cinttypes> // for PRIx64
 #include <cstdarg>
+#include <cstddef>
 
 #include <atomic>
 #include <sstream>
@@ -125,6 +126,11 @@ public:
     static void setSysLog(bool enable);
     static void setMonitorLog(bool enable);
     static void setFileLog(const std::string& path);
+    static void setFileLog(const std::string& path, bool synchronous);
+    static void setFileLogSync(bool enable);
+    static void setFileLogRotationSize(std::size_t bytes);
+    static void setFileLogRotationCount(std::size_t files);
+    static void setFileLogCompressionLevel(int level);
 
     static void setDebugMode(bool enable);
     static bool debugEnabled();
