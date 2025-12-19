@@ -4,7 +4,7 @@ LIBXML2_URL := https://nexus.svetlocal.ru/repository/github-artifacts/libxml2-$(
 
 PKGS += xml2
 
-DEPS_xml2 = zlib iconv lzma
+DEPS_xml2 = zlib iconv
 
 XML2_CMAKECONF := -DBUILD_SHARED_LIBS=OFF
 
@@ -17,7 +17,7 @@ xml2: libxml2-$(LIBXML2_VERSION).tar.gz .sum-xml2
 	$(UNPACK)
 	$(MOVE)
 
-.xml2: toolchain.cmake xml2
+.xml2: xml2 toolchain.cmake
 	cd $< && $(HOSTVARS) cmake -E make_directory build &&  $(CMAKE) -B build ${XML2_CMAKECONF}
 	cd $</build && $(MAKE) install
 	touch $@
