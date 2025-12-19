@@ -13,6 +13,7 @@ $(TARBALLS)/fontconfig-$(FONTCONFIG_VERSION).tar.gz:
 
 fontconfig: fontconfig-$(FONTCONFIG_VERSION).tar.gz .sum-fontconfig
 	$(UNPACK)
+	$(APPLY) $(SRC)/fontconfig/configure.patch
 	$(MOVE)
 
 .fontconfig: fontconfig
