@@ -4,7 +4,7 @@ FFMPEG_URL := https://nexus.svetlocal.ru/repository/github-artifacts/FFmpeg-$(FF
 
 PKGS+=ffmpeg
 
-DEPS_ffmpeg = iconv zlib vpx opus speex x264 freetype
+DEPS_ffmpeg = iconv zlib vpx opus speex x264 freetype2 fontconfig
 
 FFMPEGCONF = \
 	--cc="$(CC)" \

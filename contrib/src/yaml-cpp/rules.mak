@@ -21,6 +21,6 @@ yaml-cpp: yaml-cpp-$(YAML_CPP_VERSION).tar.gz .sum-yaml-cpp
 	$(MOVE)
 
 .yaml-cpp: yaml-cpp toolchain.cmake
-	cd $< && $(HOSTVARS) $(CMAKE) . $(YAML_CPP_CMAKECONF)
+	cd $< && $(HOSTVARS) $(CMAKE) $(YAML_CPP_CMAKECONF)
 	cd $< && $(MAKE) install
 	touch $@

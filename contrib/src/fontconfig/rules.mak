@@ -1,8 +1,10 @@
 # fontconfig
-FONTCONFIG_VERSION := 2-16-2
+FONTCONFIG_VERSION := 2.16.2
 FONTCONFIG_URL := https://nexus.svetlocal.ru/repository/github-artifacts/fontconfig-$(FONTCONFIG_VERSION).tar.gz
 
 PKGS += fontconfig
+
+DEPS_fontconfig = freetype2 iconv xml2
 
 $(TARBALLS)/fontconfig-$(FONTCONFIG_VERSION).tar.gz:
 	$(call download,$(FONTCONFIG_URL))
@@ -14,6 +16,6 @@ fontconfig: fontconfig-$(FONTCONFIG_VERSION).tar.gz .sum-fontconfig
 	$(MOVE)
 
 .fontconfig: fontconfig
-	cd $< && $(HOSTVARS) ./configure --prefix=$(PREFIX)
+	cd $< && $(HOSTVARS) sh autogen.sh --disable-docs --disable-shared --prefix=$(PREFIX)
 	cd $< && $(MAKE) install
 	touch $@
