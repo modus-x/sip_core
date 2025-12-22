@@ -27,7 +27,6 @@ FFMPEGCONF+='
             --enable-static
             --enable-zlib
             --disable-shared
-            --enable-cross-compile
             --enable-gpl
             --enable-swscale
             --enable-protocols
@@ -146,7 +145,7 @@ FFMPEGCONF+='
 echo "configure and make ffmpeg for win32-x64... in $(pwd)"
 
 # extra libs
-EXTRALDFLAGS="libopus.lib libx264.lib libvpx.lib libfreetype.lib libfontconfig.lib"
+EXTRALDFLAGS="libopus.lib libx264.lib libvpx.lib libfreetype.lib libfontconfig.lib libzlib.lib"
 
 # configure debug / release libs
 if [ "$1" == "Debug" ]; then
