@@ -210,7 +210,6 @@ endif
 
 cppcheck = $(shell $(CC) $(CFLAGS) -E -dM - < /dev/null | grep -E $(1))
 
-EXTRA_CPPFLAGS += -I$(PREFIX)/include
 EXTRA_LDFLAGS += -L$(PREFIX)/lib
 
 CPPFLAGS := $(CPPFLAGS) $(EXTRA_CPPFLAGS)
