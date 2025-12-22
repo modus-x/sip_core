@@ -420,7 +420,6 @@ target_compile_definitions(
     LIBSIP_CORE_BUILD
     # define exports Conditionally add compile definitions based on platform
     $<$<OR:$<BOOL:${LINUX}>,$<BOOL:${MSVC}>,$<BOOL:${ANDROID}>>:HAVE_WEBRTC_AP>
-    $<$<OR:$<BOOL:${LINUX}>,$<BOOL:${MSVC}>,$<BOOL:${ANDROID}>>:HAVE_SPEEXDSP>
     # Building shared library
     SIP_CORE_EXPORTS)
 
@@ -471,7 +470,6 @@ if(MSVC)
       "${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/http_parser;"
       "${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/jsoncpp/include;"
       "${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/yaml-cpp/include;"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/speexdsp/include;"
       "${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/webrtc-audio-processing;"
       "${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/portaudio/include;"
       $<$<CONFIG:Debug>:${DEPS_DEBUG}/include>
@@ -592,8 +590,6 @@ if(MSVC)
             optimized
             ${DEPS_RELEASE}/fmt.lib
             optimized
-            ${DEPS_RELEASE}/libspeexdsp.lib
-            optimized
             ${DEPS_RELEASE}/webrtc-audio-processing.lib
             optimized
             ${DEPS_RELEASE}/portaudio_static_x64.lib
@@ -629,8 +625,6 @@ if(MSVC)
             ${DEPS_DEBUG}/libyaml-cppmdd.lib
             debug
             ${DEPS_DEBUG}/fmtd.lib
-            debug
-            ${DEPS_DEBUG}/libspeexdsp.lib
             debug
             ${DEPS_DEBUG}/webrtc-audio-processing.lib
             debug
@@ -723,8 +717,6 @@ else()
 	                      libavutil)
 	    pkg_search_module(yaml_${TARGET} REQUIRED IMPORTED_TARGET yaml-cpp)
 	    pkg_search_module(json_${TARGET} REQUIRED IMPORTED_TARGET jsoncpp)
-	    pkg_search_module(speex_${TARGET} REQUIRED IMPORTED_TARGET speex)
-	    pkg_search_module(speexdsp_${TARGET} REQUIRED IMPORTED_TARGET speexdsp)
 	    pkg_search_module(zlib_${TARGET} REQUIRED IMPORTED_TARGET zlib)
 
     # LD_FLAGS are broken on Apple, erase them
@@ -761,8 +753,6 @@ else()
 	             PkgConfig::swscale_${TARGET}
 	             PkgConfig::yaml_${TARGET}
 	             PkgConfig::json_${TARGET}
-	             PkgConfig::speex_${TARGET}
-	             PkgConfig::speexdsp_${TARGET}
 	             PkgConfig::fmt_${TARGET}
 	             PkgConfig::zlib_${TARGET}
 	      # for passing video frames to external libraries

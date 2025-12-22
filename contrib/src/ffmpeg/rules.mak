@@ -214,6 +214,15 @@ FFMPEGCONF += \
 	--enable-pic
 endif
 
+ifdef HAVE_WIN32
+# For `MediaDemuxer::openInput()` using `format=lavfi` + `input=gfxcapture` with
+# `resize_mode=scale_aspect` and `hwdownload`.
+FFMPEGCONF += \
+	--enable-indev=lavfi \
+	--enable-filter=gfxcapture \
+	--enable-filter=hwdownload
+endif
+
 # x86 stuff
 ifeq ($(ARCH),i386)
 FFMPEGCONF += --arch=x86
