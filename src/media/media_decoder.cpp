@@ -44,6 +44,7 @@
 #include <thread> // hardware_concurrency
 #include <chrono>
 #include <algorithm>
+#include <vector>
 
 namespace sip_core {
 
@@ -100,23 +101,38 @@ MediaDemuxer::openInput(const DeviceParams& params)
 
     std::string filter;
     if (params.format == "lavfi" && params.input == "gfxcapture") {
+        std::vector<std::string> opts;
+
         if (not params.window_id.empty()) {
-            if(params.window_id.rfind("0x", 0) == 0) // starts with
-                filter += fmt::format("monitor_idx=window:hwnd={}:", params.window_id);
-            else
-                filter += fmt::format("monitor_idx={}:", params.window_id);
-        }
-        else {
-            filter += "monitor_idx=0";
+            if (params.window_id.rfind("0x", 0) == 0) { // starts with
+                // Explicit HWND capture (window can be resized; resize_mode controls behavior).
+                opts.emplace_back(fmt::format("hwnd={}", params.window_id));
+            } else {
+                // Monitor index capture.
+                opts.emplace_back(fmt::format("monitor_idx={}", params.window_id));
+            }
+        } else {
+            opts.emplace_back("monitor_idx=0");
         }
 
-        if (params.width and params.height)
-            filter += fmt::format("width={}:height={}:", params.width, params.height);
+        // Force a stable output canvas size when requested (or when params were probed upstream).
+        if (params.width and params.height) {
+            opts.emplace_back(fmt::format("width={}", params.width));
+            opts.emplace_back(fmt::format("height={}", params.height));
+        }
+
+        // Keep RTP stream stable on window resize by fitting the content into the canvas.
+        opts.emplace_back("resize_mode=scale_aspect");
 
         if (params.framerate)
-            filter += fmt::format("max_framerate={}:", params.framerate.real());
+            opts.emplace_back(fmt::format("max_framerate={}", params.framerate.real()));
 
-        filter.pop_back(); // remove last ':'
+        for (size_t i = 0; i < opts.size(); ++i) {
+            if (i)
+                filter += ":";
+            filter += opts[i];
+        }
+
         filter += ",hwdownload,format=bgra";
         if (not params.pixel_format.empty())
             filter += fmt::format(",format={}", params.pixel_format);

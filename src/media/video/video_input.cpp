@@ -41,6 +41,7 @@
 #include <string>
 #include <sstream>
 #include <cassert>
+#include <cctype>
 #ifdef _MSC_VER
 #include <io.h> // for access
 #else
@@ -561,38 +562,105 @@ VideoInput::initAVFoundation(const std::string& display)
 bool
 VideoInput::initWindowsCapture(const std::string& params)
 {
-    size_t space = params.find(' ');
     clearOptions();
     decOpts_ = sip_core::getVideoDeviceMonitor().getDeviceParams(DEVICE_DESKTOP);
 
-    const std::string sourceStr = " source:";
-    size_t sourcePos = params.find(sourceStr);
-    if (sourcePos != std::string::npos) {
-        decOpts_.window_id = params.substr(sourcePos + sourceStr.size()); // "0x0340021e";
-        space = params.find(sourcePos, ' ');
+    const std::string sourceStr = "source:";
+    const size_t sourcePos = params.find(sourceStr);
+    if (sourcePos != std::string::npos
+        && (sourcePos == 0 || std::isspace(static_cast<unsigned char>(params[sourcePos - 1]))))
+    {
+        const size_t sourceStart = sourcePos + sourceStr.size();
+        size_t sourceEnd = params.find_first_of(" ,\t\r\n", sourceStart);
+        if (sourceEnd == std::string::npos)
+            sourceEnd = params.size();
+
+        auto source = params.substr(sourceStart, sourceEnd - sourceStart);
+        // Some UIs include decorations like "source:1- SCREEN ..."; keep only the actual id.
+        while (!source.empty() && !std::isalnum(static_cast<unsigned char>(source.back())))
+            source.pop_back();
+        decOpts_.window_id = std::move(source); // e.g. "0x0340021e" or "0"
     }
 
-    if (space != std::string::npos) {
-        std::istringstream iss(params.substr(space + 1));
-        char sep;
-        unsigned w, h;
-        iss >> w >> sep >> h;
+    auto parseSize = [&](unsigned& outW, unsigned& outH) -> bool {
+        // Find a "<digits>x<digits>" pattern (avoid matching "0x..." hex prefixes).
+        for (size_t i = 0; i < params.size(); ++i) {
+            if (!std::isdigit(static_cast<unsigned char>(params[i])))
+                continue;
+            if (i > 0 && (params[i - 1] == '+' || !std::isspace(static_cast<unsigned char>(params[i - 1]))))
+                continue;
+            size_t j = i;
+            while (j < params.size() && std::isdigit(static_cast<unsigned char>(params[j])))
+                ++j;
+            if (j >= params.size() || params[j] != 'x')
+                continue;
+            const size_t xPos = j;
+            ++j;
+            if (j >= params.size() || !std::isdigit(static_cast<unsigned char>(params[j])))
+                continue;
+            size_t k = j;
+            while (k < params.size() && std::isdigit(static_cast<unsigned char>(params[k])))
+                ++k;
+
+            try {
+                outW = static_cast<unsigned>(std::stoul(params.substr(i, xPos - i)));
+                outH = static_cast<unsigned>(std::stoul(params.substr(j, k - j)));
+                return true;
+            } catch (...) {
+                return false;
+            }
+        }
+        return false;
+    };
+
+    auto parseOffset = [&](int& outX, int& outY) -> bool {
+        const size_t plusPos = params.find('+');
+        if (plusPos == std::string::npos)
+            return false;
+        size_t i = plusPos + 1;
+        if (i >= params.size() || !std::isdigit(static_cast<unsigned char>(params[i])))
+            return false;
+        size_t j = i;
+        while (j < params.size() && std::isdigit(static_cast<unsigned char>(params[j])))
+            ++j;
+        if (j >= params.size() || params[j] != 'x')
+            return false;
+        const size_t xPos = j;
+        ++j;
+        if (j >= params.size() || !std::isdigit(static_cast<unsigned char>(params[j])))
+            return false;
+        size_t k = j;
+        while (k < params.size() && std::isdigit(static_cast<unsigned char>(params[k])))
+            ++k;
+        try {
+            outX = static_cast<int>(std::stol(params.substr(i, xPos - i)));
+            outY = static_cast<int>(std::stol(params.substr(j, k - j)));
+            return true;
+        } catch (...) {
+            return false;
+        }
+    };
+
+    unsigned w {}, h {};
+    if (parseSize(w, h)) {
         decOpts_.width = round2pow(w, 3);
         decOpts_.height = round2pow(h, 3);
 
-        size_t plus = params.find('+');
-        std::istringstream dss(params.substr(plus + 1, space - plus));
-        dss >> decOpts_.offset_x >> sep >> decOpts_.offset_y;
-    } else {
-
-        auto dec = std::make_unique<MediaDecoder>();
-
-        if (dec->openInput(decOpts_) < 0 || dec->setupVideo() < 0)
-            return initCamera(sip_core::getVideoDeviceMonitor().getDefaultDevice());
-
-        decOpts_.width = round2pow(dec->getStream().width, 3);
-        decOpts_.height = round2pow(dec->getStream().height, 3);
+        int offX {}, offY {};
+        if (parseOffset(offX, offY)) {
+            decOpts_.offset_x = offX;
+            decOpts_.offset_y = offY;
+        }
     }
+
+    auto dec = std::make_unique<MediaDecoder>();
+
+    if (dec->openInput(decOpts_) < 0 || dec->setupVideo() < 0)
+        return initCamera(sip_core::getVideoDeviceMonitor().getDefaultDevice());
+
+    // Always reflect the actual opened stream properties.
+    decOpts_.width = round2pow(dec->getStream().width, 3);
+    decOpts_.height = round2pow(dec->getStream().height, 3);
 
     return true;
 }
@@ -607,7 +675,6 @@ VideoInput::initScreenCaptureRecorder(const std::string& params)
     // capture non default screen : 1920x1080 +28x28  source:1- SCREEN 1, POSITION 28x28, RESOLUTION 1920x1080
     // capture window : source:0x0340021e
 
-    size_t space = params.find(' ');
     clearOptions();
     decOpts_ = sip_core::getVideoDeviceMonitor().getDeviceParams(DEVICE_DESKTOP);
 
@@ -618,46 +685,110 @@ VideoInput::initScreenCaptureRecorder(const std::string& params)
     PathAppend(appDataPath, TEXT("ScreenCaptureRecorder.ini"));
     WritePrivateProfileString(TEXT("all_settings"), NULL, NULL, appDataPath); // clear all section content
 
-    std::string sourceStr = " source:";
-    size_t sourcePos = params.find(sourceStr);
-    if (sourcePos != std::string::npos) {
-        std::string source = params.substr(sourcePos + sourceStr.size()); // "0x0340021e";
-        if(source.rfind("0x", 0) == 0) // starts with
-        {
-            std::wstring wsSource = std::wstring(source.begin(), source.end());
-            BOOL result = WritePrivateProfileString(TEXT("all_settings"), TEXT("hwnd_to_track"), wsSource.c_str(), appDataPath);
-        }
-        else
-        {
-            std::wstring wsSource = std::wstring(source.begin(), source.end());
-            BOOL result = WritePrivateProfileString(TEXT("all_settings"), TEXT("capture_particular_display_number_starting_at_zero"), wsSource.c_str(), appDataPath);
+    auto writeIntSetting = [&](const wchar_t* key, int value) {
+        wchar_t buf[16];
+        swprintf(buf, 16, L"%d", value);
+        WritePrivateProfileString(TEXT("all_settings"), key, buf, appDataPath);
+    };
+
+    const std::string sourceStr = "source:";
+    const size_t sourcePos = params.find(sourceStr);
+    if (sourcePos != std::string::npos
+        && (sourcePos == 0 || std::isspace(static_cast<unsigned char>(params[sourcePos - 1]))))
+    {
+        const size_t sourceStart = sourcePos + sourceStr.size();
+        size_t sourceEnd = params.find_first_of(" ,\t\r\n", sourceStart);
+        if (sourceEnd == std::string::npos)
+            sourceEnd = params.size();
+
+        auto source = params.substr(sourceStart, sourceEnd - sourceStart);
+        while (!source.empty() && !std::isalnum(static_cast<unsigned char>(source.back())))
+            source.pop_back();
+
+        if (not source.empty()) {
+            std::wstring wsSource(source.begin(), source.end());
+            if (source.rfind("0x", 0) == 0) { // starts with
+                WritePrivateProfileString(TEXT("all_settings"),
+                                          TEXT("hwnd_to_track"),
+                                          wsSource.c_str(),
+                                          appDataPath);
+            } else {
+                WritePrivateProfileString(TEXT("all_settings"),
+                                          TEXT("capture_particular_display_number_starting_at_zero"),
+                                          wsSource.c_str(),
+                                          appDataPath);
+            }
         }
     }
 
-    if (space != std::string::npos && space != sourcePos) {
-        std::istringstream iss(params.substr(space + 1));
-        char sep;
-        unsigned w, h;
-        iss >> w >> sep >> h;
+    auto parseSize = [&](unsigned& outW, unsigned& outH) -> bool {
+        // Find a "<digits>x<digits>" pattern (avoid matching "0x..." hex prefixes).
+        for (size_t i = 0; i < params.size(); ++i) {
+            if (!std::isdigit(static_cast<unsigned char>(params[i])))
+                continue;
+            if (i > 0 && (params[i - 1] == '+' || !std::isspace(static_cast<unsigned char>(params[i - 1]))))
+                continue;
+            size_t j = i;
+            while (j < params.size() && std::isdigit(static_cast<unsigned char>(params[j])))
+                ++j;
+            if (j >= params.size() || params[j] != 'x')
+                continue;
+            const size_t xPos = j;
+            ++j;
+            if (j >= params.size() || !std::isdigit(static_cast<unsigned char>(params[j])))
+                continue;
+            size_t k = j;
+            while (k < params.size() && std::isdigit(static_cast<unsigned char>(params[k])))
+                ++k;
+            try {
+                outW = static_cast<unsigned>(std::stoul(params.substr(i, xPos - i)));
+                outH = static_cast<unsigned>(std::stoul(params.substr(j, k - j)));
+                return true;
+            } catch (...) {
+                return false;
+            }
+        }
+        return false;
+    };
+
+    auto parseOffset = [&](int& outX, int& outY) -> bool {
+        const size_t plusPos = params.find('+');
+        if (plusPos == std::string::npos)
+            return false;
+        size_t i = plusPos + 1;
+        if (i >= params.size() || !std::isdigit(static_cast<unsigned char>(params[i])))
+            return false;
+        size_t j = i;
+        while (j < params.size() && std::isdigit(static_cast<unsigned char>(params[j])))
+            ++j;
+        if (j >= params.size() || params[j] != 'x')
+            return false;
+        const size_t xPos = j;
+        ++j;
+        if (j >= params.size() || !std::isdigit(static_cast<unsigned char>(params[j])))
+            return false;
+        size_t k = j;
+        while (k < params.size() && std::isdigit(static_cast<unsigned char>(params[k])))
+            ++k;
+        try {
+            outX = static_cast<int>(std::stol(params.substr(i, xPos - i)));
+            outY = static_cast<int>(std::stol(params.substr(j, k - j)));
+            return true;
+        } catch (...) {
+            return false;
+        }
+    };
+
+    unsigned w {}, h {};
+    if (parseSize(w, h)) {
         decOpts_.width = round2pow(w, 3);
         decOpts_.height = round2pow(h, 3);
 
-        size_t plus = params.find('+');
-        std::istringstream dss(params.substr(plus + 1, space - plus));
-        dss >> decOpts_.offset_x >> sep >> decOpts_.offset_y;
-
-        wchar_t buf[16];
-        swprintf(buf, 16, L"%d", decOpts_.height);
-        BOOL result = WritePrivateProfileString(TEXT("all_settings"), TEXT("capture_height"), buf, appDataPath);
-
-        swprintf(buf, 16, L"%d", decOpts_.width);
-        result = WritePrivateProfileString(TEXT("all_settings"), TEXT("capture_width"), buf, appDataPath);
-
-        swprintf(buf, 16, L"%d", decOpts_.offset_x);
-        result = WritePrivateProfileString(TEXT("all_settings"), TEXT("start_x"), buf, appDataPath);
-        
-        swprintf(buf, 16, L"%d", decOpts_.offset_y);
-        result = WritePrivateProfileString(TEXT("all_settings"), TEXT("start_y"), buf, appDataPath);
+        int offX {}, offY {};
+        if (parseOffset(offX, offY)) {
+            decOpts_.offset_x = offX;
+            decOpts_.offset_y = offY;
+        }
     } else {
         auto dec = std::make_unique<MediaDecoder>();
 
@@ -667,6 +798,12 @@ VideoInput::initScreenCaptureRecorder(const std::string& params)
         decOpts_.width = round2pow(dec->getStream().width, 3);
         decOpts_.height = round2pow(dec->getStream().height, 3);
     }
+
+    // Ensure a stable output size even if a tracked window is resized.
+    writeIntSetting(TEXT("capture_height"), static_cast<int>(decOpts_.height));
+    writeIntSetting(TEXT("capture_width"), static_cast<int>(decOpts_.width));
+    writeIntSetting(TEXT("start_x"), decOpts_.offset_x);
+    writeIntSetting(TEXT("start_y"), decOpts_.offset_y);
     
     return true;
 }
