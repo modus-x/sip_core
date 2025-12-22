@@ -1674,6 +1674,25 @@ SIPAccount::onRegister(pjsip_regc_cbparam* param)
                      param->code,
                      (int) param->reason.slen,
                      param->reason.ptr);
+
+        std::string reason = sip_utils::as_string(param->reason);
+
+        // socket is broken, may be interface is broken
+        // so re-create transport now from scratch
+
+        if (reason.find("PJ_ESOCKETSTOP") != std::string::npos) {
+            SIP_CORE_WARN("Trying to re-create socket from scratch...");
+            cancelBackupRouteKeepAliveTimer();
+            cancelKeepAliveTimer();
+            cancelMainRouteKeepAliveTimer();
+            setTransport(nullptr);
+            pjsip_regc_destroy2(regc_, true);
+            switchTransport(libsip_core::TransportType::UDP);
+            sendRegister();
+            return;
+        }
+
+
         cancelBackupRouteKeepAliveTimer();
         pendingBackupKeepAliveStart_.store(false);
 
