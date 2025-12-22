@@ -3,11 +3,14 @@
     "version": "ddeec523a252cd3d0d04e45e1d225ffd7f1eea43",
     "url": "https://nexus.svetlocal.ru/repository/github-artifacts/FFmpeg-__VERSION__.tar.gz",
     "deps": [
-        "vpx",
-        "x264",
-        "opus",
+        "iconv",
+        "xml2",
+        "zlib",
         "freetype2",
-        "fontconfig"
+        "fontconfig",
+        "x264",
+        "vpx",
+        "opus"
     ],
     "patches": [
         "windows-configure.patch"

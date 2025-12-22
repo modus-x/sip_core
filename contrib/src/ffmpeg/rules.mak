@@ -4,7 +4,7 @@ FFMPEG_URL := https://nexus.svetlocal.ru/repository/github-artifacts/FFmpeg-$(FF
 
 PKGS+=ffmpeg
 
-DEPS_ffmpeg = iconv zlib vpx opus speex x264 freetype2 fontconfig
+DEPS_ffmpeg = iconv xml2 zlib freetype2 fontconfig x264 vpx opus
 
 FFMPEGCONF = \
 	--cc="$(CC)" \
@@ -86,12 +86,9 @@ FFMPEGCONF += \
 	--enable-encoder=mjpeg \
 	--enable-decoder=mjpeg \
 	--enable-decoder=mjpegb \
-	--enable-libspeex \
 	--enable-libopus \
 	--enable-libvpx \
 	--enable-libx264 \
-	--enable-encoder=libspeex \
-	--enable-decoder=libspeex \
 	--enable-encoder=libopus \
 	--enable-decoder=libopus
 
@@ -259,6 +256,7 @@ ffmpeg: ffmpeg-$(FFMPEG_HASH).tar.gz
 	(cd $@-$(FFMPEG_HASH) && tar x $(if ${BATCH_MODE},,-v) --strip-components=1 -f $<)
 	$(APPLY) $(SRC)/ffmpeg/ios-disable-b-frames.patch
 	$(APPLY) $(SRC)/ffmpeg/screen-sharing-x11-fix.patch
+	$(APPLY) $(SRC)/ffmpeg/rtp_dtmf.patch
 	$(UPDATE_AUTOCONFIG)
 	$(MOVE)
 
