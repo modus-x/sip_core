@@ -143,6 +143,7 @@ STRIP=xcrun strip
 RANLIB=xcrun ranlib
 EXTRA_CXXFLAGS += -stdlib=libc++
 EXTRA_LDFLAGS += -mmacosx-version-min=$(MIN_OSX_VERSION) -Wl,-syslibroot,$(MACOSX_SDK)
+EXTRA_ASFLAGS += -mmacosx-version-min=$(MIN_OSX_VERSION)
 ifeq ($(ARCH),x86_64)
 EXTRA_COMMON += -m64
 else ifeq ($(ARCH),arm64)
@@ -216,6 +217,7 @@ CPPFLAGS := $(CPPFLAGS) $(EXTRA_CPPFLAGS)
 CFLAGS := $(CFLAGS) $(EXTRA_CPPFLAGS) $(EXTRA_COMMON) $(EXTRA_CFLAGS)
 CXXFLAGS := $(CXXFLAGS) $(EXTRA_CPPFLAGS) $(EXTRA_COMMON) $(EXTRA_CXXFLAGS)
 LDFLAGS := $(LDFLAGS) $(EXTRA_LDFLAGS)
+ASFLAGS := $(ASFLAGS) $(EXTRA_ASFLAGS)
 # Do not export those! Use HOSTVARS.
 
 # Do the FPU detection, after we have figured out our compilers and flags.
@@ -336,12 +338,14 @@ HOSTVARS_NOPIC := $(HOSTTOOLS) \
 	CPPFLAGS="$(CPPFLAGS)" \
 	CFLAGS="$(CFLAGS)" \
 	CXXFLAGS="$(CXXFLAGS)" \
-	LDFLAGS="$(LDFLAGS)"
+	LDFLAGS="$(LDFLAGS)" \
+	ASFLAGS="$(ASFLAGS)"
 HOSTVARS := $(HOSTTOOLS) \
 	CPPFLAGS="$(CPPFLAGS) $(PIC)" \
 	CFLAGS="$(CFLAGS) $(PIC)" \
 	CXXFLAGS="$(CXXFLAGS) $(PIC)" \
-	LDFLAGS="$(LDFLAGS)"
+	LDFLAGS="$(LDFLAGS)" \
+	ASFLAGS="$(ASFLAGS)"
 
 # git_download procedure
 # $1: The URL of the Git repository.
@@ -541,6 +545,7 @@ ifdef HAVE_DARWIN_OS
 	echo "set(CMAKE_C_FLAGS \"$(CFLAGS)\")" >> $@
 	echo "set(CMAKE_CXX_FLAGS \"$(CXXFLAGS)\")" >> $@
 	echo "set(CMAKE_LD_FLAGS \"$(LDFLAGS)\")" >> $@
+	echo "set(CMAKE_AS_FLAGS \"$(ASFLAGS)\")" >> $@
 	echo "set(CMAKE_AR ar CACHE FILEPATH "Archiver")" >> $@
 ifdef HAVE_IOS
 	echo "set(CMAKE_OSX_SYSROOT $(IOS_SDK))" >> $@
