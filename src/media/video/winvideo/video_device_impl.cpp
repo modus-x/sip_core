@@ -35,6 +35,9 @@
 #include "capture_graph_interfaces.h"
 
 #include <dshow.h>
+#include <VersionHelpers.h>
+
+#define WIN10_1903_BUILD 18362
 
 namespace sip_core {
 namespace video {
@@ -277,7 +280,19 @@ VideoDeviceImpl::getDeviceParams() const
     params.unique_id = id;
     params.input = id;
     if (id == DEVICE_DESKTOP) {
-        params.format = "gdigrab";
+#if defined(USE_DSHOW_SCREEN_CAPTURE)
+        params.format = "dshow";
+        params.input = "video=screen-capture-recorder";
+#else
+        if(!IsWindowsVersionOrGreater(10, 0, WIN10_1903_BUILD)) { // if gfxcapture supported
+            params.format = "lavfi";
+            params.input = "gfxcapture";
+            //params.format = "yuv420p";
+        }
+        else {
+            params.format = "gdigrab";
+        }
+#endif
         params.framerate = desktopFrameRate_;
         return params;
     }

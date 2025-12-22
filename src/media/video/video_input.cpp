@@ -50,6 +50,12 @@ extern "C" {
 #include <libavutil/display.h>
 }
 
+#if defined(_WIN32) && defined(USE_DSHOW_SCREEN_CAPTURE)
+#include <windows.h>
+#include <Shlobj.h>
+#include "Shlwapi.h"
+#endif
+
 namespace sip_core {
 namespace video {
 
@@ -464,6 +470,14 @@ bool
 VideoInput::initCamera(const std::string& device)
 {
     decOpts_ = sip_core::getVideoDeviceMonitor().getDeviceParams(device);
+#if defined(_WIN32) && defined(USE_DSHOW_SCREEN_CAPTURE)
+    if(decOpts_.name == "screen-capture-recorder") {
+        // screen-capture-recorder plugin can appear 
+        // in the list of available cameras. 
+        // Initialize it explicitly in this case.
+        initScreenCaptureRecorder(device);
+    }
+#endif
     return true;
 }
 
@@ -490,9 +504,8 @@ VideoInput::initX11(const std::string& display)
         p.is_area = 0;
     }
     if (space != std::string::npos) {
-        p.input = display.substr(1, space);
+        p.input = display.substr(0, space);
         if (p.window_id.empty()) {
-            p.input = display.substr(0, space);
             SIP_CORE_INFO() << "p.window_id.empty()";
             auto splits = sip_core::split_string_to_unsigned(display.substr(space + 1), 'x');
             // round to 8 pixel block
@@ -546,11 +559,18 @@ VideoInput::initAVFoundation(const std::string& display)
 }
 
 bool
-VideoInput::initGdiGrab(const std::string& params)
+VideoInput::initWindowsCapture(const std::string& params)
 {
     size_t space = params.find(' ');
     clearOptions();
     decOpts_ = sip_core::getVideoDeviceMonitor().getDeviceParams(DEVICE_DESKTOP);
+
+    const std::string sourceStr = " source:";
+    size_t sourcePos = params.find(sourceStr);
+    if (sourcePos != std::string::npos) {
+        decOpts_.window_id = params.substr(sourcePos + sourceStr.size()); // "0x0340021e";
+        space = params.find(sourcePos, ' ');
+    }
 
     if (space != std::string::npos) {
         std::istringstream iss(params.substr(space + 1));
@@ -576,6 +596,81 @@ VideoInput::initGdiGrab(const std::string& params)
 
     return true;
 }
+
+#if defined(_WIN32) && defined(USE_DSHOW_SCREEN_CAPTURE)
+bool
+VideoInput::initScreenCaptureRecorder(const std::string& params)
+{
+    // Paterns
+    // capture area : 1920x1080 - SCREEN 0, POSITION 0X0, RESOLUTION 1920x1080
+    // capture area with offset : 1920x1080 +28x28 - SCREEN 0, POSITION 28x28, RESOLUTION 1920x1080
+    // capture non default screen : 1920x1080 +28x28  source:1- SCREEN 1, POSITION 28x28, RESOLUTION 1920x1080
+    // capture window : source:0x0340021e
+
+    size_t space = params.find(' ');
+    clearOptions();
+    decOpts_ = sip_core::getVideoDeviceMonitor().getDeviceParams(DEVICE_DESKTOP);
+
+    TCHAR appDataPath[MAX_PATH];
+    if (FAILED(SHGetFolderPath(NULL, CSIDL_APPDATA, NULL, SHGFP_TYPE_CURRENT, appDataPath))) {
+        return false;
+    }
+    PathAppend(appDataPath, TEXT("ScreenCaptureRecorder.ini"));
+    WritePrivateProfileString(TEXT("all_settings"), NULL, NULL, appDataPath); // clear all section content
+
+    std::string sourceStr = " source:";
+    size_t sourcePos = params.find(sourceStr);
+    if (sourcePos != std::string::npos) {
+        std::string source = params.substr(sourcePos + sourceStr.size()); // "0x0340021e";
+        if(source.rfind("0x", 0) == 0) // starts with
+        {
+            std::wstring wsSource = std::wstring(source.begin(), source.end());
+            BOOL result = WritePrivateProfileString(TEXT("all_settings"), TEXT("hwnd_to_track"), wsSource.c_str(), appDataPath);
+        }
+        else
+        {
+            std::wstring wsSource = std::wstring(source.begin(), source.end());
+            BOOL result = WritePrivateProfileString(TEXT("all_settings"), TEXT("capture_particular_display_number_starting_at_zero"), wsSource.c_str(), appDataPath);
+        }
+    }
+
+    if (space != std::string::npos && space != sourcePos) {
+        std::istringstream iss(params.substr(space + 1));
+        char sep;
+        unsigned w, h;
+        iss >> w >> sep >> h;
+        decOpts_.width = round2pow(w, 3);
+        decOpts_.height = round2pow(h, 3);
+
+        size_t plus = params.find('+');
+        std::istringstream dss(params.substr(plus + 1, space - plus));
+        dss >> decOpts_.offset_x >> sep >> decOpts_.offset_y;
+
+        wchar_t buf[16];
+        swprintf(buf, 16, L"%d", decOpts_.height);
+        BOOL result = WritePrivateProfileString(TEXT("all_settings"), TEXT("capture_height"), buf, appDataPath);
+
+        swprintf(buf, 16, L"%d", decOpts_.width);
+        result = WritePrivateProfileString(TEXT("all_settings"), TEXT("capture_width"), buf, appDataPath);
+
+        swprintf(buf, 16, L"%d", decOpts_.offset_x);
+        result = WritePrivateProfileString(TEXT("all_settings"), TEXT("start_x"), buf, appDataPath);
+        
+        swprintf(buf, 16, L"%d", decOpts_.offset_y);
+        result = WritePrivateProfileString(TEXT("all_settings"), TEXT("start_y"), buf, appDataPath);
+    } else {
+        auto dec = std::make_unique<MediaDecoder>();
+
+        if (dec->openInput(decOpts_) < 0 || dec->setupVideo() < 0)
+            return initCamera(sip_core::getVideoDeviceMonitor().getDefaultDevice());
+
+        decOpts_.width = round2pow(dec->getStream().width, 3);
+        decOpts_.height = round2pow(dec->getStream().height, 3);
+    }
+    
+    return true;
+}
+#endif
 
 bool
 VideoInput::initFile(std::string path)
@@ -681,8 +776,10 @@ VideoInput::switchInput(const std::string& resource)
         /* X11 display name */
 #ifdef __APPLE__
         ready = initAVFoundation(suffix);
+#elif defined(_WIN32) && defined(USE_DSHOW_SCREEN_CAPTURE)
+        ready = initScreenCaptureRecorder(suffix);
 #elif defined(_WIN32)
-        ready = initGdiGrab(suffix);
+        ready = initWindowsCapture(suffix);
 #else
         ready = initX11(suffix);
 #endif

@@ -490,7 +490,8 @@ if(MSVC)
   # ############################################################################
   target_compile_definitions(
     ${PROJECT_NAME}
-    PUBLIC "_WIN32_WINNT=0x0601;"
+    PUBLIC "_WIN32_WINNT=0x0A00;"
+           "WINDOWS_FOUNDATION_UNIVERSALAPICONTRACT_VERSION=0x130000;"
            "_USE_MATH_DEFINES;"
            "_SCL_SECURE_NO_WARNINGS;"
            "_CRT_SECURE_NO_WARNINGS;"
@@ -559,17 +560,17 @@ if(MSVC)
             OleAut32.lib
             Shlwapi.lib
             optimized
-            ${DEPS_RELEASE}/lib/libavcodec.lib
+            ${DEPS_RELEASE}/lib/avcodec.lib
             optimized
-            ${DEPS_RELEASE}/lib/libavdevice.lib
+            ${DEPS_RELEASE}/lib/avdevice.lib
             optimized
-            ${DEPS_RELEASE}/lib/libavfilter.lib
+            ${DEPS_RELEASE}/lib/avfilter.lib
             optimized
-            ${DEPS_RELEASE}/lib/libavformat.lib
+            ${DEPS_RELEASE}/lib/avformat.lib
             optimized
-            ${DEPS_RELEASE}/lib/libswresample.lib
+            ${DEPS_RELEASE}/lib/swresample.lib
             optimized
-            ${DEPS_RELEASE}/lib/libswscale.lib
+            ${DEPS_RELEASE}/lib/swscale.lib
             optimized
             ${DEPS_RELEASE}/lib/x64/libx264.lib
             optimized
@@ -591,17 +592,17 @@ if(MSVC)
             optimized
             ${DEPS_RELEASE}/portaudio_static_x64.lib
             debug
-            ${DEPS_DEBUG}/lib/libavcodec.lib
+            ${DEPS_DEBUG}/lib/avcodec.lib
             debug
-            ${DEPS_DEBUG}/lib/libavdevice.lib
+            ${DEPS_DEBUG}/lib/avdevice.lib
             debug
-            ${DEPS_DEBUG}/lib/libavfilter.lib
+            ${DEPS_DEBUG}/lib/avfilter.lib
             debug
-            ${DEPS_DEBUG}/lib/libavformat.lib
+            ${DEPS_DEBUG}/lib/avformat.lib
             debug
-            ${DEPS_DEBUG}/lib/libswresample.lib
+            ${DEPS_DEBUG}/lib/swresample.lib
             debug
-            ${DEPS_DEBUG}/lib/libswscale.lib
+            ${DEPS_DEBUG}/lib/swscale.lib
             debug
             ${DEPS_DEBUG}/lib/x64/libx264.lib
             debug
@@ -627,10 +628,12 @@ if(MSVC)
     PUBLIC
       Secur32.lib
       bcrypt.lib
+      ncrypt.lib
+      Crypt32.lib
       debug
-      ${DEPS_DEBUG}/lib/libavutil.lib
+      ${DEPS_DEBUG}/lib/avutil.lib
       debug
-      ${DEPS_DEBUG}/lib/libswscale.lib
+      ${DEPS_DEBUG}/lib/swscale.lib
       debug
       ${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/pjproject/pjsip/lib/pjsip-core-x86_64-x64-vc15-Debug.lib
       debug
@@ -650,9 +653,9 @@ if(MSVC)
       debug
       ${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/pjproject/pjnath/lib/pjnath-x86_64-x64-vc15-Debug.lib
       optimized
-      ${DEPS_RELEASE}/lib/libavutil.lib
+      ${DEPS_RELEASE}/lib/avutil.lib
       optimized
-      ${DEPS_RELEASE}/lib/libswscale.lib
+      ${DEPS_RELEASE}/lib/swscale.lib
       optimized
       ${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/pjproject/pjsip/lib/pjsip-core-x86_64-x64-vc15-Release.lib
       optimized

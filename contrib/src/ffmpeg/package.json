@@ -1,21 +1,14 @@
 {
     "name": "ffmpeg",
-    "version": "n5.0",
-    "url": "https://nexus.svetlocal.ru/repository/github-artifacts/ffmpeg-__VERSION__.tar.gz",
+    "version": "ddeec523a252cd3d0d04e45e1d225ffd7f1eea43",
+    "url": "https://nexus.svetlocal.ru/repository/github-artifacts/FFmpeg-__VERSION__.tar.gz",
     "deps": [
         "vpx",
         "x264",
         "opus"
     ],
     "patches": [
-        "change-RTCP-ratio.patch",
-        "rtp_ext_abs_send_time.patch",
-        "rtp_any_payload.patch",
-        "rtp_dtmf.patch",
-        "libopusenc-reload-packet-loss-at-encode.patch",
-        "libopusdec-enable-FEC.patch",
-        "windows-configure.patch",
-        "gdigrab.patch"
+        "windows-configure.patch"
     ],
     "win_patches": [
     ],
@@ -24,8 +17,7 @@
     "custom_scripts": {
         "pre_build": [],
         "build": [
-            "call \"%CONTRIB_SRC_DIR%\\ffmpeg\\build_ffmpeg.bat\"",
-            "cd \"%INSTALL_PREFIX%\\lib\" && ren *.a *.lib"
+            "call \"%CONTRIB_SRC_DIR%\\ffmpeg\\build_ffmpeg.bat\""
         ],
         "post_build": []
     }

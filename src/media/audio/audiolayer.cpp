@@ -393,7 +393,7 @@ AudioLayer::adjustVolume(std::shared_ptr<AudioFrame>& frame, bool playback)
     if (!data) {
         return;
     }
-    for (int i = 0; i < pFrame->nb_samples * pFrame->channels; ++i) {
+    for (int i = 0; i < pFrame->nb_samples * pFrame->ch_layout.nb_channels; ++i) {
         // Assuming AV_SAMPLE_FMT_S16
         int16_t sample = reinterpret_cast<int16_t*>(data)[i];
 

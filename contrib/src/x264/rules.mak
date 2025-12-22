@@ -1,5 +1,5 @@
 # x264
-X264_HASH := ed0f7a634050a62c1da27c99eea710824d4c3705
+X264_HASH := 0480cb05fa188d37ae87e8f4fd8f1aea3711f7ee
 X264_GITURL := https://code.videolan.org/videolan/x264.git
 
 X264CONF = --prefix="$(PREFIX)" \

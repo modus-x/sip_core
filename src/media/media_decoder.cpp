@@ -98,40 +98,80 @@ MediaDemuxer::openInput(const DeviceParams& params)
     if (!iformat && !params.format.empty())
         SIP_CORE_WARN("Cannot find format \"%s\"", params.format.c_str());
 
-    if (params.width and params.height) {
-        auto sizeStr = fmt::format("{}x{}", params.width, params.height);
-        av_dict_set(&options_, "video_size", sizeStr.c_str(), 0);
-    }
-    if (params.framerate) {
-#ifdef _WIN32
-        if (params.format == "dshow") {
-            // On windows, framerate settings don't reduce to avrational values
-            // that correspond to valid video device formats.
-            // e.g. A the rational<double>(10000000, 333333) or 30.000030000
-            //      will be reduced by av_reduce to 999991/33333 or 30.00003000003
-            //      which cause the device opening routine to fail.
-            // So we treat this imprecise reduction and adjust the value,
-            // or let dshow choose the framerate, which is, unfortunately,
-            // NOT the highest according to our experimentations.
-            auto framerate {params.framerate.real()};
-            framerate = params.framerate.numerator() / (params.framerate.denominator() + 0.5);
-            if (params.framerate.denominator() != 4999998)
-                av_dict_set(&options_, "framerate", sip_core::to_string(framerate).c_str(), 0);
-        } else {
-            av_dict_set(&options_,
-                        "framerate",
-                        sip_core::to_string(params.framerate.real()).c_str(),
-                        0);
+    std::string filter;
+    if (params.format == "lavfi" && params.input == "gfxcapture") {
+        if (not params.window_id.empty()) {
+            if(params.window_id.rfind("0x", 0) == 0) // starts with
+                filter += fmt::format("monitor_idx=window:hwnd={}:", params.window_id);
+            else
+                filter += fmt::format("monitor_idx={}:", params.window_id);
         }
+        else {
+            filter += "monitor_idx=0";
+        }
+
+        if (params.width and params.height)
+            filter += fmt::format("width={}:height={}:", params.width, params.height);
+
+        if (params.framerate)
+            filter += fmt::format("max_framerate={}:", params.framerate.real());
+
+        filter.pop_back(); // remove last ':'
+        filter += ",hwdownload,format=bgra";
+        if (not params.pixel_format.empty())
+            filter += fmt::format(",format={}", params.pixel_format);
+        else {
+            filter += ",format=yuv420p";
+        }
+    }
+    else {
+        if (params.width and 
+            params.height and 
+            params.input != "video=screen-capture-recorder") // video_size option doesn't work for this filter
+        {
+            auto sizeStr = fmt::format("{}x{}", params.width, params.height);
+            av_dict_set(&options_, "video_size", sizeStr.c_str(), 0);
+        }
+
+        if (params.framerate) {
+#ifdef _WIN32
+            if (params.format == "dshow") {
+                // On windows, framerate settings don't reduce to avrational values
+                // that correspond to valid video device formats.
+                // e.g. A the rational<double>(10000000, 333333) or 30.000030000
+                //      will be reduced by av_reduce to 999991/33333 or 30.00003000003
+                //      which cause the device opening routine to fail.
+                // So we treat this imprecise reduction and adjust the value,
+                // or let dshow choose the framerate, which is, unfortunately,
+                // NOT the highest according to our experimentations.
+                auto framerate {params.framerate.real()};
+                framerate = params.framerate.numerator() / (params.framerate.denominator() + 0.5);
+                if (params.framerate.denominator() != 4999998)
+                    av_dict_set(&options_, "framerate", sip_core::to_string(framerate).c_str(), 0);
+            } else {
+                av_dict_set(&options_,
+                            "framerate",
+                            sip_core::to_string(params.framerate.real()).c_str(),
+                            0);
+            }
 #else
-            av_dict_set(&options_, "framerate", sip_core::to_string(params.framerate.real()).c_str(), 0);
+                av_dict_set(&options_, "framerate", sip_core::to_string(params.framerate.real()).c_str(), 0);
 #endif
+        }
+
+        if (not params.pixel_format.empty()) {
+            av_dict_set(&options_, "pixel_format", params.pixel_format.c_str(), 0);
+        }
+        if (not params.window_id.empty()) {
+            av_dict_set(&options_, "window_id", params.window_id.c_str(), 0);
+        }
+
+        if (params.offset_x || params.offset_y) {
+            av_dict_set(&options_, "offset_x", std::to_string(params.offset_x).c_str(), 0);
+            av_dict_set(&options_, "offset_y", std::to_string(params.offset_y).c_str(), 0);
+        }
     }
 
-    if (params.offset_x || params.offset_y) {
-        av_dict_set(&options_, "offset_x", std::to_string(params.offset_x).c_str(), 0);
-        av_dict_set(&options_, "offset_y", std::to_string(params.offset_y).c_str(), 0);
-    }
     if (params.channel)
         av_dict_set(&options_, "channel", std::to_string(params.channel).c_str(), 0);
     av_dict_set(&options_, "loop", params.loop.c_str(), 0);
@@ -142,22 +182,14 @@ MediaDemuxer::openInput(const DeviceParams& params)
     auto us = std::chrono::duration_cast<std::chrono::microseconds>(jitterBufferMaxDelay_).count();
     av_dict_set(&options_, "max_delay", std::to_string(us).c_str(), 0);
 
-    if (!params.pixel_format.empty()) {
-        av_dict_set(&options_, "pixel_format", params.pixel_format.c_str(), 0);
-    }
-    if (!params.window_id.empty()) {
-        av_dict_set(&options_, "window_id", params.window_id.c_str(), 0);
-    }
-
-    if (params.format == "video4linux2") {
-        av_dict_set(&options_, "use_wallclock_as_timestamps", "1", 0);
-        av_dict_set(&options_, "fflags", "nobuffer", AV_DICT_APPEND);
-    }
-
 #if defined(__APPLE__) && TARGET_OS_MAC
     std::string input = params.name;
 #else
     std::string input = params.input;
+    if (params.format == "lavfi" && params.input == "gfxcapture") {        
+        input += "=";
+        input += std::move(filter);
+    }
 #endif
 
     SIP_CORE_DBG("Trying to open device %s with format %s, pixel format %s, size "
@@ -372,12 +404,6 @@ MediaDemuxer::Status
 MediaDemuxer::decode()
 {
     if (inputParams_.format == "x11grab") {
-        auto ret = inputCtx_->iformat->read_header(inputCtx_);
-        if (ret == AVERROR_EXTERNAL) {
-            SIP_CORE_ERR("Couldn't read frame: %s\n",
-                         libav_utils::getError(ret).c_str());
-            return Status::ReadError;
-        }
         auto codecpar = inputCtx_->streams[0]->codecpar;
         if (baseHeight_ != codecpar->height || baseWidth_ != codecpar->width) {
             baseHeight_ = codecpar->height;
@@ -728,8 +754,8 @@ MediaDecoder::decode(AVPacket& packet)
 
     if (frameFinished) {
         // channel layout is needed if frame will be resampled
-        if (!frame->channel_layout)
-            frame->channel_layout = av_get_default_channel_layout(frame->channels);
+        if (frame->ch_layout.order == AVChannelOrder::AV_CHANNEL_ORDER_UNSPEC)
+            av_channel_layout_default(&frame->ch_layout, frame->ch_layout.nb_channels);
 
         frame->format = (AVPixelFormat) correctPixFmt(frame->format);
         auto packetTimestamp = frame->pts;
