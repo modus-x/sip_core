@@ -236,9 +236,9 @@ public:
 
     void setEnabled(bool enable) { config_->enabled = enable; }
 
-    bool isDND() const noexcept { return isDND_; }
+    bool isDND() const noexcept { return isDND_.load(); }
 
-    void setDND(bool dnd) noexcept { isDND_ = dnd; }
+    void setDND(bool dnd) noexcept { isDND_.store(dnd); }
 
     /**
      * Tell if the account is activated
@@ -479,7 +479,7 @@ protected:
     void sortCodec();
 
     // just ignore incoming calls with refusing
-    bool isDND_ {false};
+    std::atomic_bool isDND_ {false};
 };
 
 static inline std::ostream&

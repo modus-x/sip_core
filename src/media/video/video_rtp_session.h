@@ -123,7 +123,7 @@ public:
     std::shared_ptr<VideoMixer> videoMixer_;
     std::shared_ptr<VideoInput> videoLocal_;
 
-    int getKaInterval() { return ka_inverval_; }
+    int64_t getKaInterval() { return ka_inverval_; }
     void startSender();
     void stopSender();
 
@@ -137,6 +137,10 @@ public:
 
     void startReceiver();
     void stopReceiver();
+
+    virtual rtcpRRHeader getRtcpRR() override;
+    virtual rtcpREMBHeader getRtcpREMB() override;
+    virtual rtcpSRHeader getRtcpSR() override;
 
 private:
     void setupConferenceVideoPipeline(Conference& conference, Direction dir);

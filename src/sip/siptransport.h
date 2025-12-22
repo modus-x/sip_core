@@ -102,7 +102,7 @@ private:
 
     // here we store the transport
     // before storing transport, we need to add ref to it because we are using bare pjsip struct
-    std::unique_ptr<pjsip_transport, decltype(deleteTransport)&> transport_;
+    std::unique_ptr<pjsip_transport, decltype(&deleteTransport)> transport_;
 };
 
 class TCPTransport : public SipTransport

@@ -1,5 +1,4 @@
-﻿
-/*
+﻿/*
  *  Copyright (C) 2004-2022 Savoir-faire Linux Inc.
  *
  *  Author: Emmanuel Milou <emmanuel.milou@savoirfairelinux.com>
@@ -94,6 +93,7 @@ SIPCall::SIPCall(const std::shared_ptr<SIPAccountBase>& account,
     : Call(account, callId, type)
     , sdp_(new Sdp(callId))
     , srtpEnabled_(account->isSrtpEnabled())
+    , canRetryWithBackupRoute_(type == Call::CallType::OUTGOING)
 {
     sip_core_tracepoint(call_start, callId.c_str());
 
@@ -260,36 +260,25 @@ SIPCall::setupVoiceCallback(const std::shared_ptr<RtpSession>& rtpSession)
     // need to downcast to access setVoiceCallback
     auto audioRtp = std::dynamic_pointer_cast<AudioRtpSession>(rtpSession);
 
-    audioRtp->setVoiceCallback([w = weak()](bool voice) {
+    audioRtp->setVoiceCallback([w = weak()](const std::string& streamId, bool voice) {
         // this is called whenever voice is detected on the local audio
 
-        runOnMainThread([w, voice] {
+        runOnMainThread([w, &streamId, voice] {
             if (auto thisPtr = w.lock()) {
-                // TODO: once we support multiple streams, change this to the right one
-                std::string streamId = "";
-
+                std::string defaultId = "";
 #ifdef ENABLE_VIDEO
                 if (not sip_core::getVideoDeviceMonitor().getDeviceList().empty()) {
                     // if we have a video device
-                    streamId = sip_utils::streamId("", sip_utils::DEFAULT_VIDEO_STREAMID);
+                    defaultId = sip_utils::streamId("", sip_utils::DEFAULT_VIDEO_STREAMID);
                 }
 #endif
-
-                // send our local voice activity
-                if (auto conference = thisPtr->conf_.lock()) {
-                    // we are in a conference
-
-                    // updates conference info and sends it to others via ConfInfo
-                    // (only if there was a change)
-                    // also emits signal with updated conference info
-                    conference->setVoiceActivity(streamId, voice);
-                } else {
-                    // we are in a one-to-one call
-                    // send voice activity over SIP
-                    // TODO: change the streamID once multiple streams are supported
-                    thisPtr->sendVoiceActivity("-1", voice);
-
-                    // TODO: maybe emit signal here for local voice activity
+                if (defaultId != streamId) {
+                    // remote participant audio
+                    thisPtr->peerVoice(voice);
+                }
+                else {
+                    // local mic voice activity
+                    thisPtr->localVoice(voice);
                 }
             } else {
                 SIP_CORE_ERR("voice activity callback unable to lock weak ptr to SIPCall");
@@ -494,7 +483,7 @@ SIPCall::SIPSessionReinvite()
 void
 SIPCall::sendSIPInfo(std::string_view body, std::string_view subtype)
 {
-    if (subtype == "media_control+xml") {
+    if (subtype != "media_control+xml" && subtype != "dtmf-relay") {
         return;
     }
     std::lock_guard<std::recursive_mutex> lk {callMutex_};
@@ -541,7 +530,7 @@ SIPCall::updateRecState(bool state)
     SIP_CORE_DBG("Sending recording state via SIP INFO");
 
     try {
-        sendSIPInfo(BODY, "media_control+xml");
+        // sendSIPInfo(BODY, "media_control+xml");
     } catch (const std::exception& e) {
         SIP_CORE_ERR("Error sending recording state: %s", e.what());
     }
@@ -565,7 +554,7 @@ SIPCall::requestKeyframe(int streamIdx)
                          "</to_encoder></vc_primitive></media_control>";
     SIP_CORE_DBG("Sending video keyframe request via SIP INFO");
     try {
-        sendSIPInfo(BODY, "media_control+xml");
+        // sendSIPInfo(BODY, "media_control+xml");
     } catch (const std::exception& e) {
         SIP_CORE_ERR("Error sending video keyframe request: %s", e.what());
     }
@@ -586,36 +575,36 @@ SIPCall::sendMuteState(bool state)
     SIP_CORE_DBG("Sending mute state via SIP INFO");
 
     try {
-        sendSIPInfo(BODY, "media_control+xml");
+        // sendSIPInfo(BODY, "media_control+xml");
     } catch (const std::exception& e) {
         SIP_CORE_ERR("Error sending mute state: %s", e.what());
     }
 }
 
-void
-SIPCall::sendVoiceActivity(std::string_view streamId, bool state)
-{
-    // dont send streamId if it's -1
-    std::string streamIdPart = "";
-    if (streamId != "-1" && !streamId.empty()) {
-        streamIdPart = fmt::format("<stream_id>{}</stream_id>", streamId);
-    }
+// void
+// SIPCall::sendVoiceActivity(std::string_view streamId, bool state)
+// {
+//     // dont send streamId if it's -1
+//     std::string streamIdPart = "";
+//     if (streamId != "-1" && !streamId.empty()) {
+//         streamIdPart = fmt::format("<stream_id>{}</stream_id>", streamId);
+//     }
 
-    std::string BODY = "<?xml version=\"1.0\" encoding=\"utf-8\" ?>"
-                       "<media_control><vc_primitive>"
-                       + streamIdPart
-                       + "<to_encoder>"
-                         "<voice_activity="
-                       + std::to_string(state)
-                       + "/>"
-                         "</to_encoder></vc_primitive></media_control>";
+//     std::string BODY = "<?xml version=\"1.0\" encoding=\"utf-8\" ?>"
+//                        "<media_control><vc_primitive>"
+//                        + streamIdPart
+//                        + "<to_encoder>"
+//                          "<voice_activity="
+//                        + std::to_string(state)
+//                        + "/>"
+//                          "</to_encoder></vc_primitive></media_control>";
 
-    try {
-        sendSIPInfo(BODY, "media_control+xml");
-    } catch (const std::exception& e) {
-        SIP_CORE_ERR("Error sending voice activity state: %s", e.what());
-    }
-}
+//     try {
+//         sendSIPInfo(BODY, "media_control+xml");
+//     } catch (const std::exception& e) {
+//         SIP_CORE_ERR("Error sending voice activity state: %s", e.what());
+//     }
+// }
 
 void
 SIPCall::setInviteSession(pjsip_inv_session* inviteSession)
@@ -1015,6 +1004,14 @@ SIPCall::refuse()
     removeCall();
 }
 
+namespace {
+struct TransferClientCtx
+{
+    std::string accountId;
+    std::string callId;
+};
+} // anonymous namespace
+
 static void
 transfer_client_cb(pjsip_evsub* sub, pjsip_event* event)
 {
@@ -1024,7 +1021,7 @@ transfer_client_cb(pjsip_evsub* sub, pjsip_event* event)
 
     pjsip_status_line status_line {};
 
-    pjsip_rx_data* r_data = event->body.rx_msg.rdata;
+    pjsip_rx_data* r_data = event ? event->body.rx_msg.rdata : nullptr;
 
     switch (state) {
     case PJSIP_EVSUB_STATE_ACTIVE:
@@ -1052,15 +1049,13 @@ transfer_client_cb(pjsip_evsub* sub, pjsip_event* event)
         break;
     }
 
-    auto call = static_cast<SIPCall*>(pjsip_evsub_get_mod_data(sub, mod_ua_id));
-    if (call) {
-        emitSignal<libsip_core::CallSignal::TransferStateChange>(call->getSIPAccount()
-                                                                     ->getAccountID(),
-                                                                 call->getCallId(),
+    auto ctx = static_cast<TransferClientCtx*>(pjsip_evsub_get_mod_data(sub, mod_ua_id));
+    if (ctx) {
+        emitSignal<libsip_core::CallSignal::TransferStateChange>(ctx->accountId,
+                                                                 ctx->callId,
                                                                  state,
                                                                  status_line.code,
-                                                                 sip_utils::as_string(
-                                                                     status_line.reason));
+                                                                 sip_utils::as_string(status_line.reason));
     }
 
     switch (state) {
@@ -1074,7 +1069,10 @@ transfer_client_cb(pjsip_evsub* sub, pjsip_event* event)
 
     case PJSIP_EVSUB_STATE_TERMINATED: {
         // clean mod data on sub termination
-        pjsip_evsub_set_mod_data(sub, mod_ua_id, NULL);
+        if (ctx) {
+            delete ctx;
+            pjsip_evsub_set_mod_data(sub, mod_ua_id, NULL);
+        }
         break;
     }
 
@@ -1082,12 +1080,15 @@ transfer_client_cb(pjsip_evsub* sub, pjsip_event* event)
         if (!event)
             return;
 
-        if (!r_data->msg_info.cid)
+        if (!r_data || !r_data->msg_info.cid)
             return;
 
         if (status_line.code / 100 == 2) {
             // clean mod data on success
-            pjsip_evsub_set_mod_data(sub, mod_ua_id, NULL);
+            if (ctx) {
+                delete ctx;
+                pjsip_evsub_set_mod_data(sub, mod_ua_id, NULL);
+            }
         }
 
         break;
@@ -1125,20 +1126,20 @@ SIPCall::transferCommon(const pj_str_t* dst)
     if (pjsip_xfer_create_uac(inviteSession_->dlg, &xfer_cb, &sub) != PJ_SUCCESS)
         return false;
 
-    /* Associate this voiplink of call with the client subscription
-     * We can not just associate call with the client subscription
-     * because after this function, we can no find the cooresponding
-     * voiplink from the call any more. But the voiplink is useful!
-     */
-    pjsip_evsub_set_mod_data(sub, Manager::instance().sipVoIPLink().getModId(), this);
+    /* Associate context with the client subscription */
+    auto* ctx = new TransferClientCtx{acc->getAccountID(), getCallId()};
+    pjsip_evsub_set_mod_data(sub, Manager::instance().sipVoIPLink().getModId(), ctx);
 
     /*
      * Create REFER request.
      */
     pjsip_tx_data* tdata;
 
-    if (pjsip_xfer_initiate(sub, dst, &tdata) != PJ_SUCCESS)
+    if (pjsip_xfer_initiate(sub, dst, &tdata) != PJ_SUCCESS) {
+        delete ctx;
+        pjsip_evsub_set_mod_data(sub, Manager::instance().sipVoIPLink().getModId(), NULL);
         return false;
+    }
 
     // add user agent and Referred-by header
     pjsip_generic_string_hdr* gs_hdr
@@ -1150,8 +1151,11 @@ SIPCall::transferCommon(const pj_str_t* dst)
     sip_utils::addUserAgentHeader(acc->getUserAgentName(), tdata);
 
     /* Send. */
-    if (pjsip_xfer_send_request(sub, tdata) != PJ_SUCCESS)
+    if (pjsip_xfer_send_request(sub, tdata) != PJ_SUCCESS) {
+        delete ctx;
+        pjsip_evsub_set_mod_data(sub, Manager::instance().sipVoIPLink().getModId(), NULL);
         return false;
+    }
 
     return true;
 }
@@ -1314,22 +1318,40 @@ SIPCall::internalOffHold(const std::function<void()>& sdp_cb)
 void
 SIPCall::switchInput(const std::string& source)
 {
+#ifdef ENABLE_VIDEO
     SIP_CORE_DBG("[call:%s] Set selected source to %s", getCallId().c_str(), source.c_str());
 
-    for (auto const& stream : rtpStreams_) {
-        auto mediaAttr = stream.mediaAttribute_;
-        mediaAttr->sourceUri_ = source;
+    if (source == "") {
+        auto currentMediaList = getMediaAttributeList();
+        for (const auto& videoRtp : getRtpSessionList(MediaType::MEDIA_VIDEO)) {
+            std::static_pointer_cast<video::VideoRtpSession>(videoRtp)->getVideoLocal()->stopInput();
+        }
+        for (auto& media : currentMediaList) {
+            if (media.type_ == MediaType::MEDIA_VIDEO) {
+                media.sourceUri_ = source;
+                media.muted_ = true;
+            }
+        }
+        updateAllMediaStreams(currentMediaList, false);
+
+    } else {
+        auto currentMediaList = getMediaAttributeList();
+        for (auto& media : currentMediaList) {
+            if (media.type_ == MediaType::MEDIA_VIDEO) {
+                media.sourceUri_ = source;
+                media.muted_ = false;
+            }
+        }
+        updateAllMediaStreams(currentMediaList, false);
+
+        for (const auto& videoRtp : getRtpSessionList(MediaType::MEDIA_VIDEO)) {
+            std::static_pointer_cast<video::VideoRtpSession>(videoRtp)->getVideoLocal()->switchInput(
+                source);
+        }
     }
 
-    // Check if the call is being recorded in order to continue
-    // ... the recording after the switch
-    bool isRec = Call::isRecording();
-
-    SIPSessionReinvite(getMediaAttributeList());
-    if (isRec) {
-        readyToRecord_ = false;
-        pendingRecord_ = true;
-    }
+    reportMediaNegotiationStatus();
+#endif
 }
 
 void
@@ -1407,7 +1429,7 @@ SIPCall::setVideoOrientation(int streamIdx, int rotation)
 
     SIP_CORE_DBG("Sending device orientation via SIP INFO %d for stream %u", rotation, streamIdx);
 
-    sendSIPInfo(sip_body, "media_control+xml");
+    // sendSIPInfo(sip_body, "media_control+xml");
 }
 
 void
@@ -2013,11 +2035,12 @@ SIPCall::updateMediaStream(const MediaAttribute& newMediaAttr, size_t streamIdx)
     }
 
     // Only update source and type if actually set.
-    if (not newMediaAttr.sourceUri_.empty())
+    if (mediaAttr->type_ == MediaType::MEDIA_VIDEO) {
         mediaAttr->sourceUri_ = newMediaAttr.sourceUri_;
+        rtpStream.rtpSession_->setMediaSource(mediaAttr->sourceUri_);
+    }
 
     if (notifyMute and mediaAttr->type_ == MediaType::MEDIA_AUDIO) {
-        rtpStream.rtpSession_->setMediaSource(mediaAttr->sourceUri_);
         rtpStream.rtpSession_->setMuted(mediaAttr->muted_);
         sendMuteState(mediaAttr->muted_);
         if (not isSubcall())
@@ -2027,9 +2050,7 @@ SIPCall::updateMediaStream(const MediaAttribute& newMediaAttr, size_t streamIdx)
 
 #ifdef ENABLE_VIDEO
     if (notifyMute and mediaAttr->type_ == MediaType::MEDIA_VIDEO) {
-        rtpStream.rtpSession_->setMediaSource(mediaAttr->sourceUri_);
         rtpStream.rtpSession_->setMuted(mediaAttr->muted_);
-
         if (not isSubcall())
             emitSignal<libsip_core::CallSignal::VideoMuted>(getCallId(), mediaAttr->muted_);
     }
@@ -2102,18 +2123,14 @@ SIPCall::isReinviteRequired(const std::vector<MediaAttribute>& mediaAttrList)
     for (auto const& newAttr : mediaAttrList) {
         auto streamIdx = findRtpStreamIndex(newAttr.label_);
 
-        if (streamIdx < 0) {
-            // Always needs a re-invite when a new media is added.
-            return true;
-        }
-
-        // Changing the video source currently does not work via reinvite :)
-        if (newAttr.sourceUri_ != rtpStreams_[streamIdx].mediaAttribute_->sourceUri_) {
-            return false;
-        }
-
-        // Also check if 'enabled' has changed
-        if (newAttr.enabled_ != rtpStreams_[streamIdx].mediaAttribute_->enabled_) {
+        if (streamIdx < 0
+            || // Always needs a re-invite when a new media is added.
+               // newAttr.sourceUri_ != rtpStreams_[streamIdx].mediaAttribute_->sourceUri_ || //
+               // Changing the video source currently does not work via reinvite :)
+            newAttr.enabled_
+                != rtpStreams_[streamIdx]
+                       .mediaAttribute_->enabled_ // Also check if 'enabled' has changed
+        ) {
             return true;
         }
     }
@@ -2124,17 +2141,17 @@ SIPCall::isReinviteRequired(const std::vector<MediaAttribute>& mediaAttrList)
 bool
 SIPCall::isRestartRequired(const std::vector<MediaAttribute>& mediaAttrList)
 {
-    if (mediaAttrList.size() != rtpStreams_.size())
-        return false;
+    // if (mediaAttrList.size() != rtpStreams_.size())
+    //     return false;
 
-    for (auto const& newAttr : mediaAttrList) {
-        auto streamIdx = findRtpStreamIndex(newAttr.label_);
+    // for (auto const& newAttr : mediaAttrList) {
+    //     auto streamIdx = findRtpStreamIndex(newAttr.label_);
 
-        // Changing the source in current setup needs a restart
-        if (newAttr.sourceUri_ != rtpStreams_[streamIdx].mediaAttribute_->sourceUri_) {
-            return true;
-        }
-    }
+    //     // Changing the source in current setup needs a restart
+    //     if (newAttr.sourceUri_ != rtpStreams_[streamIdx].mediaAttribute_->sourceUri_) {
+    //         return true;
+    //     }
+    // }
     return false;
 }
 
@@ -2242,33 +2259,29 @@ SIPCall::getMediaAttributeList() const
 void
 SIPCall::onMediaNegotiationComplete()
 {
-    runOnMainThread([w = weak()] {
-        if (auto this_ = w.lock()) {
-            std::lock_guard<std::recursive_mutex> lk {this_->callMutex_};
-            SIP_CORE_DBG("[call:%s] Media negotiation complete", this_->getCallId().c_str());
+    std::lock_guard<std::recursive_mutex> lk {callMutex_};
+    SIP_CORE_DBG("[call:%s] Media negotiation complete", getCallId().c_str());
 
-            // If the call has already ended, we don't need to start the media.
-            if (not this_->inviteSession_
-                or this_->inviteSession_->state == PJSIP_INV_STATE_DISCONNECTED
-                or not this_->sdp_) {
-                return;
-            }
+    // If the call has already ended, we don't need to start the media.
+    if (not inviteSession_
+        or inviteSession_->state == PJSIP_INV_STATE_DISCONNECTED
+        or not sdp_) {
+        return;
+    }
 
-            // Update the negotiated media.
-            if (this_->mediaRestartRequired_) {
-                this_->setupNegotiatedMedia();
-                // No ICE, start media now.
-                SIP_CORE_WARN("[call:%s] ICE media disabled, using default media ports",
-                              this_->getCallId().c_str());
-                // RESTART the media.
-                this_->stopAllMedia();
-                this_->startAllMedia();
-            }
+    // Update the negotiated media.
+    if (mediaRestartRequired_) {
+        setupNegotiatedMedia();
+        // No ICE, start media now.
+        SIP_CORE_WARN("[call:%s] ICE media disabled, using default media ports",
+                        getCallId().c_str());
+        // RESTART the media always....
+        stopAllMedia();
+        updateRemoteMedia();
+        startAllMedia();
+    }
 
-            this_->updateRemoteMedia();
-            this_->reportMediaNegotiationStatus();
-        }
-    });
+    reportMediaNegotiationStatus();
 }
 
 void
@@ -2522,9 +2535,43 @@ SIPCall::getDetails() const
                         details.emplace(libsip_core::Call::Details::VIDEO_BITRATE,
                                         std::to_string(curvideoRtpSession->getVideoBitrateInfo()
                                                            .videoBitrateCurrent));
+
+                        if (auto remote = curvideoRtpSession->getVideoReceive()) {
+                            details.emplace(libsip_core::Call::Details::VIDEO_FPS,
+                                            std::to_string(remote->getInfo().frameRate.real()));
+                        }
                     }
                 } else
                     details.emplace(libsip_core::Call::Details::VIDEO_CODEC, "");
+
+                auto rrParams = rtpSession->getRtcpRR();
+                details.emplace(libsip_core::Call::Details::VIDEO_FRACTION_LOST,
+                                std::to_string(rrParams.fraction_lost));
+                details.emplace(libsip_core::Call::Details::VIDEO_CUM_LOST_PACKET,
+                                std::to_string(rrParams.cum_lost_packet));
+                details.emplace(libsip_core::Call::Details::VIDEO_JITTER,
+                                std::to_string(rrParams.jitter));
+                details.emplace(libsip_core::Call::Details::VIDEO_EXT_HIGH,
+                                std::to_string(rrParams.ext_high));
+                details.emplace(libsip_core::Call::Details::VIDEO_LSR, std::to_string(rrParams.lsr));
+                details.emplace(libsip_core::Call::Details::VIDEO_DLSR,
+                                std::to_string(rrParams.dlsr));
+
+                auto srParams = rtpSession->getRtcpSR();
+                details.emplace(libsip_core::Call::Details::VIDEO_SPC, std::to_string(srParams.spc));
+                details.emplace(libsip_core::Call::Details::VIDEO_SOC, std::to_string(srParams.soc));
+                details.emplace(libsip_core::Call::Details::VIDEO_TIMESTAMP_MSB,
+                                std::to_string(srParams.timestampMSB));
+                details.emplace(libsip_core::Call::Details::VIDEO_TIMESTAMP_LSB,
+                                std::to_string(srParams.timestampLSB));
+                details.emplace(libsip_core::Call::Details::VIDEO_TIMESTAMP_RTP,
+                                std::to_string(srParams.timestampRTP));
+
+                auto rembParams = rtpSession->getRtcpREMB();
+                details.emplace(libsip_core::Call::Details::VIDEO_BR_EXP,
+                                std::to_string(rembParams.br_exp));
+                details.emplace(libsip_core::Call::Details::VIDEO_BR_MANTIS,
+                                std::to_string(rembParams.br_mantis));
             }
 #endif
         } else if (stream.mediaAttribute_->type_ == MediaType::MEDIA_AUDIO) {
@@ -2542,6 +2589,35 @@ SIPCall::getDetails() const
                     details.emplace(libsip_core::Call::Details::AUDIO_CODEC, "");
                     details.emplace(libsip_core::Call::Details::AUDIO_SAMPLE_RATE, "");
                 }
+
+                auto rrParams = rtpSession->getRtcpRR();
+                details.emplace(libsip_core::Call::Details::AUDIO_FRACTION_LOST,
+                                std::to_string(rrParams.fraction_lost));
+                details.emplace(libsip_core::Call::Details::AUDIO_CUM_LOST_PACKET,
+                                std::to_string(rrParams.cum_lost_packet));
+                details.emplace(libsip_core::Call::Details::AUDIO_JITTER,
+                                std::to_string(rrParams.jitter));
+                details.emplace(libsip_core::Call::Details::AUDIO_EXT_HIGH,
+                                std::to_string(rrParams.ext_high));
+                details.emplace(libsip_core::Call::Details::AUDIO_LSR, std::to_string(rrParams.lsr));
+                details.emplace(libsip_core::Call::Details::AUDIO_DLSR,
+                                std::to_string(rrParams.dlsr));
+
+                auto srParams = rtpSession->getRtcpSR();
+                details.emplace(libsip_core::Call::Details::AUDIO_SPC, std::to_string(srParams.spc));
+                details.emplace(libsip_core::Call::Details::AUDIO_SOC, std::to_string(srParams.soc));
+                details.emplace(libsip_core::Call::Details::AUDIO_TIMESTAMP_MSB,
+                                std::to_string(srParams.timestampMSB));
+                details.emplace(libsip_core::Call::Details::AUDIO_TIMESTAMP_LSB,
+                                std::to_string(srParams.timestampLSB));
+                details.emplace(libsip_core::Call::Details::AUDIO_TIMESTAMP_RTP,
+                                std::to_string(srParams.timestampRTP));
+
+                auto rembParams = rtpSession->getRtcpREMB();
+                details.emplace(libsip_core::Call::Details::AUDIO_BR_EXP,
+                                std::to_string(rembParams.br_exp));
+                details.emplace(libsip_core::Call::Details::AUDIO_BR_MANTIS,
+                                std::to_string(rembParams.br_mantis));
             }
         }
     }
@@ -2896,9 +2972,28 @@ SIPCall::peerVoice(bool voice)
     peerVoice_ = voice;
 
     if (auto conference = conf_.lock()) {
-        conference->updateVoiceActivity();
+            if (auto sink = sip_core::Manager::instance().getSinkClient(this->getCallId())) {
+                conference->setVoiceActivity(
+                    sip_utils::streamId(sink->getId(), 
+                                        sip_utils::DEFAULT_VIDEO_STREAMID), 
+                    voice);
+            }
     } else {
         // one-to-one call
+
+        {
+            std::lock_guard<std::mutex> lk(confInfoMutex_);
+            // confID_ empty -> participant set confInfo with the received one
+            auto participant = std::find_if(confInfo_.begin(), confInfo_.end(), [&] (const ParticipantInfo& p) {
+                return p.uri == this->getCallId();
+            });
+
+            if(participant != confInfo_.end()) {
+                participant->voiceActivity = voice;
+            }
+        }
+
+
         // maybe emit signal with partner voice activity
     }
 }

@@ -71,6 +71,9 @@
 #include "client/ring_signal.h"
 #include "sip_core/call_const.h"
 #include "sip_core/account_const.h"
+#include "sip/sipcall.h"
+#include "media/audio/audio_rtp_session.h"
+#include "media/audio/audio_receive_thread.h"
 
 #include "libav_utils.h"
 #ifdef ENABLE_VIDEO
@@ -531,7 +534,7 @@ Manager::ManagerPimpl::bindCallToConference(Call& call, Conference& conf)
     const auto& callId = call.getCallId();
     const auto& confId = conf.getConfId();
     const auto& state = call.getStateStr();
-
+    
     // ensure that calls are only in one conference at a time
     if (call.isConferenceParticipant())
         base_.detachParticipant(callId);
@@ -1327,11 +1330,31 @@ Manager::joinParticipant(const std::string& accountId,
         return false;
     }
 
+    bool attachLocalVideo = false;
+
     // Set corresponding conference ids for call 1
     auto call1 = account->getCall(callId1);
     if (!call1) {
         SIP_CORE_ERR("Could not find call %s", callId1.c_str());
         return false;
+    }
+
+    auto call1Media = call1->getMediaAttributeList();
+
+    attachLocalVideo = std::any_of(call1Media.begin(),
+                                     call1Media.end(),
+                                     [](const MediaAttribute& media) {
+                                         return media.hasValidVideo();
+                                     });
+
+    // use default source if not found
+    std::string source;
+    if(attachLocalVideo) {
+        for (auto m : call1Media) {
+            if (m.type_ == MediaType::MEDIA_VIDEO) {
+                source = m.sourceUri_;
+            }
+        }
     }
 
     // Set corresponding conference details
@@ -1343,12 +1366,20 @@ Manager::joinParticipant(const std::string& accountId,
 
     auto call2Media = call2->getMediaAttributeList();
 
-    // use default source if not found
-    std::string source;
+    // is that true for call2 ?
+    if (!attachLocalVideo) {
+        attachLocalVideo = std::any_of(call2Media.begin(),
+                                     call2Media.end(),
+                                     [](const MediaAttribute& media) {
+                                         return media.hasValidVideo();
+                                     });
+    }
 
-    for (auto m : call2Media) {
-        if (m.type_ == MediaType::MEDIA_VIDEO) {
-            source = m.sourceUri_;
+    if(attachLocalVideo) {
+        for (auto m : call2Media) {
+            if (m.type_ == MediaType::MEDIA_VIDEO) {
+                source = m.sourceUri_;
+            }
         }
     }
 
@@ -1358,13 +1389,15 @@ Manager::joinParticipant(const std::string& accountId,
                                                            conf->getConfId());
 
     // Bind calls according to their state
+    // if audio only, they will be added as AUDIO only sources
     pimpl_->bindCallToConference(*call1, *conf);
     pimpl_->bindCallToConference(*call2, *conf);
 
     // Switch current call id to this conference
     if (attached) {
         // attach local participant
-        conf->attachLocalParticipant(source);
+        conf->setLocalHostDefaultMediaSource(attachLocalVideo, source);
+        conf->attachLocalParticipant();
         pimpl_->switchCall(conf->getConfId());
         conf->setState(Conference::State::ACTIVE_ATTACHED);
     } else {
@@ -1736,19 +1769,6 @@ Manager::incomingCallsWaiting()
 {
     std::lock_guard<std::mutex> m(pimpl_->waitingCallsMutex_);
     return not pimpl_->waitingCalls_.empty();
-}
-
-bool
-Manager::checkIfDND(const std::string& accountId) const
-{
-    auto const& account = getAccount(accountId);
-
-    // always ignore all unknown calls - we do not need them
-    if (not account) {
-        return true;
-    }
-
-    return account->isDND();
 }
 
 void
@@ -2151,25 +2171,14 @@ Manager::startAudio()
 #if (defined(TARGET_OS_IOS) && TARGET_OS_IOS)
     SIP_CORE_INFO("ios -> startAudio");
 
-    constexpr std::array<AudioDeviceType, 3> TYPES {AudioDeviceType::CAPTURE};
+    // Recreate audio driver with new settings
+    pimpl_->audiodriver_.reset(pimpl_->base_.audioPreference.createAudioLayer());
+
+    constexpr std::array<AudioDeviceType, 2> TYPES {AudioDeviceType::CAPTURE, AudioDeviceType::PLAYBACK};
 
     for (const auto& type : TYPES)
         if (pimpl_->audioStreamUsers_[(unsigned) type])
             pimpl_->audiodriver_->startStream(type);
-#endif
-}
-
-void
-Manager::configureAudioForCall()
-{
-#if (defined(TARGET_OS_IOS) && TARGET_OS_IOS)
-    SIP_CORE_INFO("ios -> configureAudioForCall");
-
-    if (pimpl_->audiodriver_ == nullptr)
-        return;
-
-    auto iosDriver = std::static_pointer_cast<CoreLayer>(pimpl_->audiodriver_);
-    iosDriver->configureAudioForCall();
 #endif
 }
 
@@ -2492,6 +2501,19 @@ Manager::setAudioProcessor(const std::string& processor)
         pimpl_->initAudioDriver();
     }
 
+    if(audioPreference.getVadEnabled()) {
+        for (auto& call : callFactory.getAllCalls()) {
+            if (auto sipCall = std::dynamic_pointer_cast<SIPCall>(call)) {
+                for (auto& audioRtp : sipCall->getRtpSessionList(MediaType::MEDIA_AUDIO)) {
+                    auto& recv = std::static_pointer_cast<AudioRtpSession>(audioRtp)
+                            ->getAudioReceive();
+                    recv->setVAD(false);
+                    recv->setVAD(true);
+                }
+            }
+        }
+    }
+
     saveConfig();
 }
 
@@ -2503,6 +2525,16 @@ Manager::setVADState(bool state)
         audioPreference.setVad(state);
         pimpl_->audiodriver_.reset();
         pimpl_->initAudioDriver();
+    }
+
+    for (auto& call : callFactory.getAllCalls()) {
+        if (auto sipCall = std::dynamic_pointer_cast<SIPCall>(call)) {
+            for (auto& audioRtp : sipCall->getRtpSessionList(MediaType::MEDIA_AUDIO)) {
+                auto& recv = std::static_pointer_cast<AudioRtpSession>(audioRtp)
+                        ->getAudioReceive();
+                recv->setVAD(state);
+            }
+        }
     }
 
     saveConfig();
@@ -2546,6 +2578,11 @@ Manager::ManagerPimpl::processIncomingCall(const std::string& accountId, Call& i
 
     auto incomCallId = incomCall.getCallId();
     auto currentCall = base_.getCurrentCall();
+
+    if(currentCall && (currentCall->isConferenceParticipant() || currentCall->isRemoteConferenceParticipant())) {
+        incomCall.refuse();
+        return;
+    }
 
     auto w = incomCall.getAccount();
     auto account = w.lock();
@@ -3152,6 +3189,12 @@ Manager::isAllModerators(const std::string& accountID)
         return true; // Default value
     }
     return acc->isAllModerators();
+}
+
+void
+Manager::setTsxTimers(const uint32_t t1, const uint32_t t2, const uint32_t t4, const uint32_t td)
+{
+    pjsip_tsx_set_timers(t1, t2, t4, td);
 }
 
 } // namespace sip_core

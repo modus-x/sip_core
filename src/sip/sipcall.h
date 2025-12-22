@@ -203,6 +203,16 @@ public:
      * @param cause Optional error code
      */
     void onFailure(signed cause = 0);
+    
+    /**
+     * Check if this call can be retried with backup route
+     */
+    bool canRetryWithBackupRoute() const { return canRetryWithBackupRoute_; }
+    
+    /**
+     * Disable retry with backup route (after first attempt)
+     */
+    void disableRetryWithBackupRoute() { canRetryWithBackupRoute_ = false; }
     /**
      * Peer answered busy
      */
@@ -281,6 +291,10 @@ public:
      */
     void reportMediaNegotiationStatus();
 
+    void setInitialServiceRoute(const std::string& serviceRoute) { initialServiceRoute_ = serviceRoute; }
+
+    std::string getInitialServiceRoute() const { return initialServiceRoute_; }
+
 private:
     void generateMediaPorts();
 
@@ -291,7 +305,7 @@ private:
     void setupVoiceCallback(const std::shared_ptr<RtpSession>& rtpSession);
 
     void sendMuteState(bool state);
-    void sendVoiceActivity(std::string_view streamId, bool state);
+    // void sendVoiceActivity(std::string_view streamId, bool state);
 
     /**
      * Send device orientation through SIP INFO
@@ -411,12 +425,20 @@ private:
 
     std::atomic_bool waitForIceInit_ {false};
 
+    /**
+     * Flag to track if INVITE can be retried with backup route.
+     * Set to true for outgoing calls, reset after first failure attempt.
+     */
+    bool canRetryWithBackupRoute_ {false};
+
     void detachAudioFromConference();
 
     std::mutex setupSuccessMutex_;
 #ifdef ENABLE_VIDEO
     int rotation_ {0};
 #endif
+
+    std::string initialServiceRoute_ {};
 };
 
 // Helpers

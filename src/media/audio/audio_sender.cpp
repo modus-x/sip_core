@@ -168,7 +168,7 @@
          if (txDtmfQueue_.size() != 0 && std::chrono::steady_clock::now() >= nextDigitEarliest_) {
              RtpDtmfPayload dtmfPayload {};
  
-             bool first, last = false;
+             bool first = false, last = false;
  
              auto samples = createDtmfPayload(&dtmfPayload, &first, &last);
  
@@ -238,11 +238,9 @@
      {
          dtmf& data = txDtmfQueue_.front();
  
-         first = &data.firstSent;
- 
          /* First packet for this digit ----------------------------------------- */
          if (data.duration > 0 && !data.firstSent) {
-             *first = true;
+             data.firstSent = *first = true;
          }
  
          /* --------------------------------------------------------------------- */

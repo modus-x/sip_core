@@ -68,7 +68,11 @@ public:
     std::shared_ptr<AudioInput>& getAudioLocal() { return audioInput_; }
     std::unique_ptr<AudioReceiveThread>& getAudioReceive() { return receiveThread_; }
 
-    void setVoiceCallback(std::function<void(bool)> cb);
+    void setVoiceCallback(std::function<void(const std::string&, bool)> cb);
+
+    virtual rtcpRRHeader getRtcpRR() override;
+    virtual rtcpREMBHeader getRtcpREMB() override;
+    virtual rtcpSRHeader getRtcpSR() override;
 
 private:
     void startSender();
@@ -95,7 +99,7 @@ private:
     // Interval in seconds between RTCP checking
     std::chrono::seconds rtcp_checking_interval {4};
 
-    std::function<void(bool)> voiceCallback_;
+    std::function<void(const std::string& id, bool)> voiceCallback_;
 
     void attachRemoteRecorder(const MediaStream& ms);
     void attachLocalRecorder(const MediaStream& ms);

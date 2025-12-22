@@ -149,6 +149,11 @@ MediaDemuxer::openInput(const DeviceParams& params)
         av_dict_set(&options_, "window_id", params.window_id.c_str(), 0);
     }
 
+    if (params.format == "video4linux2") {
+        av_dict_set(&options_, "use_wallclock_as_timestamps", "1", 0);
+        av_dict_set(&options_, "fflags", "nobuffer", AV_DICT_APPEND);
+    }
+
 #if defined(__APPLE__) && TARGET_OS_MAC
     std::string input = params.name;
 #else
@@ -177,6 +182,9 @@ MediaDemuxer::openInput(const DeviceParams& params)
                      params.format.c_str(),
                      libav_utils::getError(ret).c_str());
     } else {
+        if (params.format == "video4linux2") {
+            inputCtx_->flags |= AVFMT_FLAG_NOBUFFER;
+        }
         baseWidth_ = inputCtx_->streams[0]->codecpar->width;
         baseHeight_ = inputCtx_->streams[0]->codecpar->height;
         SIP_CORE_DBG("Using format %s and resolution %dx%d",
@@ -651,6 +659,22 @@ MediaDecoder::updateStartTime(int64_t startTime)
     startTime_ = startTime;
 }
 
+void
+MediaDecoder::enableLateFrameDrop(std::chrono::microseconds threshold)
+{
+    if (threshold.count() > 0) {
+        dropLateFrames_ = true;
+        lateFrameDropThresholdUs_ = threshold.count();
+    } else {
+        dropLateFrames_ = false;
+        lateFrameDropThresholdUs_ = 0;
+    }
+    firstCapturePtsUs_ = AV_NOPTS_VALUE;
+    firstCaptureWallclockUs_ = 0;
+    lateFrameDropCount_ = 0;
+    lastLateFrameLog_ = {};
+}
+
 DecodeStatus
 MediaDecoder::decode(AVPacket& packet)
 {
@@ -709,6 +733,37 @@ MediaDecoder::decode(AVPacket& packet)
 
         frame->format = (AVPixelFormat) correctPixFmt(frame->format);
         auto packetTimestamp = frame->pts;
+
+        if (dropLateFrames_ && packetTimestamp != AV_NOPTS_VALUE) {
+            static constexpr AVRational kMicroBase {1, AV_TIME_BASE};
+            auto packetUs = av_rescale_q(packetTimestamp, decoderCtx_->time_base, kMicroBase);
+            auto nowUs = av_gettime();
+            if (firstCapturePtsUs_ == AV_NOPTS_VALUE) {
+                firstCapturePtsUs_ = packetUs;
+                firstCaptureWallclockUs_ = nowUs;
+            }
+
+            auto captureDelta = packetUs - firstCapturePtsUs_;
+            if (captureDelta < 0)
+                captureDelta = 0;
+            auto wallClockDelta = nowUs - firstCaptureWallclockUs_;
+
+            if (captureDelta + lateFrameDropThresholdUs_ < wallClockDelta) {
+                auto lagUs = wallClockDelta - captureDelta;
+                auto now = steady_clock::now();
+                if (lastLateFrameLog_.time_since_epoch().count() == 0
+                    || now - lastLateFrameLog_ >= std::chrono::seconds(1)) {
+                    SIP_CORE_WARN("Dropping stale video frame delayed by {} ms (threshold {} ms)",
+                                  lagUs / 1000,
+                                  lateFrameDropThresholdUs_ / 1000);
+                    lastLateFrameLog_ = now;
+                }
+                ++lateFrameDropCount_;
+                return DecodeStatus::Success;
+            } else {
+                lateFrameDropCount_ = 0;
+            }
+        }
 
         // calculate real pts relative to start time of stream
         frame->pts = av_rescale_q_rnd(av_gettime() - startTime_,

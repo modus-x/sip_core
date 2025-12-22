@@ -217,6 +217,7 @@ SocketPair::saveRtcpRRPacket(uint8_t* buf, size_t len)
         listRtcpRRHeader_.pop_front();
     }
 
+    lastRtcpRRHeader_ = *header;
     listRtcpRRHeader_.emplace_back(*header);
 
     cvRtcpPacketReadyToRead_.notify_one();
@@ -241,6 +242,7 @@ SocketPair::saveRtcpREMBPacket(uint8_t* buf, size_t len)
         listRtcpREMBHeader_.pop_front();
     }
 
+    lastRtcpREMBHeader_ = *header;
     listRtcpREMBHeader_.push_back(*header);
 
     cvRtcpPacketReadyToRead_.notify_one();
@@ -258,6 +260,27 @@ SocketPair::getRtcpREMB()
 {
     std::lock_guard<std::mutex> lock(rtcpInfo_mutex_);
     return std::move(listRtcpREMBHeader_);
+}
+
+rtcpSRHeader
+SocketPair::getLastRtcpSR()
+{
+    std::lock_guard<std::mutex> lock(rtcpInfo_mutex_);
+    return lastRtcpSRHeader_;
+}
+
+rtcpREMBHeader
+SocketPair::getLastRtcpREMB()
+{
+    std::lock_guard<std::mutex> lock(rtcpInfo_mutex_);
+    return lastRtcpREMBHeader_;
+}
+
+rtcpRRHeader
+SocketPair::getLastRtcpRR()
+{
+    std::lock_guard<std::mutex> lock(rtcpInfo_mutex_);
+    return lastRtcpRRHeader_;
 }
 
 void
@@ -637,6 +660,9 @@ SocketPair::writeCallback(uint8_t* buf, int buf_size)
         }
 
         lastSRTS_ = currentSRTS;
+        
+        std::lock_guard<std::mutex> lock(rtcpInfo_mutex_);
+        lastRtcpSRHeader_ = *header;
 
         // SIP_CORE_WARN("SENDING NEW RTCP SR !! ");
 

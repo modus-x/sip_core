@@ -122,14 +122,6 @@ Sdp::findCodecByPayload(const unsigned payloadType)
     return nullptr;
 }
 
-static void
-randomFill(std::vector<uint8_t>& dest)
-{
-    // std::uniform_int_distribution<int> rand_byte {0, std::numeric_limits<uint8_t>::max()};
-    // random_device rdev;
-    // std::generate(dest.begin(), dest.end(), std::bind(rand_byte, std::ref(rdev)));
-}
-
 void
 Sdp::setActiveLocalSdpSession(const pjmedia_sdp_session* sdp)
 {
@@ -466,13 +458,13 @@ void
 Sdp::printSession(const pjmedia_sdp_session* session, const char* header, SdpDirection direction)
 {
     static constexpr size_t BUF_SZ = 4095;
-    std::unique_ptr<pj_pool_t, decltype(pj_pool_release)&>
+    std::unique_ptr<pj_pool_t, decltype(&pj_pool_release)>
         tmpPool_(pj_pool_create(&Manager::instance().sipVoIPLink().getCachingPool()->factory,
                                 "printSdp",
                                 BUF_SZ,
                                 BUF_SZ,
                                 nullptr),
-                 pj_pool_release);
+                 &pj_pool_release);
 
     auto cloned_session = pjmedia_sdp_session_clone(tmpPool_.get(), session);
     if (!cloned_session) {
@@ -681,13 +673,13 @@ std::string
 Sdp::getFilteredSdp(const pjmedia_sdp_session* session, unsigned media_keep, unsigned pt_keep)
 {
     static constexpr size_t BUF_SZ = 4096;
-    std::unique_ptr<pj_pool_t, decltype(pj_pool_release)&>
+    std::unique_ptr<pj_pool_t, decltype(&pj_pool_release)>
         tmpPool_(pj_pool_create(&Manager::instance().sipVoIPLink().getCachingPool()->factory,
                                 "tmpSdp",
                                 BUF_SZ,
                                 BUF_SZ,
                                 nullptr),
-                 pj_pool_release);
+                 &pj_pool_release);
     auto cloned = pjmedia_sdp_session_clone(tmpPool_.get(), session);
     if (!cloned) {
         SIP_CORE_ERR("Could not clone SDP");
@@ -808,7 +800,7 @@ Sdp::getMediaDescriptions(const pjmedia_sdp_session* session, bool remote) const
 
         descr.onHold = pjmedia_sdp_attr_find2(media->attr_count,
                                               media->attr,
-                                              DIRECTION_STR[MediaDirection::SENDONLY],
+                                              DIRECTION_STR[MediaDirection::RECVONLY],
                                               nullptr)
                        || pjmedia_sdp_attr_find2(media->attr_count,
                                                  media->attr,
@@ -961,8 +953,7 @@ Sdp::getMediaAttributeListFromSdp(const pjmedia_sdp_session* sdpSession, bool ig
 
         // Get mute state.
         auto direction = getMediaDirection(media);
-        mediaAttr.muted_ = direction != MediaDirection::SENDRECV
-                           and direction != MediaDirection::RECVONLY;
+        mediaAttr.muted_ = direction == MediaDirection::RECVONLY;
 
         // Get transport.
         auto transp = getMediaTransport(media);

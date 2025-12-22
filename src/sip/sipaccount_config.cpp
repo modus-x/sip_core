@@ -27,7 +27,12 @@ extern "C" {
 namespace sip_core {
 
 static KeepAliveType getKeepAliveType(const std::string& value) {
-    return value == "sip-options" ? KeepAliveType::Options : KeepAliveType::Packet;
+    if (value == "packet")
+        return KeepAliveType::Packet;
+    if (value == "sip-options")
+        return KeepAliveType::Options;
+    // Default to SIP OPTIONS when unspecified or unrecognized
+    return KeepAliveType::Options;
 }
 
 static constexpr const char*
@@ -48,6 +53,7 @@ constexpr const char* PUBLISH_PORT_KEY = "publishPort";
 constexpr const char* SAME_AS_LOCAL_KEY = "sameasLocal";
 constexpr const char* DTMF_TYPE_KEY = "dtmfType";
 constexpr const char* SERVICE_ROUTE_KEY = "serviceRoute";
+constexpr const char* BACK_SERVICE_ROUTE_KEY = "backServiceRoute";
 constexpr const char* ALLOW_IP_AUTO_REWRITE = "allowIPAutoRewrite";
 constexpr const char* PRESENCE_ENABLED_KEY = "presenceEnabled";
 constexpr const char* PRESENCE_PUBLISH_SUPPORTED_KEY = "presencePublishSupported";
@@ -97,6 +103,7 @@ SipAccountConfig::serialize(YAML::Emitter& out) const
 
     out << YAML::Key << Conf::REGISTRATION_EXPIRE << YAML::Value << registrationExpire;
     out << YAML::Key << Conf::SERVICE_ROUTE_KEY << YAML::Value << serviceRoute;
+    out << YAML::Key << Conf::BACK_SERVICE_ROUTE_KEY << YAML::Value << backServiceRoute;
     out << YAML::Key << Conf::ALLOW_IP_AUTO_REWRITE << YAML::Value << allowIPAutoRewrite;
 
     if (serializeCredentials) {
@@ -130,6 +137,7 @@ SipAccountConfig::unserialize(const YAML::Node& node)
     parseValueOptional(node, Conf::REGISTRATION_EXPIRE, registrationExpire);
     registrationExpire = std::max(MIN_REGISTRATION_TIME, registrationExpire);
     parseValueOptional(node, Conf::SERVICE_ROUTE_KEY, serviceRoute);
+    parseValueOptional(node, Conf::BACK_SERVICE_ROUTE_KEY, backServiceRoute);
     parseValueOptional(node, Conf::ALLOW_IP_AUTO_REWRITE, allowIPAutoRewrite);
 
     parseValueOptional(node, Conf::PRESENCE_MODULE_ENABLED_KEY, presenceEnabled);
@@ -170,6 +178,7 @@ SipAccountConfig::toMap() const
     a.emplace(Conf::CONFIG_KEEP_ALIVE_INTERVAL, std::to_string(keepAliveInterval));
     a.emplace(Conf::CONFIG_KEEP_ALIVE_TYPE, getKeepAliveTypeName(keepAliveType));
     a.emplace(Conf::CONFIG_ACCOUNT_ROUTESET, serviceRoute);
+    a.emplace(Conf::CONFIG_ACCOUNT_BACK_ROUTESET, backServiceRoute);
     a.emplace(Conf::CONFIG_ACCOUNT_REGISTRATION_EXPIRE, std::to_string(registrationExpire));
 
     std::string password {};
@@ -198,6 +207,7 @@ SipAccountConfig::fromMap(const std::map<std::string, std::string>& details)
     parseInt(details, Conf::CONFIG_LOCAL_PORT, localPort);
     parseString(details, Conf::CONFIG_BIND_ADDRESS, bindAddress);
     parseString(details, Conf::CONFIG_ACCOUNT_ROUTESET, serviceRoute);
+    parseString(details, Conf::CONFIG_ACCOUNT_BACK_ROUTESET, backServiceRoute);
     parseBool(details, Conf::CONFIG_ACCOUNT_IP_AUTO_REWRITE, allowIPAutoRewrite);
     parseString(details, Conf::CONFIG_LOCAL_INTERFACE, interface);
     parseBool(details, Conf::CONFIG_PUBLISHED_SAMEAS_LOCAL, publishedSameasLocal);

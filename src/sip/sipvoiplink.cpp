@@ -312,9 +312,10 @@ transaction_request_cb(pjsip_rx_data* rdata)
         peerNumber = sip_utils::stripSipUriPrefix(std::string_view(tmp, length));
     }
 
-    auto fromHeader = std::string("");
 
-    fromHeader = std::string(rdata->msg_info.msg_buf, rdata->msg_info.len);
+    auto inviteBody = std::string("");
+
+    inviteBody = std::string(rdata->msg_info.msg_buf, rdata->msg_info.len);
 
     std::shared_ptr<SIPAccount> account
         = Manager::instance().sipVoIPLink().guessAccount(toUsername, viaHostname, remote_hostname);
@@ -481,7 +482,7 @@ transaction_request_cb(pjsip_rx_data* rdata)
     }
 
     call->setPeerNumber(peerNumber);
-    call->setFromHeader(fromHeader);
+    call->setInviteBody(inviteBody);
     call->setPeerUri(account->getToUri(peerNumber));
     call->setPeerDisplayName(peerDisplayName);
     call->getSDP().setPublishedIP(addrSdp);
@@ -573,7 +574,7 @@ transaction_request_cb(pjsip_rx_data* rdata)
         return PJ_FALSE;
     }
 
-    if (Manager::instance().checkIfDND(account->getAccountID())) {
+    if (account->isDND()) {
         const pj_str_t message = CONST_PJ_STR(
             "Call is declined because user is in DND / away state");
 
@@ -685,7 +686,7 @@ SIPVoIPLink::getCachingPool() noexcept
 }
 
 SIPVoIPLink::SIPVoIPLink()
-    : pool_(nullptr, pj_pool_release)
+    : pool_(nullptr, &pj_pool_release)
 {
 #define TRY(ret) \
     do { \
@@ -993,6 +994,63 @@ invite_session_state_changed_cb(pjsip_inv_session* inv, pjsip_event* ev)
             call->onClosed();
             break;
 
+        // Transport/timeout errors - can be retried with backup route
+        case PJSIP_SC_REQUEST_TIMEOUT:
+        case PJSIP_SC_SERVICE_UNAVAILABLE: {
+            // Check if this is an outgoing call that can be retried
+            auto sipCall = std::dynamic_pointer_cast<SIPCall>(call);
+            if (inv->role == PJSIP_ROLE_UAC) {
+                auto sipAccount = std::dynamic_pointer_cast<SIPAccount>(
+                    sipCall->getAccount().lock());
+
+                std::lock_guard<std::mutex> lk(sipAccount->switchFromCallRetry);
+
+                // we have some route to retry
+                if (sipAccount
+                    && (sipAccount->hasServiceRoute() || sipAccount->hasBackServiceRoute())) {
+                    if (sipCall->getInitialServiceRoute() == sipAccount->getActiveServiceRoute()) {
+                        if (sipAccount->isUsingBackupRoute()) {
+                            sipAccount->switchToMainRoute();
+                        } else {
+                            sipAccount->switchToBackupRoute();
+                        }
+                    }
+
+                    sipAccount->newOutgoingCall(sipCall->getPeerNumber(), sipCall->currentMediaList());
+
+                    // SIP_CORE_WARN(
+                    //     "[call:%s] INVITE failed with code %d, performing switch and restart",
+                    //     sipCall->getCallId().c_str(),
+                    //     inv->cause);
+
+                    // /* Must invalidate the message! */
+                    // pjsip_tx_data_invalidate_msg(inv->invite_req);
+
+                    // if (pjsip_inv_uac_restart(inv, true) != PJ_SUCCESS) {
+                    //     SIP_CORE_ERR("[call:%s] INVITE restart failed",
+                    //                  sipCall->getCallId().c_str());
+                    // }
+
+                    // std::string activeRoute = sipAccount->getActiveServiceRoute();
+                    // if (!activeRoute.empty())
+                    //     call->setInitialServiceRoute(activeRoute);
+                    // pjsip_dlg_set_route_set(inv->dlg,
+                    //                         sip_utils::createRouteSet(activeRoute,
+                    //                                                   call->inviteSession_->pool));
+
+                    // /* Send the request. */
+                    // pj_status_t status = pjsip_inv_send_msg(inv, inv->invite_req);
+                    // if (status != PJ_SUCCESS) {
+                    //     SIP_CORE_ERR("[call:%s] INVITE send failed", sipCall->getCallId().c_str());
+                    // }
+                }
+            }
+
+            // If we can't retry, treat as normal failure
+            call->onFailure(inv->cause);
+            break;
+        }
+
         // Error/unhandled conditions
         default:
             call->onFailure(inv->cause);
@@ -1212,7 +1270,7 @@ handleMediaControl(SIPCall& call, pjsip_msg_body* body)
         static constexpr auto DEVICE_ORIENTATION = "device_orientation"sv;
         static constexpr auto RECORDING_STATE = "recording_state"sv;
         static constexpr auto MUTE_STATE = "mute_state"sv;
-        static constexpr auto VOICE_ACTIVITY = "voice_activity"sv;
+        // static constexpr auto VOICE_ACTIVITY = "voice_activity"sv;
 
         int streamIdx = -1;
         if (body_msg.find(STREAM_ID) != std::string_view::npos) {
@@ -1283,20 +1341,20 @@ handleMediaControl(SIPCall& call, pjsip_msg_body* body)
                 }
                 return true;
             }
-        } else if (body_msg.find(VOICE_ACTIVITY) != std::string_view::npos) {
-            static const std::regex REC_REGEX("voice_activity=([0-1])");
-            std::svmatch matched_pattern;
-            std::regex_search(body_msg, matched_pattern, REC_REGEX);
+        // } else if (body_msg.find(VOICE_ACTIVITY) != std::string_view::npos) {
+        //     static const std::regex REC_REGEX("voice_activity=([0-1])");
+        //     std::svmatch matched_pattern;
+        //     std::regex_search(body_msg, matched_pattern, REC_REGEX);
 
-            if (matched_pattern.ready() && !matched_pattern.empty() && matched_pattern[1].matched) {
-                try {
-                    bool state = std::stoi(matched_pattern[1]);
-                    call.peerVoice(state);
-                } catch (const std::exception& e) {
-                    SIP_CORE_WARN("Error parsing state remote voice: %s", e.what());
-                }
-                return true;
-            }
+        //     if (matched_pattern.ready() && !matched_pattern.empty() && matched_pattern[1].matched) {
+        //         try {
+        //             bool state = std::stoi(matched_pattern[1]);
+        //             call.peerVoice(state);
+        //         } catch (const std::exception& e) {
+        //             SIP_CORE_WARN("Error parsing state remote voice: %s", e.what());
+        //         }
+        //         return true;
+        //     }
         }
     }
 
@@ -1359,8 +1417,10 @@ onRequestRefer(pjsip_inv_session* inv, pjsip_rx_data* rdata, pjsip_msg* msg, SIP
 static void
 onRequestInfo(pjsip_inv_session* inv, pjsip_rx_data* rdata, pjsip_msg* msg, SIPCall& call)
 {
-    if (!msg->body or handleMediaControl(call, msg->body))
-        replyToRequest(inv, rdata, PJSIP_SC_OK);
+    if (msg->body) {
+        handleMediaControl(call, msg->body);
+    }
+    replyToRequest(inv, rdata, PJSIP_SC_OK);
 }
 
 static void

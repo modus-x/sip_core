@@ -14,7 +14,8 @@
         "rtp_dtmf.patch",
         "libopusenc-reload-packet-loss-at-encode.patch",
         "libopusdec-enable-FEC.patch",
-        "windows-configure.patch"
+        "windows-configure.patch",
+        "gdigrab.patch"
     ],
     "win_patches": [
     ],

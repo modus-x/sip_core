@@ -1,0 +1,45 @@
+diff --git a/pjsip/src/pjsip-simple/presence.c b/pjsip/src/pjsip-simple/presence.c
+index 345eddd..fac1e68 100644
+--- a/pjsip/src/pjsip-simple/presence.c
++++ b/pjsip/src/pjsip-simple/presence.c
+@@ -135,8 +135,10 @@ static const pj_str_t STR_PRESENCE	    = { "presence", 8 };
+ static const pj_str_t STR_APPLICATION	    = { "application", 11 };
+ static const pj_str_t STR_PIDF_XML	    = { "pidf+xml", 8};
+ static const pj_str_t STR_XPIDF_XML	    = { "xpidf+xml", 9};
++static const pj_str_t STR_DUP_REG	    = { "reg", 3};
+ static const pj_str_t STR_APP_PIDF_XML	    = { "application/pidf+xml", 20 };
+ static const pj_str_t STR_APP_XPIDF_XML    = { "application/xpidf+xml", 21 };
++static const pj_str_t STR_APP_DUP_REG    = { "application/reg", 15 };
+ 
+ 
+ /*
+@@ -146,7 +148,7 @@ PJ_DEF(pj_status_t) pjsip_pres_init_module( pjsip_endpoint *endpt,
+ 					    pjsip_module *mod_evsub)
+ {
+     pj_status_t status;
+-    pj_str_t accept[2];
++    pj_str_t accept[3];
+ 
+     /* Check arguments. */
+     PJ_ASSERT_RETURN(endpt && mod_evsub, PJ_EINVAL);
+@@ -161,6 +163,7 @@ PJ_DEF(pj_status_t) pjsip_pres_init_module( pjsip_endpoint *endpt,
+ 
+     accept[0] = STR_APP_PIDF_XML;
+     accept[1] = STR_APP_XPIDF_XML;
++    accept[2] = STR_APP_DUP_REG;
+ 
+     /* Register event package to event module. */
+     status = pjsip_evsub_register_pkg( &mod_presence, &STR_PRESENCE, 
+@@ -768,6 +771,12 @@ static pj_status_t pres_process_rx_notify( pjsip_pres *pres,
+ 	status = pjsip_pres_parse_xpidf( rdata, pres->tmp_pool,
+ 					 &pres->tmp_status);
+     }
++    else 
++    if (pj_stricmp(&ctype_hdr->media.type, &STR_APPLICATION)==0 &&
++	pj_stricmp(&ctype_hdr->media.subtype, &STR_DUP_REG)==0)
++    {
++	status = PJ_SUCCESS;
++    }
+     else
+     {
+ 	status = PJSIP_SIMPLE_EBADCONTENT;

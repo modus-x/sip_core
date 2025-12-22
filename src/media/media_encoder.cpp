@@ -714,15 +714,18 @@ MediaEncoder::writeContainerToRtp(uint8_t* buf, int buf_size)
     }
 
     bool
-    MediaEncoder::send(AVPacket& pkt, int streamIdx)
+    MediaEncoder::send(AVPacket& pkt, int streamIdx, bool dummy)
     {
         if (!initialized_) {
-            streamIdx = initStream(videoCodec_);
+            // do not init stream because 
+            if (!dummy) {
+                streamIdx = initStream(videoCodec_);
+            }
             startIO();
         }
         if (streamIdx < 0)
             streamIdx = currentStreamIdx_;
-        if (streamIdx >= 0 and static_cast<size_t>(streamIdx) < encoders_.size()
+        if (!dummy && streamIdx >= 0 and static_cast<size_t>(streamIdx) < encoders_.size()
             and static_cast<unsigned int>(streamIdx) < outputCtx_->nb_streams) {
             auto encoderCtx = encoders_[streamIdx];
             pkt.stream_index = streamIdx;
@@ -786,8 +789,8 @@ MediaEncoder::writeContainerToRtp(uint8_t* buf, int buf_size)
 
         auto encoderName = outputCodec->name; // guaranteed to be non null if AVCodec is not null
 
-        encoderCtx->thread_count = std::min(std::thread::hardware_concurrency(), is_video ? 16u : 4u);
-        SIP_CORE_DBG("[%s] Using %d threads", encoderName, encoderCtx->thread_count);
+    encoderCtx->thread_count = std::min(std::thread::hardware_concurrency() / 2, is_video ? 4u : 16u);
+    SIP_CORE_DBG("[%s] Using %d threads", encoderName, encoderCtx->thread_count);
 
         if (is_video) {
             // resolution must be a multiple of two
@@ -1149,35 +1152,43 @@ MediaEncoder::enableAccel(bool enableAccel)
     void
     MediaEncoder::initH264(AVCodecContext* encoderCtx, uint64_t br)
     {
-        // // 200 Kbit/s    -> CRF40
-        // // 6 Mbit/s      -> CRF23
-        // uint8_t crf = (uint8_t) std::round(LOGREG_PARAM_A + LOGREG_PARAM_B * std::log(maxBitrate));
-        // // bufsize parameter impact the variation of the bitrate, reduce to half the maxrate to limit
-        // // peak and congestion
-        // // https://trac.ffmpeg.org/wiki/Limiting%20the%20output%20bitrate
-        // uint64_t bufSize = maxBitrate / 2;
+        // Use capped‐CRF (quality + rate constraints) to get “normal” quality
 
-        // av_opt_set_int(encoderCtx, "no-scenecut", 1, AV_OPT_SEARCH_CHILDREN);
-        // av_opt_set_int(encoderCtx, "intra-refresh", 1, AV_OPT_SEARCH_CHILDREN);
+        // Choose a CRF that gives good quality without too heavy data
+        int crf = 28;  // moderate quality (lower is better quality but higher bitrate)
+        // Bound quantizer swings
+        int qmin = crf - 6;  // e.g. 17
+        int qmax = crf + 6;  // e.g. 29
+        if (qmin < 1) qmin = 1;
 
-        // // If auto quality disabled use CRF mode
-        // if (mode_ == RateMode::CRF_CONSTRAINED) {
-        //     av_opt_set_int(encoderCtx, "crf", crf, AV_OPT_SEARCH_CHILDREN);
-        //     av_opt_set_int(encoderCtx, "maxrate", maxBitrate, AV_OPT_SEARCH_CHILDREN);
-        //     av_opt_set_int(encoderCtx, "bufsize", bufSize, AV_OPT_SEARCH_CHILDREN);
-        //     SIP_CORE_DEBUG("H264 encoder setup: crf={:d}, maxrate={:d} kbit/s, bufsize={:d} kbit",
-        //                    crf,
-        //                    maxBitrate / 1000,
-        //                    bufSize / 1000);
-        // } else if (mode_ == RateMode::CBR) {
-        //     av_opt_set_int(encoderCtx, "b", maxBitrate, AV_OPT_SEARCH_CHILDREN);
-        //     av_opt_set_int(encoderCtx, "maxrate", maxBitrate, AV_OPT_SEARCH_CHILDREN);
-        //     av_opt_set_int(encoderCtx, "minrate", maxBitrate, AV_OPT_SEARCH_CHILDREN);
-        //     av_opt_set_int(encoderCtx, "bufsize", bufSize, AV_OPT_SEARCH_CHILDREN);
-        //     av_opt_set_int(encoderCtx, "crf", -1, AV_OPT_SEARCH_CHILDREN);
+        // Set VBV / VBV-constrained parameters
+        // maxrate = br (no exceeding the target)
+        int64_t maxrate = 1500000;
+        // buffsize: allow some fluctuation, but not overly large
+        // e.g. buffer = br * 2/3  (or br * 3/4) — you can tune this
+        int64_t bufsize = (1500000 * 2) / 3;
 
-        //     SIP_CORE_DEBUG("H264 encoder setup cbr: bitrate={:d} kbit/s", br);
-        // }
+        // Preset: pick a trade-off between speed and compression
+        const char* preset = "medium";  // you might try "medium" if CPU allows
+
+        // Set options on encoder context
+        av_opt_set_int(encoderCtx, "crf", crf, AV_OPT_SEARCH_CHILDREN);
+        av_opt_set_int(encoderCtx, "maxrate", maxrate, AV_OPT_SEARCH_CHILDREN);
+        av_opt_set_int(encoderCtx, "bufsize", bufsize, AV_OPT_SEARCH_CHILDREN);
+        av_opt_set_int(encoderCtx, "qmin", qmin, AV_OPT_SEARCH_CHILDREN);
+        av_opt_set_int(encoderCtx, "qmax", qmax, AV_OPT_SEARCH_CHILDREN);
+        av_opt_set(encoderCtx, "preset", preset, AV_OPT_SEARCH_CHILDREN);
+
+        // Optionally disable scene cut to reduce spikes
+        av_opt_set_int(encoderCtx, "no-scenecut", 1, AV_OPT_SEARCH_CHILDREN);
+        // Intra refresh may help error resilience / refresh gradually
+        av_opt_set_int(encoderCtx, "intra-refresh", 1, AV_OPT_SEARCH_CHILDREN);
+
+        SIP_CORE_DEBUG("H264 init for 720p: br=%" PRIu64
+                    ", crf=%d, maxrate=%" PRIu64
+                    ", bufsize=%" PRIu64
+                    ", qmin=%d, qmax=%d, preset=%s",
+                    br, crf, maxrate, bufsize, qmin, qmax, preset);
     }
 
     void
@@ -1504,7 +1515,7 @@ MediaEncoder::enableAccel(bool enableAccel)
         av_init_packet(&pkt);
         pkt.data = nullptr;
         pkt.size = 0;
-        send(pkt, -1);
+        send(pkt, -1, true);
     }
 
     int

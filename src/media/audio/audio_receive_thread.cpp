@@ -44,7 +44,8 @@ AudioReceiveThread::AudioReceiveThread(const std::string& id,
     , mtu_(mtu)
     , loop_(std::bind(&AudioReceiveThread::setup, this),
             std::bind(&AudioReceiveThread::process, this),
-            std::bind(&AudioReceiveThread::cleanup, this))
+            std::bind(&AudioReceiveThread::cleanup, this),
+            ThreadLoop::ThreadPriority::HIGH)
 {}
 
 AudioReceiveThread::~AudioReceiveThread()
@@ -56,11 +57,26 @@ AudioReceiveThread::~AudioReceiveThread()
 bool
 AudioReceiveThread::setup()
 {
+    if(sip_core::Manager::instance().audioPreference.getVadEnabled())
+        createAudioProcessor();
+
     std::lock_guard lk(mutex_);
     audioDecoder_.reset(new MediaDecoder([this](std::shared_ptr<MediaFrame>&& frame) mutable {
         if (!muteState_) {
-            notify(frame);
-            ringbuffer_->put(std::static_pointer_cast<AudioFrame>(frame));
+            std::lock_guard<std::mutex> lock(audioProcessorMutex_);
+            if (audioProcessor_) {
+                // we need it for some reason
+                auto silence = std::make_shared<AudioFrame>(format_, frame->pointer()->nb_samples);
+                libav_utils::fillWithSilence(silence->pointer());
+                audioProcessor_->putPlayback(silence);
+                
+                audioProcessor_->putRecorded(std::static_pointer_cast<AudioFrame>(frame));
+            }
+            else {
+                notify(frame);
+            }
+            
+            ringbuffer_->put(std::move(std::static_pointer_cast<AudioFrame>(frame)));
         }
     }));
     audioDecoder_->setContextCallback([this]() {
@@ -106,6 +122,18 @@ void
 AudioReceiveThread::process()
 {
     audioDecoder_->decode();
+
+    std::lock_guard<std::mutex> lock(audioProcessorMutex_);
+    if (audioProcessor_) {
+        while (auto rec = audioProcessor_->getProcessed()) {
+            if (voice_ != rec->has_voice) {
+                voice_ = rec->has_voice;
+                voiceCallback_(voice_);
+            }
+
+            notify(std::static_pointer_cast<MediaFrame>(rec));
+        }
+    }
 }
 
 void
@@ -114,6 +142,8 @@ AudioReceiveThread::cleanup()
     std::lock_guard lk(mutex_);
     audioDecoder_.reset();
     demuxContext_.reset();
+
+    destroyAudioProcessor();
 }
 
 int
@@ -126,12 +156,88 @@ AudioReceiveThread::readFunction(void* opaque, uint8_t* buf, int buf_size)
     return count ? count : AVERROR_EOF;
 }
 
+void
+AudioReceiveThread::createAudioProcessor()
+{
+    std::lock_guard<std::mutex> lock(audioProcessorMutex_);
+
+    if (audioProcessor_) {
+        return;
+    }
+
+    unsigned int frame_size;
+    if (sip_core::Manager::instance().audioPreference.getAudioProcessor() == "speex") {
+        // TODO: maybe force this to be equivalent to 20ms? as expected by speex
+        frame_size = format_.sample_rate / 50u;
+    } else {
+        frame_size = format_.sample_rate / 100u;
+    }
+
+    SIP_CORE_WARN("Starting audio processor with: {%d Hz, %d channels, %d samples/frame}",
+                  format_.sample_rate,
+                  format_.nb_channels,
+                  frame_size);
+
+    if (sip_core::Manager::instance().audioPreference.getAudioProcessor() == "webrtc") {
+#if HAVE_WEBRTC_AP
+        SIP_CORE_WARN("[audio_receive_thread] using WebRTCAudioProcessor");
+        audioProcessor_.reset(new WebRTCAudioProcessor(format_,
+                                                      frame_size,
+                                                      false));
+
+        WebRTCAudioProcessor* proc = static_cast<WebRTCAudioProcessor*>(audioProcessor_.get());
+        proc->setWebRtcParams(sip_core::Manager::instance().audioPreference.getWebRtcParams());
+
+#else
+        SIP_CORE_ERR("[audio_receive_thread] audioProcessor preference is webrtc, but library not linked! "
+                     "using NullAudioProcessor instead");
+        audioProcessor_.reset(new NullAudioProcessor(format_, frame_size));
+#endif
+    } else if (sip_core::Manager::instance().audioPreference.getAudioProcessor() == "speex") {
+#if HAVE_SPEEXDSP
+        SIP_CORE_WARN("[audio_receive_thread] using SpeexAudioProcessor");
+        audioProcessor_.reset(new SpeexAudioProcessor(format_, frame_size));
+#else
+        SIP_CORE_ERR("[audio_receive_thread] audioProcessor preference is speex, but library not linked! "
+                     "using NullAudioProcessor instead");
+        audioProcessor_.reset(new NullAudioProcessor(format_, frame_size));
+#endif
+    } else if (sip_core::Manager::instance().audioPreference.getAudioProcessor() == "null") {
+        SIP_CORE_WARN("[audio_receive_thread] using NullAudioProcessor");
+        audioProcessor_.reset(new NullAudioProcessor(format_, frame_size));
+    } else {
+        SIP_CORE_ERR(
+            "[audio_receive_thread] audioProcessor preference not recognized, using NullAudioProcessor "
+            "instead");
+        audioProcessor_.reset(new NullAudioProcessor(format_, frame_size));
+    }
+    
+    audioProcessor_->enableVoiceActivityDetection(true);
+}
+
+void
+AudioReceiveThread::destroyAudioProcessor()
+{
+    std::lock_guard<std::mutex> lock(audioProcessorMutex_);
+    audioProcessor_.reset();
+}
+
 // This callback is used by libav internally to break out of blocking calls
 int
 AudioReceiveThread::interruptCb(void* data)
 {
     auto context = static_cast<AudioReceiveThread*>(data);
     return not context->loop_.isRunning();
+}
+
+void
+AudioReceiveThread::setVoiceCallback(std::function<void(bool)> cb)
+{
+    if (cb) {
+        voiceCallback_ = std::move(cb);
+    } else {
+        SIP_CORE_ERR("AudioReceiveThread trying to set invalid voice callback");
+    }
 }
 
 void
@@ -174,6 +280,15 @@ void
 AudioReceiveThread::setMuted(bool muted)
 {
     muteState_ = muted;
+}
+
+void 
+AudioReceiveThread::setVAD(bool active)
+{
+    if(active)
+        createAudioProcessor();
+    else
+        destroyAudioProcessor();
 }
 
 }; // namespace sip_core

@@ -65,6 +65,8 @@ public:
     void setChangeOrientationCallback(std::function<void(int)> cb);
     int setBitrate(uint64_t br);
 
+    void sendBlackFrame(int width, int height);
+
     void natPing();
 
     inline void setMuted(bool mute) { muted_.store(mute); }

@@ -67,7 +67,7 @@ UDPTransport::deleteTransport(pjsip_transport* t)
 
 UDPTransport::UDPTransport(pjsip_transport* t)
     : SipTransport()
-    , transport_(nullptr, deleteTransport)
+    , transport_(nullptr, &deleteTransport)
 {
     //    if (not t or pjsip_transport_add_ref(t) != PJ_SUCCESS)
     //        throw std::runtime_error("invalid transport for UDP, because cannot add ref");

@@ -173,6 +173,10 @@ public:
     std::list<rtcpRRHeader> getRtcpRR();
     std::list<rtcpREMBHeader> getRtcpREMB();
 
+    rtcpSRHeader getLastRtcpSR();
+    rtcpREMBHeader getLastRtcpREMB();
+    rtcpRRHeader getLastRtcpRR();
+
     bool waitForRTCP(std::chrono::seconds interval);
     double getLastLatency();
 
@@ -222,6 +226,9 @@ private:
 
     std::list<rtcpRRHeader> listRtcpRRHeader_;
     std::list<rtcpREMBHeader> listRtcpREMBHeader_;
+    rtcpSRHeader lastRtcpSRHeader_;
+    rtcpREMBHeader lastRtcpREMBHeader_;
+    rtcpRRHeader lastRtcpRRHeader_;
     std::mutex rtcpInfo_mutex_;
     std::condition_variable cvRtcpPacketReadyToRead_;
     static constexpr unsigned MAX_LIST_SIZE {10};

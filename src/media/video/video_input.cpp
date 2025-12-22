@@ -37,6 +37,7 @@
 
 #include <libavformat/avio.h>
 
+#include <chrono>
 #include <string>
 #include <sstream>
 #include <cassert>
@@ -316,6 +317,10 @@ VideoInput::createDecoder()
     if (emulateRate_)
         decoder->emulateRate();
 
+    if (decOpts_.format == "video4linux2") {
+        decoder->enableLateFrameDrop(std::chrono::milliseconds(200));
+    }
+
     decoder->setInterruptCallback(
         [](void* data) -> int { return not static_cast<VideoInput*>(data)->isCapturing(); }, this);
 
@@ -431,6 +436,9 @@ VideoInput::stopInput()
 void
 VideoInput::startInput()
 {
+
+    isStopped_ = false;
+
     startLoop();
 
     emitSignal<libsip_core::VideoSignal::StartCapture>(decOpts_.input);
@@ -531,13 +539,8 @@ VideoInput::initAVFoundation(const std::string& display)
         decOpts_.width = round2pow(w, 3);
         decOpts_.height = round2pow(h, 3);
     } else {
-        #ifdef __APPLE__
-        decOpts_.width = 5120;
-        decOpts_.height = 2880;
-        #else
         decOpts_.width = default_grab_width;
         decOpts_.height = default_grab_height;
-        #endif
     }
     return true;
 }
@@ -627,12 +630,6 @@ VideoInput::switchInput(const std::string& resource)
 {
     SIP_CORE_DBG("MRL: '%s'", resource.c_str());
 
-    // if already is true -> skip
-    if (switchPending_.exchange(true)) {
-        SIP_CORE_ERR("Video switch already requested");
-        return {};
-    }
-
     currentResource_ = resource;
     decOptsFound_ = false;
 
@@ -643,10 +640,13 @@ VideoInput::switchInput(const std::string& resource)
     // Switch off video input?
     if (resource.empty()) {
         clearOptions();
-        futureDecOpts_ = foundDecOpts_.get_future();
-        startLoop();
+        // some default params
+        foundDecOpts(DeviceParams{});
+        futureDecOpts_ = foundDecOpts_.get_future().share();
+        stopInput();
         return futureDecOpts_;
     }
+
 
     // Supported MRL schemes
     static const std::string sep = libsip_core::Media::VideoProtocolPrefix::SEPARATOR;
@@ -660,6 +660,17 @@ VideoInput::switchInput(const std::string& resource)
         return {};
 
     const auto suffix = resource.substr(pos + sep.size());
+
+    // if already is true -> skip
+    if (switchPending_.exchange(true)) {
+        SIP_CORE_ERR("Video switch already requested");
+        return {};
+    }
+
+    if (!isStopped_) {
+        stopInput();
+        sink_ = Manager::instance().createSinkClient(resource);
+    }
 
     bool ready = false;
 
@@ -683,6 +694,7 @@ VideoInput::switchInput(const std::string& resource)
     if (ready) {
         foundDecOpts(decOpts_);
     }
+
     futureDecOpts_ = foundDecOpts_.get_future().share();
 
     startInput();

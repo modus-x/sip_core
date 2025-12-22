@@ -71,7 +71,7 @@ private:
     NON_COPYABLE(AudioLayer);
 
 protected:
-    enum class Status { Idle, Starting, Started };
+    enum class Status { Idle, Configured, Started };
 
 public:
     AudioLayer(const AudioPreference&);

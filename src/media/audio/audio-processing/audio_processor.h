@@ -98,7 +98,7 @@ protected:
     unsigned int frameDurationMs_;
 
     // artificially extend voice activity by this long
-    unsigned int forceMinimumVoiceActivityMs {1000};
+    unsigned int forceMinimumVoiceActivityMs {1500};
 
     // current number of frames to force the voice activity to be true
     unsigned int forceVoiceActiveFramesLeft {0};

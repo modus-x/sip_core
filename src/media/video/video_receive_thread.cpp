@@ -114,8 +114,12 @@ VideoReceiveThread::setup()
             recorderCallback_(getInfo());
     });
     videoDecoder_->setResolutionChangedCallback([this](int width, int height) {
-
-        SIP_CORE_ERR("[%p] VideoReceiveThread decoder changed resolution from %dx%d -> %dx%d", this, dstWidth_, dstHeight_, width, height);
+        SIP_CORE_ERR("[%p] VideoReceiveThread decoder changed resolution from %dx%d -> %dx%d",
+                     this,
+                     dstWidth_,
+                     dstHeight_,
+                     width,
+                     height);
 
         dstWidth_ = width;
         dstHeight_ = height;
@@ -288,7 +292,7 @@ VideoReceiveThread::configureVideoOutput()
         return false;
     }
 
-    // try to start sink. but 
+    // try to start sink
     startSink();
 
     if (onSuccessfulSetup_)
@@ -334,9 +338,8 @@ VideoReceiveThread::startSink()
             SIP_CORE_DBG("VideoReceiveThread [%p] sink already attached", this);
         }
     } else {
-        SIP_CORE_ERR(
-            "VideoReceiveThread [%p] cannot start sink beacuse width or height is not > 0",
-            this);
+        SIP_CORE_ERR("VideoReceiveThread [%p] cannot start sink beacuse width or height is not > 0",
+                     this);
     }
     return false;
 }

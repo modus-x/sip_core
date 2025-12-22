@@ -144,6 +144,7 @@ public:
      */
     std::shared_ptr<Conference> getConference() const { return conf_.lock(); }
     bool isConferenceParticipant() const { return not is_uninitialized(conf_); }
+    bool isRemoteConferenceParticipant() const { std::lock_guard<std::mutex> lock(confInfoMutex_); return !confInfo_.empty(); }
 
     std::weak_ptr<Account> getAccount() const { return account_; }
     std::string getAccountId() const;
@@ -164,9 +165,10 @@ public:
      */
     const std::string& getPeerNumber() const { return peerNumber_; }
 
-    void setFromHeader(const std::string& header) { fromHeader_ = header; }
 
-    const std::string& getFromHeader() const { return fromHeader_; }
+    void setInviteBody(const std::string& body) { inviteBody_ = body; }
+
+    const std::string& getInviteBody() const { return inviteBody_; }
     /**
      * Set the display name (caller in ingoing)
      * not protected by mutex (when created)
@@ -431,6 +433,7 @@ public:
      * @msg     A JSON object describing the conference
      */
     void setConferenceInfo(const std::string& msg);
+    void setConferenceVoiceActivity(const std::string& msg);
 
     virtual void enterConference(std::shared_ptr<Conference> conference) = 0;
     virtual void exitConference() = 0;
@@ -443,6 +446,7 @@ public:
     std::unique_ptr<AudioDeviceGuard> audioGuard;
     void sendConfOrder(const Json::Value& root);
     void sendConfInfo(const std::string& json);
+    void sendVoiceActivity(const std::string& json);
     void sendObjectJson(const std::string& objectName, const std::string& objectJson);
     void resetConfInfo();
 
@@ -465,6 +469,8 @@ protected:
          const std::string& id,
          Call::CallType type,
          const std::map<std::string, std::string>& details = {});
+
+    virtual void localVoice(bool state);
 
     // TODO all these members are not protected against multi-thread access
 
@@ -523,8 +529,8 @@ protected:
     /** Number of the peer */
     std::string peerNumber_ {};
 
-    /** From header */
-    std::string fromHeader_ {};
+    /** Invite body for parsing by the clients of library */
+    std::string inviteBody_ {};
 
     /** Peer Display Name */
     std::string peerDisplayName_ {};
@@ -536,6 +542,7 @@ protected:
 
     /// Supported conference protocol version
     int peerConfProtocol_ {0};
+
     std::string toUsername_ {};
 };
 

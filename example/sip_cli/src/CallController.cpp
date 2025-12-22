@@ -1,5 +1,7 @@
 #include "CallController.h"
+#include "callmanager_interface.h"
 #include "configurationmanager_interface.h"
+#include "presencemanager_interface.h"
 #include "manager.h"
 
 #include <functional>
@@ -18,11 +20,8 @@
 
 CallController::CallController(const std::string& accountId)
     : m_mtxEvents()
+#ifdef ENABLE_VIDEO
     , m_isVideoEnabled(true)
-    , m_mediaAudio {{"MEDIA_TYPE", "MEDIA_TYPE_AUDIO"},
-                    {"ENABLED", "true"},
-                    {"MUTED", "false"},
-                    {"LABEL", "audio_0"}}
     , m_mediaVideo {{"MEDIA_TYPE", "MEDIA_TYPE_VIDEO"},
                     {"ENABLED", "true"},
                     {"MUTED", "false"},
@@ -35,6 +34,11 @@ CallController::CallController(const std::string& accountId)
                     // R"(camera://video=@device_pnp_\\?\usb#vid_04f2&pid_b76f&mi_00#6&330c68f9&0&0000#{65e8773d-8f56-11d0-a3b9-00a0c9223196}\global)"
                     // }, // front
                     {"LABEL", "video_0"}}
+#endif
+    , m_mediaAudio {{"MEDIA_TYPE", "MEDIA_TYPE_AUDIO"},
+                    {"ENABLED", "true"},
+                    {"MUTED", "false"},
+                    {"LABEL", "audio_0"}}
     , m_user()
     , m_domain()
     , m_accountId(accountId)
@@ -101,6 +105,12 @@ CallController::init()
                       std::placeholders::_1,
                       std::placeholders::_2,
                       std::placeholders::_3)),
+        libsip_core::exportable_callback<libsip_core::CallSignal::MediaChangeRequested>(
+            std::bind(&CallController::mediaChangeRequest, 
+                this, 
+                std::placeholders::_1, 
+                std::placeholders::_2, 
+                std::placeholders::_3)),
         libsip_core::exportable_callback<libsip_core::AudioSignal::DeviceEvent>(
             std::bind(&CallController::audioDeviceEvent, this)),
         libsip_core::exportable_callback<libsip_core::VideoSignal::StartCapture>(
@@ -172,12 +182,22 @@ CallController::init()
     return true;
 }
 
+void
+CallController::publishPresence(bool available, const std::string& note)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
+    if (!libsip_core::initialized())
+        return;
+
+    libsip_core::publish(m_accountId, available, note);
+}
+
 bool
 CallController::sendRegister(const std::string& user,
                              const std::string& pass,
                              const std::string& domain)
 {
-    std::lock_guard<std::mutex> lock(m_mtxEvents);
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
 
     if (!libsip_core::initialized())
         return false;
@@ -228,7 +248,9 @@ CallController::sendRegister(const std::string& user,
         }
     }
 
-    std::cout << "Registring user - " << user << "..." << std::endl;
+    libsip_core::registerEventPackage("x-lostcalls", 600);
+
+    std::cout << "Registering user - " << user << "..." << std::endl;
 
     libsip_core::sendRegister(m_accountId, true);
 
@@ -238,17 +260,75 @@ CallController::sendRegister(const std::string& user,
 }
 
 bool
+CallController::unregister()
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
+
+    if (!libsip_core::initialized())
+        return false;
+
+    std::cout << "Unregistering user - " << m_user << "..." << std::endl;
+
+    libsip_core::sendRegister(m_accountId, false);
+
+    return true;
+}
+
+void
+CallController::subscribe(const std::vector<std::string>& uris)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
+    if (!libsip_core::initialized())
+        return;
+
+    std::vector<std::string> sipUris;
+    for (const auto& uri : uris) {
+        sipUris.push_back(toSipUri(uri, m_domain));
+    }
+
+    std::cout << "Subscribing to events for specified URIs..." << std::endl;
+    for (const auto& uri : sipUris) {
+        libsip_core::subscribeToEvents(m_accountId, uri, "x-lostcalls", true);
+    }
+}
+
+void
+CallController::unsubscribe(const std::vector<std::string>& uris)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
+    if (!libsip_core::initialized())
+        return;
+
+    std::vector<std::string> sipUris;
+    for (const auto& uri : uris) {
+        sipUris.push_back(toSipUri(uri, m_domain));
+    }
+
+    std::cout << "Unsubscribing from events for specified URIs..." << std::endl;
+    for (const auto& uri : sipUris) {
+        libsip_core::subscribeToEvents(m_accountId, uri, "x-lostcalls", false);
+    }
+}
+
+bool
 CallController::call(const std::string& callTo)
 {
-    std::lock_guard<std::mutex> lock(m_mtxEvents);
-    if (!m_activeCalls.empty() || !m_activeConfirence.empty())
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
+    if (hasActiveCall())
         return false;
 
     // build media list settings according to settings
     std::vector<std::map<std::string, std::string>> mediaList;
     mediaList.push_back(m_mediaAudio);
-    if (m_isVideoEnabled)
-        mediaList.push_back(m_mediaVideo);
+#ifdef ENABLE_VIDEO
+    // if (m_isVideoEnabled) 
+    //     mediaList.push_back(m_mediaVideo);
+    if (m_isVideoEnabled) 
+        m_mediaVideo["ENABLED"] = "true";
+    else 
+        m_mediaVideo["ENABLED"] = "false";
+    mediaList.push_back(m_mediaVideo);
+#endif
 
     std::string id = libsip_core::placeCallWithMedia(m_accountId,
                                                      toSipUri(callTo, m_domain),
@@ -264,14 +344,14 @@ CallController::call(const std::string& callTo)
 bool
 CallController::hasActiveCall() const
 {
-    std::lock_guard<std::mutex> lock(m_mtxEvents);
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
     return !m_activeConfirence.empty() || m_activeCalls.size() != 0;
 }
 
 const std::string
 CallController::getActiveCall() const
 {
-    std::lock_guard<std::mutex> lock(m_mtxEvents);
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
     if (!m_activeConfirence.empty())
         return m_activeConfirence;
     else if (m_activeCalls.size() != 0) {
@@ -283,15 +363,22 @@ CallController::getActiveCall() const
 bool
 CallController::addParticipant(const std::string& newParticipant)
 {
-    std::lock_guard<std::mutex> lock(m_mtxEvents);
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
     if (m_activeCalls.empty())
         return false;
 
     // build media list settings according to settings
     std::vector<std::map<std::string, std::string>> mediaList;
     mediaList.push_back(m_mediaAudio);
-    if (m_isVideoEnabled)
-        mediaList.push_back(m_mediaVideo);
+#ifdef ENABLE_VIDEO
+    // if (m_isVideoEnabled) 
+    //     mediaList.push_back(m_mediaVideo);
+    if (m_isVideoEnabled) 
+        m_mediaVideo["ENABLED"] = "true";
+    else 
+        m_mediaVideo["ENABLED"] = "false";
+    mediaList.push_back(m_mediaVideo);
+#endif
 
     // Create call
     auto callId = libsip_core::placeCallWithMedia(m_accountId, newParticipant, mediaList);
@@ -320,7 +407,7 @@ CallController::addParticipant(const std::string& newParticipant)
 bool
 CallController::removeParticipant(const std::string& participant)
 {
-    std::lock_guard<std::mutex> lock(m_mtxEvents);
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
     if (m_activeConfirence.empty())
         return false;
 
@@ -360,7 +447,7 @@ CallController::createConfirence(const std::vector<std::string>& participantsLis
         if (!libsip_core::addParticipant(m_accountId, callId, m_accountId, m_activeConfirence))
             continue;
 
-        std::lock_guard<std::mutex> lock(m_mtxEvents);
+        std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
         m_activeCalls[participantsList[i]] = callId;
     }
 
@@ -371,6 +458,12 @@ CallController::createConfirence(const std::vector<std::string>& participantsLis
     }
 
     return true;
+}
+
+bool
+CallController::moveParticipant(size_t from_index, size_t to_index)
+{
+    return libsip_core::moveParticipant(m_accountId, m_activeConfirence, from_index, to_index);
 }
 
 bool
@@ -398,35 +491,76 @@ CallController::stopCallCapture()
     return !libsip_core::toggleRecording(m_accountId, getActiveCall());
 }
 
+bool
+CallController::hold()
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
+    if (!hasActiveCall())
+        return false;
+
+    if (m_activeConfirence.empty()) {
+        return libsip_core::hold(m_accountId, m_activeCalls.begin()->second);
+    } else {
+        return libsip_core::holdConference(m_accountId, m_activeConfirence);
+    }
+}
+
+bool
+CallController::resume()
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
+    if (!hasActiveCall())
+        return false;
+
+    if (m_activeConfirence.empty()) {
+        return libsip_core::unhold(m_accountId, m_activeCalls.begin()->second);
+    } else {
+        return libsip_core::unholdConference(m_accountId, m_activeConfirence);
+    }
+}
+
 void
 CallController::toggleVideo()
 {
+#ifdef ENABLE_VIDEO
+    m_isVideoEnabled = !m_isVideoEnabled;
+
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
     if (hasActiveCall()) {
-        std::lock_guard<std::mutex> lock(m_mtxEvents);
         // build media list settings according to settings
         std::vector<std::map<std::string, std::string>> mediaList;
         mediaList.push_back(m_mediaAudio);
-        if (m_isVideoEnabled)
-            mediaList.push_back(m_mediaVideo);
-
+        // if (m_isVideoEnabled) 
+        //     mediaList.push_back(m_mediaVideo);
+        if (m_isVideoEnabled) 
+            m_mediaVideo["ENABLED"] = "true";
+        else 
+            m_mediaVideo["ENABLED"] = "false";
+        mediaList.push_back(m_mediaVideo);
+        
         libsip_core::requestMediaChange(m_accountId, getActiveCall(), mediaList);
     }
 
-    std::lock_guard<std::mutex> lock(m_mtxEvents);
-    m_isVideoEnabled = !m_isVideoEnabled;
+#elif
+    std::cerr << "Video is unsupported by a kernel build." << std::endl;
+#endif
 }
 
 bool
 CallController::isVideoEnabled() const
 {
-    std::lock_guard<std::mutex> lock(m_mtxEvents);
+#ifdef ENABLE_VIDEO
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
     return m_isVideoEnabled;
+#elif
+    return false;
+#endif
 }
 
 bool
 CallController::setVideoDevice(const std::string& videoDevice)
 {
-    std::lock_guard<std::mutex> lock(m_mtxEvents);
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
     if (videoDevice.rfind("display://") == 0 || videoDevice.rfind("camera://") == 0) {
         m_mediaVideo["SOURCE"] = videoDevice;
     } else if (videoDevice == "default") {
@@ -440,17 +574,47 @@ CallController::setVideoDevice(const std::string& videoDevice)
 std::vector<std::string>
 CallController::getVideoDeviceList() const
 {
-    std::lock_guard<std::mutex> lock(m_mtxEvents);
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
     return libsip_core::getDeviceList();
 }
 
 const std::string
 CallController::getVideoDevice() const
 {
-    std::lock_guard<std::mutex> lock(m_mtxEvents);
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
     static std::string source;
     source = m_mediaVideo.at("SOURCE");
     return source;
+}
+
+std::map<std::string, std::string>
+CallController::getCallDetails(const std::string& callId)
+{
+    return libsip_core::getCallDetails(m_accountId, callId);
+}
+
+std::vector<std::string>
+CallController::getAudioCaptureDeviceList() const
+{
+    return sip_core::Manager::instance().getAudioInputDeviceList();
+}
+
+std::vector<std::string>
+CallController::getAudioPlaybackDeviceList() const
+{
+    return sip_core::Manager::instance().getAudioOutputDeviceList();
+}
+
+void
+CallController::setAudioCaptureDevice(int index)
+{
+    sip_core::Manager::instance().setAudioDevice(index, sip_core::AudioDeviceType::CAPTURE);
+}
+
+void
+CallController::setAudioPlaybackDevice(int index)
+{
+    sip_core::Manager::instance().setAudioDevice(index, sip_core::AudioDeviceType::PLAYBACK);
 }
 
 bool
@@ -459,7 +623,7 @@ CallController::hangUp()
     if (!hasActiveCall())
         return true;
 
-    std::lock_guard<std::mutex> lock(m_mtxEvents);
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
     if (m_activeConfirence.empty()) {
         if (!libsip_core::hangUp(m_accountId, m_activeCalls.begin()->second))
             return false;
@@ -481,7 +645,7 @@ CallController::proccesEvents()
         if (event.type == EVENT_FRAME_READY) {
             std::unique_ptr<std::string> args((std::string*) event.user.data1);
 
-            std::lock_guard<std::mutex> lock(m_mtxEvents);
+            std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
 
             auto it = m_previewWindows.find(*args);
             if (it == m_previewWindows.end())
@@ -492,7 +656,7 @@ CallController::proccesEvents()
         } else if (event.type == EVENT_CREATE_PREVIEW) {
             std::unique_ptr<CreateNewPreviewArgs> args((CreateNewPreviewArgs*) event.user.data1);
 
-            std::lock_guard<std::mutex> lock(m_mtxEvents);
+            std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
             if (m_previewWindows.find(args->id) == m_previewWindows.end()) {
                 if (!OpenVideoPrievew(args->id, args->w, args->h)) {
                     std::cerr << "Error: failed to create window for " << args->id << "."
@@ -503,7 +667,7 @@ CallController::proccesEvents()
 
             auto ptrWindow = m_previewWindows.find(args->id)->second;
             libsip_core::SinkTarget target;
-            target.preferredFormat = AV_PIX_FMT_RGBA;
+            target.preferredFormat = AV_PIX_FMT_ARGB;
 
             target.push = [this, id = args->id, ptrWindow](libsip_core::FrameBuffer frame) {
                 ptrWindow->update(frame);
@@ -525,7 +689,7 @@ CallController::proccesEvents()
         } else if (event.type == EVENT_DESTROY_PREVIEW) {
             std::unique_ptr<std::string> args((std::string*) event.user.data1);
 
-            std::lock_guard<std::mutex> lock(m_mtxEvents);
+            std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
             CloseVideoPreview(*args);
         }
     }
@@ -536,6 +700,11 @@ CallController::toSipUri(const std::string& number, const std::string& domainNam
 {
     std::smatch match;
     std::regex pattern;
+
+    // Case 0. Subscription to domain!
+    if (number == domainName) {
+        return "sip:" + number;
+    }
 
     // Case 1: Already full SIP URI with domain (sip:X@Y)
     pattern = std::regex(R"(^sip:(.+@.+))");

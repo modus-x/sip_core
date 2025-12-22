@@ -23,6 +23,7 @@
 
 #pragma once
 
+#include <mutex>
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
@@ -91,6 +92,7 @@ public:
     {
         return std::make_unique<SipAccountConfig>(getAccountID());
     }
+    void setAccountDetails(const std::map<std::string, std::string>& details) override;
     inline void editConfig(std::function<void(SipAccountConfig& conf)>&& edit)
     {
         Account::editConfig(
@@ -274,6 +276,32 @@ public:
 
     bool hasServiceRoute() const { return not config().serviceRoute.empty(); }
 
+    std::string getBackServiceRoute() const { return config().backServiceRoute; }
+
+    bool hasBackServiceRoute() const { return not config().backServiceRoute.empty(); }
+
+    const IpAddr& getActualIpAddress() const;
+
+    /**
+     * Get the currently active service route (main or backup)
+     */
+    std::string getActiveServiceRoute() const;
+
+    /**
+     * Check if currently using backup service route
+     */
+    bool isUsingBackupRoute() const { return usingBackupRoute_; }
+
+    /**
+     * Switch to backup service route
+     */
+    void switchToBackupRoute();
+
+    /**
+     * Switch back to main service route
+     */
+    void switchToMainRoute();
+
     virtual bool getSrtpFallback() const override { return config().srtpFallback; }
 
     void setReceivedParameter(const std::string& received)
@@ -315,6 +343,44 @@ public:
      * Abort currently registered timer if any
      */
     void cancelKeepAliveTimer();
+
+    /**
+     * Starts a separate keep-alive timer to check main route availability
+     * when using backup route.
+     */
+    void registerMainRouteKeepAliveTimer();
+    /**
+     * Starts a keep-alive timer to maintain NAT mapping towards backup route
+     * while operating on the main route.
+     */
+    void registerBackupRouteKeepAliveTimer();
+
+    /**
+     * Cancels the main route keep-alive timer.
+     */
+    void cancelMainRouteKeepAliveTimer();
+    /**
+     * Cancels the backup route keep-alive timer.
+     */
+    void cancelBackupRouteKeepAliveTimer();
+
+    /**
+     * Check if we should switch back to main route when calls end.
+     * Called when a call is detached from the account.
+     */
+    void checkSwitchToMainRouteOnCallEnd();
+
+    /**
+     * Override detach to check for route switching when calls end
+     */
+    bool detach(const std::shared_ptr<Call>& call)
+    {
+        bool result = Account::detach(call);
+        if (result) {
+            checkSwitchToMainRouteOnCallEnd();
+        }
+        return result;
+    }
 
     // current transport
     virtual inline std::shared_ptr<SipTransport> getTransport() { return transport_; }
@@ -408,9 +474,6 @@ public:
     void pushNotificationReceived(const std::string& from,
                                   const std::map<std::string, std::string>& data);
 
-    void reportUnregister();
-
-
     struct
     {
         pj_sockaddr socket;
@@ -418,8 +481,66 @@ public:
         pj_timer_entry timer {};
     } kaTarget;
 
+    /**
+     * Separate keep-alive for main route when using backup
+     */
+    struct
+    {
+        pj_sockaddr socket;
+        unsigned length {};
+        pj_timer_entry timer {};
+    } kaMainRoute;
+    /**
+     * Separate keep-alive for backup route when using main route
+     */
+    struct
+    {
+        pj_sockaddr socket;
+        unsigned length {};
+        pj_timer_entry timer {};
+    } kaBackupRoute;
+
+    /**
+     * Flag indicating an in-flight OPTIONS keep-alive transaction.
+     * Used to prevent sending a new keep-alive while one is pending.
+     */
+    std::atomic<bool> ka_options_pending_ {false};
+
+    /**
+     * Flag indicating an in-flight OPTIONS keep-alive transaction for main route.
+     */
+    std::atomic<bool> ka_main_route_options_pending_ {false};
+    /**
+     * Flag indicating an in-flight OPTIONS keep-alive transaction for backup route.
+     */
+    std::atomic<bool> ka_backup_route_options_pending_ {false};
+
+    /**
+     * Flag indicating if main route is available (last keep-alive succeeded)
+     * Public to allow access from static keep-alive callback
+     */
+    bool mainRouteAvailable_ {false};
+
 
     void setCredentials(const std::vector<SipAccountConfig::Credentials>& creds);
+
+
+    // set explicit transport destination and params for tdata
+    bool setUpTransmissionData(pjsip_tx_data* tdata);
+    bool setUpTransmissionData(pjsip_tx_data* tdata, const IpAddr& ip);
+
+    const IpAddr& getServiceRouteIp() { return serviceRouteIp_; };
+    const IpAddr& getBackServiceRouteIp() { return backServiceRouteIp_; };
+
+    std::atomic<bool> needsResubscribe_ {false};
+    std::string callUri_ {};
+
+    void startBackupKeepAliveAfterRegister();
+    bool sendBackupRouteKeepAlive();
+
+    std::atomic<bool> pendingBackupKeepAliveStart_ {false};
+
+    std::mutex switchFromCallRetry;
 
 private:
     void doRegister1_();
@@ -430,7 +551,6 @@ private:
     bool initContactAddress();
     void updateContactHeader();
 
-    void setUpTransmissionData(pjsip_tx_data* tdata, pjsip_transport_type_e transportType);
 
     NON_COPYABLE(SIPAccount);
 
@@ -469,10 +589,6 @@ private:
     void scheduleReregistration();
     void autoReregTimerCb();
 
-    std::mutex unregisterLock_;
-    std::condition_variable unregisterCheck_;
-    bool unregisterSend_ = false;
-
     /**
      * Current transport
      */
@@ -499,6 +615,17 @@ private:
      * Resolved IP of hostname_ (for registration)
      */
     IpAddr hostIp_;
+
+    /**
+     * Resolved IP of serviceRoute_ (for registration)
+     */
+     IpAddr serviceRouteIp_;
+
+
+    /**
+     * Resolved IP of backServiceRoute_ (for registration)
+     */
+     IpAddr backServiceRouteIp_;
 
     /**
      * The pjsip client registration information
@@ -589,6 +716,12 @@ private:
      * configured port is already used by another client
      */
     pj_uint16_t publishedPortUsed_ {sip_utils::DEFAULT_SIP_PORT};
+
+    /**
+     * Flag indicating if backup service route is currently being used
+     */
+    bool usingBackupRoute_ {false};
+
 
 };
 

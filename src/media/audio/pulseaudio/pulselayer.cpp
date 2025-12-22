@@ -64,7 +64,7 @@ PulseLayer::PulseLayer(AudioPreference& pref)
     , playback_()
     , record_()
     , ringtone_()
-    , mainloop_(pa_threaded_mainloop_new(), pa_threaded_mainloop_free)
+    , mainloop_(pa_threaded_mainloop_new(), &pa_threaded_mainloop_free)
     , preference_(pref)
 {
     SIP_CORE_INFO("[audiolayer] created pulseaudio layer");
@@ -78,8 +78,8 @@ PulseLayer::PulseLayer(AudioPreference& pref)
 
     PulseMainLoopLock lock(mainloop_.get());
 
-    std::unique_ptr<pa_proplist, decltype(pa_proplist_free)&> pl(pa_proplist_new(),
-                                                                 pa_proplist_free);
+    std::unique_ptr<pa_proplist, decltype(&pa_proplist_free)> pl(pa_proplist_new(),
+                                                                 &pa_proplist_free);
     pa_proplist_sets(pl.get(), PA_PROP_MEDIA_ROLE, "phone");
 
     context_ = pa_context_new_with_proplist(pa_threaded_mainloop_get_api(mainloop_.get()),

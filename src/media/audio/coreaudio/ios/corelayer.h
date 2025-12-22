@@ -78,7 +78,6 @@ public:
      * Configure the AudioUnit
      */
     bool initAudioLayerIO();
-    void configureAudioForCall();
     void setupOutputBus();
     void setupInputBus();
     void bindCallbacks();

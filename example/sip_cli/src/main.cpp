@@ -25,8 +25,8 @@
 // getPassword();
 
 std::string username = "dev_user";
-std::string password = "!QAZxsw2";
-std::string domain = "192.168.92.27";
+std::string password = "12345";
+std::string domain = "192.168.92.43";
 
 std::atomic_bool g_needFinish(false);
 std::queue<std::vector<std::string>> g_command_queue;
@@ -40,9 +40,10 @@ std::vector<std::string> split(const std::string& s);
 int
 main()
 {
-    std::cout << "SIP core Console App" << std::endl;
-    std::cout << "Available commands: call <callee>, add <callee>, del <callee>, conf <callee1> "
-                 "... <calleeN>, switch <device>, hangup, capOn, capOff, video, exit"
+            std::cout << "SIP core Console App" << std::endl;
+    std::cout << "Available commands:\n\tcall <callee>,\n\tadd <callee>,\n\tdel <callee>,\n\tmove <from> <to>,\n\t"
+                 "conf <callee1> ... <calleeN>,\n\tswitch <device>,\n\thold,\n\tresume,\n\thangup,\n\tcapOn,\n\t"
+                 "capOff,\n\tvideo,\n\treregister,\n\tunregister,\n\tsubscribe,\n\tunsubscribe,\n\tpublish,\n\texit"
               << std::endl;
 
     CallController controller(ACCOUNT_ID);
@@ -53,21 +54,46 @@ main()
         return 1;
     }
 
-    if (!controller.sendRegister(username, password, domain)) {
-        std::cerr << "Error: unable to send register for current account." << std::endl;
-        return 1;
+    // controller.setAudioCaptureDevice(1);
+    // print audio captures
+    auto captures = controller.getAudioCaptureDeviceList();
+    if (captures.empty())
+        std::cout << "\nNo avaliable audio capture devices found." << std::endl;
+    else {
+        std::cout << "\nAvaliable audio capture devices: \n";
+        for (auto dev : captures) {
+            std::cout << "\t" << dev << "\n";
+        }
+        std::cout << std::endl;
+    }
+
+    // print audio playbacks
+    auto playbacks = controller.getAudioPlaybackDeviceList();
+    if (playbacks.empty())
+        std::cout << "\nNo avaliable audio playback devices found." << std::endl;
+    else {
+        std::cout << "\nAvaliable audio playback devices:\n";
+        for (auto dev : playbacks) {
+            std::cout << "\t" << dev << "\n";
+        }
+        std::cout << std::endl;
     }
 
     // print video cameras info
     auto devices = controller.getVideoDeviceList();
     if (devices.empty())
-        std::cout << "No avaliable video devices found." << std::endl;
+        std::cout << "\nNo avaliable video devices found." << std::endl;
     else {
-        std::cout << "Avaliable video devices:";
+        std::cout << "\nAvaliable video devices:\n";
         for (auto dev : devices) {
-            std::cout << " " << dev;
+            std::cout << "\t" << dev << "\n";
         }
         std::cout << std::endl;
+    }
+
+    if (!controller.sendRegister(username, password, domain)) {
+        std::cerr << "Error: unable to send register for current account." << std::endl;
+        return 1;
     }
 
     while (true) {
@@ -137,6 +163,15 @@ main()
 
             controller.removeParticipant(tokens[1]);
 
+        } else if (command == "move") {
+            if (tokens.size() != 3) {
+                std::cerr << "Error: Usage - move <from> <to>" << std::endl;
+                continue;
+            }
+
+            if (!controller.moveParticipant(std::stoi(tokens[1]), std::stoi(tokens[2])))
+                std::cerr << "Error: failed to move particiant." << std::endl;
+
         } else if (command == "conf") {
             if (tokens.size() < 4) {
                 std::cerr << "Error: Usage - conf <callee1> ... <calleeN>\n new conference should "
@@ -167,6 +202,26 @@ main()
             }
             if (!controller.hangUp()) {
                 std::cerr << "Error: failed to hangup call: " << controller.getActiveCall()
+                          << std::endl;
+                continue;
+            }
+        } else if (command == "hold") {
+            if (!controller.hasActiveCall()) {
+                std::cerr << "Error: no active call" << std::endl;
+                continue;
+            }
+            if (!controller.hold()) {
+                std::cerr << "Error: failed to hold call: " << controller.getActiveCall()
+                          << std::endl;
+                continue;
+            }
+        } else if (command == "resume") {
+            if (!controller.hasActiveCall()) {
+                std::cerr << "Error: no active call" << std::endl;
+                continue;
+            }
+            if (!controller.resume()) {
+                std::cerr << "Error: failed to resume call: " << controller.getActiveCall()
                           << std::endl;
                 continue;
             }
@@ -206,16 +261,91 @@ main()
                 std::cout << "Enabling video..." << std::endl;
 
             controller.toggleVideo();
+        } else if (command == "info") {
+            if (!controller.hasActiveCall()) {
+                std::cerr << "No active call..." << std::endl;
+                continue;
+            }
+
+            auto info = controller.getCallDetails(controller.getActiveCall());
+            std::cout << "Current call info:\n";
+            for (auto it = info.begin(); it != info.end(); ++it) {
+                std::cout << " " << it->first << " : " << it->second << std::endl;
+            }
+        } else if (command == "unregister") {
+            if (!controller.unregister()) {
+                std::cerr << "Error: unable to send unregister for current account." << std::endl;
+            } else {
+                std::cout << "Unregister successfully sent" << std::endl;
+            }
+        } else if (command == "subscribe") {
+            if (tokens.size() < 2) {
+                std::cerr << "Error: Usage - subscribe <uri1> <uri2> ..." << std::endl;
+                continue;
+            }
+            std::vector<std::string> uris;
+            for (size_t i = 1; i < tokens.size(); ++i) {
+                uris.push_back(tokens[i]);
+            }
+            controller.subscribe(uris);
+            std::cout << "Subscribe successfully sent" << std::endl;
+        } else if (command == "unsubscribe") {
+        } else if (command == "publish") {
+            // Usage: publish on|off [note]
+            if (tokens.size() < 2) {
+                std::cerr << "Error: Usage - publish on|off [note]" << std::endl;
+                continue;
+            }
+            std::string state = tokens[1];
+            std::string note;
+            if (tokens.size() > 2) {
+                // reassemble the rest of tokens as note (allow spaces)
+                for (size_t i = 2; i < tokens.size(); ++i) {
+                    if (!note.empty()) note += " ";
+                    note += tokens[i];
+                }
+            }
+            bool available;
+            if (state == "on" || state == "available" || state == "online") {
+                available = true;
+            } else if (state == "off" || state == "away" || state == "offline") {
+                available = false;
+            } else {
+                std::cerr << "Error: publish expects 'on' or 'off'" << std::endl;
+                continue;
+            }
+            controller.publishPresence(available, note);
+            std::cout << "Publish sent" << std::endl;
+            if (tokens.size() < 2) {
+                std::cerr << "Error: Usage - unsubscribe <uri1> <uri2> ..." << std::endl;
+                continue;
+            }
+            std::vector<std::string> uris;
+            for (size_t i = 1; i < tokens.size(); ++i) {
+                uris.push_back(tokens[i]);
+            }
+            controller.unsubscribe(uris);
+            std::cout << "Unsubscribe successfully sent" << std::endl;
+        } else if (command == "reregister") {
+            if (!controller.sendRegister(username, password, domain)) {
+                std::cerr << "Error: unable to send reregister for current account." << std::endl;
+            } else {
+                std::cout << "Reregister successfully sent" << std::endl;
+            }
         } else {
-            std::cerr
-                << "Error: Unknown command. \nFull list of commands:\n call <callee> - initiates "
-                   "call with given ID,\n add <callee> - adds new participant to current call,\n "
-                   "del <callee> - remove participant from conference.\n conf <callee1> ... "
-                   "<calleeN> - creates conference with given participants (>=3),\n switch "
-                   "<device> - switches video source for an active call.\n hangup - hangup current "
-                   "call.\n capOn - start capture of active call in a local file.\n capOff - stops "
-                   "capture of video.\n video - enables video transfer.\n exit - exit program."
-                << std::endl;
+            std::cerr << "Error: Unknown command. \nFull list of commands:\n call <callee> - "
+                         "initiates call with given ID,\n add <callee> - adds new participant to "
+                         "current call,\n del <callee> - remove participant from conference,\n "
+                         "move <from> <to> - move conference participant position in grid,\n conf "
+                         "<callee1> ... <calleeN> - creates conference with given participants "
+                         "(>=3),\n switch <device> - switches video source for an active call.\n "
+                         "hold - put current call on hold.\n resume - resume current call.\n "
+                         "hangup - hangup current call.\n capOn - start capture of active call in "
+                         "a local file.\n capOff - stops capture of video.\n video - enables video "
+                         "transfer.\n info - get current call infos.\n reregister - force "
+                         "reregistration.\n unregister - unregister user.\n subscribe <uri1>... - "
+                         "subscribe to events.\n unsubscribe <uri1>... - unsubscribe from events.\n"
+                         "exit - exit program." << std::endl;
         }
     }
 

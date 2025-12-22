@@ -134,10 +134,9 @@ VideoDeviceImpl::setup()
 
     // Auto-deletion at exception
     auto IEnumMonikerDeleter = [](IEnumMoniker* p) {
-        p->Release();
+        if (p) p->Release();
     };
-    std::unique_ptr<IEnumMoniker, decltype(IEnumMonikerDeleter)&> pEnumGuard {pEnum,
-                                                                              IEnumMonikerDeleter};
+    std::unique_ptr<IEnumMoniker, decltype(IEnumMonikerDeleter)> pEnumGuard(pEnum, IEnumMonikerDeleter);
 
     IMoniker* pMoniker = NULL;
     while ((pEnumGuard->Next(1, &pMoniker, NULL) == S_OK)) {

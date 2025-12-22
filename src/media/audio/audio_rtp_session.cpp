@@ -136,8 +136,18 @@ AudioRtpSession::startSender()
         send_.enabled = false;
     }
 
+#ifdef ENABLE_VIDEO
+    std::string localId = "";
+    if (not sip_core::getVideoDeviceMonitor().getDeviceList().empty()) {
+        // if we have a video device
+        localId = sip_utils::streamId("", sip_utils::DEFAULT_VIDEO_STREAMID);
+    }
+#endif
+
     if (voiceCallback_) {
-        sender_->setVoiceCallback(voiceCallback_);
+        sender_->setVoiceCallback([this, localId](bool active) {
+            voiceCallback_(localId, active);
+        });
     }
 
     // NOTE do after sender/encoder are ready
@@ -183,6 +193,11 @@ AudioRtpSession::startReceiver()
                                                 accountAudioCodec->audioformat,
                                                 receive_.receiving_sdp,
                                                 mtu_));
+
+    if (voiceCallback_)
+        receiveThread_->setVoiceCallback([this](bool active) {
+            voiceCallback_(streamId_, active);
+        });
 
     receiveThread_->setRecorderCallback([this](const MediaStream& ms) { attachRemoteRecorder(ms); });
     receiveThread_->addIOContext(*socketPair_);
@@ -276,13 +291,55 @@ AudioRtpSession::setMuted(bool muted, Direction dir)
 }
 
 void
-AudioRtpSession::setVoiceCallback(std::function<void(bool)> cb)
+AudioRtpSession::setVoiceCallback(std::function<void(const std::string&, bool)> cb)
 {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     voiceCallback_ = std::move(cb);
-    if (sender_) {
-        sender_->setVoiceCallback(voiceCallback_);
+
+    std::string localId = "";
+#ifdef ENABLE_VIDEO
+    if (not sip_core::getVideoDeviceMonitor().getDeviceList().empty()) {
+        // if we have a video device
+        localId = sip_utils::streamId("", sip_utils::DEFAULT_VIDEO_STREAMID);
     }
+#endif
+
+    if (sender_) {
+        sender_->setVoiceCallback([this, localId](bool active) {
+            voiceCallback_(localId, active);
+        });
+    }
+    if (receiveThread_) {
+        receiveThread_->setVoiceCallback([this](bool active) {
+            voiceCallback_(streamId_, active);
+        });
+    }
+}
+
+rtcpRRHeader
+AudioRtpSession::getRtcpRR()
+{
+    if(socketPair_)
+        return socketPair_->getLastRtcpRR();
+
+    return {};
+}
+
+rtcpREMBHeader
+AudioRtpSession::getRtcpREMB()
+{
+    if(socketPair_)
+        return socketPair_->getLastRtcpREMB();
+
+    return {};
+}
+
+rtcpSRHeader AudioRtpSession::getRtcpSR()
+{
+    if(socketPair_)
+        return socketPair_->getLastRtcpSR();
+
+    return {};
 }
 
 bool

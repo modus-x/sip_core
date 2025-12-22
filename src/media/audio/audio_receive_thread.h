@@ -32,6 +32,14 @@
 #include <functional>
 #include <sstream>
 
+#include "audio-processing/null_audio_processor.h"
+#if HAVE_WEBRTC_AP
+#include "audio-processing/webrtc.h"
+#endif
+#if HAVE_SPEEXDSP
+#include "audio-processing/speex.h"
+#endif
+
 namespace sip_core {
 
 class MediaDecoder;
@@ -50,10 +58,13 @@ public:
 
     MediaStream getInfo() const;
 
+    void setVoiceCallback(std::function<void(bool)> cb);
     void addIOContext(SocketPair& socketPair);
     void startReceiver();
     void stopReceiver();
     void setMuted(bool muted);
+    void setVAD(bool active);
+    
 
     void setSuccessfulSetupCb(const std::function<void(MediaType, bool)>& cb)
     {
@@ -70,9 +81,19 @@ private:
     static int interruptCb(void* ctx);
     static int readFunction(void* opaque, uint8_t* buf, int buf_size);
 
+    void createAudioProcessor();
+    void destroyAudioProcessor();
+
+    std::mutex audioProcessorMutex_ {};
+    std::unique_ptr<AudioProcessor> audioProcessor_;
+
     /*-----------------------------------------------------------------*/
     /* These variables should be used in thread (i.e. process()) only! */
     /*-----------------------------------------------------------------*/
+    // last voice activity state
+    bool voice_ {false};
+    std::function<void(bool)> voiceCallback_;
+
     const std::string id_;
     const AudioFormat& format_;
 

@@ -49,9 +49,10 @@ AudioInput::AudioInput(const std::string& id)
                                      }))
     , fileId_(id + "_file")
     , deviceGuard_()
-    , loop_([] { return true; }, [this] { process(); }, [] {})
+    , loop_([] { return true; }, [this] { process(); }, [] {}, ThreadLoop::ThreadPriority::HIGH)
 {
     SIP_CORE_DBG() << "Creating audio input with id: " << id;
+    updateMuteStateForDeviceAvailability();
 }
 
 AudioInput::AudioInput(const std::string& id, const std::string& resource)
@@ -124,10 +125,14 @@ AudioInput::readFromDevice()
 
     auto& bufferPool = Manager::instance().getRingBufferPool();
     auto audioFrame = bufferPool.getData(id_);
-    if (not audioFrame)
+    if (not audioFrame && !muteState_) {
         return;
+    }
 
     if (muteState_) {
+        if (not audioFrame) {
+            audioFrame = std::make_shared<AudioFrame>(bufferPool.getInternalAudioFormat(), frameSize_);
+        }
         libav_utils::fillWithSilence(audioFrame->pointer());
         audioFrame->has_voice = false; // force no voice activity when muted
     }
@@ -182,6 +187,7 @@ AudioInput::readFromFile()
 bool
 AudioInput::initDevice(const std::string& device)
 {
+    updateMuteStateForDeviceAvailability();
     devOpts_ = {};
     devOpts_.input = device;
     devOpts_.channel = format_.nb_channels;
@@ -287,6 +293,7 @@ AudioInput::switchInput(const std::string& resource)
     playingDevice_ = false;
     currentResource_ = resource;
     devOptsFound_ = false;
+    updateMuteStateForDeviceAvailability();
 
     std::promise<DeviceParams> p;
     foundDevOpts_.swap(p);
@@ -403,8 +410,13 @@ AudioInput::setFormat(const AudioFormat& fmt)
 void
 AudioInput::setMuted(bool isMuted)
 {
-    SIP_CORE_WARN("Audio Input muted [%s]", isMuted ? "YES" : "NO");
+    updateMuteStateForDeviceAvailability();
+    if (forceMuteNoDevice_ && !isMuted) {
+        SIP_CORE_WARN("Audio Input unmute ignored: no capture devices available");
+        return;
+    }
     muteState_ = isMuted;
+    SIP_CORE_WARN("Audio Input muted [%s]", muteState_ ? "YES" : "NO");
 }
 
 MediaStream
@@ -420,6 +432,30 @@ AudioInput::getInfo(const std::string& name) const
     std::lock_guard<std::mutex> lk(fmtMutex_);
     auto ms = MediaStream(name, format_, sent_samples);
     return ms;
+}
+
+void
+AudioInput::updateMuteStateForDeviceAvailability()
+{
+#if defined(TARGET_OS_IOS) && TARGET_OS_IOS
+    return;
+#endif
+    bool hasCaptureDevice = false;
+    if (auto driver = Manager::instance().getAudioDriver()) {
+        hasCaptureDevice = !driver->getCaptureDeviceList().empty();
+    }
+
+    const bool newForceMute = !hasCaptureDevice;
+    if (newForceMute && !forceMuteNoDevice_) {
+        SIP_CORE_WARN("Audio Input forcing mute: no capture devices detected");
+    } else if (!newForceMute && forceMuteNoDevice_) {
+        SIP_CORE_INFO("Audio Input capture device detected; manual mute control restored");
+    }
+
+    forceMuteNoDevice_ = newForceMute;
+    if (forceMuteNoDevice_) {
+        muteState_ = true;
+    }
 }
 
 } // namespace sip_core

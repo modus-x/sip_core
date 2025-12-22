@@ -23,15 +23,22 @@ public:
 
     bool init();
     bool sendRegister(const std::string& user, const std::string& pass, const std::string& domain);
+    bool unregister();
+
+    void subscribe(const std::vector<std::string>& uris);
+    void unsubscribe(const std::vector<std::string>& uris);
 
     bool call(const std::string& callTo);
     bool hangUp();
+    bool hold();
+    bool resume();
     bool hasActiveCall() const;
     const std::string getActiveCall() const;
 
     bool addParticipant(const std::string& newParticipant);
     bool removeParticipant(const std::string& participant);
     bool createConfirence(const std::vector<std::string>& participantsList);
+    bool moveParticipant(size_t from_index, size_t to_index);
 
     bool isCaptureInProgress();
     bool startCallCapture();
@@ -42,8 +49,18 @@ public:
     bool setVideoDevice(const std::string& videoDevice);
     std::vector<std::string> getVideoDeviceList() const;
     const std::string getVideoDevice() const;
+    std::map<std::string, std::string> getCallDetails(const std::string& callId);
+
+    std::vector<std::string> getAudioCaptureDeviceList() const;
+    std::vector<std::string> getAudioPlaybackDeviceList() const;
+
+    void setAudioCaptureDevice(int index);
+    void setAudioPlaybackDevice(int index);
 
     void proccesEvents();
+
+    // Presence testing helper
+    void publishPresence(bool available, const std::string& note);
 
 private:
     virtual void audioDeviceEvent();
@@ -70,6 +87,10 @@ private:
         const ::std::string& callId,
         const ::std::string& event,
         const ::std::vector<::std::map<::std::string, ::std::string>>& mediaList) override;
+    virtual void mediaChangeRequest(
+        const std::string& accountId, 
+        const std::string& callId, 
+        const std::vector<std::map<std::string, std::string>>& remoteMediaList) override;
     virtual void startCapture(const std::string& camid) override;
     virtual void stopCapture(const std::string& camid) override;
     virtual void decodingStarted(const std::string& id,
@@ -96,11 +117,14 @@ private:
     void createConfFromParticipantList(const std::string& accountId,
                                        const std::vector<std::string>& participantList);
 
-    mutable std::mutex m_mtxEvents;
+    mutable std::recursive_mutex m_mtxEvents;
 
+#ifdef ENABLE_VIDEO
     bool m_isVideoEnabled;
-    std::map<std::string, std::string> m_mediaAudio;
     std::map<std::string, std::string> m_mediaVideo;
+#endif
+    
+    std::map<std::string, std::string> m_mediaAudio;
 
     std::string m_user;
     std::string m_domain;

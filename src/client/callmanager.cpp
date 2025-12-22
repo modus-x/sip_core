@@ -326,7 +326,9 @@ getConferenceDetails(const std::string& accountId, const std::string& confId)
 #ifdef ENABLE_VIDEO
                     {"VIDEO_SOURCE", conf->getVideoInput()},
 #endif
-                    {"RECORDING", conf->isRecording() ? sip_core::TRUE_STR : sip_core::FALSE_STR}};
+                    {"RECORDING", conf->isRecording() ? sip_core::TRUE_STR : sip_core::FALSE_STR}, 
+                    {"LAYOUT", std::to_string(conf->getLayout())}, 
+                    };
     return {};
 }
 
@@ -361,6 +363,26 @@ getParticipantList(const std::string& accountId, const std::string& confId)
             return {participants.begin(), participants.end()};
         }
     return {};
+}
+
+bool
+moveParticipant(const std::string& accountId, const std::string& confId, size_t from, size_t to)
+{
+    if (const auto account = sip_core::Manager::instance().getAccount(accountId))
+        if (auto conf = account->getConference(confId)) {
+            return conf->moveParticipant(from, to);
+        }
+    return false;
+}
+
+bool
+moveParticipant(const std::string& accountId, const std::string& confId, const std::string& participant_id, size_t to)
+{
+    if (const auto account = sip_core::Manager::instance().getAccount(accountId))
+        if (auto conf = account->getConference(confId)) {
+            return conf->moveParticipant(participant_id, to);
+        }
+    return false;
 }
 
 std::string

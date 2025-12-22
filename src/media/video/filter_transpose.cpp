@@ -82,5 +82,53 @@ getTransposeFilter(
     return filter;
 }
 
+std::unique_ptr<MediaFilter>
+getTransposeFilterWithCrop(
+    const std::string& inputName, int rotation, int width, int height, int format)
+{
+    SIP_CORE_WARN("Rotation set to %d", rotation);
+
+    if((width <= 0 || height <= 0) && rotation == 0) {
+        SIP_CORE_WARN("Invalid transformWithCrop filter parameters");
+        return {};
+    }
+
+    std::stringstream ss;
+    ss << "[" << inputName << "] ";
+
+    switch (rotation) {
+    case 0: break;
+    case 90:
+    case -270:
+        ss << "transpose=2, ";
+        break;
+    case 180:
+    case -180:
+        ss << "transpose=1, transpose=1, ";
+        break;
+    case 270:
+    case -90:
+        ss << "transpose=1, ";
+        break;
+    default:
+        SIP_CORE_WARN("Unsupported rotation value");
+    }
+
+    if(width && height)
+        ss << "crop=" << width << ":" << height;
+
+    constexpr auto one = rational<int>(1);
+    std::vector<MediaStream> msv;
+    msv.emplace_back(inputName, format, one, width, height, 0, one);
+
+    std::unique_ptr<MediaFilter> filter(new MediaFilter);
+    auto ret = filter->initialize(ss.str(), msv);
+    if (ret < 0) {
+        SIP_CORE_ERR() << "filter init fail";
+        return {};
+    }
+    return filter;
+}
+
 } // namespace video
 } // namespace sip_core

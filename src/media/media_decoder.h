@@ -199,6 +199,7 @@ public:
     void setInterruptCallback(int (*cb)(void*), void* opaque);
     /// just forward to demuxer
     void setIOContext(MediaIOHandle* ioctx);
+    void enableLateFrameDrop(std::chrono::microseconds threshold);
 
     int setup(AVMediaType type);
     int setupAudio() { return setup(AVMEDIA_TYPE_AUDIO); }
@@ -260,6 +261,12 @@ private:
     int frameCount_ {0};
 
     DeviceParams inputParams_;
+    bool dropLateFrames_ {false};
+    int64_t lateFrameDropThresholdUs_ {0};
+    int64_t firstCapturePtsUs_ {AV_NOPTS_VALUE};
+    int64_t firstCaptureWallclockUs_ {0};
+    uint64_t lateFrameDropCount_ {0};
+    std::chrono::steady_clock::time_point lastLateFrameLog_ {};
 
     int correctPixFmt(int input_pix_fmt);
     int setupStream();

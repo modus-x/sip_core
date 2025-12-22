@@ -497,8 +497,6 @@ public:
 
     void startAudio();
 
-    void configureAudioForCall();
-
     /**
      * Get list of supported audio output device
      * @return std::vector<std::string> A list of the audio devices supporting playback
@@ -709,7 +707,6 @@ public:
      * new call, not answered or refused
      */
     bool incomingCallsWaiting();
-    bool checkIfDND(const std::string& accountId) const;
 
     /**
      * Get the current call
@@ -903,6 +900,8 @@ public:
     bool isLocalModeratorsEnabled(const std::string& accountID);
     void setAllModerators(const std::string& accountID, bool allModerators);
     bool isAllModerators(const std::string& accountID);
+
+    void setTsxTimers(const uint32_t t1, const uint32_t t2, const uint32_t t4, const uint32_t td);
 
 private:
     std::mt19937_64 rand_;

@@ -4,7 +4,7 @@ cmake_policy(VERSION 3.25...3.31)
 
 project(
   sip_core
-  VERSION 0.13.9
+  VERSION 0.16.3
   LANGUAGES C CXX)
 
 set(BUILD_NUMBER 1)
@@ -382,20 +382,6 @@ endif()
 
 add_library(${PROJECT_NAME} STATIC ${ALL_FILES})
 
-if(LINUX)
-  # link with -rtlib=compiler-rt, to include all special builtin functions into
-  # binary
-  target_link_options(${PROJECT_NAME} PUBLIC -rtlib=compiler-rt)
-
-  # link GCC specific CXX, which was used when deps were built
-  find_library(
-    GCC_CXX libstdc++.a
-    PATHS /opt/rh/devtoolset-11/root/usr/lib/gcc/x86_64-redhat-linux/11
-          REQUIRED NO_CACHE)
-
-  target_link_libraries(${PROJECT_NAME} PUBLIC ${GCC_CXX})
-endif()
-
 set_target_properties(${PROJECT_NAME} PROPERTIES FOLDER "sip_core")
 
 target_sources(${PROJECT_NAME} PUBLIC FILE_SET HEADERS BASE_DIRS src FILES
@@ -593,6 +579,8 @@ if(MSVC)
             optimized
             ${DEPS_RELEASE}/lib/x64/lib_json.lib
             optimized
+            ${DEPS_RELEASE}/lib/x64/libzlib.lib
+            optimized
             ${DEPS_RELEASE}/libyaml-cppmd.lib
             optimized
             ${DEPS_RELEASE}/fmt.lib
@@ -622,6 +610,8 @@ if(MSVC)
             ${DEPS_DEBUG}/lib/x64/libvpx.lib
             debug
             ${DEPS_DEBUG}/lib/x64/lib_json.lib
+            debug
+            ${DEPS_DEBUG}/lib/x64/libzlib.lib
             debug
             ${DEPS_DEBUG}/libyaml-cppmdd.lib
             debug
@@ -714,12 +704,13 @@ else()
     pkg_search_module(swresample_${TARGET} REQUIRED IMPORTED_TARGET
                       libswresample)
     pkg_search_module(swscale_${TARGET} REQUIRED IMPORTED_TARGET libswscale)
-    pkg_search_module(avutil_${TARGET} REQUIRED IMPORTED_TARGET GLOBAL
-                      libavutil)
-    pkg_search_module(yaml_${TARGET} REQUIRED IMPORTED_TARGET yaml-cpp)
-    pkg_search_module(json_${TARGET} REQUIRED IMPORTED_TARGET jsoncpp)
-    pkg_search_module(speex_${TARGET} REQUIRED IMPORTED_TARGET speex)
-    pkg_search_module(speexdsp_${TARGET} REQUIRED IMPORTED_TARGET speexdsp)
+	    pkg_search_module(avutil_${TARGET} REQUIRED IMPORTED_TARGET GLOBAL
+	                      libavutil)
+	    pkg_search_module(yaml_${TARGET} REQUIRED IMPORTED_TARGET yaml-cpp)
+	    pkg_search_module(json_${TARGET} REQUIRED IMPORTED_TARGET jsoncpp)
+	    pkg_search_module(speex_${TARGET} REQUIRED IMPORTED_TARGET speex)
+	    pkg_search_module(speexdsp_${TARGET} REQUIRED IMPORTED_TARGET speexdsp)
+	    pkg_search_module(zlib_${TARGET} REQUIRED IMPORTED_TARGET zlib)
 
     # LD_FLAGS are broken on Apple, erase them
     if(APPLE)
@@ -743,23 +734,24 @@ else()
                             PROPERTIES INTERFACE_LINK_OPTIONS "")
     endif()
 
-    target_link_libraries(
-      ${PROJECT_NAME}
-      PUBLIC PkgConfig::avformat_${TARGET}
-             PkgConfig::pjproject_${TARGET}
-             PkgConfig::avdevice_${TARGET}
-             PkgConfig::avfilter_${TARGET}
-             PkgConfig::vpx_${TARGET}
-             PkgConfig::avcodec_${TARGET}
-             PkgConfig::swresample_${TARGET}
-             PkgConfig::swscale_${TARGET}
-             PkgConfig::yaml_${TARGET}
-             PkgConfig::json_${TARGET}
-             PkgConfig::speex_${TARGET}
-             PkgConfig::speexdsp_${TARGET}
-             PkgConfig::fmt_${TARGET}
-      # for passing video frames to external libraries
-      PUBLIC PkgConfig::avutil_${TARGET})
+	    target_link_libraries(
+	      ${PROJECT_NAME}
+	      PUBLIC PkgConfig::avformat_${TARGET}
+	             PkgConfig::pjproject_${TARGET}
+	             PkgConfig::avdevice_${TARGET}
+	             PkgConfig::avfilter_${TARGET}
+	             PkgConfig::vpx_${TARGET}
+	             PkgConfig::avcodec_${TARGET}
+	             PkgConfig::swresample_${TARGET}
+	             PkgConfig::swscale_${TARGET}
+	             PkgConfig::yaml_${TARGET}
+	             PkgConfig::json_${TARGET}
+	             PkgConfig::speex_${TARGET}
+	             PkgConfig::speexdsp_${TARGET}
+	             PkgConfig::fmt_${TARGET}
+	             PkgConfig::zlib_${TARGET}
+	      # for passing video frames to external libraries
+	      PUBLIC PkgConfig::avutil_${TARGET})
 
     if(LINUX)
       target_link_libraries(${PROJECT_NAME}

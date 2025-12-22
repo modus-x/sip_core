@@ -55,12 +55,12 @@ struct SipAccountConfig : public SipAccountBaseConfig {
     /**
      * How often should be ka called?
      */
-    uint32_t keepAliveInterval {15};
+    uint32_t keepAliveInterval {25};
 
     /**
      * What should be send
      */
-    KeepAliveType keepAliveType {KeepAliveType::Packet};
+    KeepAliveType keepAliveType {KeepAliveType::Options};
 
     /**
      * interface name on which this account is bound
@@ -81,6 +81,11 @@ struct SipAccountConfig : public SipAccountBaseConfig {
      * Input Outbound Proxy Server Address
      */
     std::string serviceRoute;
+
+    /**
+     * Backup Outbound Proxy Server Address
+     */
+    std::string backServiceRoute;
 
     /**
      * Determine if the softphone should fallback on non secured media channel if SRTP negotiation

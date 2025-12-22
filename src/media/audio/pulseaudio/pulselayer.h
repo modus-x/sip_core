@@ -241,7 +241,7 @@ private:
 
     /** PulseAudio context and asynchronous loop */
     pa_context* context_ {nullptr};
-    std::unique_ptr<pa_threaded_mainloop, decltype(pa_threaded_mainloop_free)&> mainloop_;
+    std::unique_ptr<pa_threaded_mainloop, decltype(&pa_threaded_mainloop_free)> mainloop_;
     bool enumeratingSinks_ {false};
     bool enumeratingSources_ {false};
     bool gettingServerInfo_ {false};

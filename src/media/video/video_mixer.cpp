@@ -35,8 +35,10 @@
 #include "connectivity/sip_utils.h"
 
 #include <cmath>
+#include <atomic>
 #include <unistd.h>
 #include <mutex>
+#include <unordered_map>
 
 #include "videomanager_interface.h"
 
@@ -50,14 +52,29 @@ struct VideoMixer::VideoMixerSource
 {
     Observable<std::shared_ptr<MediaFrame>>* source {nullptr};
     int rotation {0};
-    std::unique_ptr<MediaFilter> rotationFilter {nullptr};
+    std::unique_ptr<MediaFilter> transposeFilter {nullptr};
+    std::unique_ptr<MediaFilter> bordersFilter {nullptr};
     std::shared_ptr<VideoFrame> render_frame;
     void atomic_copy(const VideoFrame& other)
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        auto newFrame = std::make_shared<VideoFrame>();
-        newFrame->copyFrom(other);
-        render_frame = newFrame;
+        if (muted.load()) {
+            auto black_frame = std::make_shared<VideoFrame>();
+            black_frame->reserve(AV_PIX_FMT_YUV420P, other.width(), other.height());
+            libav_utils::fillWithBlack(black_frame->pointer());
+            render_frame = black_frame;
+        } else {
+            if (render_frame) {
+                if (render_frame->width() != other.width()
+                    or render_frame->height() != other.height()) {
+                    w = 0;
+                    h = 0;
+                }
+            }
+            auto newFrame = std::make_shared<VideoFrame>();
+            newFrame->copyFrom(other);
+            render_frame = newFrame;
+        }
     }
 
     std::shared_ptr<VideoFrame> getRenderFrame()
@@ -67,11 +84,17 @@ struct VideoMixer::VideoMixerSource
     }
 
     // Current render informations
-    int x {};
-    int y {};
+    std::atomic<int> x {0};
+    std::atomic<int> y {0};
     int w {};
     int h {};
+    int lastLayoutFrameWidth {0};
+    int lastLayoutFrameHeight {0};
+    int lastLayoutOrientation {0};
+    bool isBig {false};
+    bool geometryPending {false};
     bool hasVideo {true};
+    std::atomic<bool> muted {false};
 
 private:
     std::mutex mutex_;
@@ -137,7 +160,6 @@ VideoMixer::switchInputs(const std::vector<std::string>& inputs)
 
     // Re-attach videoInput to mix
     startInputs();
-
 }
 
 void
@@ -152,7 +174,20 @@ VideoMixer::stopInputs()
 {
     for (auto& input : localInputs_)
         stopInput(input);
+
     localInputs_.clear();
+}
+
+void
+VideoMixer::muteInputs(bool mute)
+{
+    for (auto& source : sources_) {
+        for (auto& input : localInputs_) {
+            if (source->source == input.get()) {
+                source->muted.store(mute);
+            }
+        }
+    }
 }
 
 void
@@ -170,17 +205,108 @@ VideoMixer::startInputs()
 void
 VideoMixer::setActiveStream(const std::string& id)
 {
+    std::unique_lock lock(rwMutex_);
     activeStream_ = id;
-    updateLayout();
+    updateLayout("setActiveStream");
+}
+
+void
+VideoMixer::setVoiceActivity(const std::string& streamId, bool state)
+{
+    std::unique_lock lock(rwMutex_);
+    voiceActivity_[streamId] = state;
+    updateLayout("setVoiceActivity(single)");
+}
+
+void
+VideoMixer::setVoiceActivity(const std::map<std::string, bool>& states)
+{
+    std::unique_lock lock(rwMutex_);
+    voiceActivity_ = states;
+    updateLayout("setVoiceActivity(map)");
+}
+
+void
+VideoMixer::setVoiceActivity(const std::map<std::string, bool>&& states)
+{
+    std::unique_lock lock(rwMutex_);
+    voiceActivity_ = std::move(states);
+    updateLayout("setVoiceActivity(move)");
+}
+
+bool
+VideoMixer::moveSource(size_t from_index, size_t to_index)
+{
+    std::unique_lock lock(rwMutex_);
+
+    size_t size = sources_.size();
+    if (from_index == to_index || from_index >= size || to_index >= size)
+        return false;
+
+    auto it_from = sources_.begin();
+    std::advance(it_from, from_index);
+
+    if (from_index < to_index) {
+        if (to_index == sources_.size()) {
+            sources_.splice(sources_.end(), sources_, it_from);
+        } else {
+            auto it_to = sources_.begin();
+            std::advance(it_to, to_index);
+            sources_.splice(std::next(it_to), sources_, it_from);
+        }
+    } else { // from > to
+        auto it_to = sources_.begin();
+        std::advance(it_to, to_index);
+        sources_.splice(it_to, sources_, it_from);
+    }
+    updateLayout("moveSource");
+    return true;
 }
 
 // just report that layout was updated
 void
-VideoMixer::updateLayout()
+VideoMixer::updateLayout(const char* reason)
 {
-    if (activeStream_ == "")
+    if (activeStream_.empty())
         currentLayout_ = Layout::GRID;
-    layoutUpdated_ += 1;
+    addLayoutUpdate(reason);
+}
+
+int
+VideoMixer::addLayoutUpdate(const char* reason)
+{
+    const int previous = layoutUpdated_.fetch_add(1, std::memory_order_acq_rel);
+    const int current = previous + 1;
+    SIP_CORE_DBG("[mixer:%s] layoutUpdated_ += 1 (%s) %d -> %d",
+                 id_.c_str(),
+                 reason ? reason : "unknown",
+                 previous,
+                 current);
+    return current;
+}
+
+void
+VideoMixer::consumeLayoutUpdates(int count, const char* reason)
+{
+    if (count <= 0)
+        return;
+    int previous = layoutUpdated_.fetch_sub(count, std::memory_order_acq_rel);
+    int current = previous - count;
+    if (current < 0) {
+        SIP_CORE_WARN("[mixer:%s] layoutUpdated_ underflow (%s): %d - %d < 0, clamping to 0",
+                      id_.c_str(),
+                      reason ? reason : "unknown",
+                      previous,
+                      count);
+        current = 0;
+        layoutUpdated_.store(0, std::memory_order_release);
+    }
+    SIP_CORE_DBG("[mixer:%s] layoutUpdated_ -= %d (%s) %d -> %d",
+                 id_.c_str(),
+                 count,
+                 reason ? reason : "unknown",
+                 previous,
+                 current);
 }
 
 void
@@ -220,6 +346,20 @@ VideoMixer::detachVideo(Observable<std::shared_ptr<MediaFrame>>* frame)
         frame->detach(this);
 }
 
+VideoMixer::VideoToStream 
+VideoMixer::getVideoToStreamInfo() const
+{
+    std::lock_guard<std::mutex> lk(videoToStreamInfoMtx_);
+    return videoToStreamInfo_;
+}
+
+std::map<std::string, bool> 
+VideoMixer::getVoiceActivity()
+{
+    std::shared_lock lk(rwMutex_);
+    return voiceActivity_;
+}
+
 void
 VideoMixer::attached(Observable<std::shared_ptr<MediaFrame>>* ob)
 {
@@ -231,23 +371,14 @@ VideoMixer::attached(Observable<std::shared_ptr<MediaFrame>>* ob)
     SIP_CORE_DBG("Add new source [%p]", src.get());
     sources_.emplace_back(std::move(src));
     SIP_CORE_DEBUG("Total sources: {:d}", sources_.size());
-    updateLayout();
+    updateLayout("attached()");
 }
 
 void
 VideoMixer::detached(Observable<std::shared_ptr<MediaFrame>>* ob)
 {
-    std::unique_lock lock(rwMutex_);
-
-    for (const auto& x : sources_) {
-        if (x->source == ob) {
-            SIP_CORE_DBG("Remove source [%p]", x.get());
-            sources_.remove(x);
-            SIP_CORE_DEBUG("Total sources: {:d}", sources_.size());
-            updateLayout();
-            break;
-        }
-    }
+    // Avoid taking rwMutex_ inside observable callback; enqueue and process in mixer loop
+    enqueueDetach(ob);
 }
 
 void
@@ -278,8 +409,46 @@ VideoMixer::update(Observable<std::shared_ptr<MediaFrame>>* ob,
 }
 
 void
+VideoMixer::enqueueDetach(Observable<std::shared_ptr<MediaFrame>>* ob)
+{
+    std::lock_guard<std::mutex> ql(pendingDetachMtx_);
+    pendingDetaches_.push_back(ob);
+}
+
+void
+VideoMixer::processPendingDetaches()
+{
+    std::vector<Observable<std::shared_ptr<MediaFrame>>*> local;
+    {
+        std::lock_guard<std::mutex> ql(pendingDetachMtx_);
+        if (pendingDetaches_.empty())
+            return;
+        local.swap(pendingDetaches_);
+    }
+
+    if (local.empty())
+        return;
+
+    std::unique_lock lock(rwMutex_);
+    for (auto* ob : local) {
+        for (const auto& x : sources_) {
+            if (x->source == ob) {
+                SIP_CORE_DBG("Remove source [%p]", x.get());
+                sources_.remove(x);
+                SIP_CORE_DEBUG("Total sources: {:d}", sources_.size());
+                updateLayout("processPendingDetaches");
+                break;
+            }
+        }
+    }
+}
+
+void
 VideoMixer::process()
 {
+    // First, process any pending detach requests safely
+    processPendingDetaches();
+
     nextProcess_ += std::chrono::duration_cast<std::chrono::microseconds>(FRAME_DURATION);
     const auto delay = nextProcess_ - std::chrono::steady_clock::now();
     if (delay.count() > 0)
@@ -302,60 +471,58 @@ VideoMixer::process()
     libav_utils::fillWithBlack(output.pointer());
 
     {
-        std::lock_guard<std::mutex> lk(audioOnlySourcesMtx_);
         std::shared_lock lock(rwMutex_);
 
         // does current frame is SUCCESSFULLY rendered?
-        bool successfullyRendered = audioOnlySources_.size() != 0 && sources_.size() == 0;
+        bool layoutRendered = audioOnlySources_.size() != 0 && sources_.size() == 0;
 
         // collection of patricipants, both audio & video
         std::vector<SourceInfo> sourcesInfo;
         sourcesInfo.reserve(sources_.size() + audioOnlySources_.size());
 
+        // Build a cache of stream infos to avoid taking videoToStreamInfoMtx_ while holding rwMutex_
+        VideoToStream streamInfoCache = getVideoToStreamInfo();
+
+        // Snapshot voice activity to avoid locking vocieActivivtyMtx_ under rwMutex_
+        std::map<std::string, bool> voiceActivitySnapshot = getVoiceActivity();
+
+        const int pendingLayoutUpdates = layoutUpdated_.load(std::memory_order_acquire);
+        bool needsUpdate = pendingLayoutUpdates > 0;
+        int layoutUpdatesGenerated = 0;
+        bool layoutInvalidated = false;
+
         int i = 0;
-
-        // did active stream was found?
-        bool activeFound = false;
-
-        // did updateLayout was called before
-        bool needsUpdate = layoutUpdated_ > 0;
+        if(hasActive())
+            i++; // reserve 0 index place for active stream
 
         // first, iterate and draw audioOnlySources_
         for (auto& [callId, streamId] : audioOnlySources_) {
-            auto isActiveSource = verifyActive(streamId);
+            /* thread stop pending? */
+            if (!loop_.isRunning())
+                return;
+                
             std::shared_ptr<VideoFrame> audioFrame = std::make_shared<VideoFrame>();
             audioFrame->reserve(format_, 640, 480);
 
-            // set "wantedIndex" to current index of video source, for GRID layout
-            auto wantedIndex = i;
-            if (currentLayout_ == Layout::ONE_BIG) {
-                // reset to zero if ONE_BIG layout
-                wantedIndex = 0;
-                activeFound = true;
-            } else if (currentLayout_ == Layout::ONE_BIG_WITH_SMALL) {
-                // show active stream FIRST
-                if (isActiveSource) {
-                    wantedIndex = 0;
-                    activeFound = true;
-                } else if (not activeFound) {
-                    // active streams appears at i == 3
-                    // 1 2 3 0 4 5 6
-                    wantedIndex += 1;
-                }
-            }
-
             auto audioSource = std::make_unique<VideoMixer::VideoMixerSource>();
+            audioSource->hasVideo = false;
+
+            bool voiceActive = false;
+            if (auto itVA = voiceActivitySnapshot.find(streamId); itVA != voiceActivitySnapshot.end())
+                voiceActive = itVA->second;
 
             // calc pos, but DO NOT render anything
-            calc_position(audioSource, audioFrame, wantedIndex);
-            sourcesInfo.emplace_back(SourceInfo { {},
-                                        audioSource->x,
-                                        audioSource->y,
-                                        audioSource->w,
-                                        audioSource->h,
-                                        false,
-                                        callId,
-                                        streamId});
+            if(needsUpdate)
+                processSource(audioSource, audioFrame, i, streamId, voiceActive);
+
+            sourcesInfo.emplace_back(SourceInfo {{},
+                                                 audioSource->x.load(),
+                                                 audioSource->y.load(),
+                                                 audioSource->w,
+                                                 audioSource->h,
+                                                 audioSource->hasVideo,
+                                                 callId,
+                                                 streamId});
             i++;
         }
 
@@ -365,95 +532,69 @@ VideoMixer::process()
             if (!loop_.isRunning())
                 return;
 
-            auto sinfo = streamInfo(x->source);
-            auto activeSource = verifyActive(sinfo.streamId);
+            if (x->w == 0 || x->h == 0)
+                needsUpdate;
 
-            if (currentLayout_ != Layout::ONE_BIG or activeSource) {
-                // make rendered frame temporarily unavailable for update()
-                // to avoid concurrent access.
-                std::shared_ptr<VideoFrame> input = x->getRenderFrame();
-                std::shared_ptr<VideoFrame> fooInput = std::make_shared<VideoFrame>();
+            StreamInfo sinfo = {};
+            if (auto itSI = streamInfoCache.find(x->source); itSI != streamInfoCache.end())
+                sinfo = itSI->second;
 
-                // set "wantedIndex" to current index of video source, for GRID layout
-                auto wantedIndex = i;
-                if (currentLayout_ == Layout::ONE_BIG) {
-                    // reset to zero if ONE_BIG layout
-                    wantedIndex = 0;
-                    activeFound = true;
-                } else if (currentLayout_ == Layout::ONE_BIG_WITH_SMALL) {
-                    // show active stream FIRST
-                    if (activeSource) {
-                        wantedIndex = 0;
-                        activeFound = true;
-                    } else if (not activeFound) {
-                        // active streams appears at i == 3
-                        // 1 2 3 0 4 5 6
-                        wantedIndex += 1;
-                    }
-                }
+            bool voiceActive = false;
+            if (auto itVA = voiceActivitySnapshot.find(sinfo.streamId);
+                itVA != voiceActivitySnapshot.end())
+                voiceActive = itVA->second;
 
-                auto hasVideo = x->hasVideo;
-                bool blackFrame = false;
-
-                if (!input->height() or !input->width()) {
-                    successfullyRendered = true;
-                    fooInput->reserve(format_, width_, height_);
-                    blackFrame = true;
-                } else {
-                    fooInput.swap(input);
-                }
-
-                // If orientation changed or if the first valid frame for source
-                // is received -> trigger layout calculation and confInfo update
-                if (x->rotation != fooInput->getOrientation() or !x->w or !x->h) {
-                    // layoutUpdated_ += 1;
-                    updateLayout();
+            // make rendered frame temporarily unavailable for update()
+            // to avoid concurrent access.
+            std::shared_ptr<VideoFrame> input = x->getRenderFrame();
+            bool geometryChanged = false;
+            if (input->height() and input->width()) {
+                if (input->width() != x->lastLayoutFrameWidth
+                        || input->height() != x->lastLayoutFrameHeight
+                        || input->getOrientation() != x->lastLayoutOrientation)
+                {
                     needsUpdate = true;
+                    x->lastLayoutFrameWidth = input->width();
+                    x->lastLayoutFrameHeight = input->height();
+                    x->lastLayoutOrientation = input->getOrientation();
                 }
-
-                if (needsUpdate)
-                    calc_position(x, fooInput, wantedIndex);
-
-                if (!blackFrame) {
-                    if (fooInput)
-                        successfullyRendered |= render_frame(output, fooInput, x);
-                    else
-                        SIP_CORE_WARN("[mixer:%s] Nothing to render for %p", id_.c_str(), x->source);
-                }
-
-                x->hasVideo = !blackFrame && successfullyRendered;
-                if (hasVideo != x->hasVideo) {
-                    // layoutUpdated_ += 1;
-                    updateLayout();
-                    needsUpdate = true;
-                }
-            } else if (needsUpdate) {
-                x->x = 0;
-                x->y = 0;
-                x->w = 0;
-                x->h = 0;
-                x->hasVideo = false;
             }
 
+            if(needsUpdate)
+                processSource(x, input, i, sinfo.streamId, voiceActive);
+
+            bool frameRendered = false;
+            if (input and input->height() and input->width()) {
+                    frameRendered = render_frame(output, input, x, needsUpdate);
+                    layoutRendered |= frameRendered;
+            }
+            else
+                SIP_CORE_WARN("[mixer:%s] Nothing to render for %p", id_.c_str(), x->source);
+
+            if (frameRendered != x->hasVideo) {
+                x->hasVideo = frameRendered;
+                layoutInvalidated = true;
+            }
+
+            sourcesInfo.emplace_back(SourceInfo {x->source,
+                                                 x->x.load(),
+                                                 x->y.load(),
+                                                 x->w,
+                                                 x->h,
+                                                 x->hasVideo,
+                                                 sinfo.callId,
+                                                 sinfo.streamId});
+            
             ++i;
         }
-        if (needsUpdate and successfullyRendered) {
-            layoutUpdated_ -= 1;
-            if (layoutUpdated_ == 0) {
-                for (auto& x : sources_) {
-                    auto sinfo = streamInfo(x->source);
-                    sourcesInfo.emplace_back(SourceInfo {x->source,
-                                                         x->x,
-                                                         x->y,
-                                                         x->w,
-                                                         x->h,
-                                                         x->hasVideo,
-                                                         sinfo.callId,
-                                                         sinfo.streamId});
-                }
-                if (onSourcesUpdated_)
-                    onSourcesUpdated_(std::move(sourcesInfo));
-            }
+
+        if (needsUpdate && layoutRendered && !layoutInvalidated) {
+            const int totalUpdatesToConsume = pendingLayoutUpdates + layoutUpdatesGenerated;
+            if (totalUpdatesToConsume > 0)
+                consumeLayoutUpdates(totalUpdatesToConsume, "layout processed");
+
+            if (onSourcesUpdated_)
+                onSourcesUpdated_(std::move(sourcesInfo));
         }
     }
 
@@ -466,54 +607,146 @@ VideoMixer::process()
     publishFrame();
 }
 
+void
+VideoMixer::processSource(std::unique_ptr<VideoMixer::VideoMixerSource>& source,
+                          const std::shared_ptr<VideoFrame> frame,
+                          int& i,
+                          const std::string& streamId,
+                          bool isVoiceActive)
+{
+    // set "wantedIndex" to current index of video source, for GRID layout
+    auto wantedIndex = i;
+    if(currentLayout_ == Layout::ONE_BIG) {
+        // show active stream FIRST
+        if (verifyActive(streamId)) {
+            wantedIndex = 0;
+            i--; // negilate i++ further
+        }
+        else {
+            source->x.store(0);
+            source->y.store(0);
+            source->w = 0;
+            source->h = 0;
+            source->hasVideo = false;
+        }
+    }
+    else {
+        if (currentLayout_ == Layout::ONE_BIG_WITH_SMALL && verifyActive(streamId)) {
+            wantedIndex = 0;
+            i--; // negilate i++ further
+        }
+    }
+    
+    calc_position(source, frame, wantedIndex, isVoiceActive);
+}
+
 bool
 VideoMixer::render_frame(VideoFrame& output,
                          const std::shared_ptr<VideoFrame>& input,
-                         std::unique_ptr<VideoMixerSource>& source)
+                         std::unique_ptr<VideoMixerSource>& source,
+                         bool positionChanged)
 {
     if (!width_ or !height_ or !input->pointer() or input->pointer()->format == -1)
         return false;
 
     int cell_width = source->w;
     int cell_height = source->h;
-    int xoff = source->x;
-    int yoff = source->y;
+    int xoff = source->x.load();
+    int yoff = source->y.load();
 
     int angle = input->getOrientation();
     const constexpr char filterIn[] = "mixin";
-    if (angle != source->rotation) {
-        source->rotationFilter = video::getTransposeFilter(angle,
-                                                           filterIn,
-                                                           input->width(),
-                                                           input->height(),
-                                                           input->format(),
-                                                           false);
+    if (angle != source->rotation || positionChanged) {
+        // calculate width and height for cropping
+        int width = 0, height = 0;
+        if(remove_black_borders_ && not source->isBig) {
+            // calculte cropping according to aspects
+            if(grid_aspect_ > input->width() / input->height()) {
+                width = input->width();
+                height = width / grid_aspect_;
+            }
+            else {
+                height = input->height();
+                width = height * grid_aspect_;
+            }
+        }
+        source->transposeFilter = video::getTransposeFilterWithCrop(filterIn,
+                                                                    angle,
+                                                                    width,
+                                                                    height,
+                                                                    input->format());
         source->rotation = angle;
     }
     std::shared_ptr<VideoFrame> frame;
-    if (source->rotationFilter) {
-        source->rotationFilter->feedInput(input->pointer(), filterIn);
+    if (source->transposeFilter) {
+        source->transposeFilter->feedInput(input->pointer(), filterIn);
         frame = std::static_pointer_cast<VideoFrame>(
-            std::shared_ptr<MediaFrame>(source->rotationFilter->readOutput()));
+            std::shared_ptr<MediaFrame>(source->transposeFilter->readOutput()));
     } else {
         frame = input;
     }
 
     scaler_.scale_and_pad(*frame, output, xoff, yoff, cell_width, cell_height, true);
+
+    const constexpr char borderFilter[] = "border";
+    if (source->bordersFilter) {
+        source->bordersFilter->feedInput(output.pointer(), borderFilter);
+        std::unique_ptr<MediaFrame> clone = source->bordersFilter->readOutput();
+        if (clone.get())
+            output.copyFrom(*std::static_pointer_cast<VideoFrame>(
+                std::shared_ptr<MediaFrame>(clone.release())));
+    }
+
     return true;
 }
 
 void
 VideoMixer::calc_position(std::unique_ptr<VideoMixerSource>& source,
                           const std::shared_ptr<VideoFrame>& input,
-                          int index)
+                          int index,
+                          bool isActive)
 {
     if (!width_ or !height_)
         return;
 
+    int frameW, frameH, frameW_off, frameH_off;
+    if(grid_aspect_ == 0.) {
+        std::tie(frameW, frameH, frameW_off, frameH_off) 
+            = calc_position_rel(source, input, index, isActive);
+    } else {
+        std::tie(frameW, frameH, frameW_off, frameH_off) 
+            = calc_position_fixed(source, input, index, isActive);
+    }
+
+    // Update source's cache
+    source->w = frameW - (padding_ + border_size_) * 2;
+    source->h = frameH - (padding_ + border_size_) * 2;
+    source->x.store(frameW_off + padding_ + border_size_);
+    source->y.store(frameH_off + padding_ + border_size_);
+
+    // Update border filter
+    source->bordersFilter = std::unique_ptr<MediaFilter>(new MediaFilter());
+    if (!initBorderFilter(*source->bordersFilter.get(),
+                          "border",
+                          input->format(),
+                          source->x.load(),
+                          source->y.load(),
+                          source->w,
+                          source->h,
+                          isActive))
+        source->bordersFilter.release();
+}
+
+VideoMixer::gripRect
+VideoMixer::calc_position_rel(std::unique_ptr<VideoMixerSource>& source,
+                       const std::shared_ptr<VideoFrame>& input,
+                       int index,
+                       bool isActive)
+{
     // Compute cell size/position
     int cell_width, cell_height, cellW_off, cellH_off;
-    const int n = currentLayout_ == Layout::ONE_BIG ? 1 : sources_.size() + audioOnlySources_.size();
+    const int n = currentLayout_ == Layout::ONE_BIG ? 1
+                                                    : sources_.size() + audioOnlySources_.size();
     const int zoom = currentLayout_ == Layout::ONE_BIG_WITH_SMALL ? std::max(MIN_LINE_ZOOM, n)
                                                                   : ceil(sqrt(n));
     if (currentLayout_ == Layout::ONE_BIG_WITH_SMALL && index == 0) {
@@ -579,21 +812,167 @@ VideoMixer::calc_position(std::unique_ptr<VideoMixerSource>& source,
     frameW_off = cellW_off + (cell_width - frameW) / 2;
     frameH_off = cellH_off + (cell_height - frameH) / 2;
 
-    // Update source's cache
-    source->w = frameW;
-    source->h = frameH;
-    source->x = frameW_off;
-    source->y = frameH_off;
+    return {frameW, frameH, frameW_off, frameH_off};
+}
+    
+VideoMixer::gripRect
+VideoMixer::calc_position_fixed(std::unique_ptr<VideoMixerSource>& source,
+                       const std::shared_ptr<VideoFrame>& input,
+                       int index,
+                       bool isActive)
+{
+    int frameW, frameH, frameW_off, frameH_off;
+    const int n = sources_.size() + audioOnlySources_.size();
+
+    auto layout_to_draw = n == 1 ? Layout::ONE_BIG : currentLayout_;
+    switch(layout_to_draw)
+    {
+        case Layout::ONE_BIG:
+            // On some platforms (at least macOS/android) - Having one frame at the same
+            // size of the mixer cause it to be grey.
+            // Removing some pixels solve this. We use 16 because it's a multiple of 8
+            // (value that we prefer for video management)
+            frameW = width_ - 16;
+            frameH = height_ - 16;
+
+            frameW_off = index * frameW;
+            frameH_off = index * frameH;
+
+            // Centerize (cellwidth = width_ - 16)
+            frameW_off += 8;
+            frameH_off += 8;
+
+            source->isBig = true;
+            break;
+
+        case Layout::ONE_BIG_WITH_SMALL:
+        {
+            const int max_preview_height = height_ / MIN_LINE_ZOOM;
+            const int preview_height = std::min(static_cast<int>(width_ / (n * grid_aspect_)),
+                                                max_preview_height);
+            const int preview_width = preview_height * grid_aspect_;
+
+            if(index == 0) {
+                // In ONE_BIG_WITH_SMALL, the first line at the top is the previews
+                // The rest is the active source
+                frameH = height_ - preview_height;
+                frameW = width_;
+
+                frameW_off = 0;
+                frameH_off = preview_height; // First line height
+                source->isBig = true;
+            }
+            else {
+                frameW = preview_width;
+                frameH = preview_height;
+
+                frameW_off = (index - 1) * frameW;
+                // Show sources in center
+                frameW_off += (width_ - (n - 1) * frameW) / 2;
+                frameH_off = 0;
+                source->isBig = false;
+            }
+            break;
+        }
+        case Layout::GRID:
+        {
+            int rows = 0, columns = 0;
+            double source_aspect = (double)width_ / (double)height_;
+            
+            // calculate optimal grid. Can be cached for optimization
+            bool isVerticalAlign = source_aspect < grid_aspect_;
+            {
+                if(isVerticalAlign) { 
+                    // vertical alignment
+                    rows = 2 * height_ * grid_aspect_ / width_;
+                    rows = std::min(rows, n);
+                    columns = ((n + 1) / rows) + 1;
+                    if(columns == 1)
+                        isVerticalAlign = !isVerticalAlign;
+                }
+                else { 
+                    // horizontal alignment
+                    columns = 2 * width_ / (height_ * grid_aspect_);
+                    columns = std::min(columns, n);
+                    rows = ((n - 1) / columns) + 1;
+                    if(rows == 1)
+                        isVerticalAlign = !isVerticalAlign;
+                }
+            }
+
+            if(isVerticalAlign) { 
+                frameW = width_ / columns;
+                frameH = frameW / grid_aspect_;
+            }
+            else { 
+                frameH = height_ / rows;
+                frameW = frameH * grid_aspect_;
+            }
+
+            frameH_off = (index / columns) * frameH;
+            frameW_off = (index % columns) * frameW;
+
+            // center participants
+            frameH_off += (height_ - (rows * frameH)) / 2;
+            if(n % columns != 0 && index >= (columns * (rows - 1))) // if we draw last and not full row
+                frameW_off += (width_ - (n % columns) * frameW) / 2;
+            else
+                frameW_off += (width_ - (columns * frameW)) / 2;
+
+            source->isBig = false;
+            break;
+        }
+    }
+
+    return {frameW, frameH, frameW_off, frameH_off};
 }
 
+bool
+VideoMixer::initBorderFilter(MediaFilter& filter,
+                             std::string inputName,
+                             int format,
+                             int x,
+                             int y,
+                             int width,
+                             int height,
+                             bool active)
+{
+    if(border_size_ <= 0)
+        return false;
+
+    std::stringstream ss;
+    ss << "[" << inputName << "] ";
+    ss << "drawbox=x=" << x - (border_size_) << ":y=" << y - (border_size_)
+       << ":w=" << width + (border_size_ * 2) << ":h=" << height + (border_size_ * 2)
+       << ":color=" << (active ? active_border_color_ : inactive_border_color_)
+       << ":t=" << border_size_;
+
+    constexpr auto one = rational<int>(1);
+    std::vector<MediaStream> msv;
+    msv.emplace_back(inputName, format, one, width, height, 0, one);
+
+    auto ret = filter.initialize(ss.str(), msv);
+    if (ret < 0) {
+        SIP_CORE_ERR() << "filter init fail";
+        return false;
+    }
+    return true;
+}
+    
 void
-VideoMixer::setParameters(int width, int height, AVPixelFormat format)
+VideoMixer::setParameters(const Parameters& params)
 {
     std::unique_lock lock(rwMutex_);
 
-    width_ = width;
-    height_ = height;
-    format_ = format;
+    width_ = params.width;
+    height_ = params.height;
+    format_ = params.format;
+    grid_aspect_ = fabs(params.grid_aspect);
+    padding_ = params.padding < 0 ? 0 : params.padding;
+    border_size_ = params.border_size < 0 ? 0 : params.border_size;
+    active_border_color_ = params.active_border_color;
+    inactive_border_color_ = params.inactive_border_color;
+    remove_black_borders_ = params.remove_black_borders;
 
     // cleanup the previous frame to have a nice copy in rendering method
     std::shared_ptr<VideoFrame> previous_p(obtainLastFrame());
@@ -601,7 +980,7 @@ VideoMixer::setParameters(int width, int height, AVPixelFormat format)
         libav_utils::fillWithBlack(previous_p->pointer());
 
     startSink();
-    updateLayout();
+    updateLayout("setParameters");
     startTime_ = av_gettime();
 }
 
@@ -663,6 +1042,24 @@ VideoMixer::getStream(const std::string& name) const
     ms.firstTimestamp = lastTimestamp_;
 
     return ms;
+}
+
+void
+VideoMixer::setVideoLayout(Layout newLayout)
+{
+    std::unique_lock lock(rwMutex_);
+    currentLayout_ = newLayout;
+
+    if (currentLayout_ == Layout::GRID)
+        activeStream_ = {};
+
+    // Force coordinate recalculation for all sources,
+    // this will trigger updateLayout()
+    for (auto& source : sources_) {
+        source->w = 0;
+        source->h = 0;
+        source->isBig = false;
+    }
 }
 
 } // namespace video

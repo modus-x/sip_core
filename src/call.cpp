@@ -40,6 +40,9 @@
 #include <algorithm>
 #include <functional>
 #include <utility>
+#ifdef ENABLE_VIDEO
+#include "videomanager.h"
+#endif
 
 namespace sip_core {
 
@@ -237,13 +240,6 @@ Call::setState(CallState call_state, ConnectionState cnx_state, signed code)
                          new_client_state.c_str(),
                          code);
 
-            if(cnx_state == ConnectionState::PROGRESSING) {
-                Manager::instance().playTone();
-            }
-            else if(cnx_state == ConnectionState::DISCONNECTED
-                    || cnx_state == ConnectionState::CONNECTED) {
-                Manager::instance().stopTone();
-            }
             emitSignal<libsip_core::CallSignal::StateChange>(getAccountId(),
                                                              id_,
                                                              new_client_state,
@@ -340,7 +336,7 @@ Call::getDetails() const
     return {
         {libsip_core::Call::Details::CALL_TYPE, std::to_string((unsigned) type_)},
         {libsip_core::Call::Details::PEER_NUMBER, peerNumber_},
-        {libsip_core::Call::Details::FROM_HEADER, fromHeader_},
+        {libsip_core::Call::Details::INVITE_BODY, inviteBody_},
         {libsip_core::Call::Details::DISPLAY_NAME, peerDisplayName_},
         {libsip_core::Call::Details::CALL_STATE, getStateStr()},
         {libsip_core::Call::Details::CONF_ID, conference ? conference->getConfId() : ""},
@@ -351,6 +347,7 @@ Call::getDetails() const
         {libsip_core::Call::Details::VIDEO_MUTED,
          std::string(bool_to_str(isCaptureDeviceMuted(MediaType::MEDIA_VIDEO)))},
         {libsip_core::Call::Details::AUDIO_ONLY, std::string(bool_to_str(not hasVideo()))},
+        {libsip_core::Call::Details::PEER_MUTED, std::string(isPeerMuted() ? TRUE_STR : FALSE_STR)},
     };
 }
 
@@ -368,6 +365,11 @@ Call::onTextMessage(std::map<std::string, std::string>&& messages)
         if (auto conf = conf_.lock())
             conf->onConfOrder(getCallId(), it->second);
         return;
+    }
+
+    it = messages.find("application/confVoiceActivity+json");
+    if(it != messages.end()) {
+        setConferenceVoiceActivity(it->second);
     }
 
     {
@@ -543,6 +545,34 @@ Call::merge(Call& subcall)
     });
 }
 
+void Call::localVoice(bool state)
+{
+    if (auto conference = conf_.lock()) {
+    // we are in a conference
+
+    std::string streamId = "";
+#ifdef ENABLE_VIDEO
+    if (not sip_core::getVideoDeviceMonitor().getDeviceList().empty()) {
+        // if we have a video device
+        streamId = sip_utils::streamId("", sip_utils::DEFAULT_VIDEO_STREAMID);
+    }
+#endif
+
+    // updates conference info and sends it to others via ConfInfo
+    // (only if there was a change)
+    // also emits signal with updated conference info
+    conference->setVoiceActivity(streamId, state);
+
+    } else {
+        // we are in a one-to-one call
+        // send voice activity over SIP
+        // TODO: change the streamID once multiple streams are supported
+        // thisPtr->sendVoiceActivity("-1", voice);
+
+        // TODO: maybe emit signal here for local voice activity
+    }
+}
+
 /// Handle pending IM message
 ///
 /// Used in multi-device context to send pending IM when the master call is connected.
@@ -660,6 +690,50 @@ Call::setConferenceInfo(const std::string& msg)
 }
 
 void
+Call::setConferenceVoiceActivity(const std::string& msg)
+{
+    ConfInfo newInfo;
+    Json::Value json;
+    std::string err;
+    Json::CharReaderBuilder rbuilder;
+    auto reader = std::unique_ptr<Json::CharReader>(rbuilder.newCharReader());
+    if (!reader->parse(msg.data(), msg.data() + msg.size(), &json, &err)) {
+        return;
+    }
+
+    if (not isConferenceParticipant()) {
+        
+        if(!json.isObject())
+            return;
+
+        for (const auto& participantInfo : json) {
+
+            if (!participantInfo.isObject() || !participantInfo.isMember("uri") || 
+                     !participantInfo.isMember("state") || !participantInfo.isMember("sinkId"))
+                continue;
+                
+            auto uri = participantInfo["uri"].asString();
+            auto sinkId = participantInfo["sinkId"].asString();
+            auto state = participantInfo["state"].asBool();
+            
+            {
+                std::lock_guard<std::mutex> lk(confInfoMutex_);
+                // confID_ empty -> participant set confInfo with the received one
+                auto participant = std::find_if(confInfo_.begin(), confInfo_.end(), [&uri] (const ParticipantInfo& p) {
+                    return uri == p.uri;
+                });
+
+                if(participant != confInfo_.end()) {
+                    participant->voiceActivity = state;
+                }
+            }
+        }
+    } else if (auto conf = conf_.lock()) {
+        conf->setVoiceActivity(json);
+    }
+}
+
+void
 Call::sendConfOrder(const Json::Value& root)
 {
     std::map<std::string, std::string> messages;
@@ -682,6 +756,21 @@ Call::sendConfInfo(const std::string& json)
     wbuilder["commentStyle"] = "None";
     wbuilder["indentation"] = "";
     messages["application/confInfo+json"] = json;
+
+    auto w = getAccount();
+    auto account = w.lock();
+    if (account)
+        sendTextMessage(messages, account->getFromUri());
+}
+
+void
+Call::sendVoiceActivity(const std::string& json)
+{
+    std::map<std::string, std::string> messages;
+    Json::StreamWriterBuilder wbuilder;
+    wbuilder["commentStyle"] = "None";
+    wbuilder["indentation"] = "";
+    messages["application/confVoiceActivity+json"] = json;
 
     auto w = getAccount();
     auto account = w.lock();
