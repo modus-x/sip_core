@@ -31,7 +31,11 @@ FFMPEGCONF+='
             --enable-swscale
             --enable-protocols
             --enable-bsfs
-            --enable-d3d11va'
+            --enable-d3d11va
+            --enable-libfreetype
+            --enable-libfontconfig
+            --enable-iconv
+            --enable-libxml2'
 
 #enable muxers/demuxers
 FFMPEGCONF+='
@@ -128,7 +132,10 @@ FFMPEGCONF+='
             --enable-filter=transpose
             --enable-filter=pad
             --enable-filter=gfxcapture
-            --enable-filter=hwdownload'
+            --enable-filter=hwdownload
+            --enable-filter=drawbox
+            --enable-filter=crop
+            --enable-filter=drawtext'
 
 FFMPEGCONF+='
                 --enable-indev=dshow
@@ -138,7 +145,7 @@ FFMPEGCONF+='
 echo "configure and make ffmpeg for win32-x64... in $(pwd)"
 
 # extra libs
-EXTRALDFLAGS="libopus.lib libx264.lib libvpx.lib"
+EXTRALDFLAGS="libopus.lib libx264.lib libvpx.lib libfreetype.lib libfontconfig.lib"
 
 # configure debug / release libs
 if [ "$1" == "Debug" ]; then
@@ -152,9 +159,10 @@ else
   EXTRACXXFLAGS="${EXTRACFLAGS}"
 fi
 
-EXTRACFLAGS="${EXTRACFLAGS} -D_WINDLL -D_WIN32_WINNT=0x0A00 -DWINDOWS_FOUNDATION_UNIVERSALAPICONTRACT_VERSION=0x130000 -I${INCLUDE_DIR} -I${INCLUDE_DIR}/opus"
+EXTRACFLAGS="${EXTRACFLAGS} -D_WINDLL -D_WIN32_WINNT=0x0A00 -DWINDOWS_FOUNDATION_UNIVERSALAPICONTRACT_VERSION=0x130000 -I${INCLUDE_DIR} -I${INCLUDE_DIR}/opus -I${INCLUDE_DIR}/freetype2 -I${INCLUDE_DIR}/libxml2"
 
 EXTRALDFLAGS="${EXTRALDFLAGS} -APPCONTAINER:NO -MACHINE:x64 /VERBOSE:LIB Ole32.lib Kernel32.lib Gdi32.lib User32.lib Strmiids.lib Advapi32.lib OleAut32.lib Shlwapi.lib Vfw32.lib Secur32.lib Crypt32.lib ncrypt.lib Advapi32.lib -LIBPATH:${LIB_DIR}"
+
 FFMPEGCONF+=' --arch=x86_64'
 
 # DO NOT mix debug and release builds

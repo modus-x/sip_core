@@ -415,6 +415,32 @@ VideoMixer::enqueueDetach(Observable<std::shared_ptr<MediaFrame>>* ob)
     pendingDetaches_.push_back(ob);
 }
 
+std::string
+VideoMixer::getCallDisplayName(const std::unique_ptr<VideoMixer::VideoMixerSource>& source)
+{
+    std::string name;
+    auto& callId = videoToStreamInfo_[source->source].callId;
+    if (auto call = Manager::instance().getCallFromCallID(callId)) {
+        name = call->getPeerDisplayName();
+        if (name.empty()) {
+            name = call->getPeerNumber();
+        }
+        if (name.empty()) {
+            return name = "unknown";
+        }
+        auto found = name.find('@');
+        if (found != std::string_view::npos)
+            name = name.substr(0, found);
+
+        found = name.find("<sip:");
+        if (found != std::string_view::npos)
+            name = name.substr(found + 5);
+    }
+    else return "host";
+
+    return name;
+}
+
 void
 VideoMixer::processPendingDetaches()
 {
@@ -688,9 +714,8 @@ VideoMixer::render_frame(VideoFrame& output,
 
     scaler_.scale_and_pad(*frame, output, xoff, yoff, cell_width, cell_height, true);
 
-    const constexpr char borderFilter[] = "border";
     if (source->bordersFilter) {
-        source->bordersFilter->feedInput(output.pointer(), borderFilter);
+        source->bordersFilter->feedInput(output.pointer(), borderFilterName_);
         std::unique_ptr<MediaFrame> clone = source->bordersFilter->readOutput();
         if (clone.get())
             output.copyFrom(*std::static_pointer_cast<VideoFrame>(
@@ -725,15 +750,27 @@ VideoMixer::calc_position(std::unique_ptr<VideoMixerSource>& source,
     source->y.store(frameH_off + padding_ + border_size_);
 
     // Update border filter
+    std::string display = getCallDisplayName(source);
     source->bordersFilter = std::unique_ptr<MediaFilter>(new MediaFilter());
-    if (!initBorderFilter(*source->bordersFilter.get(),
-                          "border",
+    if (initBorderFilter(*source->bordersFilter.get(),
+                          display,
                           input->format(),
                           source->x.load(),
                           source->y.load(),
                           source->w,
                           source->h,
-                          isActive))
+                          isActive, true))
+        return;
+
+    source->bordersFilter.reset(new MediaFilter());
+    if (!initBorderFilter(*source->bordersFilter.get(),
+                          display,
+                          input->format(),
+                          source->x.load(),
+                          source->y.load(),
+                          source->w,
+                          source->h,
+                          isActive, false))
         source->bordersFilter.release();
 }
 
@@ -935,27 +972,38 @@ VideoMixer::initBorderFilter(MediaFilter& filter,
                              int y,
                              int width,
                              int height,
-                             bool active)
+                             bool active,
+                             bool withText)
 {
     if(border_size_ <= 0)
         return false;
 
     std::stringstream ss;
-    ss << "[" << inputName << "] ";
+    ss << "[" << borderFilterName_ << "] ";
     ss << "drawbox=x=" << x - (border_size_) << ":y=" << y - (border_size_)
        << ":w=" << width + (border_size_ * 2) << ":h=" << height + (border_size_ * 2)
        << ":color=" << (active ? active_border_color_ : inactive_border_color_)
        << ":t=" << border_size_;
 
+    if(withText) { 
+        const int text_height = height / 15;
+        constexpr int text_padding = 10;
+        ss << ",drawtext=text='" << inputName << "'"
+           << ":fontcolor=white:fontsize=" << text_height
+           << ":x=" << x << "+(" << width << "-text_w)/2"
+           << ":y=" << y << "+" << height - text_padding << "-text_h";
+    }
+
     constexpr auto one = rational<int>(1);
     std::vector<MediaStream> msv;
-    msv.emplace_back(inputName, format, one, width, height, 0, one);
+    msv.emplace_back(borderFilterName_, format, one, width, height, 0, one);
 
     auto ret = filter.initialize(ss.str(), msv);
     if (ret < 0) {
         SIP_CORE_ERR() << "filter init fail";
         return false;
     }
+
     return true;
 }
     

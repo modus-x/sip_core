@@ -229,7 +229,8 @@ private:
                           int y,
                           int width,
                           int height,
-                          bool active);
+                          bool active,
+                          bool withText);
 
     int addLayoutUpdate(const char* reason);
     void consumeLayoutUpdates(int count, const char* reason);
@@ -250,12 +251,15 @@ private:
     // Enqueue an observable to be detached from sources_ without blocking
     void enqueueDetach(Observable<std::shared_ptr<MediaFrame>>* ob);
 
+    std::string getCallDisplayName(const std::unique_ptr<VideoMixer::VideoMixerSource>& source);
+
     const std::string id_;
     int width_ = 0;
     int height_ = 0;
     AVPixelFormat format_ = AV_PIX_FMT_YUV422P;
     double grid_aspect_ {1.};
     int padding_ {5};
+    const std::string borderFilterName_ = "border";
     int border_size_ {8};
     std::string active_border_color_ {"CornflowerBlue@1"}; // ffmpeg declared colors only
     std::string inactive_border_color_ {"Blue@1"};         // ffmpeg declared colors only

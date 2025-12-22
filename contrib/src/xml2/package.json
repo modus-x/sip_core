@@ -1,0 +1,21 @@
+{
+    "name": "xml2",
+    "version": "2.14.3",
+    "url": "https://nexus.svetlocal.ru/repository/github-artifacts/libxml2-__VERSION__.tar.gz",
+    "deps": [
+        "zlib",
+        "iconv",
+        "lzma"
+    ],
+    "patches": [],
+    "win_patches": [],
+    "project_paths": [
+        "SMP/libxml2.vcxproj"
+    ],
+    "with_env" : "",
+    "custom_scripts": {
+        "pre_build": [],
+        "build": [],
+        "post_build": ["if /I %BUILD_TYPE%==debug cd \"%INSTALL_PREFIX%\\lib\\x64\" && if not exist libxml2.lib mklink libxml2.lib libxml2d.lib"]
+    }
+}

@@ -578,6 +578,12 @@ if(MSVC)
             optimized
             ${DEPS_RELEASE}/lib/x64/libvpx.lib
             optimized
+            ${DEPS_RELEASE}/lib/x64/libfreetype.lib
+            optimized
+            ${DEPS_RELEASE}/lib/x64/libiconv.lib
+            optimized
+            ${DEPS_RELEASE}/lib/x64/libfontconfig.lib
+            optimized
             ${DEPS_RELEASE}/lib/x64/lib_json.lib
             optimized
             ${DEPS_RELEASE}/lib/x64/libzlib.lib
@@ -609,6 +615,12 @@ if(MSVC)
             ${DEPS_DEBUG}/lib/x64/libopus.lib
             debug
             ${DEPS_DEBUG}/lib/x64/libvpx.lib
+            debug
+            ${DEPS_DEBUG}/lib/x64/libfreetype.lib
+            debug
+            ${DEPS_DEBUG}/lib/x64/libiconv.lib
+            debug
+            ${DEPS_DEBUG}/lib/x64/libfontconfig.lib
             debug
             ${DEPS_DEBUG}/lib/x64/lib_json.lib
             debug

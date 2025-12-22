@@ -1,0 +1,548 @@
+diff --git a/builds/windows/vc2010/freetype.vcxproj b/builds/windows/vc2010/freetype.vcxproj
+index 4cddc916f..b7b0cea55 100644
+--- a/builds/windows/vc2010/freetype.vcxproj
++++ b/builds/windows/vc2010/freetype.vcxproj
+@@ -143,7 +143,7 @@
+       <CompileAs>Default</CompileAs>
+       <DisableSpecificWarnings>4001</DisableSpecificWarnings>
+       <MultiProcessorCompilation>true</MultiProcessorCompilation>
+-      <ProgramDataBaseFileName>$(OutDir)$(TargetName).pdb</ProgramDataBaseFileName>
++      <ProgramDataBaseFileName>$(OutDir)\lib\x86\$(TargetName).pdb</ProgramDataBaseFileName>
+       <InlineFunctionExpansion>Disabled</InlineFunctionExpansion>
+     </ClCompile>
+     <ResourceCompile>
+@@ -155,7 +155,41 @@
+       <TargetMachine>MachineX86</TargetMachine>
+       <AdditionalLibraryDirectories>$(UserLibraryDirectories);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+       <AdditionalDependencies>$(UserDependencies);%(AdditionalDependencies)</AdditionalDependencies>
++      <OutputFile>$(OutDir)\bin\x86\$(TargetName)$(TargetExt)</OutputFile>
++      <ImportLibrary>$(OutDir)\lib\x86\$(TargetName).lib</ImportLibrary>
+     </Link>
++    <PostBuildEvent>
++      <Command>mkdir "$(OutDir)"\include\freetype
++mkdir "$(OutDir)"\include\freetype\freetype\
++mkdir "$(OutDir)"\include\freetype\freetype\config
++mkdir "$(OutDir)"\include\freetype\freetype\internal
++mkdir "$(OutDir)"\include\freetype\freetype\internal\services
++copy ..\..\..\include\ft2build.h "$(OutDir)"\include\freetype
++copy ..\..\..\include\freetype "$(OutDir)"\include\freetype\freetype
++copy ..\..\..\include\freetype\config "$(OutDir)"\include\freetype\freetype\config
++copy ..\..\..\include\freetype\internal "$(OutDir)"\include\freetype\freetype\internal
++copy ..\..\..\include\freetype\internal\services "$(OutDir)"\include\freetype\freetype\internal\services
++copy ..\..\..\LICENSE.TXT $(OutDir)\licenses\freetype.txt</Command>
++    </PostBuildEvent>
++    <PreBuildEvent>
++      <Command>if exist "$(OutDir)"\include\freetype (
++rd /s /q "$(OutDir)"\include\freetype
++cd ../
++cd $(ProjectDir)
++)</Command>
++    </PreBuildEvent>
++    <CustomBuildStep>
++      <Message>Custom Clean Step</Message>
++    </CustomBuildStep>
++    <CustomBuildStep>
++      <Outputs>force_clean</Outputs>
++      <Command>if exist "$(OutDir)"\include\freetype (
++rmdir /s /q "$(OutDir)"\include\freetype
++)
++if exist $(OutDir)\licenses\freetype.txt (
++del /f /q $(OutDir)\licenses\freetype.txt
++)</Command>
++    </CustomBuildStep>
+   </ItemDefinitionGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">
+     <ClCompile>
+@@ -170,7 +204,7 @@
+       <CompileAs>Default</CompileAs>
+       <DisableSpecificWarnings>4001;4267</DisableSpecificWarnings>
+       <MultiProcessorCompilation>true</MultiProcessorCompilation>
+-      <ProgramDataBaseFileName>$(OutDir)$(TargetName).pdb</ProgramDataBaseFileName>
++      <ProgramDataBaseFileName>$(OutDir)\lib\x64\$(TargetName).pdb</ProgramDataBaseFileName>
+       <InlineFunctionExpansion>Disabled</InlineFunctionExpansion>
+     </ClCompile>
+     <ResourceCompile>
+@@ -182,7 +216,41 @@
+       <TargetMachine>MachineARM64</TargetMachine>
+       <AdditionalLibraryDirectories>$(UserLibraryDirectories);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+       <AdditionalDependencies>$(UserDependencies);%(AdditionalDependencies)</AdditionalDependencies>
++      <OutputFile>$(OutDir)\bin\x64\$(TargetName)$(TargetExt)</OutputFile>
++      <ImportLibrary>$(OutDir)\lib\x64\$(TargetName).lib</ImportLibrary>
+     </Link>
++    <PostBuildEvent>
++      <Command>mkdir "$(OutDir)"\include\freetype
++mkdir "$(OutDir)"\include\freetype\freetype\
++mkdir "$(OutDir)"\include\freetype\freetype\config
++mkdir "$(OutDir)"\include\freetype\freetype\internal
++mkdir "$(OutDir)"\include\freetype\freetype\internal\services
++copy ..\..\..\include\ft2build.h "$(OutDir)"\include\freetype
++copy ..\..\..\include\freetype "$(OutDir)"\include\freetype\freetype
++copy ..\..\..\include\freetype\config "$(OutDir)"\include\freetype\freetype\config
++copy ..\..\..\include\freetype\internal "$(OutDir)"\include\freetype\freetype\internal
++copy ..\..\..\include\freetype\internal\services "$(OutDir)"\include\freetype\freetype\internal\services
++copy ..\..\..\LICENSE.TXT $(OutDir)\licenses\freetype.txt</Command>
++    </PostBuildEvent>
++    <PreBuildEvent>
++      <Command>if exist "$(OutDir)"\include\freetype (
++rd /s /q "$(OutDir)"\include\freetype
++cd ../
++cd $(ProjectDir)
++)</Command>
++    </PreBuildEvent>
++    <CustomBuildStep>
++      <Message>Custom Clean Step</Message>
++    </CustomBuildStep>
++    <CustomBuildStep>
++      <Outputs>force_clean</Outputs>
++      <Command>if exist "$(OutDir)"\include\freetype (
++rmdir /s /q "$(OutDir)"\include\freetype
++)
++if exist $(OutDir)\licenses\freetype.txt (
++del /f /q $(OutDir)\licenses\freetype.txt
++)</Command>
++    </CustomBuildStep>
+   </ItemDefinitionGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+     <ClCompile>
+@@ -197,7 +265,7 @@
+       <CompileAs>Default</CompileAs>
+       <DisableSpecificWarnings>4001;4267</DisableSpecificWarnings>
+       <MultiProcessorCompilation>true</MultiProcessorCompilation>
+-      <ProgramDataBaseFileName>$(OutDir)$(TargetName).pdb</ProgramDataBaseFileName>
++      <ProgramDataBaseFileName>$(OutDir)\lib\x64\$(TargetName).pdb</ProgramDataBaseFileName>
+       <InlineFunctionExpansion>Disabled</InlineFunctionExpansion>
+     </ClCompile>
+     <ResourceCompile>
+@@ -209,7 +277,41 @@
+       <TargetMachine>MachineX64</TargetMachine>
+       <AdditionalLibraryDirectories>$(UserLibraryDirectories);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+       <AdditionalDependencies>$(UserDependencies);%(AdditionalDependencies)</AdditionalDependencies>
++      <OutputFile>$(OutDir)\bin\x64\$(TargetName)$(TargetExt)</OutputFile>
++      <ImportLibrary>$(OutDir)\lib\x64\$(TargetName).lib</ImportLibrary>
+     </Link>
++    <PostBuildEvent>
++      <Command>mkdir "$(OutDir)"\include\freetype
++mkdir "$(OutDir)"\include\freetype\freetype\
++mkdir "$(OutDir)"\include\freetype\freetype\config
++mkdir "$(OutDir)"\include\freetype\freetype\internal
++mkdir "$(OutDir)"\include\freetype\freetype\internal\services
++copy ..\..\..\include\ft2build.h "$(OutDir)"\include\freetype
++copy ..\..\..\include\freetype "$(OutDir)"\include\freetype\freetype
++copy ..\..\..\include\freetype\config "$(OutDir)"\include\freetype\freetype\config
++copy ..\..\..\include\freetype\internal "$(OutDir)"\include\freetype\freetype\internal
++copy ..\..\..\include\freetype\internal\services "$(OutDir)"\include\freetype\freetype\internal\services
++copy ..\..\..\LICENSE.TXT $(OutDir)\licenses\freetype.txt</Command>
++    </PostBuildEvent>
++    <PreBuildEvent>
++      <Command>if exist "$(OutDir)"\include\freetype (
++rd /s /q "$(OutDir)"\include\freetype
++cd ../
++cd $(ProjectDir)
++)</Command>
++    </PreBuildEvent>
++    <CustomBuildStep>
++      <Message>Custom Clean Step</Message>
++    </CustomBuildStep>
++    <CustomBuildStep>
++      <Outputs>force_clean</Outputs>
++      <Command>if exist "$(OutDir)"\include\freetype (
++rmdir /s /q "$(OutDir)"\include\freetype
++)
++if exist $(OutDir)\licenses\freetype.txt (
++del /f /q $(OutDir)\licenses\freetype.txt
++)</Command>
++    </CustomBuildStep>
+   </ItemDefinitionGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug Static|Win32'">
+     <ClCompile>
+@@ -224,7 +326,7 @@
+       <CompileAs>Default</CompileAs>
+       <DisableSpecificWarnings>4001</DisableSpecificWarnings>
+       <MultiProcessorCompilation>true</MultiProcessorCompilation>
+-      <ProgramDataBaseFileName>$(OutDir)$(TargetName).pdb</ProgramDataBaseFileName>
++      <ProgramDataBaseFileName>$(OutDir)\lib\x86\$(TargetName).pdb</ProgramDataBaseFileName>
+       <InlineFunctionExpansion>Disabled</InlineFunctionExpansion>
+     </ClCompile>
+     <ResourceCompile>
+@@ -232,10 +334,43 @@
+       <Culture>0x0409</Culture>
+     </ResourceCompile>
+     <Lib>
++      <OutputFile>$(OutDir)\lib\x86\$(TargetName)$(TargetExt)</OutputFile>
+       <TargetMachine>MachineX86</TargetMachine>
+       <AdditionalLibraryDirectories>$(UserLibraryDirectories);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+       <AdditionalDependencies>$(UserDependencies);%(AdditionalDependencies)</AdditionalDependencies>
+     </Lib>
++    <PostBuildEvent>
++      <Command>mkdir "$(OutDir)"\include\freetype
++mkdir "$(OutDir)"\include\freetype\freetype\
++mkdir "$(OutDir)"\include\freetype\freetype\config
++mkdir "$(OutDir)"\include\freetype\freetype\internal
++mkdir "$(OutDir)"\include\freetype\freetype\internal\services
++copy ..\..\..\include\ft2build.h "$(OutDir)"\include\freetype
++copy ..\..\..\include\freetype "$(OutDir)"\include\freetype\freetype
++copy ..\..\..\include\freetype\config "$(OutDir)"\include\freetype\freetype\config
++copy ..\..\..\include\freetype\internal "$(OutDir)"\include\freetype\freetype\internal
++copy ..\..\..\include\freetype\internal\services "$(OutDir)"\include\freetype\freetype\internal\services
++copy ..\..\..\LICENSE.TXT $(OutDir)\licenses\freetype.txt</Command>
++    </PostBuildEvent>
++    <PreBuildEvent>
++      <Command>if exist "$(OutDir)"\include\freetype (
++rd /s /q "$(OutDir)"\include\freetype
++cd ../
++cd $(ProjectDir)
++)</Command>
++    </PreBuildEvent>
++    <CustomBuildStep>
++      <Message>Custom Clean Step</Message>
++    </CustomBuildStep>
++    <CustomBuildStep>
++      <Outputs>force_clean</Outputs>
++      <Command>if exist "$(OutDir)"\include\freetype (
++rmdir /s /q "$(OutDir)"\include\freetype
++)
++if exist $(OutDir)\licenses\freetype.txt (
++del /f /q $(OutDir)\licenses\freetype.txt
++)</Command>
++    </CustomBuildStep>
+   </ItemDefinitionGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug Static|ARM64'">
+     <ClCompile>
+@@ -250,7 +385,7 @@
+       <CompileAs>Default</CompileAs>
+       <DisableSpecificWarnings>4001;4267</DisableSpecificWarnings>
+       <MultiProcessorCompilation>true</MultiProcessorCompilation>
+-      <ProgramDataBaseFileName>$(OutDir)$(TargetName).pdb</ProgramDataBaseFileName>
++      <ProgramDataBaseFileName>$(OutDir)\lib\x64\$(TargetName).pdb</ProgramDataBaseFileName>
+       <InlineFunctionExpansion>Disabled</InlineFunctionExpansion>
+     </ClCompile>
+     <ResourceCompile>
+@@ -258,10 +393,43 @@
+       <Culture>0x0409</Culture>
+     </ResourceCompile>
+     <Lib>
++      <OutputFile>$(OutDir)\lib\x64\$(TargetName)$(TargetExt)</OutputFile>
+       <TargetMachine>MachineARM64</TargetMachine>
+       <AdditionalLibraryDirectories>$(UserLibraryDirectories);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+       <AdditionalDependencies>$(UserDependencies);%(AdditionalDependencies)</AdditionalDependencies>
+     </Lib>
++    <PostBuildEvent>
++      <Command>mkdir "$(OutDir)"\include\freetype
++mkdir "$(OutDir)"\include\freetype\freetype\
++mkdir "$(OutDir)"\include\freetype\freetype\config
++mkdir "$(OutDir)"\include\freetype\freetype\internal
++mkdir "$(OutDir)"\include\freetype\freetype\internal\services
++copy ..\..\..\include\ft2build.h "$(OutDir)"\include\freetype
++copy ..\..\..\include\freetype "$(OutDir)"\include\freetype\freetype
++copy ..\..\..\include\freetype\config "$(OutDir)"\include\freetype\freetype\config
++copy ..\..\..\include\freetype\internal "$(OutDir)"\include\freetype\freetype\internal
++copy ..\..\..\include\freetype\internal\services "$(OutDir)"\include\freetype\freetype\internal\services
++copy ..\..\..\LICENSE.TXT $(OutDir)\licenses\freetype.txt</Command>
++    </PostBuildEvent>
++    <PreBuildEvent>
++      <Command>if exist "$(OutDir)"\include\freetype (
++rd /s /q "$(OutDir)"\include\freetype
++cd ../
++cd $(ProjectDir)
++)</Command>
++    </PreBuildEvent>
++    <CustomBuildStep>
++      <Message>Custom Clean Step</Message>
++    </CustomBuildStep>
++    <CustomBuildStep>
++      <Outputs>force_clean</Outputs>
++      <Command>if exist "$(OutDir)"\include\freetype (
++rmdir /s /q "$(OutDir)"\include\freetype
++)
++if exist $(OutDir)\licenses\freetype.txt (
++del /f /q $(OutDir)\licenses\freetype.txt
++)</Command>
++    </CustomBuildStep>
+   </ItemDefinitionGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug Static|x64'">
+     <ClCompile>
+@@ -276,7 +444,7 @@
+       <CompileAs>Default</CompileAs>
+       <DisableSpecificWarnings>4001;4267</DisableSpecificWarnings>
+       <MultiProcessorCompilation>true</MultiProcessorCompilation>
+-      <ProgramDataBaseFileName>$(OutDir)$(TargetName).pdb</ProgramDataBaseFileName>
++      <ProgramDataBaseFileName>$(OutDir)\lib\x64\$(TargetName).pdb</ProgramDataBaseFileName>
+       <InlineFunctionExpansion>Disabled</InlineFunctionExpansion>
+     </ClCompile>
+     <ResourceCompile>
+@@ -284,10 +452,43 @@
+       <Culture>0x0409</Culture>
+     </ResourceCompile>
+     <Lib>
++      <OutputFile>$(OutDir)\lib\x64\$(TargetName)$(TargetExt)</OutputFile>
+       <TargetMachine>MachineX64</TargetMachine>
+       <AdditionalLibraryDirectories>$(UserLibraryDirectories);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+       <AdditionalDependencies>$(UserDependencies);%(AdditionalDependencies)</AdditionalDependencies>
+     </Lib>
++    <PostBuildEvent>
++      <Command>mkdir "$(OutDir)"\include\freetype
++mkdir "$(OutDir)"\include\freetype\freetype\
++mkdir "$(OutDir)"\include\freetype\freetype\config
++mkdir "$(OutDir)"\include\freetype\freetype\internal
++mkdir "$(OutDir)"\include\freetype\freetype\internal\services
++copy ..\..\..\include\ft2build.h "$(OutDir)"\include\freetype
++copy ..\..\..\include\freetype "$(OutDir)"\include\freetype\freetype
++copy ..\..\..\include\freetype\config "$(OutDir)"\include\freetype\freetype\config
++copy ..\..\..\include\freetype\internal "$(OutDir)"\include\freetype\freetype\internal
++copy ..\..\..\include\freetype\internal\services "$(OutDir)"\include\freetype\freetype\internal\services
++copy ..\..\..\LICENSE.TXT $(OutDir)\licenses\freetype.txt</Command>
++    </PostBuildEvent>
++    <PreBuildEvent>
++      <Command>if exist "$(OutDir)"\include\freetype (
++rd /s /q "$(OutDir)"\include\freetype
++cd ../
++cd $(ProjectDir)
++)</Command>
++    </PreBuildEvent>
++    <CustomBuildStep>
++      <Message>Custom Clean Step</Message>
++    </CustomBuildStep>
++    <CustomBuildStep>
++      <Outputs>force_clean</Outputs>
++      <Command>if exist "$(OutDir)"\include\freetype (
++rmdir /s /q "$(OutDir)"\include\freetype
++)
++if exist $(OutDir)\licenses\freetype.txt (
++del /f /q $(OutDir)\licenses\freetype.txt
++)</Command>
++    </CustomBuildStep>
+   </ItemDefinitionGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+     <ClCompile>
+@@ -315,7 +516,41 @@
+       <TargetMachine>MachineX86</TargetMachine>
+       <AdditionalLibraryDirectories>$(UserLibraryDirectories);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+       <AdditionalDependencies>$(UserDependencies);%(AdditionalDependencies)</AdditionalDependencies>
++      <OutputFile>$(OutDir)\bin\x86\$(TargetName)$(TargetExt)</OutputFile>
++      <ImportLibrary>$(OutDir)\lib\x86\$(TargetName).lib</ImportLibrary>
+     </Link>
++    <PostBuildEvent>
++      <Command>mkdir "$(OutDir)"\include\freetype
++mkdir "$(OutDir)"\include\freetype\freetype\
++mkdir "$(OutDir)"\include\freetype\freetype\config
++mkdir "$(OutDir)"\include\freetype\freetype\internal
++mkdir "$(OutDir)"\include\freetype\freetype\internal\services
++copy ..\..\..\include\ft2build.h "$(OutDir)"\include\freetype
++copy ..\..\..\include\freetype "$(OutDir)"\include\freetype\freetype
++copy ..\..\..\include\freetype\config "$(OutDir)"\include\freetype\freetype\config
++copy ..\..\..\include\freetype\internal "$(OutDir)"\include\freetype\freetype\internal
++copy ..\..\..\include\freetype\internal\services "$(OutDir)"\include\freetype\freetype\internal\services
++copy ..\..\..\LICENSE.TXT $(OutDir)\licenses\freetype.txt</Command>
++    </PostBuildEvent>
++    <PreBuildEvent>
++      <Command>if exist "$(OutDir)"\include\freetype (
++rd /s /q "$(OutDir)"\include\freetype
++cd ../
++cd $(ProjectDir)
++)</Command>
++    </PreBuildEvent>
++    <CustomBuildStep>
++      <Message>Custom Clean Step</Message>
++    </CustomBuildStep>
++    <CustomBuildStep>
++      <Outputs>force_clean</Outputs>
++      <Command>if exist "$(OutDir)"\include\freetype (
++rmdir /s /q "$(OutDir)"\include\freetype
++)
++if exist $(OutDir)\licenses\freetype.txt (
++del /f /q $(OutDir)\licenses\freetype.txt
++)</Command>
++    </CustomBuildStep>
+   </ItemDefinitionGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
+     <ClCompile>
+@@ -343,6 +578,8 @@
+       <TargetMachine>MachineARM64</TargetMachine>
+       <AdditionalLibraryDirectories>$(UserLibraryDirectories);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+       <AdditionalDependencies>$(UserDependencies);%(AdditionalDependencies)</AdditionalDependencies>
++      <OutputFile>$(OutDir)\bin\x64\$(TargetName)$(TargetExt)</OutputFile>
++      <ImportLibrary>$(OutDir)\lib\x64\$(TargetName).lib</ImportLibrary>
+     </Link>
+   </ItemDefinitionGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+@@ -370,7 +607,41 @@
+       <TargetMachine>MachineX64</TargetMachine>
+       <AdditionalLibraryDirectories>$(UserLibraryDirectories);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+       <AdditionalDependencies>$(UserDependencies);%(AdditionalDependencies)</AdditionalDependencies>
++      <OutputFile>$(OutDir)\bin\x64\$(TargetName)$(TargetExt)</OutputFile>
++      <ImportLibrary>$(OutDir)\lib\x64\$(TargetName).lib</ImportLibrary>
+     </Link>
++    <PostBuildEvent>
++      <Command>mkdir "$(OutDir)"\include\freetype
++mkdir "$(OutDir)"\include\freetype\freetype\
++mkdir "$(OutDir)"\include\freetype\freetype\config
++mkdir "$(OutDir)"\include\freetype\freetype\internal
++mkdir "$(OutDir)"\include\freetype\freetype\internal\services
++copy ..\..\..\include\ft2build.h "$(OutDir)"\include\freetype
++copy ..\..\..\include\freetype "$(OutDir)"\include\freetype\freetype
++copy ..\..\..\include\freetype\config "$(OutDir)"\include\freetype\freetype\config
++copy ..\..\..\include\freetype\internal "$(OutDir)"\include\freetype\freetype\internal
++copy ..\..\..\include\freetype\internal\services "$(OutDir)"\include\freetype\freetype\internal\services
++copy ..\..\..\LICENSE.TXT $(OutDir)\licenses\freetype.txt</Command>
++    </PostBuildEvent>
++    <PreBuildEvent>
++      <Command>if exist "$(OutDir)"\include\freetype (
++rd /s /q "$(OutDir)"\include\freetype
++cd ../
++cd $(ProjectDir)
++)</Command>
++    </PreBuildEvent>
++    <CustomBuildStep>
++      <Message>Custom Clean Step</Message>
++    </CustomBuildStep>
++    <CustomBuildStep>
++      <Outputs>force_clean</Outputs>
++      <Command>if exist "$(OutDir)"\include\freetype (
++rmdir /s /q "$(OutDir)"\include\freetype
++)
++if exist $(OutDir)\licenses\freetype.txt (
++del /f /q $(OutDir)\licenses\freetype.txt
++)</Command>
++    </CustomBuildStep>
+   </ItemDefinitionGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release Static|Win32'">
+     <ClCompile>
+@@ -393,10 +664,43 @@
+       <Culture>0x0409</Culture>
+     </ResourceCompile>
+     <Lib>
++      <OutputFile>$(OutDir)\lib\x86\$(TargetName)$(TargetExt)</OutputFile>
+       <TargetMachine>MachineX86</TargetMachine>
+       <AdditionalLibraryDirectories>$(UserLibraryDirectories);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+       <AdditionalDependencies>$(UserDependencies);%(AdditionalDependencies)</AdditionalDependencies>
+     </Lib>
++    <PostBuildEvent>
++      <Command>mkdir "$(OutDir)"\include\freetype
++mkdir "$(OutDir)"\include\freetype\freetype\
++mkdir "$(OutDir)"\include\freetype\freetype\config
++mkdir "$(OutDir)"\include\freetype\freetype\internal
++mkdir "$(OutDir)"\include\freetype\freetype\internal\services
++copy ..\..\..\include\ft2build.h "$(OutDir)"\include\freetype
++copy ..\..\..\include\freetype "$(OutDir)"\include\freetype\freetype
++copy ..\..\..\include\freetype\config "$(OutDir)"\include\freetype\freetype\config
++copy ..\..\..\include\freetype\internal "$(OutDir)"\include\freetype\freetype\internal
++copy ..\..\..\include\freetype\internal\services "$(OutDir)"\include\freetype\freetype\internal\services
++copy ..\..\..\LICENSE.TXT $(OutDir)\licenses\freetype.txt</Command>
++    </PostBuildEvent>
++    <PreBuildEvent>
++      <Command>if exist "$(OutDir)"\include\freetype (
++rd /s /q "$(OutDir)"\include\freetype
++cd ../
++cd $(ProjectDir)
++)</Command>
++    </PreBuildEvent>
++    <CustomBuildStep>
++      <Message>Custom Clean Step</Message>
++    </CustomBuildStep>
++    <CustomBuildStep>
++      <Outputs>force_clean</Outputs>
++      <Command>if exist "$(OutDir)"\include\freetype (
++rmdir /s /q "$(OutDir)"\include\freetype
++)
++if exist $(OutDir)\licenses\freetype.txt (
++del /f /q $(OutDir)\licenses\freetype.txt
++)</Command>
++    </CustomBuildStep>
+   </ItemDefinitionGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release Static|ARM64'">
+     <ClCompile>
+@@ -419,10 +723,43 @@
+       <Culture>0x0409</Culture>
+     </ResourceCompile>
+     <Lib>
++      <OutputFile>$(OutDir)\lib\x64\$(TargetName)$(TargetExt)</OutputFile>
+       <TargetMachine>MachineARM64</TargetMachine>
+       <AdditionalLibraryDirectories>$(UserLibraryDirectories);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+       <AdditionalDependencies>$(UserDependencies);%(AdditionalDependencies)</AdditionalDependencies>
+     </Lib>
++    <PostBuildEvent>
++      <Command>mkdir "$(OutDir)"\include\freetype
++mkdir "$(OutDir)"\include\freetype\freetype\
++mkdir "$(OutDir)"\include\freetype\freetype\config
++mkdir "$(OutDir)"\include\freetype\freetype\internal
++mkdir "$(OutDir)"\include\freetype\freetype\internal\services
++copy ..\..\..\include\ft2build.h "$(OutDir)"\include\freetype
++copy ..\..\..\include\freetype "$(OutDir)"\include\freetype\freetype
++copy ..\..\..\include\freetype\config "$(OutDir)"\include\freetype\freetype\config
++copy ..\..\..\include\freetype\internal "$(OutDir)"\include\freetype\freetype\internal
++copy ..\..\..\include\freetype\internal\services "$(OutDir)"\include\freetype\freetype\internal\services
++copy ..\..\..\LICENSE.TXT $(OutDir)\licenses\freetype.txt</Command>
++    </PostBuildEvent>
++    <PreBuildEvent>
++      <Command>if exist "$(OutDir)"\include\freetype (
++rd /s /q "$(OutDir)"\include\freetype
++cd ../
++cd $(ProjectDir)
++)</Command>
++    </PreBuildEvent>
++    <CustomBuildStep>
++      <Message>Custom Clean Step</Message>
++    </CustomBuildStep>
++    <CustomBuildStep>
++      <Outputs>force_clean</Outputs>
++      <Command>if exist "$(OutDir)"\include\freetype (
++rmdir /s /q "$(OutDir)"\include\freetype
++)
++if exist $(OutDir)\licenses\freetype.txt (
++del /f /q $(OutDir)\licenses\freetype.txt
++)</Command>
++    </CustomBuildStep>
+   </ItemDefinitionGroup>
+   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release Static|x64'">
+     <ClCompile>
+@@ -444,10 +781,43 @@
+       <Culture>0x0409</Culture>
+     </ResourceCompile>
+     <Lib>
++      <OutputFile>$(OutDir)\lib\x64\$(TargetName)$(TargetExt)</OutputFile>
+       <TargetMachine>MachineX64</TargetMachine>
+       <AdditionalLibraryDirectories>$(UserLibraryDirectories);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+       <AdditionalDependencies>$(UserDependencies);%(AdditionalDependencies)</AdditionalDependencies>
+     </Lib>
++    <PostBuildEvent>
++      <Command>mkdir "$(OutDir)"\include\freetype
++mkdir "$(OutDir)"\include\freetype\freetype\
++mkdir "$(OutDir)"\include\freetype\freetype\config
++mkdir "$(OutDir)"\include\freetype\freetype\internal
++mkdir "$(OutDir)"\include\freetype\freetype\internal\services
++copy ..\..\..\include\ft2build.h "$(OutDir)"\include\freetype
++copy ..\..\..\include\freetype "$(OutDir)"\include\freetype\freetype
++copy ..\..\..\include\freetype\config "$(OutDir)"\include\freetype\freetype\config
++copy ..\..\..\include\freetype\internal "$(OutDir)"\include\freetype\freetype\internal
++copy ..\..\..\include\freetype\internal\services "$(OutDir)"\include\freetype\freetype\internal\services
++copy ..\..\..\LICENSE.TXT $(OutDir)\licenses\freetype.txt</Command>
++    </PostBuildEvent>
++    <PreBuildEvent>
++      <Command>if exist "$(OutDir)"\include\freetype (
++rd /s /q "$(OutDir)"\include\freetype
++cd ../
++cd $(ProjectDir)
++)</Command>
++    </PreBuildEvent>
++    <CustomBuildStep>
++      <Message>Custom Clean Step</Message>
++    </CustomBuildStep>
++    <CustomBuildStep>
++      <Outputs>force_clean</Outputs>
++      <Command>if exist "$(OutDir)"\include\freetype (
++rmdir /s /q "$(OutDir)"\include\freetype
++)
++if exist $(OutDir)\licenses\freetype.txt (
++del /f /q $(OutDir)\licenses\freetype.txt
++)</Command>
++    </CustomBuildStep>
+   </ItemDefinitionGroup>
+   <ItemGroup>
+     <ClCompile Include="..\..\..\src\autofit\autofit.c" />
+@@ -520,6 +890,5 @@
+       <TargetFiles Include="$(TargetDir)$(TargetName).*" />
+     </ItemGroup>
+     <Copy SourceFiles="@(TargetFiles)" DestinationFolder="..\..\..\objs" />
+-    <Copy SourceFiles="$(TargetDir)$(TargetFileName)" DestinationFolder="..\..\..\..\freetype-demos\bin" Condition="'$(TargetExt)'=='.dll'" />
+   </Target>
+ </Project>
