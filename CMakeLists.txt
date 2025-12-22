@@ -788,6 +788,9 @@ else()
                                                     "-framework CFNetwork")
     endif()
 
+    # do not forget to link iconv on macOS!
+    target_link_libraries(${PROJECT_NAME} PRIVATE iconv)
+
     target_link_libraries(
       ${PROJECT_NAME} PRIVATE resolv "-framework AudioToolbox"
                               "-framework CoreAudio" "-framework Accelerate")
