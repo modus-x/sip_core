@@ -6,6 +6,11 @@ PKGS += fontconfig
 
 DEPS_fontconfig = freetype2 iconv xml2
 
+ifdef HAVE_MACOSX
+# on macos, we must install it via brew
+HOSTVARS += LIBTOOLIZE=glibtoolize
+endif
+
 $(TARBALLS)/fontconfig-$(FONTCONFIG_VERSION).tar.gz:
 	$(call download,$(FONTCONFIG_URL))
 
