@@ -98,9 +98,11 @@ def getLatestVSVersion():
 
 
 # vs help
-win_sdk_default = '10.0.22621.0'
+win_sdk_default = '10.0.26100.0'
 VSVersion = getLatestVSVersion()
-if VSVersion == '17':
+if VSVersion == '18':
+    win_toolset_default = '145'
+elif VSVersion == '17':
     win_toolset_default = '143'
 elif VSVersion == '16':
     win_toolset_default = '142'
@@ -161,13 +163,14 @@ def getVSEnv(arch='x64', platform='', version=''):
                          shell=True,
                          stdout=subprocess.PIPE)
     stdout, _ = p.communicate()
-    out = stdout.decode('utf-8', errors='ignore').split("\r\n")[5:-1]
-    print(env_cmd)
+    out = stdout.decode('utf-8', errors='ignore').split("\r\n")[7:-1]
     return dict(s.split('=', 1) for s in out)
 
 
 def getCMakeGenerator(vs_version):
-    if vs_version == '17':
+    if vs_version == '18':
+        return '\"Visual Studio 18 2026\" -A x64'
+    elif vs_version == '17':
         return '\"Visual Studio 17 2022\" -A x64'
     elif vs_version == '16':
         return '\"Visual Studio 16 2019\" -A x64'

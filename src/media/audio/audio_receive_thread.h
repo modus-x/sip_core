@@ -36,9 +36,6 @@
 #if HAVE_WEBRTC_AP
 #include "audio-processing/webrtc.h"
 #endif
-#if HAVE_SPEEXDSP
-#include "audio-processing/speex.h"
-#endif
 
 namespace sip_core {
 

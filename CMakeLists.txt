@@ -420,6 +420,10 @@ target_compile_definitions(
     LIBSIP_CORE_BUILD
     # define exports Conditionally add compile definitions based on platform
     $<$<OR:$<BOOL:${LINUX}>,$<BOOL:${MSVC}>,$<BOOL:${ANDROID}>>:HAVE_WEBRTC_AP>
+	# Use static lixml2
+	LIBXML_STATIC
+	# Use static yaml-cpp
+	YAML_CPP_STATIC_DEFINE
     # Building shared library
     SIP_CORE_EXPORTS)
 
@@ -582,11 +586,13 @@ if(MSVC)
             optimized
             ${DEPS_RELEASE}/lib/x64/libfontconfig.lib
             optimized
+            ${DEPS_RELEASE}/lib/x64/libxml2.lib
+            optimized
             ${DEPS_RELEASE}/lib/x64/lib_json.lib
             optimized
             ${DEPS_RELEASE}/lib/x64/libzlib.lib
             optimized
-            ${DEPS_RELEASE}/libyaml-cppmd.lib
+            ${DEPS_RELEASE}/yaml-cpp.lib
             optimized
             ${DEPS_RELEASE}/fmt.lib
             optimized
@@ -617,12 +623,14 @@ if(MSVC)
             ${DEPS_DEBUG}/lib/x64/libiconv.lib
             debug
             ${DEPS_DEBUG}/lib/x64/libfontconfig.lib
+			debug
+            ${DEPS_DEBUG}/lib/x64/libxml2.lib
             debug
             ${DEPS_DEBUG}/lib/x64/lib_json.lib
             debug
             ${DEPS_DEBUG}/lib/x64/libzlib.lib
             debug
-            ${DEPS_DEBUG}/libyaml-cppmdd.lib
+            ${DEPS_DEBUG}/yaml-cpp.lib
             debug
             ${DEPS_DEBUG}/fmtd.lib
             debug
@@ -809,7 +817,7 @@ else()
             -Wno-deprecated
             -Wno-deprecated-declarations
             -Wno-unknown-pragmas)
-  target_compile_definitions(${PROJECT_NAME} PRIVATE PJ_AUTOCONF=1)
+  target_compile_definitions(${PROJECT_NAME} PRIVATE PJ_AUTOCONF=1 YAML_CPP_STATIC_DEFINE)
 
   if(APPLE)
     target_compile_definitions(${PROJECT_NAME} PUBLIC HAVE_COREAUDIO)

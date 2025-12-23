@@ -33,9 +33,6 @@
 #if HAVE_WEBRTC_AP
 #include "audio-processing/webrtc.h"
 #endif
-#if HAVE_SPEEXDSP
-#include "audio-processing/speex.h"
-#endif
 
 #include <ctime>
 #include <algorithm>
@@ -193,13 +190,7 @@ AudioLayer::createAudioProcessor()
 
     AudioFormat formatForProcessor {sample_rate, nb_channels};
 
-    unsigned int frame_size;
-    if (pref_.getAudioProcessor() == "speex") {
-        // TODO: maybe force this to be equivalent to 20ms? as expected by speex
-        frame_size = sample_rate / 50u;
-    } else {
-        frame_size = sample_rate / 100u;
-    }
+    unsigned int frame_size = sample_rate / 100u;
 
     SIP_CORE_WARN("Input {%d Hz, %d channels}",
                   audioInputFormat_.sample_rate,
@@ -218,15 +209,6 @@ AudioLayer::createAudioProcessor()
                                                       pref_.getWebRtcParams().experimentalNs));
 #else
         SIP_CORE_ERR("[audiolayer] audioProcessor preference is webrtc, but library not linked! "
-                     "using NullAudioProcessor instead");
-        audioProcessor.reset(new NullAudioProcessor(formatForProcessor, frame_size));
-#endif
-    } else if (pref_.getAudioProcessor() == "speex") {
-#if HAVE_SPEEXDSP
-        SIP_CORE_WARN("[audiolayer] using SpeexAudioProcessor");
-        audioProcessor.reset(new SpeexAudioProcessor(formatForProcessor, frame_size));
-#else
-        SIP_CORE_ERR("[audiolayer] audioProcessor preference is speex, but library not linked! "
                      "using NullAudioProcessor instead");
         audioProcessor.reset(new NullAudioProcessor(formatForProcessor, frame_size));
 #endif

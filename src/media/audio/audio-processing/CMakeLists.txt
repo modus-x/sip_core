@@ -14,8 +14,6 @@ if(LINUX
   list(
     APPEND
     Source_Files__media__audio__audio_processing
-    "${CMAKE_CURRENT_SOURCE_DIR}/speex.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/speex.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/webrtc.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/webrtc.cpp")
 endif()

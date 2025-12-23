@@ -5,7 +5,6 @@
         "x264",
         "vpx",
         "ffmpeg",
-        "speexdsp",
         "pjproject",
         "portaudio",
         "yaml-cpp",

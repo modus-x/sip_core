@@ -193,15 +193,6 @@ AudioReceiveThread::createAudioProcessor()
                      "using NullAudioProcessor instead");
         audioProcessor_.reset(new NullAudioProcessor(format_, frame_size));
 #endif
-    } else if (sip_core::Manager::instance().audioPreference.getAudioProcessor() == "speex") {
-#if HAVE_SPEEXDSP
-        SIP_CORE_WARN("[audio_receive_thread] using SpeexAudioProcessor");
-        audioProcessor_.reset(new SpeexAudioProcessor(format_, frame_size));
-#else
-        SIP_CORE_ERR("[audio_receive_thread] audioProcessor preference is speex, but library not linked! "
-                     "using NullAudioProcessor instead");
-        audioProcessor_.reset(new NullAudioProcessor(format_, frame_size));
-#endif
     } else if (sip_core::Manager::instance().audioPreference.getAudioProcessor() == "null") {
         SIP_CORE_WARN("[audio_receive_thread] using NullAudioProcessor");
         audioProcessor_.reset(new NullAudioProcessor(format_, frame_size));
