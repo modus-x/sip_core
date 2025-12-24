@@ -118,8 +118,15 @@ VideoRtpSession::setupKaTimer()
 
     delay_initial = ka_inverval_;
 
+    // Guard against invalid or disabled interval to avoid modulo-by-zero
+    if (delay_initial == 0) {
+        SIP_CORE_WARN("VideoRtpSession keep-alive not started: interval is 0 (disabled)");
+        return;
+    }
+
     lower_bound = (unsigned) ((float) delay_initial * 0.8f);
-    delay.sec = pj_rand() % (delay_initial - lower_bound) + lower_bound;
+    unsigned range = (delay_initial > lower_bound) ? (delay_initial - lower_bound) : 1;
+    delay.sec = pj_rand() % range + lower_bound;
     delay.msec = 0;
     status = pjsip_endpt_schedule_timer(account_->getVoipLink().getEndpoint(), &ka_timer_, &delay);
     SIP_CORE_DEBUG("VideoRtpSession rtp keep-alive delay_initial is {:d}, lower_bound is {:d}",
@@ -183,6 +190,7 @@ VideoRtpSession::updateMedia(const MediaDescription& send, const MediaDescriptio
 void
 VideoRtpSession::natPing()
 {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     SIP_CORE_DEBUG("VideoRtpSession Sending keep-alive BLACK rtp packet to session {:s}",
                    getRemoteRtpUri());
     if (sender_) {
@@ -632,6 +640,8 @@ VideoRtpSession::cancelKeepAliveTimer()
 {
     if (ka_timer_.id != PJ_FALSE) {
         pjsip_endpt_cancel_timer(account_->getVoipLink().getEndpoint(), &ka_timer_);
+        // Ensure callback sees a null user_data if it somehow fires after cancellation
+        ka_timer_.user_data = nullptr;
         ka_timer_ = {};
     }
 }
