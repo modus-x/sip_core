@@ -582,7 +582,8 @@ VideoRtpSession::setMuted(bool mute, Direction dir)
         }
 
         if (mute) {
-            setupKaTimer();
+            // do NOT set any timers here, can be buggy, introduce some another type of NAT ping
+            // setupKaTimer();
         } else {
             cancelKeepAliveTimer();
         }
