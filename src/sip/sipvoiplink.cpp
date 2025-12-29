@@ -574,38 +574,6 @@ transaction_request_cb(pjsip_rx_data* rdata)
         return PJ_FALSE;
     }
 
-    if (account->isDND()) {
-        const pj_str_t message = CONST_PJ_STR(
-            "Call is declined because user is in DND / away state");
-
-        if (pjsip_inv_end_session(call->inviteSession_.get(), PJSIP_SC_DECLINE, &message, &tdata)) {
-            SIP_CORE_ERR("Could not create answer DECLINE");
-            return PJ_FALSE;
-        }
-
-        if (pjsip_inv_send_msg(call->inviteSession_.get(), tdata) != PJ_SUCCESS) {
-            SIP_CORE_ERR("Could not send msg DECLINE");
-        }
-
-        return PJ_FALSE;
-    }
-
-    call->setState(Call::ConnectionState::TRYING);
-
-    if (pjsip_inv_answer(call->inviteSession_.get(), PJSIP_SC_RINGING, NULL, NULL, &tdata)
-        != PJ_SUCCESS) {
-        SIP_CORE_ERR("Could not create answer RINGING");
-        return PJ_FALSE;
-    }
-
-    sip_utils::addContactHeader(call->getContactHeader(), tdata);
-    if (pjsip_inv_send_msg(call->inviteSession_.get(), tdata) != PJ_SUCCESS) {
-        SIP_CORE_ERR("Could not send msg RINGING");
-        return PJ_FALSE;
-    }
-
-    call->setState(Call::ConnectionState::RINGING);
-
     std::map<std::string, std::string> extraHeaders;
 
     if (dialog->call_id) {
@@ -627,6 +595,41 @@ transaction_request_cb(pjsip_rx_data* rdata)
             extraHeaders.emplace(headerName, headerValue);
         }
     }
+
+    if (account->isDND()) {
+        auto it = extraHeaders.find("X-CallType");
+        if (it != extraHeaders.end() && it->second == "ACD")
+        {
+            const pj_str_t message = CONST_PJ_STR(
+                "ACD call is declined because user is in DND / away state");
+            if (pjsip_inv_end_session(call->inviteSession_.get(), PJSIP_SC_DECLINE, &message, &tdata)) {
+                SIP_CORE_ERR("Could not create answer DECLINE");
+                return PJ_FALSE;
+            }
+
+            if (pjsip_inv_send_msg(call->inviteSession_.get(), tdata) != PJ_SUCCESS) {
+                SIP_CORE_ERR("Could not send msg DECLINE");
+            }
+
+            return PJ_FALSE;
+        }
+    }
+
+    call->setState(Call::ConnectionState::TRYING);
+
+    if (pjsip_inv_answer(call->inviteSession_.get(), PJSIP_SC_RINGING, NULL, NULL, &tdata)
+        != PJ_SUCCESS) {
+        SIP_CORE_ERR("Could not create answer RINGING");
+        return PJ_FALSE;
+    }
+
+    sip_utils::addContactHeader(call->getContactHeader(), tdata);
+    if (pjsip_inv_send_msg(call->inviteSession_.get(), tdata) != PJ_SUCCESS) {
+        SIP_CORE_ERR("Could not send msg RINGING");
+        return PJ_FALSE;
+    }
+
+    call->setState(Call::ConnectionState::RINGING);
 
     Manager::instance().incomingCall(account->getAccountID(), *call, extraHeaders);
 
