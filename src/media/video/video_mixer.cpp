@@ -771,7 +771,7 @@ VideoMixer::calc_position(std::unique_ptr<VideoMixerSource>& source,
                           source->w,
                           source->h,
                           isActive, false))
-        source->bordersFilter.release();
+        source->bordersFilter.reset();  // Use reset() instead of release() to properly free
 }
 
 VideoMixer::gripRect

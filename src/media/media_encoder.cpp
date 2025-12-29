@@ -149,9 +149,9 @@ MediaEncoder::writeContainerToRtp(uint8_t* buf, int buf_size)
             if (fileIO_) {
                 avio_close(outputCtx_->pb);
             }
-            for (auto encoderCtx : encoders_) {
+            // Use reference to properly free the encoder contexts
+            for (auto& encoderCtx : encoders_) {
                 if (encoderCtx) {
-
                     avcodec_free_context(&encoderCtx);
                 }
             }
@@ -1355,15 +1355,16 @@ MediaEncoder::enableAccel(bool enableAccel)
     MediaEncoder::stopEncoder()
     {
         flush();
-        for (auto it = encoders_.begin(); it != encoders_.end(); it++) {
+        for (auto it = encoders_.begin(); it != encoders_.end(); ++it) {
             if ((*it)->codec_type == AVMEDIA_TYPE_VIDEO) {
+                // Free the encoder context BEFORE erasing from the list
+                // Note: avcodec_free_context already frees the context and sets pointer to nullptr,
+                // so av_free is not needed (and would cause double-free)
+                avcodec_free_context(&(*it));
                 encoders_.erase(it);
                 break;
             }
         }
-        AVCodecContext* encoderCtx = getCurrentVideoAVCtx();
-        avcodec_free_context(&encoderCtx);
-        av_free(encoderCtx);
     }
 
     bool
@@ -1621,7 +1622,10 @@ MediaEncoder::getHWFrameFromSWFrame(const VideoFrame& input)
             flush();
             initialized_ = false;
             if (outputCtx_) {
-                for (auto encoderCtx : encoders_) {
+                // IMPORTANT: Use reference to actually modify the list elements!
+                // Using 'auto encoderCtx' (value copy) would leak the AVCodecContext
+                // because avcodec_free_context would only modify the local copy.
+                for (auto& encoderCtx : encoders_) {
                     if (encoderCtx) {
                         avcodec_free_context(&encoderCtx);
                     }

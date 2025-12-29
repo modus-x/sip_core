@@ -608,6 +608,8 @@ MediaDecoder::setupStream()
                 accel_.reset();
                 continue;
             }
+            // Free previous context before allocating a new one for this accel attempt
+            avcodec_free_context(&decoderCtx_);
             if (prepareDecoderContext() < 0)
                 return -1; // failed
             accel_->setDetails(decoderCtx_);
@@ -638,19 +640,28 @@ MediaDecoder::setupStream()
                  inputDecoder_->name,
                  av_get_media_type_string(avStream_->codecpar->codec_type));
 
-    decoderCtx_->thread_count = std::max(1u, std::min(8u, std::thread::hardware_concurrency() / 2));
-    decoderCtx_->thread_type = FF_THREAD_SLICE;
     if (emulateRate_)
         SIP_CORE_DBG() << "Using framerate emulation";
     startTime_ = av_gettime(); // used to set pts after decoding, and for rate emulation
 
 #ifdef RING_ACCEL
     if (!accel_) {
+        // If hardware decoding failed, decoderCtx_ may be null - recreate it for software decoding
+        if (!decoderCtx_) {
+            if (prepareDecoderContext() < 0)
+                return -1;
+        }
+        // Set threading options for software decoder (must be done before avcodec_open2)
+        decoderCtx_->thread_count = std::max(1u, std::min(8u, std::thread::hardware_concurrency() / 2));
+        decoderCtx_->thread_type = FF_THREAD_SLICE;
         SIP_CORE_WARN("Not using hardware decoding for %s",
                       avcodec_get_name(decoderCtx_->codec_id));
         ret = avcodec_open2(decoderCtx_, inputDecoder_, nullptr);
     }
 #else
+    // Set threading options for software decoder (must be done before avcodec_open2)
+    decoderCtx_->thread_count = std::max(1u, std::min(8u, std::thread::hardware_concurrency() / 2));
+    decoderCtx_->thread_type = FF_THREAD_SLICE;
     ret = avcodec_open2(decoderCtx_, inputDecoder_, nullptr);
 #endif
     if (ret < 0) {
