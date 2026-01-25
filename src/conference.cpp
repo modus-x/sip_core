@@ -1206,10 +1206,13 @@ Conference::setVoiceActivity(const std::string& streamId, const bool& newState)
 {
     // verify that streamID exists in our confInfo
     bool exists = false;
-    for (auto& participant : confInfo_) {
-        if (participant.sinkId == streamId) {
-            exists = true;
-            break;
+    {
+        std::lock_guard<std::mutex> lk(confInfoMutex_);
+        for (auto& participant : confInfo_) {
+            if (participant.sinkId == streamId) {
+                exists = true;
+                break;
+            }
         }
     }
 
@@ -1253,10 +1256,13 @@ Conference::setVoiceActivity(const Json::Value& json)
         auto state = json["state"].asBool();
         
         bool exists = false;
-        for (auto& participant : confInfo_) {
-            if (participant.sinkId == sinkId) {
-                exists = true;
-                break;
+        {
+            std::lock_guard<std::mutex> lk(confInfoMutex_);
+            for (auto& participant : confInfo_) {
+                if (participant.sinkId == sinkId) {
+                    exists = true;
+                    break;
+                }
             }
         }
 
@@ -1318,19 +1324,26 @@ Conference::setModerator(const std::string& participant_id, const bool& state)
 void
 Conference::updateModerators()
 {
-    std::lock_guard<std::mutex> lk(confInfoMutex_);
-    for (auto& info : confInfo_) {
-        info.isModerator = isModerator(string_remove_suffix(info.uri, '@'));
+    {
+        std::lock_guard<std::mutex> lk(confInfoMutex_);
+        for (auto& info : confInfo_) {
+            info.isModerator = isModerator(string_remove_suffix(info.uri, '@'));
+        }
     }
+    // Call sendConferenceInfos() outside the lock to avoid deadlocks
+    // since it iterates calls and may acquire other locks
     sendConferenceInfos();
 }
 
 void
 Conference::updateHandsRaised()
 {
-    std::lock_guard<std::mutex> lk(confInfoMutex_);
-    for (auto& info : confInfo_)
-        info.handRaised = isHandRaised(info.device);
+    {
+        std::lock_guard<std::mutex> lk(confInfoMutex_);
+        for (auto& info : confInfo_)
+            info.handRaised = isHandRaised(info.device);
+    }
+    // Call sendConferenceInfos() outside the lock to avoid deadlocks
     sendConferenceInfos();
 }
 
@@ -1361,14 +1374,14 @@ Conference::updateVoiceActivity()
             voiceStates[p.sinkId] = p.voiceActivity;
         }
     }
+    // NOTE: All operations below are done OUTSIDE the confInfoMutex_ lock
+    // to avoid deadlocks with video mixer and call mutexes
 
     if (videoMixer_)
         videoMixer_->setVoiceActivity(std::move(voiceStates));
 
-    {
-        std::lock_guard<std::mutex> lk(confInfoMutex_);
-        sendVoiceActivity(); // also emits signal to client
-    }
+    // sendVoiceActivity() iterates calls and emits signals, do NOT hold confInfoMutex_
+    sendVoiceActivity();
 }
 
 void
@@ -1473,38 +1486,45 @@ Conference::muteParticipant(const std::string& participant_id, const bool& state
 void
 Conference::updateRecording()
 {
-    std::lock_guard<std::mutex> lk(confInfoMutex_);
-    for (auto& info : confInfo_) {
-        if (info.uri.empty()) {
-            info.recording = isRecording();
-        } else if (auto call = getCallWith(std::string(string_remove_suffix(info.uri, '@')),
-                                           info.device)) {
-            info.recording = call->isPeerRecording();
+    {
+        std::lock_guard<std::mutex> lk(confInfoMutex_);
+        for (auto& info : confInfo_) {
+            if (info.uri.empty()) {
+                info.recording = isRecording();
+            } else if (auto call = getCallWith(std::string(string_remove_suffix(info.uri, '@')),
+                                               info.device)) {
+                info.recording = call->isPeerRecording();
+            }
         }
     }
+    // Call sendConferenceInfos() outside the lock to avoid deadlocks
     sendConferenceInfos();
 }
 
 void
 Conference::updateMuted()
 {
-    std::lock_guard<std::mutex> lk(confInfoMutex_);
-    for (auto& info : confInfo_) {
-        if (info.uri.empty()) {
-            info.audioModeratorMuted = isMuted("host"sv);
-            info.audioLocalMuted = isMediaSourceMuted(MediaType::MEDIA_AUDIO);
-        } else if (auto call = getCallWith(std::string(string_remove_suffix(info.uri, '@')),
-                                           info.device)) {
-            info.audioModeratorMuted = isMuted(call->getCallId());
-            info.audioLocalMuted = call->isPeerMuted();
+    {
+        std::lock_guard<std::mutex> lk(confInfoMutex_);
+        for (auto& info : confInfo_) {
+            if (info.uri.empty()) {
+                info.audioModeratorMuted = isMuted("host"sv);
+                info.audioLocalMuted = isMediaSourceMuted(MediaType::MEDIA_AUDIO);
+            } else if (auto call = getCallWith(std::string(string_remove_suffix(info.uri, '@')),
+                                               info.device)) {
+                info.audioModeratorMuted = isMuted(call->getCallId());
+                info.audioLocalMuted = call->isPeerMuted();
+            }
         }
     }
+    // Call sendConferenceInfos() outside the lock to avoid deadlocks
     sendConferenceInfos();
 }
 
 ConfInfo
 Conference::getConfInfoHostUri(std::string_view localHostURI, std::string_view destURI)
 {
+    std::lock_guard<std::mutex> lk(confInfoMutex_);
     ConfInfo newInfo = confInfo_;
 
     for (auto it = newInfo.begin(); it != newInfo.end();) {
@@ -1578,8 +1598,11 @@ Conference::isHostDevice(std::string_view deviceId) const
 void
 Conference::updateConferenceInfo(ConfInfo confInfo)
 {
-    std::lock_guard<std::mutex> lk(confInfoMutex_);
-    confInfo_ = std::move(confInfo);
+    {
+        std::lock_guard<std::mutex> lk(confInfoMutex_);
+        confInfo_ = std::move(confInfo);
+    }
+    // Call sendConferenceInfos() outside the lock to avoid deadlocks
     sendConferenceInfos();
 }
 
@@ -1702,10 +1725,13 @@ Conference::resizeRemoteParticipants(ConfInfo& confInfo, std::string_view peerUR
 
     // get the size of the local frame
     ParticipantInfo localCell;
-    for (const auto& p : confInfo_) {
-        if (p.uri == peerURI) {
-            localCell = p;
-            break;
+    {
+        std::lock_guard<std::mutex> lk(confInfoMutex_);
+        for (const auto& p : confInfo_) {
+            if (p.uri == peerURI) {
+                localCell = p;
+                break;
+            }
         }
     }
 
@@ -1726,8 +1752,11 @@ Conference::mergeConfInfo(ConfInfo& newInfo, const std::string& peerURI)
 {
     if (newInfo.empty()) {
         SIP_CORE_DBG("confInfo empty, remove remoteHost");
-        std::lock_guard<std::mutex> lk(confInfoMutex_);
-        remoteHosts_.erase(peerURI);
+        {
+            std::lock_guard<std::mutex> lk(confInfoMutex_);
+            remoteHosts_.erase(peerURI);
+        }
+        // Call sendConferenceInfos() outside the lock to avoid deadlocks
         sendConferenceInfos();
         return;
     }
@@ -1737,17 +1766,20 @@ Conference::mergeConfInfo(ConfInfo& newInfo, const std::string& peerURI)
 #endif
 
     bool updateNeeded = false;
-    auto it = remoteHosts_.find(peerURI);
-    if (it != remoteHosts_.end()) {
-        // Compare confInfo before update
-        if (it->second != newInfo) {
-            it->second = newInfo;
+    {
+        std::lock_guard<std::mutex> lk(confInfoMutex_);
+        auto it = remoteHosts_.find(peerURI);
+        if (it != remoteHosts_.end()) {
+            // Compare confInfo before update
+            if (it->second != newInfo) {
+                it->second = newInfo;
+                updateNeeded = true;
+            } else
+                SIP_CORE_WARN("No change in confInfo, don't update");
+        } else {
+            remoteHosts_.emplace(peerURI, newInfo);
             updateNeeded = true;
-        } else
-            SIP_CORE_WARN("No change in confInfo, don't update");
-    } else {
-        remoteHosts_.emplace(peerURI, newInfo);
-        updateNeeded = true;
+        }
     }
     // Send confInfo only if needed to avoid loops
 #ifdef ENABLE_VIDEO
@@ -1763,6 +1795,7 @@ Conference::mergeConfInfo(ConfInfo& newInfo, const std::string& peerURI)
 std::string_view
 Conference::findHostforRemoteParticipant(std::string_view uri, std::string_view deviceId)
 {
+    std::lock_guard<std::mutex> lk(confInfoMutex_);
     for (const auto& host : remoteHosts_) {
         for (const auto& p : host.second) {
             if (uri == string_remove_suffix(p.uri, '@') && (deviceId == "" || deviceId == p.device))
@@ -1823,6 +1856,7 @@ Conference::startRecording(const std::string& path)
 int
 Conference::getLayout() const
 {
+    std::lock_guard<std::mutex> lk(confInfoMutex_);
     return confInfo_.layout;
 }
 

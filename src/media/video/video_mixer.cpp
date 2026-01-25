@@ -181,6 +181,8 @@ VideoMixer::stopInputs()
 void
 VideoMixer::muteInputs(bool mute)
 {
+    std::shared_lock lock(rwMutex_);
+    std::lock_guard lk(localInputsMtx_);
     for (auto& source : sources_) {
         for (auto& input : localInputs_) {
             if (source->source == input.get()) {
@@ -419,7 +421,13 @@ std::string
 VideoMixer::getCallDisplayName(const std::unique_ptr<VideoMixer::VideoMixerSource>& source)
 {
     std::string name;
-    auto& callId = videoToStreamInfo_[source->source].callId;
+    std::string callId;
+    {
+        std::lock_guard<std::mutex> lk(videoToStreamInfoMtx_);
+        auto it = videoToStreamInfo_.find(source->source);
+        if (it != videoToStreamInfo_.end())
+            callId = it->second.callId;
+    }
     if (auto call = Manager::instance().getCallFromCallID(callId)) {
         name = call->getPeerDisplayName();
         if (name.empty()) {
@@ -559,7 +567,7 @@ VideoMixer::process()
                 return;
 
             if (x->w == 0 || x->h == 0)
-                needsUpdate;
+                needsUpdate = true;
 
             StreamInfo sinfo = {};
             if (auto itSI = streamInfoCache.find(x->source); itSI != streamInfoCache.end())
@@ -573,6 +581,23 @@ VideoMixer::process()
             // make rendered frame temporarily unavailable for update()
             // to avoid concurrent access.
             std::shared_ptr<VideoFrame> input = x->getRenderFrame();
+            
+            // Skip processing if input frame is null (can happen when video is just attached
+            // or when all participants turn off video)
+            if (!input) {
+                SIP_CORE_DBG("[mixer:%s] No frame yet for source %p", id_.c_str(), x->source);
+                sourcesInfo.emplace_back(SourceInfo {x->source,
+                                                     x->x.load(),
+                                                     x->y.load(),
+                                                     x->w,
+                                                     x->h,
+                                                     false,
+                                                     sinfo.callId,
+                                                     sinfo.streamId});
+                ++i;
+                continue;
+            }
+            
             bool geometryChanged = false;
             if (input->height() and input->width()) {
                 if (input->width() != x->lastLayoutFrameWidth
@@ -590,7 +615,7 @@ VideoMixer::process()
                 processSource(x, input, i, sinfo.streamId, voiceActive);
 
             bool frameRendered = false;
-            if (input and input->height() and input->width()) {
+            if (input->height() and input->width()) {
                     frameRendered = render_frame(output, input, x, needsUpdate);
                     layoutRendered |= frameRendered;
             }
@@ -733,6 +758,12 @@ VideoMixer::calc_position(std::unique_ptr<VideoMixerSource>& source,
 {
     if (!width_ or !height_)
         return;
+    
+    // Defensive check: input should never be null at this point
+    if (!input) {
+        SIP_CORE_WARN("[mixer:%s] calc_position called with null input", id_.c_str());
+        return;
+    }
 
     int frameW, frameH, frameW_off, frameH_off;
     if(grid_aspect_ == 0.) {
@@ -1108,6 +1139,8 @@ VideoMixer::setVideoLayout(Layout newLayout)
         source->h = 0;
         source->isBig = false;
     }
+
+    addLayoutUpdate("setVideoLayout");
 }
 
 } // namespace video

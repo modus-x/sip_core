@@ -152,6 +152,7 @@ VideoRtpSession::VideoRtpSession(const string& callId,
     , localVideoParams_(localVideoParams)
     , videoBitrateInfo_ {}
     , rtcpCheckerThread_([] { return true; }, [this] { processRtcpChecker(); }, [] {})
+    , mutedFrameThread_([] { return true; }, [this] { processMutedFrame(); }, [] {})
 {
     recorder_ = rec;
     setupVideoBitrateInfo(); // reset bitrate
@@ -164,6 +165,10 @@ VideoRtpSession::VideoRtpSession(const string& callId,
 VideoRtpSession::~VideoRtpSession()
 {
     stop();
+
+    // Stop muted frame thread if running
+    sendMutedFrames_.store(false);
+    mutedFrameThread_.join();
 
     deinitRecorder();
 
@@ -552,6 +557,10 @@ VideoRtpSession::stop()
 {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
 
+    // Stop muted frame sending
+    sendMutedFrames_.store(false);
+    mutedFrameThread_.join();
+
     stopSender();
     stopReceiver();
 
@@ -585,14 +594,47 @@ VideoRtpSession::setMuted(bool mute, Direction dir)
 
         // set onHold
         send_.onHold = mute;
-        if (videoLocal_) {
+
+        // Set sender mute state (sender will send black frames when muted)
+        if (sender_) {
             sender_->setMuted(mute);
         }
 
+        // Stop/start video input device to avoid camera indicator when muted
+        // Only for non-conference mode where we control the local video input
+        // Note: stopInput/startInput only available on desktop platforms
+#ifndef VIDEO_CLIENT_INPUT
+        if (videoLocal_ && !conference_) {
+            if (mute) {
+                // Detach and stop video input to turn off camera/display capture
+                detachVideoInput();
+                videoLocal_->stopInput();
+                SIP_CORE_DBG("[%p] Video input stopped (muted)", this);
+            } else {
+                // Restart video input and reattach
+                videoLocal_->startInput();
+                attachVideoInput();
+                SIP_CORE_DBG("[%p] Video input started (unmuted)", this);
+            }
+        }
+#endif
+
         if (mute) {
-            // do NOT set any timers here, can be buggy, introduce some another type of NAT ping
-            // setupKaTimer();
+            // Start sending black frames while muted (only for non-conference mode)
+            // This keeps the RTP stream alive and NAT pinholes open
+#ifndef VIDEO_CLIENT_INPUT
+            if (!conference_) {
+                sendMutedFrames_.store(true);
+                if (!mutedFrameThread_.isRunning()) {
+                    mutedFrameThread_.start();
+                    SIP_CORE_DBG("[%p] Started muted frame thread", this);
+                }
+            }
+#endif
         } else {
+            // Stop sending muted frames
+            sendMutedFrames_.store(false);
+            mutedFrameThread_.join();
             cancelKeepAliveTimer();
         }
 
@@ -953,6 +995,30 @@ VideoRtpSession::processRtcpChecker()
 {
     adaptQualityAndBitrate();
     socketPair_->waitForRTCP(std::chrono::seconds(rtcp_checking_interval));
+}
+
+void
+VideoRtpSession::processMutedFrame()
+{
+    // Send black frames at approximately 10 fps while video is muted
+    // This keeps the RTP stream alive and maintains NAT pinholes
+    constexpr auto frameInterval = std::chrono::milliseconds(100); // ~10 fps
+
+    if (!sendMutedFrames_.load()) {
+        // Signal to stop - exit the loop
+        return;
+    }
+
+    {
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
+        if (sender_ && send_.onHold) {
+            sender_->sendBlackFrame(
+                localVideoParams_.width > 0 ? localVideoParams_.width : NO_DEVICE_WIDTH,
+                localVideoParams_.height > 0 ? localVideoParams_.height : NO_DEVICE_HEIGHT);
+        }
+    }
+
+    std::this_thread::sleep_for(frameInterval);
 }
 
 void

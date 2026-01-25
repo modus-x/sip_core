@@ -168,6 +168,13 @@ VideoDeviceMonitor::getDeviceParams(const std::string& id) const
     return itd->getDeviceParams();
 }
 
+bool
+VideoDeviceMonitor::deviceExists(const std::string& id) const
+{
+    std::lock_guard<std::mutex> l(lock_);
+    return findDeviceById(id) != devices_.cend();
+}
+
 static void
 giveUniqueName(VideoDevice& dev, const vector<VideoDevice>& devices)
 {

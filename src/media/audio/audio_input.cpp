@@ -125,16 +125,48 @@ AudioInput::readFromDevice()
 
     auto& bufferPool = Manager::instance().getRingBufferPool();
     auto audioFrame = bufferPool.getData(id_);
-    if (not audioFrame && !muteState_) {
-        return;
+
+    // Track consecutive empty frames to detect broken/non-functional audio device
+    // If we get too many empty frames in a row, the device is likely broken
+    // and we should send silence to keep the RTP stream alive
+    if (not audioFrame) {
+        consecutiveEmptyFrames_++;
+        // After ~1 second (50 frames * 20ms) of no audio, consider device broken
+        constexpr unsigned int BROKEN_DEVICE_THRESHOLD = 50;
+        if (consecutiveEmptyFrames_ == BROKEN_DEVICE_THRESHOLD) {
+            SIP_CORE_WARN("Audio Input: no data for %u consecutive frames, "
+                         "device may be broken - sending silence to keep RTP alive",
+                         BROKEN_DEVICE_THRESHOLD);
+        }
+    } else {
+        // Reset counter when we get valid audio
+        if (consecutiveEmptyFrames_ >= 50) {
+            SIP_CORE_INFO("Audio Input: device recovered, received audio data again");
+        }
+        consecutiveEmptyFrames_ = 0;
     }
 
-    if (muteState_) {
-        if (not audioFrame) {
-            audioFrame = std::make_shared<AudioFrame>(bufferPool.getInternalAudioFormat(), frameSize_);
+    // Send silence frames in these cases:
+    // 1. User explicitly muted (muteState_ == true)
+    // 2. No capture device available (forceMuteNoDevice_ == true)
+    // 3. Device appears broken (many consecutive empty frames)
+    // This ensures RTP packets are always sent to prevent server kicking us
+    bool shouldSendSilence = muteState_ || forceMuteNoDevice_ || 
+                             (not audioFrame && consecutiveEmptyFrames_ >= 50);
+
+    if (not audioFrame) {
+        if (!shouldSendSilence) {
+            // Still waiting for device to provide data, don't send anything yet
+            return;
         }
+        // Create silence frame
+        audioFrame = std::make_shared<AudioFrame>(bufferPool.getInternalAudioFormat(), frameSize_);
         libav_utils::fillWithSilence(audioFrame->pointer());
-        audioFrame->has_voice = false; // force no voice activity when muted
+        audioFrame->has_voice = false;
+    } else if (muteState_) {
+        // User is muted but we got a frame - fill it with silence
+        libav_utils::fillWithSilence(audioFrame->pointer());
+        audioFrame->has_voice = false;
     }
 
     std::lock_guard<std::mutex> lk(fmtMutex_);
@@ -293,6 +325,7 @@ AudioInput::switchInput(const std::string& resource)
     playingDevice_ = false;
     currentResource_ = resource;
     devOptsFound_ = false;
+    consecutiveEmptyFrames_ = 0;  // Reset broken device detection counter
     updateMuteStateForDeviceAvailability();
 
     std::promise<DeviceParams> p;

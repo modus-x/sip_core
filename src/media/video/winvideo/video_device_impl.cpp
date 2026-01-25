@@ -284,13 +284,15 @@ VideoDeviceImpl::getDeviceParams() const
         params.format = "dshow";
         params.input = "video=screen-capture-recorder";
 #else
-        if(!IsWindowsVersionOrGreater(10, 0, WIN10_1903_BUILD)) { // if gfxcapture supported
+        // gfxcapture uses Windows Graphics Capture API which requires Windows 10 1903+ (build 18362)
+        if (IsWindowsVersionOrGreater(10, 0, WIN10_1903_BUILD)) {
             params.format = "lavfi";
             params.input = "gfxcapture";
-            //params.format = "yuv420p";
         }
         else {
+            // Fallback to gdigrab for older Windows versions
             params.format = "gdigrab";
+            params.input = "desktop";  // gdigrab requires "desktop" as input for full screen capture
         }
 #endif
         params.framerate = desktopFrameRate_;

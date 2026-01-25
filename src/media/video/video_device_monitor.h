@@ -65,6 +65,11 @@ public:
     void removeDeviceViaInput(const std::string& path);
 
     /**
+     * Check if a device with the given id exists (is still connected)
+     */
+    bool deviceExists(const std::string& id) const;
+
+    /**
      * Params for libav
      */
     DeviceParams getDeviceParams(const std::string& name) const;

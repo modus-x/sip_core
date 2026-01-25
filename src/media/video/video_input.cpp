@@ -220,10 +220,29 @@ VideoInput::captureFrame()
 
     switch (decoder_->decode()) {
     case MediaDemuxer::Status::EndOfFile:
+        // Before attempting to recreate decoder, check if device is still available
+        // For camera devices, verify the device hasn't been disconnected
+        if (decOpts_.format == "video4linux2" || decOpts_.format == "dshow" 
+            || decOpts_.format == "avfoundation") {
+            if (!sip_core::getVideoDeviceMonitor().deviceExists(decOpts_.name)) {
+                SIP_CORE_WARN("Device \"%s\" disconnected during capture, stopping",
+                              decOpts_.name.c_str());
+                return false;
+            }
+        }
         createDecoder();
         return static_cast<bool>(decoder_);
     case MediaDemuxer::Status::ReadError:
         SIP_CORE_ERR() << "Failed to decode frame";
+        // For repeated read errors, check if device still exists
+        if (decOpts_.format == "video4linux2" || decOpts_.format == "dshow" 
+            || decOpts_.format == "avfoundation") {
+            if (!sip_core::getVideoDeviceMonitor().deviceExists(decOpts_.name)) {
+                SIP_CORE_WARN("Device \"%s\" disconnected (read error), stopping",
+                              decOpts_.name.c_str());
+                return false;
+            }
+        }
         // try again to decode
         return true;
     default:
@@ -338,7 +357,32 @@ VideoInput::createDecoder()
     }
 
     int tries = 0;
+    int busyTries = 0;
+    constexpr int maxBusyTries = 50; // 50 * 100ms = 5 seconds max for EBUSY
+    auto startTime = std::chrono::steady_clock::now();
+    constexpr auto maxTotalTime = std::chrono::seconds(10); // 10 seconds max total
+
     while (!ready && !isStopped_) {
+        // Check total timeout
+        auto elapsed = std::chrono::steady_clock::now() - startTime;
+        if (elapsed > maxTotalTime) {
+            SIP_CORE_ERR("Timeout waiting for device \"%s\" to become available",
+                         decOpts_.input.c_str());
+            foundDecOpts(decOpts_);
+            return;
+        }
+
+        // For camera devices, check if the device still exists before retrying
+        if (decOpts_.format == "video4linux2" || decOpts_.format == "dshow" 
+            || decOpts_.format == "avfoundation") {
+            if (!sip_core::getVideoDeviceMonitor().deviceExists(decOpts_.name)) {
+                SIP_CORE_WARN("Device \"%s\" disconnected, stopping input",
+                              decOpts_.name.c_str());
+                foundDecOpts(decOpts_);
+                return;
+            }
+        }
+
         // Retry to open the video till the input is opened
         auto ret = decoder->openInput(decOpts_);
         ready = ret >= 0;
@@ -357,6 +401,13 @@ VideoInput::createDecoder()
             // If this is the case, cleanup() can occur and this will erase shmPath_
             // So, be sure to regenerate a correct shmPath for clients.
             restartSink = true;
+            busyTries += 1;
+            if (busyTries > maxBusyTries) {
+                SIP_CORE_ERR("Device \"%s\" busy for too long, giving up",
+                             decOpts_.input.c_str());
+                foundDecOpts(decOpts_);
+                return;
+            }
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }

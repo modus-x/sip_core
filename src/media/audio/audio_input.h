@@ -86,6 +86,7 @@ private:
     std::string id_;
     bool muteState_ = false;
     bool forceMuteNoDevice_ = false;
+    unsigned int consecutiveEmptyFrames_ = 0;  // Track empty frames to detect broken device
     uint64_t sent_samples = 0;
     mutable std::mutex fmtMutex_ {};
     AudioFormat format_;

@@ -187,6 +187,11 @@ private:
     InterruptedThreadLoop rtcpCheckerThread_;
     void processRtcpChecker();
 
+    // Thread for sending black frames when video is muted
+    InterruptedThreadLoop mutedFrameThread_;
+    void processMutedFrame();
+    std::atomic<bool> sendMutedFrames_ {false};
+
     std::function<void(int)> changeOrientationCallback_;
 
     std::function<void(bool)> recordingStateCallback_;
