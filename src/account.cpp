@@ -213,6 +213,10 @@ Account::hasActiveCodec(MediaType mediaType) const
 void
 Account::setActiveCodecs(const std::vector<unsigned>& list)
 {
+    if(list.empty()) {
+        SIP_CORE_WARNING("No active codecs applied.");
+    }
+
     // first clear the previously stored codecs
     // TODO: mutex to protect isActive
     setAllCodecsActive(MEDIA_ALL, false);
