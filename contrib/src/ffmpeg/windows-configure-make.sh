@@ -35,7 +35,7 @@ FFMPEGCONF+='
             --enable-libfreetype
             --enable-libfontconfig
             --enable-iconv
-            --enable-libxml2'
+            --enable-libharfbuzz'
 
 #enable muxers/demuxers
 FFMPEGCONF+='
@@ -70,7 +70,7 @@ FFMPEGCONF+='
             --enable-libvpx
             --enable-encoder=libvpx_vp8
             --enable-encoder=libvpx_vp9
-            --enable-decoder=vp8 
+            --enable-decoder=vp8
             --enable-decoder=vp9
             --enable-libopus
             --enable-encoder=libopus
@@ -138,14 +138,14 @@ FFMPEGCONF+='
             --enable-filter=drawtext'
 
 FFMPEGCONF+='
-                --enable-indev=dshow
-                --enable-indev=gdigrab
-                --enable-indev=lavfi'
+            --enable-indev=dshow
+            --enable-indev=gdigrab
+            --enable-indev=lavfi'
 
 echo "configure and make ffmpeg for win32-x64... in $(pwd)"
 
 # extra libs
-EXTRALDFLAGS="libopus.lib libx264.lib libvpx.lib libfreetype.lib libfontconfig.lib"
+EXTRALDFLAGS="libopus.lib libx264.lib libvpx.lib libfreetype.lib libfontconfig.lib harfbuzz.lib"
 
 # configure debug / release libs
 if [ "$1" == "Debug" ]; then
@@ -159,7 +159,7 @@ else
   EXTRACXXFLAGS="${EXTRACFLAGS}"
 fi
 
-EXTRACFLAGS="${EXTRACFLAGS} -D_WINDLL -D_WIN32_WINNT=0x0A00 -DWINDOWS_FOUNDATION_UNIVERSALAPICONTRACT_VERSION=0x130000 -I${INCLUDE_DIR} -I${INCLUDE_DIR}/opus -I${INCLUDE_DIR}/freetype2 -I${INCLUDE_DIR}/libxml2"
+EXTRACFLAGS="${EXTRACFLAGS} -D_WINDLL -D_WIN32_WINNT=0x0A00 -DWINDOWS_FOUNDATION_UNIVERSALAPICONTRACT_VERSION=0x130000 -I${INCLUDE_DIR} -I${INCLUDE_DIR}/opus -I${INCLUDE_DIR}/freetype2 -I${INCLUDE_DIR}/harfbuzz"
 
 EXTRALDFLAGS="${EXTRALDFLAGS} -APPCONTAINER:NO -MACHINE:x64 /VERBOSE:LIB Ole32.lib Kernel32.lib Gdi32.lib User32.lib Strmiids.lib Advapi32.lib OleAut32.lib Shlwapi.lib Vfw32.lib Secur32.lib Crypt32.lib ncrypt.lib Advapi32.lib -LIBPATH:${LIB_DIR}"
 

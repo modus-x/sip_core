@@ -584,6 +584,8 @@ if(MSVC)
             optimized
             ${DEPS_RELEASE}/lib/x64/libfontconfig.lib
             optimized
+            ${DEPS_RELEASE}/lib/x64/harfbuzz.lib
+            optimized
             ${DEPS_RELEASE}/lib/x64/lib_json.lib
             optimized
             ${DEPS_RELEASE}/lib/x64/libzlib.lib
@@ -621,6 +623,8 @@ if(MSVC)
             ${DEPS_DEBUG}/lib/x64/libiconv.lib
             debug
             ${DEPS_DEBUG}/lib/x64/libfontconfig.lib
+            debug
+            ${DEPS_DEBUG}/lib/x64/harfbuzz.lib
             debug
             ${DEPS_DEBUG}/lib/x64/lib_json.lib
             debug
@@ -726,6 +730,8 @@ else()
 	    pkg_search_module(speex_${TARGET} REQUIRED IMPORTED_TARGET speex)
 	    pkg_search_module(speexdsp_${TARGET} REQUIRED IMPORTED_TARGET speexdsp)
 	    pkg_search_module(zlib_${TARGET} REQUIRED IMPORTED_TARGET zlib)
+	    pkg_search_module(fontconfig_${TARGET} REQUIRED IMPORTED_TARGET fontconfig)
+	    pkg_search_module(harfbuzz_${TARGET} REQUIRED IMPORTED_TARGET harfbuzz)
 
     # LD_FLAGS are broken on Apple, erase them
     if(APPLE)
@@ -765,6 +771,8 @@ else()
 	             PkgConfig::speexdsp_${TARGET}
 	             PkgConfig::fmt_${TARGET}
 	             PkgConfig::zlib_${TARGET}
+	             PkgConfig::fontconfig_${TARGET}
+	             PkgConfig::harfbuzz_${TARGET}
 	      # for passing video frames to external libraries
 	      PUBLIC PkgConfig::avutil_${TARGET})
 

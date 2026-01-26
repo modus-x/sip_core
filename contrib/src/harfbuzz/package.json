@@ -1,0 +1,24 @@
+{
+    "name": "harfbuzz",
+    "version": "12.2.0",
+    "url": "https://nexus.svetlocal.ru/repository/github-artifacts/harfbuzz-__VERSION__.tar.gz",
+    "deps": [],
+    "patches": [ "CMakeLists-freetype2.txt.patch" ],
+    "project_paths": [
+        "msvc/harfbuzz.vcxproj",
+        "msvc/harfbuzz-subset.vcxproj"
+    ],
+    "win_patches": [],
+    "with_env" : "",
+    "custom_scripts":
+    {
+        "pre_build": [ 
+            "mkdir msvc & cd msvc & cmake .. -G %CMAKE_GENERATOR% -DHB_HAVE_FREETYPE=ON -DFREETYPE_INCLUDE_DIRS=\"%INSTALL_PREFIX%\\include\\freetype2\"" 
+        ],
+        "build": [],
+        "post_build": [
+            "cd \"%INSTALL_PREFIX%\" && move /Y harfbuzz*.lib \".\\lib\\x64\"",
+            "mkdir \"%INSTALL_PREFIX%\\include\\harfbuzz\" & cd src & xcopy /S /Y *.h \"%INSTALL_PREFIX%\\include\\harfbuzz\""
+        ]
+    }
+}
