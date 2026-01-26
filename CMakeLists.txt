@@ -432,6 +432,10 @@ if(ENABLE_VIDEO)
   target_compile_definitions(${PROJECT_NAME} PUBLIC ENABLE_VIDEO)
 endif()
 
+if(HW_ACCEL)
+  target_compile_definitions(${PROJECT_NAME} PUBLIC RING_ACCEL)
+endif()
+
 if(ANDROID)
   target_compile_definitions(${PROJECT_NAME} PUBLIC HAVE_OPENSL)
 endif()
