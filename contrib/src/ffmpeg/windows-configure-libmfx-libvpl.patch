@@ -1,6 +1,6 @@
-diff --git a/configure-old b/configure
+diff --git a/configure b/configure
 index 9052f18..93402f3 100644
---- a/configure-old
+--- a/configure
 +++ b/configure
 @@ -7162,22 +7162,14 @@ if enabled libmfx && enabled libvpl; then
  # pkg-config support.  Instead, users should make sure that the build
