@@ -1,0 +1,20 @@
+{
+    "name": "libmfx",
+    "version": "23.2.2",
+    "url": "https://nexus.svetlocal.ru/repository/github-artifacts/MediaSDK-intel-mediasdk-__VERSION__.tar.gz",
+    "deps": [],
+    "patches": ["libmfx_vs2015.vcxproj.patch"],
+    "project_paths": [
+        "api/mfx_dispatch/windows/libmfx_vs2015.vcxproj"
+    ],
+    "win_patches": [],
+    "with_env" : "",
+    "custom_scripts": {
+        "pre_build": [],
+        "build": [],
+        "post_build": [
+            "mkdir \"%INSTALL_PREFIX%\\include\\libmfx\" & cd api/include & xcopy /S /Y *.h \"%INSTALL_PREFIX%\\include\\libmfx\"",
+            "mkdir \"%INSTALL_PREFIX%\\include\\libmfx\\mfx\" & cd api/mfx_dispatch/windows/include & xcopy /S /Y *.h \"%INSTALL_PREFIX%\\include\\libmfx\\mfx\""
+        ]
+    }
+}

@@ -8,10 +8,14 @@
         "opus",
         "freetype2",
         "fontconfig",
-        "harfbuzz"
+        "harfbuzz",
+        "ffnvcodec",
+        "libvpl"
     ],
     "patches": [
-        "windows-configure.patch"
+        "windows-configure.patch",
+        "windows-configure-ffnvcodec.patch",
+        "windows-configure-libmfx-libvpl.patch"
     ],
     "win_patches": [
     ],

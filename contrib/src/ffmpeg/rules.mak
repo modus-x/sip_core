@@ -4,7 +4,9 @@ FFMPEG_URL := https://nexus.svetlocal.ru/repository/github-artifacts/FFmpeg-$(FF
 
 PKGS+=ffmpeg
 
-DEPS_ffmpeg = iconv zlib vpx opus speex x264 freetype2 fontconfig harfbuzz
+DEPS_ffmpeg = iconv zlib vpx opus speex x264 freetype2 fontconfig harfbuzz ffnvcodec libvdpau libva libvpl
+
+LDFLAGS = -ldrm
 
 FFMPEGCONF = \
 	--cc="$(CC)" \
@@ -185,6 +187,36 @@ FFMPEGCONF += \
 	--enable-libxcb-xfixes \
 	--enable-libxcb-shape
 # End Desktop Linux:
+
+FFMPEGCONF += \
+	--enable-vdpau \
+	--enable-hwaccel=h264_vdpau \
+	--enable-hwaccel=vp9_vdpau \
+	--enable-vaapi \
+	--enable-hwaccel=h264_vaapi \
+	--enable-hwaccel=vp8_vaapi \
+	--enable-hwaccel=vp9_vaapi \
+	--enable-encoder=h264_vaapi \
+	--enable-encoder=vp8_vaapi \
+	--enable-encoder=vp9_vaapi \
+	--enable-libvpl \
+	--enable-encoder=h264_qsv \
+	--enable-decoder=h264_qsv \
+	--enable-decoder=h264_cuvid \
+	--enable-decoder=vp9_qsv \
+	--enable-encoder=vp9_qsv \
+	--enable-decoder=vp8_cuvid \
+	--enable-decoder=vp9_cuvid \
+	--enable-cuvid \
+	--enable-cuda \
+	--enable-ffnvcodec \
+	--enable-nvdec \
+	--enable-nvenc \
+	--enable-hwaccel=h264_nvdec \
+	--enable-hwaccel=vp8_nvdec \
+	--enable-hwaccel=vp9_nvdec \
+	--enable-encoder=h264_nvenc
+
 endif
 
 # End HAVE_LINUX:
@@ -267,6 +299,7 @@ ffmpeg: ffmpeg-$(FFMPEG_HASH).tar.gz
 	cd $< && $(HOSTVARS) ./configure \
 		--extra-cflags="$(CFLAGS)" \
 		--extra-ldflags="$(LDFLAGS)" $(FFMPEGCONF) \
+		--extra-libs="-ldrm" \
 		--prefix="$(PREFIX)" --enable-static --disable-shared \
                 --pkg-config-flags="--static"
 	cd $< && $(MAKE) install-libs install-headers

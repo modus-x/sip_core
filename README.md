@@ -52,6 +52,12 @@ cmake --build . --config Release/Debug --target install
 - **_yasm_**
 - **_nasm_**
 - **_pkg-config_**
+- **_autoconf_**
+- **_libtool_**
+- **_python3-dev_**
+- **_gperf_**
+- **_gettext_**
+- **_autopoint_**
 - **_curl + wget + tar + git_**
 
 На darwin + linux установки библиотек, содержащих данные инструменты,  любым способом - должно быть достаточно. Главное, чтобы они были доступны в PATH.

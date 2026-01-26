@@ -594,6 +594,8 @@ if(MSVC)
             optimized
             ${DEPS_RELEASE}/lib/x64/libzlib.lib
             optimized
+            ${DEPS_RELEASE}/lib/x64/vpl.lib
+            optimized
             ${DEPS_RELEASE}/libyaml-cppmd.lib
             optimized
             ${DEPS_RELEASE}/fmt.lib
@@ -633,6 +635,8 @@ if(MSVC)
             ${DEPS_DEBUG}/lib/x64/lib_json.lib
             debug
             ${DEPS_DEBUG}/lib/x64/libzlib.lib
+            debug
+            ${DEPS_DEBUG}/lib/x64/vpl.lib
             debug
             ${DEPS_DEBUG}/libyaml-cppmdd.lib
             debug
@@ -718,6 +722,14 @@ else()
                         webrtc-audio-processing)
     endif()
 
+    if(LINUX)
+      pkg_search_module(vpl_${TARGET} REQUIRED IMPORTED_TARGET vpl)
+      pkg_search_module(libva_${TARGET} REQUIRED IMPORTED_TARGET libva)
+      pkg_search_module(libva-drm_${TARGET} REQUIRED IMPORTED_TARGET libva-drm)
+      pkg_search_module(drm_${TARGET} REQUIRED IMPORTED_TARGET libdrm)
+      pkg_search_module(vdpau_${TARGET} REQUIRED IMPORTED_TARGET vdpau)
+    endif()
+
     pkg_search_module(pjproject_${TARGET} REQUIRED IMPORTED_TARGET libpjproject)
     pkg_search_module(avformat_${TARGET} REQUIRED IMPORTED_TARGET libavformat)
     pkg_search_module(vpx_${TARGET} REQUIRED IMPORTED_TARGET vpx)
@@ -784,7 +796,13 @@ else()
       target_link_libraries(${PROJECT_NAME}
                             PRIVATE PkgConfig::webrtcap_${TARGET})
       target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::udev
-                                                    PkgConfig::pulseaudio)
+                                                    PkgConfig::pulseaudio
+	                                                  PkgConfig::vpl_${TARGET}
+                                                    PkgConfig::libva_${TARGET}
+                                                    PkgConfig::libva-drm_${TARGET}
+                                                    PkgConfig::drm_${TARGET}
+                                                    PkgConfig::vdpau_${TARGET}
+                                                    )
       # X11, XCB, XCB_SHM, XCB_SHAPE, XCB_XFIXES for desktop share
       pkg_search_module(X11 REQUIRED IMPORTED_TARGET x11)
       pkg_search_module(XCB REQUIRED IMPORTED_TARGET xcb)
