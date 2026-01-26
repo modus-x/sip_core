@@ -40,7 +40,7 @@ std::vector<std::string> split(const std::string& s);
 int
 main()
 {
-            std::cout << "SIP core Console App" << std::endl;
+    std::cout << "SIP core Console App" << std::endl;
     std::cout << "Available commands:\n\tcall <callee>,\n\tadd <callee>,\n\tdel <callee>,\n\tmove <from> <to>,\n\t"
                  "conf <callee1> ... <calleeN>,\n\tswitch <device>,\n\thold,\n\tresume,\n\thangup,\n\tcapOn,\n\t"
                  "capOff,\n\tvideo,\n\treregister,\n\tunregister,\n\tsubscribe,\n\tunsubscribe,\n\tpublish,\n\texit"
@@ -120,9 +120,14 @@ main()
                 continue;
             }
 
+            if (controller.hasActiveCall()) {
+                std::cerr << "Error: already in an active call state." << std::endl;
+                continue;
+            }
+
             std::string callee = tokens[1];
             if (!controller.call(callee)) {
-                std::cerr << "Error: already in an active call state" << std::endl;
+                std::cerr << "Error: failed to start a new call." << std::endl;
                 continue;
             }
 
@@ -138,7 +143,6 @@ main()
             if (!controller.hasActiveCall()) {
                 std::cerr << "Error: No active call." << std::endl;
                 continue;
-                ;
             }
 
             if (!controller.addParticipant(tokens[1]))
@@ -155,7 +159,6 @@ main()
             if (!controller.hasActiveCall()) {
                 std::cerr << "Error: No active call." << std::endl;
                 continue;
-                ;
             }
 
             controller.addParticipant(tokens[1]);

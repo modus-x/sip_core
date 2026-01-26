@@ -176,6 +176,15 @@ CallController::init()
 
     if (!libsip_core::start(cwd + "/test.yaml", ""))
         return false;
+    
+    const std::vector<unsigned> active_codecs = 
+    {
+        // audio
+        AV_CODEC_ID_OPUS, AV_CODEC_ID_PCM_ALAW, AV_CODEC_ID_PCM_MULAW,
+        // video 
+        AV_CODEC_ID_H264, AV_CODEC_ID_VP8, AV_CODEC_ID_VP9 
+    };
+    libsip_core::setActiveCodecList(m_accountId, active_codecs);
 
     // Initialize SDL
     if (!SDL_Init(SDL_INIT_VIDEO)) {
