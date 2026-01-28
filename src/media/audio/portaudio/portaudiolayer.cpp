@@ -27,10 +27,12 @@
 #include "audio/ringbufferpool.h"
 #include "audio/ringbuffer.h"
 #include "audio/audioloop.h"
+#include "libav_deps.h"
 
 #include <portaudio.h>
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 namespace sip_core {
 
@@ -67,23 +69,30 @@ struct PortAudioLayer::PortAudioLayerImpl
 
     std::array<PaStream*, static_cast<int>(Direction::End)> streams_;
 
+    // Track the actual PortAudio format opened for input/output streams
+    // This is critical for proper format conversion in callbacks
+    PaSampleFormat inputStreamFormat_ {paInt16};
+    PaSampleFormat outputStreamFormat_ {paInt16};
+    double inputStreamSampleRate_ {48000.0};
+    double outputStreamSampleRate_ {48000.0};
+
     int paOutputCallback(PortAudioLayer& parent,
-                         const AudioSample* inputBuffer,
-                         AudioSample* outputBuffer,
+                         const void* inputBuffer,
+                         void* outputBuffer,
                          unsigned long framesPerBuffer,
                          const PaStreamCallbackTimeInfo* timeInfo,
                          PaStreamCallbackFlags statusFlags);
 
     int paInputCallback(PortAudioLayer& parent,
-                        const AudioSample* inputBuffer,
-                        AudioSample* outputBuffer,
+                        const void* inputBuffer,
+                        void* outputBuffer,
                         unsigned long framesPerBuffer,
                         const PaStreamCallbackTimeInfo* timeInfo,
                         PaStreamCallbackFlags statusFlags);
 
     int paIOCallback(PortAudioLayer& parent,
-                     const AudioSample* inputBuffer,
-                     AudioSample* outputBuffer,
+                     const void* inputBuffer,
+                     void* outputBuffer,
                      unsigned long framesPerBuffer,
                      const PaStreamCallbackTimeInfo* timeInfo,
                      PaStreamCallbackFlags statusFlags);
@@ -582,6 +591,227 @@ const char* formatToString(PaSampleFormat fmt) {
     }
 }
 
+// Get the size in bytes of a single sample for a given PortAudio format
+static size_t getBytesPerSample(PaSampleFormat fmt) {
+    switch (fmt) {
+        case paFloat32: return 4;
+        case paInt32:   return 4;
+        case paInt24:   return 3;
+        case paInt16:   return 2;
+        case paInt8:    return 1;
+        case paUInt8:   return 1;
+        default:        return 2; // fallback to Int16 size
+    }
+}
+
+// Convert PortAudio format to FFmpeg AVSampleFormat
+static AVSampleFormat paFormatToAVFormat(PaSampleFormat paFmt) {
+    switch (paFmt) {
+        case paFloat32: return AV_SAMPLE_FMT_FLT;
+        case paInt32:   return AV_SAMPLE_FMT_S32;
+        case paInt16:   return AV_SAMPLE_FMT_S16;
+        // paInt24, paInt8, paUInt8 don't have direct AVSampleFormat equivalents
+        // We'll handle these by converting to S16 or S32 in the conversion functions
+        case paInt24:   return AV_SAMPLE_FMT_S32; // Will need to pack/unpack
+        case paInt8:    return AV_SAMPLE_FMT_S16; // Will need to scale
+        case paUInt8:   return AV_SAMPLE_FMT_S16; // Will need to scale and offset
+        default:        return AV_SAMPLE_FMT_S16;
+    }
+}
+
+// Convert PortAudio input buffer to int16_t samples (AudioSample)
+// This handles all PortAudio formats and converts them to 16-bit PCM
+static void convertPaInputToInt16(const void* paBuffer, 
+                                   int16_t* outBuffer,
+                                   size_t frameCount,
+                                   int channels,
+                                   PaSampleFormat paFormat) {
+    const size_t sampleCount = frameCount * channels;
+    
+    SIP_CORE_DBG("[PortAudio Format Convert] Converting %zu samples from %s to Int16", 
+                 sampleCount, formatToString(paFormat));
+    
+    switch (paFormat) {
+        case paFloat32: {
+            const float* src = static_cast<const float*>(paBuffer);
+            for (size_t i = 0; i < sampleCount; ++i) {
+                // Clamp float to [-1.0, 1.0] and convert to int16
+                float sample = src[i];
+                sample = std::max(-1.0f, std::min(1.0f, sample));
+                outBuffer[i] = static_cast<int16_t>(sample * 32767.0f);
+            }
+            break;
+        }
+        case paInt32: {
+            const int32_t* src = static_cast<const int32_t*>(paBuffer);
+            for (size_t i = 0; i < sampleCount; ++i) {
+                // Shift right by 16 bits to convert 32-bit to 16-bit
+                outBuffer[i] = static_cast<int16_t>(src[i] >> 16);
+            }
+            break;
+        }
+        case paInt24: {
+            // Int24 is packed as 3 bytes per sample (little-endian)
+            const uint8_t* src = static_cast<const uint8_t*>(paBuffer);
+            for (size_t i = 0; i < sampleCount; ++i) {
+                // Read 24-bit sample (little-endian: low, mid, high)
+                int32_t sample = src[i * 3] | (src[i * 3 + 1] << 8) | (src[i * 3 + 2] << 16);
+                // Sign extend if negative (bit 23 is sign bit)
+                if (sample & 0x800000) {
+                    sample |= 0xFF000000;
+                }
+                // Shift right by 8 to convert 24-bit to 16-bit
+                outBuffer[i] = static_cast<int16_t>(sample >> 8);
+            }
+            break;
+        }
+        case paInt16: {
+            // Direct copy - no conversion needed
+            const int16_t* src = static_cast<const int16_t*>(paBuffer);
+            std::copy_n(src, sampleCount, outBuffer);
+            break;
+        }
+        case paInt8: {
+            const int8_t* src = static_cast<const int8_t*>(paBuffer);
+            for (size_t i = 0; i < sampleCount; ++i) {
+                // Scale 8-bit to 16-bit (multiply by 256)
+                outBuffer[i] = static_cast<int16_t>(src[i]) << 8;
+            }
+            break;
+        }
+        case paUInt8: {
+            const uint8_t* src = static_cast<const uint8_t*>(paBuffer);
+            for (size_t i = 0; i < sampleCount; ++i) {
+                // Convert unsigned 8-bit [0, 255] to signed 16-bit [-32768, 32767]
+                // First convert to signed by subtracting 128, then scale
+                outBuffer[i] = (static_cast<int16_t>(src[i]) - 128) << 8;
+            }
+            break;
+        }
+        default:
+            SIP_CORE_ERR("[PortAudio Format Convert] Unknown format %d, zeroing output", paFormat);
+            std::fill_n(outBuffer, sampleCount, static_cast<int16_t>(0));
+            break;
+    }
+}
+
+// Convert int16_t samples (AudioSample) to PortAudio output buffer
+// This handles all PortAudio formats
+static void convertInt16ToPaOutput(const int16_t* inBuffer,
+                                    void* paBuffer,
+                                    size_t frameCount,
+                                    int channels,
+                                    PaSampleFormat paFormat) {
+    const size_t sampleCount = frameCount * channels;
+    
+    SIP_CORE_DBG("[PortAudio Format Convert] Converting %zu samples from Int16 to %s",
+                 sampleCount, formatToString(paFormat));
+    
+    switch (paFormat) {
+        case paFloat32: {
+            float* dst = static_cast<float*>(paBuffer);
+            for (size_t i = 0; i < sampleCount; ++i) {
+                // Convert int16 to float [-1.0, 1.0]
+                dst[i] = static_cast<float>(inBuffer[i]) / 32768.0f;
+            }
+            break;
+        }
+        case paInt32: {
+            int32_t* dst = static_cast<int32_t*>(paBuffer);
+            for (size_t i = 0; i < sampleCount; ++i) {
+                // Shift left by 16 bits to convert 16-bit to 32-bit
+                dst[i] = static_cast<int32_t>(inBuffer[i]) << 16;
+            }
+            break;
+        }
+        case paInt24: {
+            // Int24 is packed as 3 bytes per sample (little-endian)
+            uint8_t* dst = static_cast<uint8_t*>(paBuffer);
+            for (size_t i = 0; i < sampleCount; ++i) {
+                // Shift left by 8 to convert 16-bit to 24-bit
+                int32_t sample = static_cast<int32_t>(inBuffer[i]) << 8;
+                // Write 24-bit sample (little-endian: low, mid, high)
+                dst[i * 3] = sample & 0xFF;
+                dst[i * 3 + 1] = (sample >> 8) & 0xFF;
+                dst[i * 3 + 2] = (sample >> 16) & 0xFF;
+            }
+            break;
+        }
+        case paInt16: {
+            // Direct copy - no conversion needed
+            int16_t* dst = static_cast<int16_t*>(paBuffer);
+            std::copy_n(inBuffer, sampleCount, dst);
+            break;
+        }
+        case paInt8: {
+            int8_t* dst = static_cast<int8_t*>(paBuffer);
+            for (size_t i = 0; i < sampleCount; ++i) {
+                // Scale 16-bit to 8-bit (divide by 256)
+                dst[i] = static_cast<int8_t>(inBuffer[i] >> 8);
+            }
+            break;
+        }
+        case paUInt8: {
+            uint8_t* dst = static_cast<uint8_t*>(paBuffer);
+            for (size_t i = 0; i < sampleCount; ++i) {
+                // Convert signed 16-bit to unsigned 8-bit [0, 255]
+                // Scale down and add offset of 128
+                dst[i] = static_cast<uint8_t>((inBuffer[i] >> 8) + 128);
+            }
+            break;
+        }
+        default:
+            SIP_CORE_ERR("[PortAudio Format Convert] Unknown format %d, zeroing output", paFormat);
+            std::memset(paBuffer, 0, sampleCount * getBytesPerSample(paFormat));
+            break;
+    }
+}
+
+// Fill PortAudio output buffer with silence in the appropriate format
+static void fillPaBufferWithSilence(void* paBuffer,
+                                     size_t frameCount,
+                                     int channels,
+                                     PaSampleFormat paFormat) {
+    const size_t sampleCount = frameCount * channels;
+    
+    switch (paFormat) {
+        case paFloat32: {
+            float* dst = static_cast<float*>(paBuffer);
+            std::fill_n(dst, sampleCount, 0.0f);
+            break;
+        }
+        case paInt32: {
+            int32_t* dst = static_cast<int32_t*>(paBuffer);
+            std::fill_n(dst, sampleCount, static_cast<int32_t>(0));
+            break;
+        }
+        case paInt24: {
+            // Zero out all bytes
+            std::memset(paBuffer, 0, sampleCount * 3);
+            break;
+        }
+        case paInt16: {
+            int16_t* dst = static_cast<int16_t*>(paBuffer);
+            std::fill_n(dst, sampleCount, static_cast<int16_t>(0));
+            break;
+        }
+        case paInt8: {
+            int8_t* dst = static_cast<int8_t*>(paBuffer);
+            std::fill_n(dst, sampleCount, static_cast<int8_t>(0));
+            break;
+        }
+        case paUInt8: {
+            // Silence for unsigned 8-bit is 128 (midpoint)
+            uint8_t* dst = static_cast<uint8_t*>(paBuffer);
+            std::fill_n(dst, sampleCount, static_cast<uint8_t>(128));
+            break;
+        }
+        default:
+            std::memset(paBuffer, 0, sampleCount * getBytesPerSample(paFormat));
+            break;
+    }
+}
+
 static std::pair<PaSampleFormat, double>
 openStreamDevice(PaStream**      stream,
                  PaDeviceIndex   device,
@@ -604,91 +834,97 @@ openStreamDevice(PaStream**      stream,
     auto supportedCombinations = getSupportedFormatSampleRates(device, direction);
     SIP_CORE_INFO() << "PortAudioLayer: Supported format/sample rate combinations:";
 
+    if (supportedCombinations.empty()) {
+        SIP_CORE_ERR("PortAudioLayer: No supported format/sample rate combinations found for device %d (%s).",
+                     device, device_info->name);
+        return { 0, 0.0 };
+    }
+
     const double         requested_rate   = device_info->defaultSampleRate;
     const PaSampleFormat requested_format = paInt16;
 
-    bool               found_exact_pair = false;
-    bool               found_exact_fmt  = false;
-    double             selected_rate    = 0.0;
-    PaSampleFormat     selected_format  = 0;
-    double             fallback_rate    = 0.0;
-    PaSampleFormat     fallback_format  = 0;
+    // Build a prioritized list of format/rate pairs to try:
+    // 1. Exact match (requested_format @ requested_rate)
+    // 2. Requested format at any rate
+    // 3. Any format at requested rate
+    // 4. Any other combination
+    std::vector<FormatRatePair> prioritizedCombinations;
+    std::vector<FormatRatePair> formatMatchOnly;
+    std::vector<FormatRatePair> rateMatchOnly;
+    std::vector<FormatRatePair> noMatch;
 
-    // 1) First pass: see if any combination of rate and fmt is what we trying to find
     for (const auto& [fmt, rate] : supportedCombinations) {
         SIP_CORE_INFO() << "PortAudioLayer: - Format: " << formatToString(fmt) 
                         << ", Rate: " << rate;
 
-        if (rate == requested_rate && fmt == requested_format && !found_exact_pair) {
-            selected_rate   = rate;
-            selected_format = fmt;
-            found_exact_pair = true;
-            SIP_CORE_INFO() << "PortAudioLayer: Found exact rate match!";
-        }
-
-        // Meanwhile remember the first time we see the requested_format
-        if (!found_exact_fmt && fmt == requested_format && !found_exact_pair) {
-            fallback_format = fmt;
-            fallback_rate   = rate;
-            found_exact_fmt = true;
-        }
-    }
-
-    // 2) If we didn�t find any entry at the requested_rate, try format == requested_format.
-    if (!found_exact_pair) {
-        if (found_exact_fmt) {
-            selected_rate   = fallback_rate;
-            selected_format = fallback_format;
+        if (rate == requested_rate && fmt == requested_format) {
+            // Exact match - highest priority
+            prioritizedCombinations.insert(prioritizedCombinations.begin(), {fmt, rate});
+            SIP_CORE_INFO() << "PortAudioLayer: Found exact match (preferred)!";
+        } else if (fmt == requested_format) {
+            // Format matches, different rate
+            formatMatchOnly.push_back({fmt, rate});
+        } else if (rate == requested_rate) {
+            // Rate matches, different format
+            rateMatchOnly.push_back({fmt, rate});
+        } else {
+            // No match
+            noMatch.push_back({fmt, rate});
         }
     }
 
-    // 3) If we still have neither a matching rate nor a matching format, we cannot open.
-    if (selected_format == 0 || selected_rate == 0.0) {
-        SIP_CORE_WARN("PortAudioLayer: Neither requested sample rate (%.0f) nor "
-                      "requested sample format (%s) is supported by device %d (%s). "
-                      "Skipping stream open.",
-                      requested_rate,
-                      formatToString(requested_format),
-                      device,
-                      device_info->name);
-        return { 0, 0.0 };
-    }
-
-    // Log which combination we�re actually going to use:
-    SIP_CORE_INFO() << "PortAudioLayer: Selecting format " 
-                    << formatToString(selected_format) 
-                    << " @ rate " << selected_rate;
+    // Append in priority order
+    prioritizedCombinations.insert(prioritizedCombinations.end(), formatMatchOnly.begin(), formatMatchOnly.end());
+    prioritizedCombinations.insert(prioritizedCombinations.end(), rateMatchOnly.begin(), rateMatchOnly.end());
+    prioritizedCombinations.insert(prioritizedCombinations.end(), noMatch.begin(), noMatch.end());
 
     PaStreamParameters params;
     params.device = device;
     params.channelCount = is_out ? device_info->maxOutputChannels
                                  : device_info->maxInputChannels;
-    params.sampleFormat = selected_format;
     params.suggestedLatency = is_out ? device_info->defaultLowOutputLatency
                                      : device_info->defaultLowInputLatency;
     params.hostApiSpecificStreamInfo = nullptr;
 
-    if (!is_out) {
-        SIP_CORE_INFO() << "PortAudioLayer: Is format supported (input): "
-                        << Pa_IsFormatSupported(&params, nullptr, selected_rate);
-    }
+    // Try each combination until one works
+    for (const auto& [fmt, rate] : prioritizedCombinations) {
+        params.sampleFormat = fmt;
 
-    PaError err = Pa_OpenStream(stream,
-                                is_out ? nullptr         : &params,
-                                is_out ? &params         : nullptr,
-                                selected_rate,
-                                paFramesPerBufferUnspecified,
-                                paNoFlag,
-                                callback,
-                                user_data);
+        SIP_CORE_INFO() << "PortAudioLayer: Attempting to open stream with format "
+                        << formatToString(fmt) << " @ rate " << rate;
 
-    if (err != paNoError) {
+        if (!is_out) {
+            PaError supportErr = Pa_IsFormatSupported(&params, nullptr, rate);
+            SIP_CORE_INFO() << "PortAudioLayer: Is format supported (input): " << supportErr;
+        }
+
+        PaError err = Pa_OpenStream(stream,
+                                    is_out ? nullptr         : &params,
+                                    is_out ? &params         : nullptr,
+                                    rate,
+                                    paFramesPerBufferUnspecified,
+                                    paNoFlag,
+                                    callback,
+                                    user_data);
+
+        if (err == paNoError) {
+            SIP_CORE_INFO() << "PortAudioLayer: Successfully opened stream with format "
+                            << formatToString(fmt) << " @ rate " << rate;
+            return { fmt, rate };
+        }
+
+        // Log the error and continue trying other combinations
         const char* errorText = Pa_GetErrorText(err);
-        SIP_CORE_ERR("PortAudioLayer error: %s. Reporting it!", errorText);
-        emitSignal<libsip_core::ConfigurationSignal::DeviceOpenError>(errorText, is_out);
+        SIP_CORE_WARN("PortAudioLayer: Failed to open stream with format %s @ rate %.0f: %s. Trying next combination...",
+                      formatToString(fmt), rate, errorText);
     }
 
-    return { selected_format, selected_rate };
+    // All combinations failed
+    SIP_CORE_ERR("PortAudioLayer: Failed to open stream with any supported format/rate combination for device %d (%s).",
+                 device, device_info->name);
+    emitSignal<libsip_core::ConfigurationSignal::DeviceOpenError>("All format/rate combinations failed", is_out);
+
+    return { 0, 0.0 };
 }
 
 static void
@@ -732,10 +968,13 @@ openFullDuplexStream(PaStream** stream,
 bool
 PortAudioLayer::PortAudioLayerImpl::initInputStream(PortAudioLayer& parent)
 {
-    SIP_CORE_DBG("Open PortAudio Input Stream");
+    SIP_CORE_INFO("[PortAudio Input] Opening PortAudio Input Stream");
     auto& stream = streams_[Direction::Input];
     auto apiIndex = getApiIndexByType(AudioDeviceType::CAPTURE);
+    
     if (apiIndex != paNoDevice) {
+        SIP_CORE_INFO("[PortAudio Input] Found input device at index %d", apiIndex);
+        
         auto [ format, sample_rate ] = openStreamDevice(
             &streams_[Direction::Input],
             apiIndex,
@@ -748,27 +987,50 @@ PortAudioLayer::PortAudioLayerImpl::initInputStream(PortAudioLayer& parent)
                void* userData) -> int {
                 auto layer = static_cast<PortAudioLayer*>(userData);
                 return layer->pimpl_->paInputCallback(*layer,
-                                                      static_cast<const AudioSample*>(inputBuffer),
-                                                      static_cast<AudioSample*>(outputBuffer),
+                                                      inputBuffer,
+                                                      outputBuffer,
                                                       framesPerBuffer,
                                                       timeInfo,
                                                       statusFlags);
             },
             &parent);
-            parent.audioInputFormat_.sampleFormat = AV_SAMPLE_FMT_S16;
-            parent.audioInputFormat_.sample_rate = sample_rate;
+        
+        // Check if stream opened successfully
+        if (format == 0 || sample_rate == 0.0) {
+            SIP_CORE_ERR("[PortAudio Input] Failed to open input stream - format=%d, rate=%.0f",
+                         format, sample_rate);
+            return false;
+        }
+        
+        // Store the actual format for use in callbacks
+        inputStreamFormat_ = format;
+        inputStreamSampleRate_ = sample_rate;
+        
+        SIP_CORE_INFO("[PortAudio Input] Stream opened successfully:");
+        SIP_CORE_INFO("[PortAudio Input]   - PortAudio Format: %s (%d)", formatToString(format), format);
+        SIP_CORE_INFO("[PortAudio Input]   - Sample Rate: %.0f Hz", sample_rate);
+        SIP_CORE_INFO("[PortAudio Input]   - Channels: %d", parent.audioInputFormat_.nb_channels);
+        
+        // AudioFrame always uses AV_SAMPLE_FMT_S16 internally - we convert in the callback
+        parent.audioInputFormat_.sampleFormat = AV_SAMPLE_FMT_S16;
+        parent.audioInputFormat_.sample_rate = static_cast<unsigned int>(sample_rate);
+        
+        SIP_CORE_INFO("[PortAudio Input] AudioInputFormat set to: {rate=%d, channels=%d, fmt=S16}",
+                     parent.audioInputFormat_.sample_rate,
+                     parent.audioInputFormat_.nb_channels);
     } else {
-        SIP_CORE_ERR("Error: No valid input device. There will be no mic.");
+        SIP_CORE_ERR("[PortAudio Input] Error: No valid input device (paNoDevice). There will be no mic.");
         return false;
     }
 
-    SIP_CORE_DBG("Starting PortAudio Input Stream");
+    SIP_CORE_INFO("[PortAudio Input] Starting PortAudio Input Stream");
     auto err = Pa_StartStream(stream);
     if (err != paNoError) {
-        SIP_CORE_ERR("PortAudioLayer error : %s", Pa_GetErrorText(err));
+        SIP_CORE_ERR("[PortAudio Input] Pa_StartStream error: %s", Pa_GetErrorText(err));
         return false;
     }
 
+    SIP_CORE_INFO("[PortAudio Input] Input stream started successfully!");
     parent.recordChanged(true);
     return true;
 }
@@ -776,11 +1038,14 @@ PortAudioLayer::PortAudioLayerImpl::initInputStream(PortAudioLayer& parent)
 bool
 PortAudioLayer::PortAudioLayerImpl::initOutputStream(PortAudioLayer& parent, bool ringtone)
 {
-    SIP_CORE_DBG("Open PortAudio Output Stream");
+    SIP_CORE_INFO("[PortAudio Output] Opening PortAudio Output Stream (ringtone=%d)", ringtone);
     auto& stream = streams_[Direction::Output];
     auto apiIndex = getApiIndexByType(ringtone == false ? AudioDeviceType::PLAYBACK : AudioDeviceType::RINGTONE);
+    
     if (apiIndex != paNoDevice) {
-        openStreamDevice(
+        SIP_CORE_INFO("[PortAudio Output] Found output device at index %d", apiIndex);
+        
+        auto [ format, sample_rate ] = openStreamDevice(
             &stream,
             apiIndex,
             Direction::Output,
@@ -792,25 +1057,42 @@ PortAudioLayer::PortAudioLayerImpl::initOutputStream(PortAudioLayer& parent, boo
                void* userData) -> int {
                 auto layer = static_cast<PortAudioLayer*>(userData);
                 return layer->pimpl_->paOutputCallback(*layer,
-                                                       static_cast<const AudioSample*>(inputBuffer),
-                                                       static_cast<AudioSample*>(outputBuffer),
+                                                       inputBuffer,
+                                                       outputBuffer,
                                                        framesPerBuffer,
                                                        timeInfo,
                                                        statusFlags);
             },
             &parent);
+        
+        // Check if stream opened successfully
+        if (format == 0 || sample_rate == 0.0) {
+            SIP_CORE_ERR("[PortAudio Output] Failed to open output stream - format=%d, rate=%.0f",
+                         format, sample_rate);
+            return false;
+        }
+        
+        // Store the actual format for use in callbacks
+        outputStreamFormat_ = format;
+        outputStreamSampleRate_ = sample_rate;
+        
+        SIP_CORE_INFO("[PortAudio Output] Stream opened successfully:");
+        SIP_CORE_INFO("[PortAudio Output]   - PortAudio Format: %s (%d)", formatToString(format), format);
+        SIP_CORE_INFO("[PortAudio Output]   - Sample Rate: %.0f Hz", sample_rate);
+        SIP_CORE_INFO("[PortAudio Output]   - Channels: %d", parent.audioFormat_.nb_channels);
     } else {
-        SIP_CORE_ERR("Error: No valid output device. There will be no sound.");
+        SIP_CORE_ERR("[PortAudio Output] Error: No valid output device (paNoDevice). There will be no sound.");
         return false;
     }
 
-    SIP_CORE_DBG("Starting PortAudio Output Stream");
+    SIP_CORE_INFO("[PortAudio Output] Starting PortAudio Output Stream");
     auto err = Pa_StartStream(stream);
     if (err != paNoError) {
-        SIP_CORE_ERR("PortAudioLayer error : %s", Pa_GetErrorText(err));
+        SIP_CORE_ERR("[PortAudio Output] Pa_StartStream error: %s", Pa_GetErrorText(err));
         return false;
     }
 
+    SIP_CORE_INFO("[PortAudio Output] Output stream started successfully!");
     parent.playbackChanged(true);
     return true;
 }
@@ -818,17 +1100,43 @@ PortAudioLayer::PortAudioLayerImpl::initOutputStream(PortAudioLayer& parent, boo
 bool
 PortAudioLayer::PortAudioLayerImpl::initFullDuplexStream(PortAudioLayer& parent)
 {
+    SIP_CORE_INFO("[PortAudio FullDuplex] Initializing full-duplex stream");
+    
     auto apiIndexRecord = getApiIndexByType(AudioDeviceType::CAPTURE);
     auto apiIndexPlayback = getApiIndexByType(AudioDeviceType::PLAYBACK);
+    
+    SIP_CORE_INFO("[PortAudio FullDuplex] Record device index: %d, Playback device index: %d",
+                  apiIndexRecord, apiIndexPlayback);
+    
     if (apiIndexRecord == paNoDevice || apiIndexPlayback == paNoDevice) {
-        SIP_CORE_ERR("Error: Invalid input/output devices. There will be no audio.");
+        SIP_CORE_ERR("[PortAudio FullDuplex] Error: Invalid input/output devices (paNoDevice). There will be no audio.");
         return false;
     }
 
     parent.dcblocker_.reset();
 
-    SIP_CORE_DBG("Open PortAudio Full-duplex input/output stream");
+    SIP_CORE_INFO("[PortAudio FullDuplex] Opening PortAudio Full-duplex input/output stream");
     auto& stream = streams_[Direction::IO];
+    
+    // Full-duplex mode currently hardcoded to paInt16 - set the stream formats
+    // Note: openFullDuplexStream doesn't support format fallback yet
+    inputStreamFormat_ = paInt16;
+    outputStreamFormat_ = paInt16;
+    
+    auto input_device_info = Pa_GetDeviceInfo(apiIndexRecord);
+    auto output_device_info = Pa_GetDeviceInfo(apiIndexPlayback);
+    
+    if (input_device_info) {
+        inputStreamSampleRate_ = input_device_info->defaultSampleRate;
+        SIP_CORE_INFO("[PortAudio FullDuplex] Input device: %s, rate: %.0f Hz",
+                      input_device_info->name, inputStreamSampleRate_);
+    }
+    if (output_device_info) {
+        outputStreamSampleRate_ = output_device_info->defaultSampleRate;
+        SIP_CORE_INFO("[PortAudio FullDuplex] Output device: %s, rate: %.0f Hz",
+                      output_device_info->name, outputStreamSampleRate_);
+    }
+    
     openFullDuplexStream(
         &stream,
         apiIndexRecord,
@@ -841,21 +1149,27 @@ PortAudioLayer::PortAudioLayerImpl::initFullDuplexStream(PortAudioLayer& parent)
            void* userData) -> int {
             auto layer = static_cast<PortAudioLayer*>(userData);
             return layer->pimpl_->paIOCallback(*layer,
-                                               static_cast<const AudioSample*>(inputBuffer),
-                                               static_cast<AudioSample*>(outputBuffer),
+                                               inputBuffer,
+                                               outputBuffer,
                                                framesPerBuffer,
                                                timeInfo,
                                                statusFlags);
         },
         &parent);
 
-    SIP_CORE_DBG("Start PortAudio I/O Streams");
+    SIP_CORE_INFO("[PortAudio FullDuplex] Starting PortAudio I/O Streams");
     auto err = Pa_StartStream(stream);
     if (err != paNoError) {
-        SIP_CORE_ERR("PortAudioLayer error : %s", Pa_GetErrorText(err));
+        SIP_CORE_ERR("[PortAudio FullDuplex] Pa_StartStream error: %s", Pa_GetErrorText(err));
         return false;
     }
 
+    SIP_CORE_INFO("[PortAudio FullDuplex] Full-duplex stream started successfully!");
+    SIP_CORE_INFO("[PortAudio FullDuplex]   - Input Format: %s @ %.0f Hz",
+                  formatToString(inputStreamFormat_), inputStreamSampleRate_);
+    SIP_CORE_INFO("[PortAudio FullDuplex]   - Output Format: %s @ %.0f Hz",
+                  formatToString(outputStreamFormat_), outputStreamSampleRate_);
+    
     parent.recordChanged(true);
     parent.playbackChanged(true);
     return true;
@@ -863,8 +1177,8 @@ PortAudioLayer::PortAudioLayerImpl::initFullDuplexStream(PortAudioLayer& parent)
 
 int
 PortAudioLayer::PortAudioLayerImpl::paOutputCallback(PortAudioLayer& parent,
-                                                     const AudioSample* inputBuffer,
-                                                     AudioSample* outputBuffer,
+                                                     const void* inputBuffer,
+                                                     void* outputBuffer,
                                                      unsigned long framesPerBuffer,
                                                      const PaStreamCallbackTimeInfo* timeInfo,
                                                      PaStreamCallbackFlags statusFlags)
@@ -874,21 +1188,39 @@ PortAudioLayer::PortAudioLayerImpl::paOutputCallback(PortAudioLayer& parent,
     (void) timeInfo;
     (void) statusFlags;
 
+    // Log callback invocation periodically (every ~1000 calls to avoid spam)
+    static unsigned long callCount = 0;
+    if (++callCount % 1000 == 1) {
+        SIP_CORE_DBG("[PortAudio Output CB] Processing %lu frames, format=%s, channels=%d",
+                     framesPerBuffer, 
+                     formatToString(outputStreamFormat_),
+                     parent.audioFormat_.nb_channels);
+    }
+
     auto toPlay = parent.getPlayback(parent.audioFormat_, framesPerBuffer);
     if (!toPlay) {
-        std::fill_n(outputBuffer, framesPerBuffer * parent.audioFormat_.nb_channels, 0);
+        // No audio to play - fill with silence in the appropriate format
+        fillPaBufferWithSilence(outputBuffer,
+                                framesPerBuffer,
+                                parent.audioFormat_.nb_channels,
+                                outputStreamFormat_);
         return paContinue;
     }
 
-    auto nFrames = toPlay->pointer()->nb_samples * toPlay->pointer()->ch_layout.nb_channels;
-    std::copy_n((AudioSample*) toPlay->pointer()->extended_data[0], nFrames, outputBuffer);
+    // Convert from S16 (AudioFrame internal format) to PortAudio output format
+    auto nFrames = toPlay->pointer()->nb_samples;
+    convertInt16ToPaOutput(reinterpret_cast<const int16_t*>(toPlay->pointer()->extended_data[0]),
+                           outputBuffer,
+                           nFrames,
+                           toPlay->pointer()->ch_layout.nb_channels,
+                           outputStreamFormat_);
     return paContinue;
 }
 
 int
 PortAudioLayer::PortAudioLayerImpl::paInputCallback(PortAudioLayer& parent,
-                                                    const AudioSample* inputBuffer,
-                                                    AudioSample* outputBuffer,
+                                                    const void* inputBuffer,
+                                                    void* outputBuffer,
                                                     unsigned long framesPerBuffer,
                                                     const PaStreamCallbackTimeInfo* timeInfo,
                                                     PaStreamCallbackFlags statusFlags)
@@ -899,24 +1231,42 @@ PortAudioLayer::PortAudioLayerImpl::paInputCallback(PortAudioLayer& parent,
     (void) statusFlags;
 
     if (framesPerBuffer == 0) {
-        SIP_CORE_WARN("No frames for input.");
+        SIP_CORE_WARN("[PortAudio Input CB] No frames for input (framesPerBuffer=0).");
         return paContinue;
     }
 
+    // Log callback invocation periodically (every ~1000 calls to avoid spam)
+    static unsigned long callCount = 0;
+    if (++callCount % 1000 == 1) {
+        SIP_CORE_DBG("[PortAudio Input CB] Processing %lu frames, format=%s, channels=%d",
+                     framesPerBuffer, 
+                     formatToString(inputStreamFormat_),
+                     parent.audioInputFormat_.nb_channels);
+    }
+
+    // Create AudioFrame with S16 format (internal standard)
     auto inBuff = std::make_shared<AudioFrame>(parent.audioInputFormat_, framesPerBuffer);
-    auto nFrames = framesPerBuffer * parent.audioInputFormat_.nb_channels;
-    if (parent.isCaptureMuted_)
+    
+    if (parent.isCaptureMuted_) {
         libav_utils::fillWithSilence(inBuff->pointer());
-    else
-        std::copy_n(inputBuffer, nFrames, (AudioSample*) inBuff->pointer()->extended_data[0]);
+    } else {
+        // Convert from PortAudio format to S16 (AudioSample)
+        // The conversion function handles all supported PortAudio formats
+        convertPaInputToInt16(inputBuffer,
+                              reinterpret_cast<int16_t*>(inBuff->pointer()->extended_data[0]),
+                              framesPerBuffer,
+                              parent.audioInputFormat_.nb_channels,
+                              inputStreamFormat_);
+    }
+    
     parent.putRecorded(std::move(inBuff));
     return paContinue;
 }
 
 int
 PortAudioLayer::PortAudioLayerImpl::paIOCallback(PortAudioLayer& parent,
-                                                 const AudioSample* inputBuffer,
-                                                 AudioSample* outputBuffer,
+                                                 const void* inputBuffer,
+                                                 void* outputBuffer,
                                                  unsigned long framesPerBuffer,
                                                  const PaStreamCallbackTimeInfo* timeInfo,
                                                  PaStreamCallbackFlags statusFlags)
