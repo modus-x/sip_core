@@ -57,11 +57,47 @@ extern "C" {
 #include "Shlwapi.h"
 #endif
 
+#ifdef __APPLE__
+#include <CoreGraphics/CoreGraphics.h>
+#endif
+
 namespace sip_core {
 namespace video {
 
 static constexpr unsigned default_grab_width = 640;
 static constexpr unsigned default_grab_height = 480;
+
+#ifdef __APPLE__
+// Calculate scaled dimensions that fit within maxWidth x maxHeight while preserving aspect ratio
+static std::pair<unsigned, unsigned> calculateScaledResolution(
+    unsigned srcWidth, unsigned srcHeight,
+    unsigned maxWidth, unsigned maxHeight)
+{
+    if (srcWidth <= maxWidth && srcHeight <= maxHeight) {
+        return {srcWidth, srcHeight};
+    }
+
+    float srcAspect = static_cast<float>(srcWidth) / srcHeight;
+    float maxAspect = static_cast<float>(maxWidth) / maxHeight;
+
+    unsigned targetWidth, targetHeight;
+    if (srcAspect > maxAspect) {
+        // Width is the limiting factor
+        targetWidth = maxWidth;
+        targetHeight = static_cast<unsigned>(maxWidth / srcAspect);
+    } else {
+        // Height is the limiting factor
+        targetHeight = maxHeight;
+        targetWidth = static_cast<unsigned>(maxHeight * srcAspect);
+    }
+
+    // Round to 8-pixel boundary for encoder compatibility
+    targetWidth = (targetWidth >> 3) << 3;
+    targetHeight = (targetHeight >> 3) << 3;
+
+    return {targetWidth, targetHeight};
+}
+#endif
 
 VideoInput::VideoInput(VideoInputMode inputMode, const std::string& id_)
     : VideoGenerator::VideoGenerator()
@@ -224,9 +260,9 @@ VideoInput::captureFrame()
         // For camera devices, verify the device hasn't been disconnected
         if (decOpts_.format == "video4linux2" || decOpts_.format == "dshow" 
             || decOpts_.format == "avfoundation") {
-            if (!sip_core::getVideoDeviceMonitor().deviceExists(decOpts_.name)) {
+            if (!sip_core::getVideoDeviceMonitor().deviceExists(decOpts_.input)) {
                 SIP_CORE_WARN("Device \"%s\" disconnected during capture, stopping",
-                              decOpts_.name.c_str());
+                              decOpts_.input.c_str());
                 return false;
             }
         }
@@ -237,9 +273,9 @@ VideoInput::captureFrame()
         // For repeated read errors, check if device still exists
         if (decOpts_.format == "video4linux2" || decOpts_.format == "dshow" 
             || decOpts_.format == "avfoundation") {
-            if (!sip_core::getVideoDeviceMonitor().deviceExists(decOpts_.name)) {
+            if (!sip_core::getVideoDeviceMonitor().deviceExists(decOpts_.input)) {
                 SIP_CORE_WARN("Device \"%s\" disconnected (read error), stopping",
-                              decOpts_.name.c_str());
+                              decOpts_.input.c_str());
                 return false;
             }
         }
@@ -375,9 +411,9 @@ VideoInput::createDecoder()
         // For camera devices, check if the device still exists before retrying
         if (decOpts_.format == "video4linux2" || decOpts_.format == "dshow" 
             || decOpts_.format == "avfoundation") {
-            if (!sip_core::getVideoDeviceMonitor().deviceExists(decOpts_.name)) {
+            if (!sip_core::getVideoDeviceMonitor().deviceExists(decOpts_.input)) {
                 SIP_CORE_WARN("Device \"%s\" disconnected, stopping input",
-                              decOpts_.name.c_str());
+                              decOpts_.input.c_str());
                 foundDecOpts(decOpts_);
                 return;
             }
@@ -596,17 +632,39 @@ VideoInput::initAVFoundation(const std::string& display)
     decOpts_.input = "Capture screen 0";
     decOpts_.framerate = sip_core::getVideoDeviceMonitor().getDeviceParams(DEVICE_DESKTOP).framerate;
 
+    // Get actual screen dimensions using CoreGraphics
+    CGDirectDisplayID mainDisplay = CGMainDisplayID();
+    size_t screenWidth = CGDisplayPixelsWide(mainDisplay);
+    size_t screenHeight = CGDisplayPixelsHigh(mainDisplay);
+
+    // Parse user-provided dimensions if available (overrides detected screen size)
     if (space != std::string::npos) {
         std::istringstream iss(display.substr(space + 1));
         char sep;
         unsigned w, h;
         iss >> w >> sep >> h;
-        decOpts_.width = round2pow(w, 3);
-        decOpts_.height = round2pow(h, 3);
-    } else {
-        decOpts_.width = default_grab_width;
-        decOpts_.height = default_grab_height;
+        if (w > 0 && h > 0) {
+            screenWidth = w;
+            screenHeight = h;
+        }
     }
+
+    // Cap at 1920x1080 maximum to prevent lag on large displays
+    constexpr unsigned MAX_CAPTURE_WIDTH = 1920;
+    constexpr unsigned MAX_CAPTURE_HEIGHT = 1080;
+
+    auto [targetWidth, targetHeight] = calculateScaledResolution(
+        static_cast<unsigned>(screenWidth),
+        static_cast<unsigned>(screenHeight),
+        MAX_CAPTURE_WIDTH,
+        MAX_CAPTURE_HEIGHT);
+
+    decOpts_.width = targetWidth;
+    decOpts_.height = targetHeight;
+
+    SIP_CORE_DBG("initAVFoundation: screen %zux%zu -> target %ux%u",
+                 screenWidth, screenHeight, targetWidth, targetHeight);
+
     return true;
 }
 

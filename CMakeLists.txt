@@ -801,7 +801,8 @@ else()
 
     target_link_libraries(
       ${PROJECT_NAME} PRIVATE resolv "-framework AudioToolbox"
-                              "-framework CoreAudio" "-framework Accelerate")
+                              "-framework CoreAudio" "-framework Accelerate"
+                              "-framework CoreGraphics")
   endif()
 
   if(ANDROID)
