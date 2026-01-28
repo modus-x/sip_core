@@ -630,7 +630,7 @@ if(MSVC)
             debug
             ${DEPS_DEBUG}/lib/x64/libzlib.lib
             debug
-            ${DEPS_DEBUG}/yaml-cpp.lib
+            ${DEPS_DEBUG}/yaml-cppd.lib
             debug
             ${DEPS_DEBUG}/fmtd.lib
             debug
