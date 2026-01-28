@@ -575,6 +575,7 @@ round2pow(unsigned i, unsigned n)
     return (i >> n) << n;
 }
 
+#if !defined(_WIN32)
 bool
 VideoInput::initX11(const std::string& display)
 {
@@ -619,7 +620,9 @@ VideoInput::initX11(const std::string& display)
 
     return true;
 }
+#endif
 
+#ifdef __APPLE__
 bool
 VideoInput::initAVFoundation(const std::string& display)
 {
@@ -667,6 +670,7 @@ VideoInput::initAVFoundation(const std::string& display)
 
     return true;
 }
+#endif
 
 bool
 VideoInput::initWindowsCapture(const std::string& params)
