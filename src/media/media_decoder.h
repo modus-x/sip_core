@@ -270,7 +270,6 @@ private:
 
     int correctPixFmt(int input_pix_fmt);
     int setupStream();
-    int updateStream();
 
     bool fallback_ = false;
 

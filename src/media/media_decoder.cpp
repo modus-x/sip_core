@@ -609,55 +609,6 @@ MediaDecoder::setupStream()
     return 0;
 }
 
-int
-MediaDecoder::updateStream()
-{
-    int ret = 0;
-
-    int width = 0, height = 0;
-    if(decoderCtx_) {
-        width = decoderCtx_->width;
-        height = decoderCtx_->height;
-    }
-    avcodec_free_context(&decoderCtx_);
-
-    if (prepareDecoderContext() < 0)
-        return -1; // failed
-
-    #ifdef RING_ACCEL
-    ret = accelUpdateSize(&decoderCtx_, width, height);
-    if(ret < 0)
-        return ret;
-    #endif
-
-    SIP_CORE_DBG("Using %s (%s) decoder for %s",
-                 inputDecoder_->long_name,
-                 inputDecoder_->name,
-                 av_get_media_type_string(avStream_->codecpar->codec_type));
-
-    decoderCtx_->thread_count = std::max(1u, std::min(8u, std::thread::hardware_concurrency() / 2));
-    decoderCtx_->thread_type = FF_THREAD_SLICE;
-    if (emulateRate_)
-        SIP_CORE_DBG() << "Using framerate emulation";
-    startTime_ = av_gettime(); // used to set pts after decoding, and for rate emulation
-
-#ifdef RING_ACCEL
-    if (!accel_) {
-        SIP_CORE_WARN("Not using hardware decoding for %s",
-                      avcodec_get_name(decoderCtx_->codec_id));
-        ret = avcodec_open2(decoderCtx_, inputDecoder_, nullptr);
-    }
-#else
-    ret = avcodec_open2(decoderCtx_, inputDecoder_, nullptr);
-#endif
-    if (ret < 0) {
-        SIP_CORE_ERR() << "Could not open codec: " << libav_utils::getError(ret);
-        return -1;
-    }
-
-    return 0;
-}
-
 #ifdef RING_ACCEL
 int
 MediaDecoder::accelUpdateSize(AVCodecContext** decoderCtx, int width, int height)
@@ -864,9 +815,6 @@ MediaDecoder::decode(AVPacket& packet)
     if (decoderCtx_->width != width_ or decoderCtx_->height != height_) {
         width_ = decoderCtx_->width;
         height_ = decoderCtx_->height;
-// #ifdef RING_ACCEL
-        //updateStream();
-// #endif
         if (resolutionChangedCallback_) {
             SIP_CORE_DBG("Resolution changed from %dx%d to %dx%d",
                          width_,

@@ -368,11 +368,6 @@ bool
 HardwareAccel::initFrame()
 {
     int ret = 0;
-    // if(width_ <= 0 || height_ <= 0) {
-    //     SIP_CORE_WARN("Initial HardwareAccel width/height is zero. Ignoring initFrame");
-    //     return true;
-    // }
-
     if (!deviceCtx_) {
         SIP_CORE_ERR() << "Cannot initialize hardware frames without a valid hardware device";
         return false;

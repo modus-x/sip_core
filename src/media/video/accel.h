@@ -134,19 +134,6 @@ public:
      */
     void setDetails(AVCodecContext* codecCtx);
 
-
-    /**
-     * @brief Change resolution.
-     * 
-     * In case first instance is initialized with zero width and height 
-     * this function should be called everytime decoder's frame size changes.
-     * 
-     * @param width New frame width.
-     * @param height New frame height.
-     * @returns True on success, otherwise false.
-     */
-    // bool changeResolution(int width, int height);
-
     /**
      * @brief Transfers a frame to/from the GPU memory.
      *
