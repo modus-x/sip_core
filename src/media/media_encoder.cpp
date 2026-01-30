@@ -370,7 +370,7 @@ MediaEncoder::writeContainerToRtp(uint8_t* buf, int buf_size)
         // Get compatible list of Hardware API
     if (enableAccel_ && mediaType == AVMEDIA_TYPE_VIDEO) {
         auto APIs = video::HardwareAccel::getCompatibleAccel(static_cast<AVCodecID>(
-                                                                 systemCodecInfo.avcodecId),
+                                                             systemCodecInfo.avcodecId),
                                                              videoOpts_.width,
                                                              videoOpts_.height,
                                                              CODEC_ENCODER);
@@ -1024,14 +1024,14 @@ MediaEncoder::enableAccel(bool enableAccel)
         outputCodec_ = nullptr;
 #ifdef RING_ACCEL
         if (mediaType == AVMEDIA_TYPE_VIDEO) {
-        if (enableAccel_) {
-            if (accel_) {
-                outputCodec_ = avcodec_find_encoder_by_name(accel_->getCodecName().c_str());
+            if (enableAccel_) {
+                if (accel_) {
+                    outputCodec_ = avcodec_find_encoder_by_name(accel_->getCodecName().c_str());
+                }
+            } else {
+                SIP_CORE_WARN() << "Hardware encoding disabled";
             }
-        } else {
-            SIP_CORE_WARN() << "Hardware encoding disabled";
         }
-    }
 #endif
 
         if (!outputCodec_) {
@@ -1567,7 +1567,7 @@ MediaEncoder::enableAccel(bool enableAccel)
     }
 
 #ifdef RING_ACCEL
-    std::shared_ptr<VideoFrame>
+std::shared_ptr<VideoFrame>
 MediaEncoder::getUnlinkedHWFrame(const VideoFrame& input)
 {
     AVPixelFormat pix = (accel_ ? accel_->getSoftwareFormat() : AV_PIX_FMT_NV12);

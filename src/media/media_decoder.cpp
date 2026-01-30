@@ -576,45 +576,9 @@ MediaDecoder::setupStream()
         return -1; // failed
 
 #ifdef RING_ACCEL
-    // if there was a fallback to software decoding, do not enable accel
-    // it has been disabled already by the video_receive_thread/video_input
-    enableAccel_ &= Manager::instance().videoPreferences.getDecodingAccelerated();
-
-    if (enableAccel_ and not fallback_) {
-        auto APIs = video::HardwareAccel::getCompatibleAccel(decoderCtx_->codec_id,
-                                                             decoderCtx_->width,
-                                                             decoderCtx_->height,
-                                                             CODEC_DECODER);
-        for (const auto& it : APIs) {
-            accel_ = std::make_unique<video::HardwareAccel>(it); // save accel
-            auto ret = accel_->initAPI(false, nullptr);
-            if (ret < 0) {
-                accel_.reset();
-                continue;
-            }
-            if (prepareDecoderContext() < 0)
-                return -1; // failed
-            accel_->setDetails(decoderCtx_);
-            decoderCtx_->opaque = accel_.get();
-            decoderCtx_->pix_fmt = accel_->getFormat();
-            if (avcodec_open2(decoderCtx_, inputDecoder_, &options_) < 0) {
-                // Failed to open codec
-                SIP_CORE_WARN("Fail to open hardware decoder for %s with %s",
-                              avcodec_get_name(decoderCtx_->codec_id),
-                              it.getName().c_str());
-                avcodec_free_context(&decoderCtx_);
-                decoderCtx_ = nullptr;
-                accel_.reset();
-                continue;
-            } else {
-                // Succeed to open codec
-                SIP_CORE_WARN("Using hardware decoding for %s with %s",
-                              avcodec_get_name(decoderCtx_->codec_id),
-                              it.getName().c_str());
-                break;
-            }
-        }
-    }
+    ret = accelUpdateSize(&decoderCtx_, decoderCtx_->width, decoderCtx_->height);
+    if(ret < 0)
+        return ret;
 #endif
 
     SIP_CORE_DBG("Using %s (%s) decoder for %s",
@@ -646,9 +610,172 @@ MediaDecoder::setupStream()
 }
 
 int
+MediaDecoder::updateStream()
+{
+    int ret = 0;
+
+    int width = 0, height = 0;
+    if(decoderCtx_) {
+        width = decoderCtx_->width;
+        height = decoderCtx_->height;
+    }
+    avcodec_free_context(&decoderCtx_);
+
+    if (prepareDecoderContext() < 0)
+        return -1; // failed
+
+    #ifdef RING_ACCEL
+    ret = accelUpdateSize(&decoderCtx_, width, height);
+    if(ret < 0)
+        return ret;
+    #endif
+
+    SIP_CORE_DBG("Using %s (%s) decoder for %s",
+                 inputDecoder_->long_name,
+                 inputDecoder_->name,
+                 av_get_media_type_string(avStream_->codecpar->codec_type));
+
+    decoderCtx_->thread_count = std::max(1u, std::min(8u, std::thread::hardware_concurrency() / 2));
+    decoderCtx_->thread_type = FF_THREAD_SLICE;
+    if (emulateRate_)
+        SIP_CORE_DBG() << "Using framerate emulation";
+    startTime_ = av_gettime(); // used to set pts after decoding, and for rate emulation
+
+#ifdef RING_ACCEL
+    if (!accel_) {
+        SIP_CORE_WARN("Not using hardware decoding for %s",
+                      avcodec_get_name(decoderCtx_->codec_id));
+        ret = avcodec_open2(decoderCtx_, inputDecoder_, nullptr);
+    }
+#else
+    ret = avcodec_open2(decoderCtx_, inputDecoder_, nullptr);
+#endif
+    if (ret < 0) {
+        SIP_CORE_ERR() << "Could not open codec: " << libav_utils::getError(ret);
+        return -1;
+    }
+
+    return 0;
+}
+
+#ifdef RING_ACCEL
+int
+MediaDecoder::accelUpdateSize(AVCodecContext** decoderCtx, int width, int height)
+{
+    // if there was a fallback to software decoding, do not enable accel
+    // it has been disabled already by the video_receive_thread/video_input
+    enableAccel_ &= Manager::instance().videoPreferences.getDecodingAccelerated();
+
+    if (enableAccel_ and not fallback_) {
+        auto APIs = video::HardwareAccel::getCompatibleAccel((*decoderCtx)->codec_id,
+                                                             width,
+                                                             height,
+                                                             CODEC_DECODER);
+        for (const auto& it : APIs) {
+            accel_ = std::make_unique<video::HardwareAccel>(it); // save accel
+            auto ret = accel_->initAPI(false, nullptr);
+            if (ret < 0) {
+                accel_.reset();
+                continue;
+            }
+            if (prepareDecoderContext() < 0)
+                return -1; // failed
+            accel_->setDetails((*decoderCtx));
+            (*decoderCtx)->opaque = accel_.get();
+            (*decoderCtx)->pix_fmt = accel_->getFormat();
+            if (avcodec_open2((*decoderCtx), inputDecoder_, &options_) < 0) {
+                // Failed to open codec
+                SIP_CORE_WARN("Fail to open hardware decoder for %s with %s",
+                              avcodec_get_name((*decoderCtx)->codec_id),
+                              it.getName().c_str());
+                avcodec_free_context(decoderCtx);
+                (*decoderCtx) = nullptr;
+                accel_.reset();
+                continue;
+            } else {
+                // Succeed to open codec
+                SIP_CORE_WARN("Using hardware decoding for %s with %s",
+                              avcodec_get_name((*decoderCtx)->codec_id),
+                              it.getName().c_str());
+                break;
+            }
+        }
+    }
+    return 0;
+}
+
+int MediaDecoder::getHWFrame(const std::shared_ptr<VideoFrame>& input, std::shared_ptr<VideoFrame>& output)
+{
+#if !defined(__APPLE__) && defined(RING_ACCEL)
+    try {
+        auto desc = av_pix_fmt_desc_get(static_cast<AVPixelFormat>(input->format()));
+        bool isHardware = desc && (desc->flags & AV_PIX_FMT_FLAG_HWACCEL);
+        if (accel_ && accel_->isLinked() && isHardware) {
+            // Fully accelerated pipeline, skip main memory
+            output = input;
+        } else if (isHardware) {
+            // Hardware decoded frame, transfer back to main memory
+            // Transfer to GPU if we have a hardware encoder
+            // Hardware decoders decode to NV12, but sip_core's supported software encoders want YUV420P
+            output = getUnlinkedHWFrame(*input.get());
+        } else if (accel_) {
+            // Software decoded frame with a hardware encoder, convert to accepted format first
+            output = getHWFrameFromSWFrame(*input.get());
+        } else {
+            output = input;
+        }
+    } catch (const std::runtime_error& e) {
+        SIP_CORE_ERR("Accel failure: %s", e.what());
+        return -1;
+    }
+#else
+        // macOS
+        output = input;
+#endif
+
+        return 0;
+}
+
+std::shared_ptr<VideoFrame>
+MediaDecoder::getUnlinkedHWFrame(const VideoFrame& input)
+{
+    std::shared_ptr<VideoFrame> framePtr;
+    if (!accel_) {
+        framePtr = scaler_.convertFormat(input, AV_PIX_FMT_YUV420P);
+    } else {
+        framePtr = accel_->transfer(input);
+    }
+    return framePtr;
+}
+
+std::shared_ptr<VideoFrame>
+MediaDecoder::getHWFrameFromSWFrame(const VideoFrame& input)
+{
+    std::shared_ptr<VideoFrame> framePtr;
+    auto pix = accel_->getSoftwareFormat();
+    if (input.format() != pix) {
+        framePtr = scaler_.convertFormat(input, pix);
+        framePtr = accel_->transfer(*framePtr);
+    } else {
+        framePtr = accel_->transfer(input);
+    }
+    return framePtr;
+}
+#endif
+
+int
 MediaDecoder::prepareDecoderContext()
 {
-    inputDecoder_ = findDecoder(avStream_->codecpar->codec_id);
+    inputDecoder_ = nullptr;
+#ifdef RING_ACCEL
+    if (enableAccel_ && accel_) {
+        inputDecoder_ = avcodec_find_decoder_by_name(accel_->getCodecName().c_str());
+    }
+#endif
+
+    if(inputDecoder_ == nullptr)
+        inputDecoder_ = findDecoder(avStream_->codecpar->codec_id);
+
     if (!inputDecoder_) {
         SIP_CORE_ERR() << "Unsupported codec";
         return -1;
@@ -734,15 +861,18 @@ MediaDecoder::decode(AVPacket& packet)
     // fix for sdp time_base
     decoderCtx_->time_base = av_inv_q(decoderCtx_->framerate);
     frame->time_base = decoderCtx_->time_base;
-    if (resolutionChangedCallback_) {
-        if (decoderCtx_->width != width_ or decoderCtx_->height != height_) {
+    if (decoderCtx_->width != width_ or decoderCtx_->height != height_) {
+        width_ = decoderCtx_->width;
+        height_ = decoderCtx_->height;
+// #ifdef RING_ACCEL
+        //updateStream();
+// #endif
+        if (resolutionChangedCallback_) {
             SIP_CORE_DBG("Resolution changed from %dx%d to %dx%d",
                          width_,
                          height_,
                          decoderCtx_->width,
                          decoderCtx_->height);
-            width_ = decoderCtx_->width;
-            height_ = decoderCtx_->height;
             resolutionChangedCallback_(width_, height_);
         }
     }
@@ -826,6 +956,17 @@ MediaDecoder::decode(AVPacket& packet)
                 std::this_thread::sleep_for(std::chrono::microseconds(target_absolute - now));
             }
         }
+
+#ifdef RING_ACCEL
+        auto videoFrame = std::dynamic_pointer_cast<VideoFrame>(f);
+        auto output = std::make_shared<VideoFrame>();
+        if (videoFrame.get() && getHWFrame(videoFrame, output) < 0) {
+            SIP_CORE_ERR("Fail to get hardware frame");
+            return DecodeStatus::DecodeError;
+        }
+        if(output && videoFrame)
+            f = std::static_pointer_cast<MediaFrame>(output);
+#endif
 
         if (callback_)
             callback_(std::move(f));

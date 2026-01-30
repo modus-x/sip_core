@@ -34,7 +34,7 @@
 namespace sip_core {
 namespace video {
 
-struct HardwareAPI
+struct HardwareAccel::HardwareAPI
 {
     std::string name;
     AVHWDeviceType hwType;
@@ -46,14 +46,7 @@ struct HardwareAPI
 };
 
 
-static std::list<HardwareAPI> apiListDec = {
-    {"nvdec",
-     AV_HWDEVICE_TYPE_CUDA,
-     AV_PIX_FMT_CUDA,
-     AV_PIX_FMT_NV12,
-     {AV_CODEC_ID_H264, AV_CODEC_ID_HEVC, AV_CODEC_ID_VP8, AV_CODEC_ID_MJPEG},
-     {{"default", DeviceState::NOT_TESTED}, {"1", DeviceState::NOT_TESTED}, {"2", DeviceState::NOT_TESTED}},
-     false},
+std::vector<HardwareAccel::HardwareAPI> HardwareAccel::apiListDec_ = {
     {"vaapi",
      AV_HWDEVICE_TYPE_VAAPI,
      AV_PIX_FMT_VAAPI,
@@ -68,6 +61,13 @@ static std::list<HardwareAPI> apiListDec = {
      AV_PIX_FMT_NV12,
      {AV_CODEC_ID_H264, AV_CODEC_ID_MPEG4},
      {{"default", DeviceState::NOT_TESTED}},
+     false},
+    {"nvdec",
+     AV_HWDEVICE_TYPE_CUDA,
+     AV_PIX_FMT_CUDA,
+     AV_PIX_FMT_NV12,
+     {AV_CODEC_ID_H264, AV_CODEC_ID_HEVC, AV_CODEC_ID_VP8, AV_CODEC_ID_MJPEG},
+     {{"default", DeviceState::NOT_TESTED}, {"1", DeviceState::NOT_TESTED}, {"2", DeviceState::NOT_TESTED}},
      false},
     {"videotoolbox",
      AV_HWDEVICE_TYPE_VIDEOTOOLBOX,
@@ -106,7 +106,7 @@ static std::list<HardwareAPI> apiListDec = {
      false},
 };
 
-static std::list<HardwareAPI> apiListEnc = {
+std::vector<HardwareAccel::HardwareAPI> HardwareAccel::apiListEnc_ = {
     {"nvenc",
      AV_HWDEVICE_TYPE_CUDA,
      AV_PIX_FMT_CUDA,
@@ -166,6 +166,7 @@ HardwareAccel::~HardwareAccel()
 static AVPixelFormat
 getFormatCb(AVCodecContext* codecCtx, const AVPixelFormat* formats)
 {
+    // this cb is called only for decoders
     auto accel = static_cast<HardwareAccel*>(codecCtx->opaque);
 
     for (int i = 0; formats[i] != AV_PIX_FMT_NONE; ++i) {
@@ -174,8 +175,35 @@ getFormatCb(AVCodecContext* codecCtx, const AVPixelFormat* formats)
             SIP_CORE_DBG() << "Found compatible hardware format for "
                        << avcodec_get_name(static_cast<AVCodecID>(accel->getCodecId()))
                        << " decoder with " << accel->getName();
+
+            if (!codecCtx->hw_device_ctx) {
+                SIP_CORE_ERR() << "Cannot initialize hardware frames without a valid hardware device";
+                return AV_PIX_FMT_NONE;
+            }
+
+            AVBufferRef* frame_ctx = av_hwframe_ctx_alloc(codecCtx->hw_device_ctx);
+            if (!frame_ctx)
+                return AV_PIX_FMT_NONE;
+
+            auto ctx = reinterpret_cast<AVHWFramesContext*>(frame_ctx->data);
+            ctx->format = formats[i];
+            ctx->sw_format = accel->getSoftwareFormat();
+            ctx->width = codecCtx->width;
+            ctx->height = codecCtx->height;
+            ctx->initial_pool_size = 20; // TODO try other values
+
+            int ret = 0;
+            if ((ret = av_hwframe_ctx_init(frame_ctx)) < 0) {
+                SIP_CORE_ERR("Failed to initialize hardware frame context: %s (%d)",
+                        libav_utils::getError(ret).c_str(),
+                        ret);
+                av_buffer_unref(&frame_ctx);
+                return AV_PIX_FMT_NONE;
+            }
+            
             // hardware tends to under-report supported levels
             codecCtx->hwaccel_flags |= AV_HWACCEL_FLAG_IGNORE_LEVEL;
+            codecCtx->hw_frames_ctx = av_buffer_ref(frame_ctx);
             return formats[i];
         }
     }
@@ -269,12 +297,7 @@ HardwareAccel::init_device_type(std::string& dev)
 std::string
 HardwareAccel::getCodecName() const
 {
-    if (type_ == CODEC_DECODER) {
-        return avcodec_get_name(id_);
-    } else if (type_ == CODEC_ENCODER) {
-        return fmt::format("{}_{}", avcodec_get_name(id_), name_);
-    }
-    return {};
+    return fmt::format("{}_{}", avcodec_get_name(id_), name_);
 }
 
 std::unique_ptr<VideoFrame>
@@ -330,9 +353,9 @@ HardwareAccel::transfer(const VideoFrame& frame)
 void
 HardwareAccel::setDetails(AVCodecContext* codecCtx)
 {
+    codecCtx->hw_device_ctx = av_buffer_ref(deviceCtx_);
     if (type_ == CODEC_DECODER) {
-        codecCtx->hw_device_ctx = av_buffer_ref(deviceCtx_);
-        codecCtx->get_format = getFormatCb;
+        codecCtx->get_format = &getFormatCb;
         // codecCtx->thread_safe_callbacks = 1;
     } else if (type_ == CODEC_ENCODER) {
         if (framesCtx_)
@@ -345,6 +368,11 @@ bool
 HardwareAccel::initFrame()
 {
     int ret = 0;
+    // if(width_ <= 0 || height_ <= 0) {
+    //     SIP_CORE_WARN("Initial HardwareAccel width/height is zero. Ignoring initFrame");
+    //     return true;
+    // }
+
     if (!deviceCtx_) {
         SIP_CORE_ERR() << "Cannot initialize hardware frames without a valid hardware device";
         return false;
@@ -430,15 +458,15 @@ HardwareAccel::transferToMainMemory(const VideoFrame& frame, AVPixelFormat desir
 int
 HardwareAccel::initAPI(bool linkable, AVBufferRef* framesCtx)
 {
-    const auto& codecName = getCodecName();
     std::string device;
     auto ret = init_device_type(device);
     if (ret == 0) {
         bool link = false;
         if (linkable && framesCtx)
             link = linkHardware(framesCtx);
-        // we don't need frame context for videotoolbox
-        if (hwType_ == AV_HWDEVICE_TYPE_VIDEOTOOLBOX || link || initFrame()) {
+        // we don't need frame context for videotoolbox and decoders
+        if (hwType_ == AV_HWDEVICE_TYPE_VIDEOTOOLBOX ||
+                type_ == CODEC_DECODER || link || initFrame()) {
             return 0;
         }
     }
@@ -449,7 +477,7 @@ std::list<HardwareAccel>
 HardwareAccel::getCompatibleAccel(AVCodecID id, int width, int height, CodecType type)
 {
     std::list<HardwareAccel> l;
-    const auto& list = (type == CODEC_ENCODER) ? &apiListEnc : &apiListDec;
+    const auto& list = (type == CODEC_ENCODER) ? &apiListEnc_ : &apiListDec_;
     for (auto& api : *list) {
         const auto& it = std::find(api.supportedCodecs.begin(), api.supportedCodecs.end(), id);
         if (it != api.supportedCodecs.end()) {

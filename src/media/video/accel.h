@@ -134,6 +134,19 @@ public:
      */
     void setDetails(AVCodecContext* codecCtx);
 
+
+    /**
+     * @brief Change resolution.
+     * 
+     * In case first instance is initialized with zero width and height 
+     * this function should be called everytime decoder's frame size changes.
+     * 
+     * @param width New frame width.
+     * @param height New frame height.
+     * @returns True on success, otherwise false.
+     */
+    // bool changeResolution(int width, int height);
+
     /**
      * @brief Transfers a frame to/from the GPU memory.
      *
@@ -177,6 +190,10 @@ private:
 
     AVBufferRef* deviceCtx_ {nullptr};
     AVBufferRef* framesCtx_ {nullptr};
+
+    struct HardwareAPI;
+    static std::vector<HardwareAPI> apiListDec_;
+    static std::vector<HardwareAPI> apiListEnc_;
 
     int init_device(const char* name, const char* device, int flags);
     int init_device_type(std::string& dev);

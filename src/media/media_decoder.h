@@ -205,7 +205,7 @@ public:
     int setupAudio() { return setup(AVMEDIA_TYPE_AUDIO); }
     int setupVideo() { return setup(AVMEDIA_TYPE_VIDEO); }
 
-    // forward to demuxer. at the end, if stream was setup correctly, MediaDecoder's decode ,ethod will be called
+    // forward to demuxer. at the end, if stream was setup correctly, MediaDecoder's decode method will be called
     MediaDemuxer::Status decode();
 
     DecodeStatus flush();
@@ -270,13 +270,23 @@ private:
 
     int correctPixFmt(int input_pix_fmt);
     int setupStream();
+    int updateStream();
 
     bool fallback_ = false;
 
 #ifdef RING_ACCEL
+    int accelUpdateSize(AVCodecContext** decoderCtx, int width, int height);
+    int getHWFrame(const std::shared_ptr<VideoFrame>& input, std::shared_ptr<VideoFrame>& output);
+    std::shared_ptr<VideoFrame> getUnlinkedHWFrame(const VideoFrame& input);
+    std::shared_ptr<VideoFrame> getHWFrameFromSWFrame(const VideoFrame& input);
+
     bool enableAccel_ = true;
     std::unique_ptr<video::HardwareAccel> accel_;
     unsigned short accelFailures_ = 0;
+#endif
+
+#ifdef ENABLE_VIDEO
+    video::VideoScaler scaler_;
 #endif
 
     // report here x value of MediaFrame after demuxer
