@@ -495,7 +495,7 @@ AudioPreference::unserialize(const YAML::Node& in)
 #ifdef ENABLE_VIDEO
 VideoPreferences::VideoPreferences()
     : decodingAccelerated_(true)
-    , encodingAccelerated_(false)
+    , encodingAccelerated_(true)
     , recordPreview_(true)
     , recordQuality_(0)
     , conferenceResolution_(DEFAULT_CONFERENCE_RESOLUTION)
