@@ -159,12 +159,12 @@ FFMPEGCONF+='
             --enable-hwaccel=vp9_d3d11va
             --enable-hwaccel=vp9_dxva2
             --enable-decoder=vp8_cuvid
-            --enable-decoder=vp9_cuvid'
+            --enable-decoder=vp9_cuvid
+            --enable-decoder=h264_cuvid'
 FFMPEGCONF+='
             --enable-libvpl
             --enable-encoder=h264_qsv
             --enable-decoder=h264_qsv
-            --enable-decoder=h264_cuvid
             --enable-decoder=vp9_qsv
             --enable-encoder=vp9_qsv'
 
