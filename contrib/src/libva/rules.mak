@@ -14,6 +14,6 @@ libva: libva-$(LIBVA_VERSION).tar.gz .sum-libva
 	$(MOVE)
 
 .libva: libva
-	cd $< && $(HOSTVARS) sh autogen.sh $(HOSTCONF) USE_X11_FALSE USE_WAYLAND_FALSE USE_DRM_TRUE DRM_LIBS="-ldrm"
+	cd $< && $(HOSTVARS) sh autogen.sh $(HOSTCONF) --with-drivers-path=="/usr/lib/$(HOST)/dri/" --enable-drm USE_X11_FALSE USE_WAYLAND_FALSE USE_GLX_FALSE DRM_LIBS="-ldrm"
 	cd $< && $(MAKE) install
 	touch $@
