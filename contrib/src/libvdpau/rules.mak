@@ -2,7 +2,7 @@
 LIBVDPAU_VERSION := 1.5
 LIBVDPAU_URL := https://nexus.svetlocal.ru/repository/github-artifacts/libvdpau-$(LIBVDPAU_VERSION).tar.gz
 
-PKGS += libvdpau
+# PKGS += libvdpau
 
 MESON_HOSTCONF := $(BUILD)
 MESON_HOSTCONF += --prefix="$(PREFIX)"

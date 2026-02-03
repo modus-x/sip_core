@@ -727,7 +727,6 @@ else()
       pkg_search_module(libva_${TARGET} REQUIRED IMPORTED_TARGET libva)
       pkg_search_module(libva-drm_${TARGET} REQUIRED IMPORTED_TARGET libva-drm)
       pkg_search_module(drm_${TARGET} REQUIRED IMPORTED_TARGET libdrm)
-      pkg_search_module(vdpau_${TARGET} REQUIRED IMPORTED_TARGET vdpau)
     endif()
 
     pkg_search_module(pjproject_${TARGET} REQUIRED IMPORTED_TARGET libpjproject)
@@ -801,7 +800,6 @@ else()
                                                     PkgConfig::libva_${TARGET}
                                                     PkgConfig::libva-drm_${TARGET}
                                                     PkgConfig::drm_${TARGET}
-                                                    PkgConfig::vdpau_${TARGET}
                                                     )
       # X11, XCB, XCB_SHM, XCB_SHAPE, XCB_XFIXES for desktop share
       pkg_search_module(X11 REQUIRED IMPORTED_TARGET x11)

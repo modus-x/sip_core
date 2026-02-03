@@ -4,7 +4,7 @@ FFMPEG_URL := https://nexus.svetlocal.ru/repository/github-artifacts/FFmpeg-$(FF
 
 PKGS+=ffmpeg
 
-DEPS_ffmpeg = iconv zlib vpx opus speex x264 freetype2 fontconfig harfbuzz ffnvcodec libvdpau libva libvpl
+DEPS_ffmpeg = iconv zlib vpx opus speex x264 freetype2 fontconfig harfbuzz ffnvcodec libva libvpl
 
 LDFLAGS = -ldrm
 
@@ -189,9 +189,6 @@ FFMPEGCONF += \
 # End Desktop Linux:
 
 FFMPEGCONF += \
-	--enable-vdpau \
-	--enable-hwaccel=h264_vdpau \
-	--enable-hwaccel=vp9_vdpau \
 	--enable-vaapi \
 	--enable-hwaccel=h264_vaapi \
 	--enable-hwaccel=vp8_vaapi \

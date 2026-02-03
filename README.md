@@ -115,12 +115,10 @@ Windows SDK + MSVC комиляторы очень просто устанавл
 
 Visual Studio 2010 (VC++ 10.0) SP1 требуется для сборки некоторых зависимостей, которые используют "легаси" код. При установке Visual Studio данный пакет **не устанавливается**.
 
-В Linux системах, которые используют аппаратное видео ускорение, для корректной работы vdpau и vaapi должны быть выставлены следующие переменные окружения:
+В Linux системах, которые используют аппаратное видео ускорение, для корректной работы vaapi должны быть выставлены следующие переменные окружения:
 ```sh
 export LIBVA_DRIVER_NAME=iHD/nvidia/vdpau
 export LIBVA_DRIVERS_PATH=/path/to/media/driver
-export VDPAU_DRIVER_PATH=/path/to/vdpau/driver
-export VDPAU_DRIVER=va_gl/iHD/nvidia
 ```
 а так же установлены соответсвующие runtime библиотеки.
 
