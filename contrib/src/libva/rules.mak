@@ -11,6 +11,7 @@ $(TARBALLS)/libva-$(LIBVA_VERSION).tar.gz:
 
 libva: libva-$(LIBVA_VERSION).tar.gz .sum-libva
 	$(UNPACK)
+	$(APPLY) $(SRC)/libva/libva.pc.in.patch
 	$(MOVE)
 
 .libva: libva
