@@ -148,11 +148,13 @@ EXTRALDFLAGS="libopus.lib libx264.lib libvpx.lib libfreetype.lib libfontconfig.l
 
 # configure debug / release libs
 if [ "$1" == "Debug" ]; then
+  EXTRACFLAGS="-MDd"
   EXTRACXXFLAGS="${EXTRACFLAGS}"
   FFMPEGCONF+=' --enable-debug --disable-optimizations'
   # IGNORE LIBCMT -> read https://trac.ffmpeg.org/wiki/CompilationGuide/MSVC#DebugBuilds
   EXTRALDFLAGS=" ${EXTRALDFLAGS} /NODEFAULTLIB:libcmt"
 else
+  EXTRACFLAGS="-MD"
   EXTRACXXFLAGS="${EXTRACFLAGS}"
 fi
 
