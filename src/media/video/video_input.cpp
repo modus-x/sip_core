@@ -69,9 +69,11 @@ static constexpr unsigned default_grab_height = 480;
 
 #ifdef __APPLE__
 // Calculate scaled dimensions that fit within maxWidth x maxHeight while preserving aspect ratio
-static std::pair<unsigned, unsigned> calculateScaledResolution(
-    unsigned srcWidth, unsigned srcHeight,
-    unsigned maxWidth, unsigned maxHeight)
+static std::pair<unsigned, unsigned>
+calculateScaledResolution(unsigned srcWidth,
+                          unsigned srcHeight,
+                          unsigned maxWidth,
+                          unsigned maxHeight)
 {
     if (srcWidth <= maxWidth && srcHeight <= maxHeight) {
         return {srcWidth, srcHeight};
@@ -258,7 +260,7 @@ VideoInput::captureFrame()
     case MediaDemuxer::Status::EndOfFile:
         // Before attempting to recreate decoder, check if device is still available
         // For camera devices, verify the device hasn't been disconnected
-        if (decOpts_.format == "video4linux2" || decOpts_.format == "dshow" 
+        if (decOpts_.format == "video4linux2" || decOpts_.format == "dshow"
             || decOpts_.format == "avfoundation") {
             if (!sip_core::getVideoDeviceMonitor().deviceExists(decOpts_.input)) {
                 SIP_CORE_WARN("Device \"%s\" disconnected during capture, stopping",
@@ -271,7 +273,7 @@ VideoInput::captureFrame()
     case MediaDemuxer::Status::ReadError:
         SIP_CORE_ERR() << "Failed to decode frame";
         // For repeated read errors, check if device still exists
-        if (decOpts_.format == "video4linux2" || decOpts_.format == "dshow" 
+        if (decOpts_.format == "video4linux2" || decOpts_.format == "dshow"
             || decOpts_.format == "avfoundation") {
             if (!sip_core::getVideoDeviceMonitor().deviceExists(decOpts_.input)) {
                 SIP_CORE_WARN("Device \"%s\" disconnected (read error), stopping",
@@ -409,11 +411,10 @@ VideoInput::createDecoder()
         }
 
         // For camera devices, check if the device still exists before retrying
-        if (decOpts_.format == "video4linux2" || decOpts_.format == "dshow" 
+        if (decOpts_.format == "video4linux2" || decOpts_.format == "dshow"
             || decOpts_.format == "avfoundation") {
             if (!sip_core::getVideoDeviceMonitor().deviceExists(decOpts_.input)) {
-                SIP_CORE_WARN("Device \"%s\" disconnected, stopping input",
-                              decOpts_.input.c_str());
+                SIP_CORE_WARN("Device \"%s\" disconnected, stopping input", decOpts_.input.c_str());
                 foundDecOpts(decOpts_);
                 return;
             }
@@ -439,8 +440,7 @@ VideoInput::createDecoder()
             restartSink = true;
             busyTries += 1;
             if (busyTries > maxBusyTries) {
-                SIP_CORE_ERR("Device \"%s\" busy for too long, giving up",
-                             decOpts_.input.c_str());
+                SIP_CORE_ERR("Device \"%s\" busy for too long, giving up", decOpts_.input.c_str());
                 foundDecOpts(decOpts_);
                 return;
             }
@@ -514,7 +514,6 @@ VideoInput::deleteDecoder()
 void
 VideoInput::stopInput()
 {
-
     emitSignal<libsip_core::VideoSignal::StopCapture>(decOpts_.input);
 
     isStopped_ = true;
@@ -530,6 +529,11 @@ VideoInput::stopInput()
 void
 VideoInput::startInput()
 {
+    if (decOpts_.input.empty() && !currentResource_.empty() && !switchPending_.load()) {
+        // Restart using the last known resource when options were cleared.
+        switchInput(currentResource_);
+        return;
+    }
 
     isStopped_ = false;
 
@@ -559,9 +563,9 @@ VideoInput::initCamera(const std::string& device)
 {
     decOpts_ = sip_core::getVideoDeviceMonitor().getDeviceParams(device);
 #if defined(_WIN32) && defined(USE_DSHOW_SCREEN_CAPTURE)
-    if(decOpts_.name == "screen-capture-recorder") {
-        // screen-capture-recorder plugin can appear 
-        // in the list of available cameras. 
+    if (decOpts_.name == "screen-capture-recorder") {
+        // screen-capture-recorder plugin can appear
+        // in the list of available cameras.
         // Initialize it explicitly in this case.
         initScreenCaptureRecorder(device);
     }
@@ -656,17 +660,19 @@ VideoInput::initAVFoundation(const std::string& display)
     constexpr unsigned MAX_CAPTURE_WIDTH = 1920;
     constexpr unsigned MAX_CAPTURE_HEIGHT = 1080;
 
-    auto [targetWidth, targetHeight] = calculateScaledResolution(
-        static_cast<unsigned>(screenWidth),
-        static_cast<unsigned>(screenHeight),
-        MAX_CAPTURE_WIDTH,
-        MAX_CAPTURE_HEIGHT);
+    auto [targetWidth, targetHeight] = calculateScaledResolution(static_cast<unsigned>(screenWidth),
+                                                                 static_cast<unsigned>(screenHeight),
+                                                                 MAX_CAPTURE_WIDTH,
+                                                                 MAX_CAPTURE_HEIGHT);
 
     decOpts_.width = targetWidth;
     decOpts_.height = targetHeight;
 
     SIP_CORE_DBG("initAVFoundation: screen %zux%zu -> target %ux%u",
-                 screenWidth, screenHeight, targetWidth, targetHeight);
+                 screenWidth,
+                 screenHeight,
+                 targetWidth,
+                 targetHeight);
 
     return true;
 }
@@ -681,8 +687,7 @@ VideoInput::initWindowsCapture(const std::string& params)
     const std::string sourceStr = "source:";
     const size_t sourcePos = params.find(sourceStr);
     if (sourcePos != std::string::npos
-        && (sourcePos == 0 || std::isspace(static_cast<unsigned char>(params[sourcePos - 1]))))
-    {
+        && (sourcePos == 0 || std::isspace(static_cast<unsigned char>(params[sourcePos - 1])))) {
         const size_t sourceStart = sourcePos + sourceStr.size();
         size_t sourceEnd = params.find_first_of(" ,\t\r\n", sourceStart);
         if (sourceEnd == std::string::npos)
@@ -700,7 +705,9 @@ VideoInput::initWindowsCapture(const std::string& params)
         for (size_t i = 0; i < params.size(); ++i) {
             if (!std::isdigit(static_cast<unsigned char>(params[i])))
                 continue;
-            if (i > 0 && (params[i - 1] == '+' || !std::isspace(static_cast<unsigned char>(params[i - 1]))))
+            if (i > 0
+                && (params[i - 1] == '+'
+                    || !std::isspace(static_cast<unsigned char>(params[i - 1]))))
                 continue;
             size_t j = i;
             while (j < params.size() && std::isdigit(static_cast<unsigned char>(params[j])))
@@ -785,8 +792,8 @@ VideoInput::initScreenCaptureRecorder(const std::string& params)
     // Paterns
     // capture area : 1920x1080 - SCREEN 0, POSITION 0X0, RESOLUTION 1920x1080
     // capture area with offset : 1920x1080 +28x28 - SCREEN 0, POSITION 28x28, RESOLUTION 1920x1080
-    // capture non default screen : 1920x1080 +28x28  source:1- SCREEN 1, POSITION 28x28, RESOLUTION 1920x1080
-    // capture window : source:0x0340021e
+    // capture non default screen : 1920x1080 +28x28  source:1- SCREEN 1, POSITION 28x28, RESOLUTION
+    // 1920x1080 capture window : source:0x0340021e
 
     clearOptions();
     decOpts_ = sip_core::getVideoDeviceMonitor().getDeviceParams(DEVICE_DESKTOP);
@@ -796,7 +803,10 @@ VideoInput::initScreenCaptureRecorder(const std::string& params)
         return false;
     }
     PathAppend(appDataPath, TEXT("ScreenCaptureRecorder.ini"));
-    WritePrivateProfileString(TEXT("all_settings"), NULL, NULL, appDataPath); // clear all section content
+    WritePrivateProfileString(TEXT("all_settings"),
+                              NULL,
+                              NULL,
+                              appDataPath); // clear all section content
 
     auto writeIntSetting = [&](const wchar_t* key, int value) {
         wchar_t buf[16];
@@ -807,8 +817,7 @@ VideoInput::initScreenCaptureRecorder(const std::string& params)
     const std::string sourceStr = "source:";
     const size_t sourcePos = params.find(sourceStr);
     if (sourcePos != std::string::npos
-        && (sourcePos == 0 || std::isspace(static_cast<unsigned char>(params[sourcePos - 1]))))
-    {
+        && (sourcePos == 0 || std::isspace(static_cast<unsigned char>(params[sourcePos - 1])))) {
         const size_t sourceStart = sourcePos + sourceStr.size();
         size_t sourceEnd = params.find_first_of(" ,\t\r\n", sourceStart);
         if (sourceEnd == std::string::npos)
@@ -827,7 +836,8 @@ VideoInput::initScreenCaptureRecorder(const std::string& params)
                                           appDataPath);
             } else {
                 WritePrivateProfileString(TEXT("all_settings"),
-                                          TEXT("capture_particular_display_number_starting_at_zero"),
+                                          TEXT(
+                                              "capture_particular_display_number_starting_at_zero"),
                                           wsSource.c_str(),
                                           appDataPath);
             }
@@ -839,7 +849,9 @@ VideoInput::initScreenCaptureRecorder(const std::string& params)
         for (size_t i = 0; i < params.size(); ++i) {
             if (!std::isdigit(static_cast<unsigned char>(params[i])))
                 continue;
-            if (i > 0 && (params[i - 1] == '+' || !std::isspace(static_cast<unsigned char>(params[i - 1]))))
+            if (i > 0
+                && (params[i - 1] == '+'
+                    || !std::isspace(static_cast<unsigned char>(params[i - 1]))))
                 continue;
             size_t j = i;
             while (j < params.size() && std::isdigit(static_cast<unsigned char>(params[j])))
@@ -917,7 +929,7 @@ VideoInput::initScreenCaptureRecorder(const std::string& params)
     writeIntSetting(TEXT("capture_width"), static_cast<int>(decOpts_.width));
     writeIntSetting(TEXT("start_x"), decOpts_.offset_x);
     writeIntSetting(TEXT("start_y"), decOpts_.offset_y);
-    
+
     return true;
 }
 #endif
@@ -986,12 +998,11 @@ VideoInput::switchInput(const std::string& resource)
     if (resource.empty()) {
         clearOptions();
         // some default params
-        foundDecOpts(DeviceParams{});
+        foundDecOpts(DeviceParams {});
         futureDecOpts_ = foundDecOpts_.get_future().share();
         stopInput();
         return futureDecOpts_;
     }
-
 
     // Supported MRL schemes
     static const std::string sep = libsip_core::Media::VideoProtocolPrefix::SEPARATOR;

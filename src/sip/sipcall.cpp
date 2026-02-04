@@ -275,8 +275,7 @@ SIPCall::setupVoiceCallback(const std::shared_ptr<RtpSession>& rtpSession)
                 if (defaultId != streamId) {
                     // remote participant audio
                     thisPtr->peerVoice(voice);
-                }
-                else {
+                } else {
                     // local mic voice activity
                     thisPtr->localVoice(voice);
                 }
@@ -1055,7 +1054,8 @@ transfer_client_cb(pjsip_evsub* sub, pjsip_event* event)
                                                                  ctx->callId,
                                                                  state,
                                                                  status_line.code,
-                                                                 sip_utils::as_string(status_line.reason));
+                                                                 sip_utils::as_string(
+                                                                     status_line.reason));
     }
 
     switch (state) {
@@ -1127,7 +1127,7 @@ SIPCall::transferCommon(const pj_str_t* dst)
         return false;
 
     /* Associate context with the client subscription */
-    auto* ctx = new TransferClientCtx{acc->getAccountID(), getCallId()};
+    auto* ctx = new TransferClientCtx {acc->getAccountID(), getCallId()};
     pjsip_evsub_set_mod_data(sub, Manager::instance().sipVoIPLink().getModId(), ctx);
 
     /*
@@ -2263,9 +2263,7 @@ SIPCall::onMediaNegotiationComplete()
     SIP_CORE_DBG("[call:%s] Media negotiation complete", getCallId().c_str());
 
     // If the call has already ended, we don't need to start the media.
-    if (not inviteSession_
-        or inviteSession_->state == PJSIP_INV_STATE_DISCONNECTED
-        or not sdp_) {
+    if (not inviteSession_ or inviteSession_->state == PJSIP_INV_STATE_DISCONNECTED or not sdp_) {
         return;
     }
 
@@ -2274,7 +2272,7 @@ SIPCall::onMediaNegotiationComplete()
         setupNegotiatedMedia();
         // No ICE, start media now.
         SIP_CORE_WARN("[call:%s] ICE media disabled, using default media ports",
-                        getCallId().c_str());
+                      getCallId().c_str());
         // RESTART the media always....
         stopAllMedia();
         updateRemoteMedia();
@@ -2461,7 +2459,7 @@ SIPCall::onReceiveOfferIn200OK(const pjmedia_sdp_session* offer)
 
     SIP_CORE_DBG("[call:%s] Received an offer in '200 OK' answer", getCallId().c_str());
 
-    auto mediaList = Sdp::getMediaAttributeListFromSdp(offer);
+    auto mediaList = Sdp::getMediaAttributeListFromSdp(offer, false, false);
     // If this method is called, it means we are expecting an offer
     // in the 200OK answer.
     if (mediaList.empty()) {
@@ -2972,27 +2970,27 @@ SIPCall::peerVoice(bool voice)
     peerVoice_ = voice;
 
     if (auto conference = conf_.lock()) {
-            if (auto sink = sip_core::Manager::instance().getSinkClient(this->getCallId())) {
-                conference->setVoiceActivity(
-                    sip_utils::streamId(sink->getId(), 
-                                        sip_utils::DEFAULT_VIDEO_STREAMID), 
-                    voice);
-            }
+        if (auto sink = sip_core::Manager::instance().getSinkClient(this->getCallId())) {
+            conference->setVoiceActivity(sip_utils::streamId(sink->getId(),
+                                                             sip_utils::DEFAULT_VIDEO_STREAMID),
+                                         voice);
+        }
     } else {
         // one-to-one call
 
         {
             std::lock_guard<std::mutex> lk(confInfoMutex_);
             // confID_ empty -> participant set confInfo with the received one
-            auto participant = std::find_if(confInfo_.begin(), confInfo_.end(), [&] (const ParticipantInfo& p) {
-                return p.uri == this->getCallId();
-            });
+            auto participant = std::find_if(confInfo_.begin(),
+                                            confInfo_.end(),
+                                            [&](const ParticipantInfo& p) {
+                                                return p.uri == this->getCallId();
+                                            });
 
-            if(participant != confInfo_.end()) {
+            if (participant != confInfo_.end()) {
                 participant->voiceActivity = voice;
             }
         }
-
 
         // maybe emit signal with partner voice activity
     }

@@ -217,7 +217,7 @@ VideoRtpSession::startSender()
     SIP_CORE_DBG("VideoRtpSession [%p] Start video RTP sender: input [%s] - muted [%s]",
                  this,
                  conference_ ? "Video Mixer" : input_.c_str(),
-                 send_.onHold ? "YES" : "NO");
+                 localMuted_.load() ? "YES" : "NO");
 
     if (not socketPair_) {
         // Ignore if the transport is not set yet
@@ -235,30 +235,34 @@ VideoRtpSession::startSender()
         }
 
         if (not conference_) {
-            auto input = getVideoInput(input_);
-            videoLocal_ = input;
-            if (input) {
-                videoLocal_->setRecorderCallback(
-                    [this](const MediaStream& ms) { attachLocalRecorder(ms); });
-                auto newParams = input->getParams();
-                try {
-                    if (newParams.valid()
-                        && newParams.wait_for(NEWPARAMS_TIMEOUT) == std::future_status::ready) {
-                        localVideoParams_ = newParams.get();
+            if (!localMuted_.load()) {
+                auto input = getVideoInput(input_);
+                videoLocal_ = input;
+                if (input) {
+                    videoLocal_->setRecorderCallback(
+                        [this](const MediaStream& ms) { attachLocalRecorder(ms); });
+                    auto newParams = input->getParams();
+                    try {
+                        if (newParams.valid()
+                            && newParams.wait_for(NEWPARAMS_TIMEOUT) == std::future_status::ready) {
+                            localVideoParams_ = newParams.get();
 
-                    } else {
-                        SIP_CORE_WARN("VideoRtpSession [%p] No valid new video parameters, this "
-                                      "may be non existent input",
-                                      this);
+                        } else {
+                            SIP_CORE_WARN(
+                                "VideoRtpSession [%p] No valid new video parameters, this "
+                                "may be non existent input",
+                                this);
+                        }
+                    } catch (const std::exception& e) {
+                        SIP_CORE_ERR(
+                            "VideoRtpSession Exception during retrieving video parameters: %s",
+                            e.what());
+                        return;
                     }
-                } catch (const std::exception& e) {
-                    SIP_CORE_ERR("VideoRtpSession Exception during retrieving video parameters: %s",
-                                 e.what());
+                } else {
+                    SIP_CORE_WARN("VideoRtpSession Can't lock video input");
                     return;
                 }
-            } else {
-                SIP_CORE_WARN("VideoRtpSession Can't lock video input");
-                return;
             }
 
 #ifdef __ANDROID__
@@ -321,8 +325,10 @@ VideoRtpSession::startSender()
             if (socketPair_)
                 socketPair_->setPacketLossCallback([this]() { cbKeyFrameRequest_(); });
 
-            // attach video input!
-            attachVideoInput();
+            // attach video input only when not muted
+            if (!localMuted_.load()) {
+                attachVideoInput();
+            }
 
         } catch (const MediaEncoderException& e) {
             SIP_CORE_ERR("%s", e.what());
@@ -360,8 +366,7 @@ VideoRtpSession::stopSender()
     SIP_CORE_DBG("VideoRtpSession [%p] Stop video RTP sender: input [%s] - muted [%s]",
                  this,
                  conference_ ? "Video Mixer" : input_.c_str(),
-
-                 send_.onHold ? "YES" : "NO");
+                 localMuted_.load() ? "YES" : "NO");
 
     if (sender_) {
         if (videoLocal_) {
@@ -587,34 +592,56 @@ VideoRtpSession::setMuted(bool mute, Direction dir)
 
     // Sender
     if (dir == Direction::SEND) {
-        if (send_.onHold == mute) {
+        if (localMuted_.load() == mute) {
             SIP_CORE_DBG("[%p] Local already %s", this, mute ? "muted" : "un-muted");
             return;
         }
 
-        // set onHold
-        send_.onHold = mute;
-
-        // Set sender mute state (sender will send black frames when muted)
-        if (sender_) {
-            sender_->setMuted(mute);
-        }
+        localMuted_.store(mute);
 
         // Stop/start video input device to avoid camera indicator when muted
         // Only for non-conference mode where we control the local video input
         // Note: stopInput/startInput only available on desktop platforms
 #ifndef VIDEO_CLIENT_INPUT
-        if (videoLocal_ && !conference_) {
+        if (!conference_) {
             if (mute) {
-                // Detach and stop video input to turn off camera/display capture
-                detachVideoInput();
-                videoLocal_->stopInput();
-                SIP_CORE_DBG("[%p] Video input stopped (muted)", this);
+                if (videoLocal_) {
+                    // Detach and stop video input to turn off camera/display capture
+                    detachVideoInput();
+                    videoLocal_->stopInput();
+                    SIP_CORE_DBG("[%p] Video input stopped (muted)", this);
+                }
             } else {
-                // Restart video input and reattach
-                videoLocal_->startInput();
-                attachVideoInput();
-                SIP_CORE_DBG("[%p] Video input started (unmuted)", this);
+                if (!videoLocal_) {
+                    videoLocal_ = getVideoInput(input_);
+                    if (videoLocal_) {
+                        videoLocal_->setRecorderCallback(
+                            [this](const MediaStream& ms) { attachLocalRecorder(ms); });
+                    }
+                }
+                if (videoLocal_) {
+                    // Restart video input and reattach
+                    videoLocal_->startInput();
+                    auto newParams = videoLocal_->getParams();
+                    try {
+                        if (newParams.valid()
+                            && newParams.wait_for(NEWPARAMS_TIMEOUT) == std::future_status::ready) {
+                            localVideoParams_ = newParams.get();
+                        } else {
+                            SIP_CORE_WARN(
+                                "VideoRtpSession [%p] No valid new video parameters on unmute",
+                                this);
+                        }
+                    } catch (const std::exception& e) {
+                        SIP_CORE_ERR(
+                            "VideoRtpSession Exception during retrieving video parameters: %s",
+                            e.what());
+                    }
+                    if (sender_) {
+                        attachVideoInput();
+                    }
+                    SIP_CORE_DBG("[%p] Video input started (unmuted)", this);
+                }
             }
         }
 #endif
@@ -1011,10 +1038,11 @@ VideoRtpSession::processMutedFrame()
 
     {
         std::lock_guard<std::recursive_mutex> lock(mutex_);
-        if (sender_ && send_.onHold) {
-            sender_->sendBlackFrame(
-                localVideoParams_.width > 0 ? localVideoParams_.width : NO_DEVICE_WIDTH,
-                localVideoParams_.height > 0 ? localVideoParams_.height : NO_DEVICE_HEIGHT);
+        if (sender_ && localMuted_.load()) {
+            sender_->sendBlackFrame(localVideoParams_.width > 0 ? localVideoParams_.width
+                                                                : NO_DEVICE_WIDTH,
+                                    localVideoParams_.height > 0 ? localVideoParams_.height
+                                                                 : NO_DEVICE_HEIGHT);
         }
     }
 

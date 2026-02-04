@@ -161,9 +161,8 @@ Sdp::mediaDirection(const MediaAttribute& mediaAttr)
         return DIRECTION_STR[MediaDirection::INACTIVE];
     }
 
-
     if (mediaAttr.type_ == MediaType::MEDIA_AUDIO) {
-        // ignore hold for video. It just can be stopped with sending black frames. 
+        // ignore hold for video. It just can be stopped with sending black frames.
         // Audio will played to callee by the SIP server.
         if (mediaAttr.onHold_) {
             return DIRECTION_STR[MediaDirection::SENDONLY];
@@ -916,7 +915,9 @@ Sdp::getMediaSlots() const
 }
 
 std::vector<MediaAttribute>
-Sdp::getMediaAttributeListFromSdp(const pjmedia_sdp_session* sdpSession, bool ignoreDisabled)
+Sdp::getMediaAttributeListFromSdp(const pjmedia_sdp_session* sdpSession,
+                                  bool ignoreDisabled,
+                                  bool remote)
 {
     if (sdpSession == nullptr) {
         return {};
@@ -951,9 +952,11 @@ Sdp::getMediaAttributeListFromSdp(const pjmedia_sdp_session* sdpSession, bool ig
             continue;
         }
 
-        // Get mute state.
+        // Get mute state for remote perspective only.
         auto direction = getMediaDirection(media);
-        mediaAttr.muted_ = direction == MediaDirection::RECVONLY;
+        if (remote) {
+            mediaAttr.muted_ = direction == MediaDirection::RECVONLY;
+        }
 
         // Get transport.
         auto transp = getMediaTransport(media);

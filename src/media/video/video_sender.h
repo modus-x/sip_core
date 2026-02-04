@@ -69,7 +69,6 @@ public:
 
     void natPing();
 
-    inline void setMuted(bool mute) { muted_.store(mute); }
     void setSource(const std::string& source);
 
 private:
@@ -96,7 +95,6 @@ private:
     std::function<void(int)> changeOrientationCallback_;
 
     bool natResolved_ = false;
-    std::atomic<bool> muted_ {false};
 };
 } // namespace video
 } // namespace sip_core

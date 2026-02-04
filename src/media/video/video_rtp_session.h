@@ -90,7 +90,6 @@ public:
 
     void cancelKeepAliveTimer();
 
-
     /**
      * Set video orientation
      *
@@ -191,6 +190,7 @@ private:
     InterruptedThreadLoop mutedFrameThread_;
     void processMutedFrame();
     std::atomic<bool> sendMutedFrames_ {false};
+    std::atomic<bool> localMuted_ {false};
 
     std::function<void(int)> changeOrientationCallback_;
 

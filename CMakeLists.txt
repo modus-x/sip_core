@@ -825,5 +825,13 @@ else()
   endif()
 endif()
 
+# Tests
+include(CTest)
+if(BUILD_TESTING)
+  add_executable(video_input_tests tests/video_input_tests.cpp)
+  target_link_libraries(video_input_tests PRIVATE ${PROJECT_NAME})
+  add_test(NAME video_input_tests COMMAND video_input_tests)
+endif()
+
 # install
 install(TARGETS ${PROJECT_NAME} FILE_SET HEADERS)

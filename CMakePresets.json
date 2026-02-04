@@ -3,7 +3,7 @@
     "configurePresets": [
         {
             "name": "darwin",
-            "displayName": "latest macOS configure",
+            "displayName": "MacOS configure",
             "description": "Using compilers: C = /usr/bin/clang, CXX = /usr/bin/clang++",
             "generator": "Ninja",
             "binaryDir": "${sourceDir}/out/build/${presetName}",
@@ -15,12 +15,13 @@
                 "ENABLE_CLI_EXAMPLE": "ON",
                 "CMAKE_OSX_DEPLOYMENT_TARGET": "10.15",
                 "BUILD_DEPS": "ON",
-                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "CMAKE_OSX_ARCHITECTURES": "x86_64"
             }
         },
         {
-            "name": "Windows",
-            "displayName": "lastest Windows configure",
+            "name": "win32",
+            "displayName": "Windows configure",
             "description": "Using MSVC and MSYS2(ffmpeg) compilers",
             "generator": "Visual Studio 17 2022",
             "binaryDir": "${sourceDir}/out/build/${presetName}",

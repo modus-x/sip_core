@@ -65,7 +65,6 @@ VideoSender::VideoSender(const std::string& dest,
     videoEncoder_->addStream(args.codec->systemCodecInfo);
     videoEncoder_->setInitSeqVal(seqVal);
     videoEncoder_->setIOContext(muxContext_->getContext());
-    muted_.store(args.onHold);
 }
 
 void
@@ -98,11 +97,6 @@ VideoSender::encodeAndSendVideo(const std::shared_ptr<VideoFrame>& input_frame)
 
         if (is_keyframe) {
             --forceKeyFrame_;
-        }
-
-        if (muted_.load()) {
-            sendBlackFrame(stream_.width, stream_.height);
-            return;
         }
 
         if (videoEncoder_->encode(input_frame, is_keyframe, frameNumber_++) < 0)

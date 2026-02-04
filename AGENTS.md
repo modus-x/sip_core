@@ -5,12 +5,8 @@ Core SIP logic lives in `src/` (signaling under `sip/`, media routines in `media
 
 ## Build, Test, and Development Commands
 ```bash
-mkdir -p build && cd build
-cmake .. -DBUILD_DEPS=ON -DCMAKE_INSTALL_PREFIX=/opt/sip-core -DCMAKE_BUILD_TYPE=Debug
-cmake --build . --target install
-cmake --build . --target sip_cli    # optional CLI example
+/opt/homebrew/bin/cmake --build /Users/modus.operandi/Code/sip_core/out/build/darwin --target sip_core --
 ```
-Set `BUILD_DEPS=OFF` with `-DPREBUILD_DEPS_PATHS=/path/to/triplets` to reuse prebuilt binaries. Toggle `ENABLE_VIDEO` or `ENABLE_CLI_EXAMPLE` as needed. On Windows, add `--A x64 -Thost=x64` during configure. Ensure `CMAKE_PREFIX_PATH`/`CMAKE_FIND_ROOT_PATH` point to the intended contrib triplet so linking uses the packaged dependencies.
 
 ## Coding Style & Naming Conventions
 Target C++17 with 4-space indents, no tabs, and a 100-character line limit. Braces wrap on new lines for classes/functions; includes are intentionally not auto-sorted. Run `clang-format -i <file>` and `clang-tidy -p build <file>` (configs provided) before submitting. Prefer descriptive CamelCase for types and existing snake_case patterns for files/functions to match the current codebase.
