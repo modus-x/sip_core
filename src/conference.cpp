@@ -740,6 +740,7 @@ ConfInfo::toString() const
 void
 Conference::sendConferenceInfos()
 {
+#if CONFERENCE_METADATA
     // Inform calls that the layout has changed
     foreachCall([&](auto call) {
         // Produce specific JSON for each participant (2 separate accounts can host ...
@@ -752,6 +753,7 @@ Conference::sendConferenceInfos()
         call->sendConfInfo(
             getConfInfoHostUri(account->getUsername() + "@server", call->getPeerNumber()).toString());
     });
+#endif
 
     auto confInfo = getConfInfoHostUri("", "");
 #ifdef ENABLE_VIDEO

@@ -34,6 +34,9 @@ endif()
 option(ENABLE_CLI_EXAMPLE "Build with CLI example" OFF)
 option(ENABLE_VIDEO "Build with video support" ON)
 option(BUILD_DEPS "Build deps" ON)
+option(CONFERENCE_METADATA
+       "Send conference metadata over SIP and disable conference border text overlays"
+       ON)
 
 set(PREBUILD_DEPS_PATHS
     ""
@@ -409,8 +412,9 @@ target_compile_definitions(
     LIBSIP_CORE_BUILD
     # define exports Conditionally add compile definitions based on platform
     $<$<OR:$<BOOL:${LINUX}>,$<BOOL:${MSVC}>,$<BOOL:${ANDROID}>>:HAVE_WEBRTC_AP>
-	# Use static yaml-cpp
-	YAML_CPP_STATIC_DEFINE
+    # Use static yaml-cpp
+    YAML_CPP_STATIC_DEFINE
+    CONFERENCE_METADATA=$<BOOL:${CONFERENCE_METADATA}>
     # Building shared library
     SIP_CORE_EXPORTS)
 
