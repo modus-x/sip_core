@@ -409,8 +409,6 @@ target_compile_definitions(
     LIBSIP_CORE_BUILD
     # define exports Conditionally add compile definitions based on platform
     $<$<OR:$<BOOL:${LINUX}>,$<BOOL:${MSVC}>,$<BOOL:${ANDROID}>>:HAVE_WEBRTC_AP>
-	# Use static lixml2
-	LIBXML_STATIC
 	# Use static yaml-cpp
 	YAML_CPP_STATIC_DEFINE
     # Building shared library
@@ -579,8 +577,6 @@ if(MSVC)
             optimized
             ${DEPS_RELEASE}/lib/x64/libfontconfig.lib
             optimized
-            ${DEPS_RELEASE}/lib/x64/libxml2.lib
-            optimized
             ${DEPS_RELEASE}/lib/x64/harfbuzz.lib
             optimized
             ${DEPS_RELEASE}/lib/x64/lib_json.lib
@@ -618,8 +614,6 @@ if(MSVC)
             ${DEPS_DEBUG}/lib/x64/libiconv.lib
             debug
             ${DEPS_DEBUG}/lib/x64/libfontconfig.lib
-            debug
-            ${DEPS_DEBUG}/lib/x64/libxml2.lib
             debug
             ${DEPS_DEBUG}/lib/x64/harfbuzz.lib
             debug

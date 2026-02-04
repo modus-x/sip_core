@@ -4,9 +4,9 @@
     "url": "https://nexus.svetlocal.ru/repository/github-artifacts/FFmpeg-__VERSION__.tar.gz",
     "deps": [
         "iconv",
-        "xml2",
         "zlib",
         "freetype2",
+        "harfbuzz",
         "fontconfig",
         "x264",
         "vpx",
