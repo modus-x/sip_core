@@ -134,16 +134,19 @@ endif
 endif
 
 ifdef HAVE_MACOSX
-MIN_OSX_VERSION=10.15
+MIN_OSX_VERSION ?= 10.15
 CC=xcrun cc
 CXX=xcrun c++
 AR=xcrun ar
 LD=xcrun ld
 STRIP=xcrun strip
 RANLIB=xcrun ranlib
-EXTRA_CXXFLAGS += -stdlib=libc++
-EXTRA_LDFLAGS += -mmacosx-version-min=$(MIN_OSX_VERSION) -Wl,-syslibroot,$(MACOSX_SDK)
-EXTRA_ASFLAGS += -mmacosx-version-min=$(MIN_OSX_VERSION)
+EXTRA_MACOSX_ARCH_FLAGS = -arch $(ARCH)
+EXTRA_CFLAGS += $(EXTRA_MACOSX_ARCH_FLAGS) -mmacosx-version-min=$(MIN_OSX_VERSION)
+EXTRA_CXXFLAGS += $(EXTRA_MACOSX_ARCH_FLAGS) -mmacosx-version-min=$(MIN_OSX_VERSION) \
+	-stdlib=libc++
+EXTRA_LDFLAGS += $(EXTRA_MACOSX_ARCH_FLAGS) -mmacosx-version-min=$(MIN_OSX_VERSION) \
+	-Wl,-syslibroot,$(MACOSX_SDK)
 ifeq ($(ARCH),x86_64)
 EXTRA_COMMON += -m64
 else ifeq ($(ARCH),arm64)

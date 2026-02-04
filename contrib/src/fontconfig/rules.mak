@@ -11,6 +11,11 @@ ifdef HAVE_MACOSX
 HOSTVARS += LIBTOOLIZE=glibtoolize
 endif
 
+# When targeting Darwin (especially cross-arch on macOS), skip utility subdirs
+# so install does not try to link target executables like fc-cache.
+FONTCONFIG_INSTALL_SUBDIRS := \
+	SUBDIRS='fontconfig fc-case fc-lang src conf.d'
+
 $(TARBALLS)/fontconfig-$(FONTCONFIG_VERSION).tar.gz:
 	$(call download,$(FONTCONFIG_URL))
 
@@ -22,6 +27,7 @@ fontconfig: fontconfig-$(FONTCONFIG_VERSION).tar.gz .sum-fontconfig
 	$(MOVE)
 
 .fontconfig: fontconfig
-	cd $< && $(HOSTVARS) sh autogen.sh $(HOSTCONF) --disable-docs
-	cd $< && $(MAKE) install
+	cd $< && $(HOSTVARS) sh autogen.sh $(HOSTCONF) --disable-docs --enable-static \
+		--disable-shared --disable-cache-build --disable-docbook
+	cd $< && $(HOSTVARS) $(MAKE) $(FONTCONFIG_INSTALL_SUBDIRS) install
 	touch $@

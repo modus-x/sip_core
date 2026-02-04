@@ -4,6 +4,8 @@ FREETYPE_URL := https://nexus.svetlocal.ru/repository/github-artifacts/freetype2
 
 PKGS += freetype2
 
+DEPS_freetype2 = libpng harfbuzz zlib brotli
+
 FREETYPE_CMAKECONF := -DBUILD_SHARED_LIBS=OFF
 
 $(TARBALLS)/freetype2-$(FREETYPE_VERSION).tar.gz:

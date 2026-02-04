@@ -1468,7 +1468,7 @@ MediaEncoder::enableAccel(bool enableAccel)
             framerate.den = 1;
             encoderCtx->time_base = av_inv_q(framerate);
             encoderCtx->pix_fmt = accel->getFormat();
-            encoderCtx->profile = FF_PROFILE_HEVC_MAIN;
+            encoderCtx->profile = AV_PROFILE_HEVC_MAIN;
             encoderCtx->opaque = accel.get();
 
             auto br = SystemCodecInfo::DEFAULT_VIDEO_BITRATE;

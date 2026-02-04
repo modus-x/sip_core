@@ -195,17 +195,6 @@ if(NOT MSVC AND BUILD_DEPS)
   endif()
 
   foreach(TARGET ${TARGETS})
-    if(APPLE AND NOT IOS)
-      getarch(${TARGET} TARGET_ARCH)
-      message(STATUS "Building on macOS for ${TARGET}...")
-      set(ENV{LDFLAGS}
-          "-arch ${TARGET_ARCH} -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
-      set(ENV{CFLAGS}
-          "-arch ${TARGET_ARCH} -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
-      set(ENV{CXXFLAGS}
-          "-arch ${TARGET_ARCH} -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
-    endif()
-
     message(STATUS "building native dependencies for ${TARGET}")
 
     set(CONTRIB_BUILD_PATH ${CMAKE_CURRENT_SOURCE_DIR}/contrib/build-${TARGET})
@@ -435,6 +424,10 @@ if(ENABLE_VIDEO)
   target_compile_definitions(${PROJECT_NAME} PUBLIC ENABLE_VIDEO)
 endif()
 
+if(HW_ACCEL)
+  target_compile_definitions(${PROJECT_NAME} PUBLIC RING_ACCEL)
+endif()
+
 if(ANDROID)
   target_compile_definitions(${PROJECT_NAME} PUBLIC HAVE_OPENSL)
 endif()
@@ -588,6 +581,8 @@ if(MSVC)
             optimized
             ${DEPS_RELEASE}/lib/x64/libxml2.lib
             optimized
+            ${DEPS_RELEASE}/lib/x64/harfbuzz.lib
+            optimized
             ${DEPS_RELEASE}/lib/x64/lib_json.lib
             optimized
             ${DEPS_RELEASE}/lib/x64/libzlib.lib
@@ -623,8 +618,10 @@ if(MSVC)
             ${DEPS_DEBUG}/lib/x64/libiconv.lib
             debug
             ${DEPS_DEBUG}/lib/x64/libfontconfig.lib
-			debug
+            debug
             ${DEPS_DEBUG}/lib/x64/libxml2.lib
+            debug
+            ${DEPS_DEBUG}/lib/x64/harfbuzz.lib
             debug
             ${DEPS_DEBUG}/lib/x64/lib_json.lib
             debug
@@ -721,11 +718,11 @@ else()
     pkg_search_module(swresample_${TARGET} REQUIRED IMPORTED_TARGET
                       libswresample)
     pkg_search_module(swscale_${TARGET} REQUIRED IMPORTED_TARGET libswscale)
-	    pkg_search_module(avutil_${TARGET} REQUIRED IMPORTED_TARGET GLOBAL
-	                      libavutil)
-	    pkg_search_module(yaml_${TARGET} REQUIRED IMPORTED_TARGET yaml-cpp)
-	    pkg_search_module(json_${TARGET} REQUIRED IMPORTED_TARGET jsoncpp)
-	    pkg_search_module(zlib_${TARGET} REQUIRED IMPORTED_TARGET zlib)
+    pkg_search_module(avutil_${TARGET} REQUIRED IMPORTED_TARGET GLOBAL
+                      libavutil)
+    pkg_search_module(yaml_${TARGET} REQUIRED IMPORTED_TARGET yaml-cpp)
+    pkg_search_module(json_${TARGET} REQUIRED IMPORTED_TARGET jsoncpp)
+    pkg_search_module(zlib_${TARGET} REQUIRED IMPORTED_TARGET zlib)
 
     # LD_FLAGS are broken on Apple, erase them
     if(APPLE)
