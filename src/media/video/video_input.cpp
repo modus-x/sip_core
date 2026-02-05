@@ -260,8 +260,7 @@ VideoInput::captureFrame()
     case MediaDemuxer::Status::EndOfFile:
         // Before attempting to recreate decoder, check if device is still available
         // For camera devices, verify the device hasn't been disconnected
-        if (decOpts_.format == "video4linux2" || decOpts_.format == "dshow"
-            || decOpts_.format == "avfoundation") {
+        if (decOpts_.format == "video4linux2" || decOpts_.format == "dshow") {
             if (!sip_core::getVideoDeviceMonitor().deviceExists(decOpts_.input)) {
                 SIP_CORE_WARN("Device \"%s\" disconnected during capture, stopping",
                               decOpts_.input.c_str());
@@ -273,8 +272,7 @@ VideoInput::captureFrame()
     case MediaDemuxer::Status::ReadError:
         SIP_CORE_ERR() << "Failed to decode frame";
         // For repeated read errors, check if device still exists
-        if (decOpts_.format == "video4linux2" || decOpts_.format == "dshow"
-            || decOpts_.format == "avfoundation") {
+        if (decOpts_.format == "video4linux2" || decOpts_.format == "dshow") {
             if (!sip_core::getVideoDeviceMonitor().deviceExists(decOpts_.input)) {
                 SIP_CORE_WARN("Device \"%s\" disconnected (read error), stopping",
                               decOpts_.input.c_str());
@@ -411,8 +409,7 @@ VideoInput::createDecoder()
         }
 
         // For camera devices, check if the device still exists before retrying
-        if (decOpts_.format == "video4linux2" || decOpts_.format == "dshow"
-            || decOpts_.format == "avfoundation") {
+        if (decOpts_.format == "video4linux2" || decOpts_.format == "dshow") {
             if (!sip_core::getVideoDeviceMonitor().deviceExists(decOpts_.input)) {
                 SIP_CORE_WARN("Device \"%s\" disconnected, stopping input", decOpts_.input.c_str());
                 foundDecOpts(decOpts_);
