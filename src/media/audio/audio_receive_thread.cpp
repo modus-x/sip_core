@@ -63,20 +63,25 @@ AudioReceiveThread::setup()
     std::lock_guard lk(mutex_);
     audioDecoder_.reset(new MediaDecoder([this](std::shared_ptr<MediaFrame>&& frame) mutable {
         if (!muteState_) {
-            std::lock_guard<std::mutex> lock(audioProcessorMutex_);
-            if (audioProcessor_) {
-                // we need it for some reason
-                auto silence = std::make_shared<AudioFrame>(format_, frame->pointer()->nb_samples);
-                libav_utils::fillWithSilence(silence->pointer());
-                audioProcessor_->putPlayback(silence);
-                
-                audioProcessor_->putRecorded(std::static_pointer_cast<AudioFrame>(frame));
+            bool processed = false;
+            {
+                std::lock_guard<std::mutex> lock(audioProcessorMutex_);
+                if (audioProcessor_) {
+                    // we need it for some reason
+                    auto silence = std::make_shared<AudioFrame>(format_, frame->pointer()->nb_samples);
+                    libav_utils::fillWithSilence(silence->pointer());
+                    audioProcessor_->putPlayback(silence);
+
+                    audioProcessor_->putRecorded(std::static_pointer_cast<AudioFrame>(frame));
+                    processed = true;
+                }
             }
-            else {
+
+            if (!processed) {
                 notify(frame);
             }
-            
-            ringbuffer_->put(std::move(std::static_pointer_cast<AudioFrame>(frame)));
+
+            ringbuffer_->put(std::static_pointer_cast<AudioFrame>(frame));
         }
     }));
     audioDecoder_->setContextCallback([this]() {

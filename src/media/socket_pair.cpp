@@ -503,9 +503,8 @@ SocketPair::readCallback(uint8_t* buf, int buf_size)
         if (len > 0) {
             auto header = reinterpret_cast<rtcpRRHeader*>(buf);
             // 201 = RR PT
-            if (header->pt == 201) {
-                lastDLSR_ = Swap4Bytes(header->dlsr);
-                // SIP_CORE_WARN("Read RR, lastDLSR : %d", lastDLSR_);
+            if (header->pt == 201 && static_cast<size_t>(len) >= sizeof(rtcpRRHeader)) {
+                lastDLSR_.store(Swap4Bytes(header->dlsr), std::memory_order_relaxed);
                 lastRR_time = std::chrono::steady_clock::now();
                 saveRtcpRRPacket(buf, len);
             }
@@ -600,6 +599,8 @@ SocketPair::writeData(const uint8_t* buf, int buf_size)
 
     if (noWrite_)
         return buf_size;
+
+    return 0;
 }
 
 int
@@ -650,17 +651,19 @@ SocketPair::writeCallback(const uint8_t* buf, int buf_size)
 
         currentSRTS = ts_MSB + (ts_LSB / pow(2, 32));
 
-        if (lastSRTS_ != 0 && lastDLSR_ != 0) {
-            if (histoLatency_.size() >= MAX_LIST_SIZE)
-                histoLatency_.pop_front();
+        {
+            std::lock_guard<std::mutex> lock(latencyMutex_);
+            if (lastSRTS_ != 0 && lastDLSR_.load(std::memory_order_relaxed) != 0) {
+                if (histoLatency_.size() >= MAX_LIST_SIZE)
+                    histoLatency_.pop_front();
 
-            currentLatency = (currentSRTS - lastSRTS_) / 2;
-            // SIP_CORE_WARN("Current Latency : %f from sender %X", currentLatency, header->ssrc);
-            histoLatency_.push_back(currentLatency);
+                currentLatency = (currentSRTS - lastSRTS_) / 2;
+                histoLatency_.push_back(currentLatency);
+            }
+
+            lastSRTS_ = currentSRTS;
         }
 
-        lastSRTS_ = currentSRTS;
-        
         std::lock_guard<std::mutex> lock(rtcpInfo_mutex_);
         lastRtcpSRHeader_ = *header;
 
@@ -678,6 +681,7 @@ SocketPair::writeCallback(const uint8_t* buf, int buf_size)
 double
 SocketPair::getLastLatency()
 {
+    std::lock_guard<std::mutex> lock(latencyMutex_);
     if (not histoLatency_.empty())
         return histoLatency_.back();
     else

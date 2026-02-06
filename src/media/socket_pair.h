@@ -235,9 +235,10 @@ private:
 
     mutable std::atomic_bool rtcpPacketLoss_ {false};
     double lastSRTS_ {};
-    uint32_t lastDLSR_ {};
+    std::atomic<uint32_t> lastDLSR_ {0};
 
     std::list<double> histoLatency_;
+    mutable std::mutex latencyMutex_;
 
     time_point lastRR_time;
     uint16_t lastSeqNumIn_ {0};
