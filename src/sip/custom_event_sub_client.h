@@ -31,6 +31,7 @@ private:
     pj_caching_pool cp_;
     pj_pool_t* pool_;      /**< Pool for this pres_client. */
     pjsip_evsub* sub_;     /**< pres_client presence subscription */
+    bool desired_ {true};  /**< Whether user still wants this subscription active. */
     unsigned term_code_;   /**< Subscription termination code */
     pj_str_t term_reason_; /**< Subscription termination reason */
     pj_timer_entry timer_; /**< Resubscription timer */
@@ -113,6 +114,9 @@ public:
      * Return  the monitor variable.
      */
     bool isSubscribed();
+    bool isDesired() const { return desired_; }
+    void setDesired(bool desired) { desired_ = desired; }
+    void refreshContact(const std::string& contactHeader);
     /**
      * Return the pres_client URI
      */

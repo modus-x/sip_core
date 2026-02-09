@@ -654,8 +654,18 @@ transaction_request_cb(pjsip_rx_data* rdata)
 static void
 tp_state_callback(pjsip_transport* tp,
                   pjsip_transport_state state,
+                  const pjsip_transport_state_info* info);
+
+static pjsip_tp_state_callback previous_tp_state_callback {nullptr};
+
+static void
+tp_state_callback(pjsip_transport* tp,
+                  pjsip_transport_state state,
                   const pjsip_transport_state_info* info)
 {
+    if (previous_tp_state_callback && previous_tp_state_callback != tp_state_callback)
+        previous_tp_state_callback(tp, state, info);
+
     if (auto& broker = Manager::instance().sipVoIPLink().sipTransportBroker)
         broker->transportStateChanged(tp, state, info);
     else
@@ -728,7 +738,9 @@ SIPVoIPLink::SIPVoIPLink()
 
     sipTransportBroker.reset(new SipTransportBroker(endpt_));
 
-    auto status = pjsip_tpmgr_set_state_cb(pjsip_endpt_get_tpmgr(endpt_), tp_state_callback);
+    auto* tpmgr = pjsip_endpt_get_tpmgr(endpt_);
+    previous_tp_state_callback = pjsip_tpmgr_get_state_cb(tpmgr);
+    auto status = pjsip_tpmgr_set_state_cb(tpmgr, tp_state_callback);
     if (status != PJ_SUCCESS)
         SIP_CORE_ERR("Can't set transport callback: %s", sip_utils::sip_strerror(status).c_str());
 
@@ -820,6 +832,7 @@ SIPVoIPLink::shutdown()
 
     SIP_CORE_DBG("sipTransportBroker was shutdown");
     pjsip_tpmgr_set_state_cb(pjsip_endpt_get_tpmgr(endpt_), nullptr);
+    previous_tp_state_callback = nullptr;
 
     pjsip_endpt_destroy(endpt_);
 
@@ -1006,17 +1019,13 @@ invite_session_state_changed_cb(pjsip_inv_session* inv, pjsip_event* ev)
                 auto sipAccount = std::dynamic_pointer_cast<SIPAccount>(
                     sipCall->getAccount().lock());
 
-                std::lock_guard<std::mutex> lk(sipAccount->switchFromCallRetry);
-
                 // we have some route to retry
                 if (sipAccount
                     && (sipAccount->hasServiceRoute() || sipAccount->hasBackServiceRoute())) {
                     if (sipCall->getInitialServiceRoute() == sipAccount->getActiveServiceRoute()) {
-                        if (sipAccount->isUsingBackupRoute()) {
-                            sipAccount->switchToMainRoute();
-                        } else {
-                            sipAccount->switchToBackupRoute();
-                        }
+                        const bool switchToBackup = !sipAccount->isUsingBackupRoute();
+                        sipAccount->switchRouteAndReregister(switchToBackup,
+                                                             "invite-failure-route-retry");
                     }
 
                     sipAccount->newOutgoingCall(sipCall->getPeerNumber(), sipCall->currentMediaList());
@@ -1136,7 +1145,7 @@ sdp_create_offer_cb(pjsip_inv_session* inv, pjmedia_sdp_session** p_offer)
         if (dlg->tp_sel.type == PJSIP_TPSELECTOR_TRANSPORT) {
             if (auto tr = dlg->tp_sel.u.transport)
                 family = tr->local_addr.addr.sa_family;
-        } else if (dlg->tp_sel.type == PJSIP_TPSELECTOR_TRANSPORT) {
+        } else if (dlg->tp_sel.type == PJSIP_TPSELECTOR_LISTENER) {
             if (auto tr = dlg->tp_sel.u.listener)
                 family = tr->local_addr.addr.sa_family;
         }
@@ -1676,7 +1685,8 @@ SIPVoIPLink::findLocalAddressFromTransport(std::shared_ptr<SipTransport> transpo
                                            std::string& addr,
                                            pj_uint16_t& port) const
 {
-    auto transportType = transport->getPjSipTransportType();
+    auto transportType
+        = transport ? transport->getPjSipTransportType() : PJSIP_TRANSPORT_UDP;
 
     // Initialize the sip port with the default SIP port
     port = pjsip_transport_get_default_port_for_type(transportType);
@@ -1684,7 +1694,6 @@ SIPVoIPLink::findLocalAddressFromTransport(std::shared_ptr<SipTransport> transpo
     // Initialize the sip address with the hostname
     addr = sip_utils::as_view(*pj_gethostname());
 
-    // Update address and port with active transport
     RETURN_IF_NULL(transport,
                    "Transport is NULL in findLocalAddress, using local address %s :%d",
                    addr.c_str(),
@@ -1719,24 +1728,36 @@ SIPVoIPLink::findLocalAddressFromTransport(std::shared_ptr<SipTransport> transpo
 pjsip_tpselector
 SIPVoIPLink::getTransportSelector(std::shared_ptr<SipTransport> transport)
 {
-    pjsip_tpselector tp;
+    pjsip_tpselector tp {};
+    if (!transport) {
+        tp.type = PJSIP_TPSELECTOR_NONE;
+        return tp;
+    }
 
     auto type = transport->getTransportType();
 
     switch (type) {
     case TransportType::TCP:
         // connection oriented. will be managed by pjsip transport manager
-        tp.type = PJSIP_TPSELECTOR_LISTENER;
-        tp.u.listener = std::static_pointer_cast<TCPTransport>(transport)->get_factory();
-        tp.disable_connection_reuse = PJ_FALSE;
+        if (auto listener = std::static_pointer_cast<TCPTransport>(transport)->get_factory()) {
+            tp.type = PJSIP_TPSELECTOR_LISTENER;
+            tp.u.listener = listener;
+            tp.disable_connection_reuse = PJ_FALSE;
+        } else {
+            tp.type = PJSIP_TPSELECTOR_NONE;
+        }
         break;
     case TransportType::UDP:
         // handled by us when socket is opened
-        tp.type = PJSIP_TPSELECTOR_TRANSPORT;
-        tp.u.transport = std::static_pointer_cast<UDPTransport>(transport)->get();
+        if (auto* tpTransport = std::static_pointer_cast<UDPTransport>(transport)->get()) {
+            tp.type = PJSIP_TPSELECTOR_TRANSPORT;
+            tp.u.transport = tpTransport;
+        } else {
+            tp.type = PJSIP_TPSELECTOR_NONE;
+        }
         break;
     default:
-        // Handle the case when the transport type is not recognized
+        tp.type = PJSIP_TPSELECTOR_NONE;
         break;
     }
 

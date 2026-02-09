@@ -27,6 +27,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <string>
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
@@ -90,6 +91,8 @@ public:
 
     inline pjsip_transport* get() const { return transport_.get(); }
 
+    void shutdown();
+
     inline TransportType getTransportType() const override { return TransportType::UDP; };
 
     inline bool isSecure() const override { return false; }
@@ -114,6 +117,8 @@ public:
 
     inline pjsip_tpfactory* get_factory() const { return connection_factory_; }
 
+    void shutdown();
+
     inline TransportType getTransportType() const override { return TransportType::TCP; };
 
     inline bool isSecure() const override { return false; }
@@ -125,6 +130,7 @@ private:
     // before storing transport, we need to add ref to it because we are using bare pjsip struct
     // this is manager by transport manager of PJSIP!
     pjsip_tpfactory* connection_factory_;
+    std::atomic_bool destroyed_ {false};
 };
 
 class IpAddr;
@@ -146,6 +152,11 @@ public:
      * Start graceful shutdown procedure for all transports
      */
     void shutdown();
+
+    /**
+     * Clear transport caches for connectivity changes without entering destroy mode.
+     */
+    void resetForConnectivityChange();
 
     void transportStateChanged(pjsip_transport*,
                                pjsip_transport_state,
@@ -170,14 +181,24 @@ private:
     std::mutex transportMapMutex_ {};
 
     /**
-     * UDP transport currently used
+     * UDP transport map keyed by bind address.
      */
-    std::weak_ptr<UDPTransport> udpTransport_;
+    std::map<std::string, std::shared_ptr<UDPTransport>> udpTransports_;
 
     /**
-     * TCP transport currently used
+     * Reverse lookup index for UDP transport state events.
      */
-    std::weak_ptr<TCPTransport> tcpTransport_;
+    std::map<pjsip_transport*, std::string> udpTransportIndex_;
+
+    /**
+     * TCP transport map keyed by bind address.
+     */
+    std::map<std::string, std::shared_ptr<TCPTransport>> tcpTransports_;
+
+    /**
+     * Reverse lookup index for TCP transport state events.
+     */
+    std::map<pjsip_tpfactory*, std::string> tcpTransportIndex_;
 
     pjsip_endpoint* endpt_;
 

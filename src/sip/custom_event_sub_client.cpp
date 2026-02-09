@@ -327,7 +327,6 @@ CustomEventSubClient::CustomEventSubClient(const std::string& uri,
     : manager_(manager)
     , uri_ {0, 0}
     , contact_ {0, 0}
-    , event_ {0, 0}
     , display_()
     , dlg_(NULL)
     , monitored_(false)
@@ -335,12 +334,14 @@ CustomEventSubClient::CustomEventSubClient(const std::string& uri,
     , cp_()
     , pool_(0)
     , sub_(NULL)
+    , desired_(true)
     , term_code_(0)
     , term_reason_()
     , timer_()
     , user_data_(NULL)
     , lock_count_(0)
     , lock_flag_(0)
+    , event_ {0, 0}
 {
     pj_caching_pool_init(&cp_, &pj_pool_factory_default_policy, 0);
     pool_ = pj_pool_create(&cp_.factory, "Events_sub_client", 512, 512, NULL);
@@ -361,6 +362,12 @@ bool
 CustomEventSubClient::isSubscribed()
 {
     return monitored_;
+}
+
+void
+CustomEventSubClient::refreshContact(const std::string& contactHeader)
+{
+    contact_ = pj_strdup3(pool_, contactHeader.c_str());
 }
 
 std::string_view

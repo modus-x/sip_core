@@ -233,7 +233,9 @@ struct Manager::ManagerPimpl
 
     void initAudioDriver();
 
-    void processIncomingCall(const std::string& accountId, Call& incomCall, const std::map<std::string, std::string>& headers = {});
+    void processIncomingCall(const std::string& accountId,
+                             Call& incomCall,
+                             const std::map<std::string, std::string>& headers = {});
     static void stripSipPrefix(Call& incomCall);
 
     Manager& base_; // pimpl back-pointer
@@ -534,7 +536,7 @@ Manager::ManagerPimpl::bindCallToConference(Call& call, Conference& conf)
     const auto& callId = call.getCallId();
     const auto& confId = conf.getConfId();
     const auto& state = call.getStateStr();
-    
+
     // ensure that calls are only in one conference at a time
     if (call.isConferenceParticipant())
         base_.detachParticipant(callId);
@@ -613,7 +615,9 @@ Manager::setRingtone(const std::string& accountId, const std::string& ringtone)
     return false;
 }
 
-int Manager::getKeepAliveInterval(const std::string& accountId) {
+int
+Manager::getKeepAliveInterval(const std::string& accountId)
+{
     if (auto account = getAccount(accountId)) {
         if (account->config().type == ACCOUNT_TYPE_SIP) {
             auto sipAccount = std::static_pointer_cast<SIPAccount>(account);
@@ -623,15 +627,17 @@ int Manager::getKeepAliveInterval(const std::string& accountId) {
     return 0;
 }
 
-void Manager::setKeepAliveInterval(const std::string& accountId, int interval) {
-        if (auto account = getAccount(accountId)) {
+void
+Manager::setKeepAliveInterval(const std::string& accountId, int interval)
+{
+    if (auto account = getAccount(accountId)) {
         if (account->config().type == ACCOUNT_TYPE_SIP) {
             auto sipAccount = std::static_pointer_cast<SIPAccount>(account);
-            sipAccount->editConfig([&](SipAccountConfig& config) { config.keepAliveInterval = interval; });
+            sipAccount->editConfig(
+                [&](SipAccountConfig& config) { config.keepAliveInterval = interval; });
             sipAccount->registerKeepAliveTimer();
         }
     }
-
 }
 
 std::string
@@ -668,8 +674,10 @@ signalHandler(int signum)
     std::exit(signum);
 }
 
-static void beforeExit() {
-	Manager::instance().finish();
+static void
+beforeExit()
+{
+    Manager::instance().finish();
 }
 
 void
@@ -714,8 +722,7 @@ Manager::init(const std::string& config_file, const std::optional<std::string>& 
     // So only create the SipLink once
     pimpl_->sipLink_ = std::make_unique<SIPVoIPLink>();
 
-    pimpl_->path_ = config_file.empty() ? pimpl_->retrieveConfigPath()
-                                        : config_file;
+    pimpl_->path_ = config_file.empty() ? pimpl_->retrieveConfigPath() : config_file;
     SIP_CORE_DBG("Configuration file path: %s", pimpl_->path_.c_str());
 
     pimpl_->data_path_ = data_path;
@@ -743,8 +750,8 @@ Manager::init(const std::string& config_file, const std::optional<std::string>& 
             pimpl_->dtmfKey_.reset(new DTMF(getRingBufferPool().getInternalSamplingRate()));
         }
     }
-	
-	atexit(beforeExit);
+
+    atexit(beforeExit);
 
     // Register the signal handler for common termination signals
     if (signal(SIGINT, signalHandler) == SIG_ERR) {
@@ -901,8 +908,8 @@ Manager::outgoingCall(const std::string& account_id,
                       const std::string& to,
                       const std::vector<libsip_core::MediaMap>& mediaList)
 {
-    SIP_CORE_DBG() << "try outgoing call to '" << to << "'" << " with account '" << account_id
-                   << "'";
+    SIP_CORE_DBG() << "try outgoing call to '" << to << "'"
+                   << " with account '" << account_id << "'";
 
     std::shared_ptr<Call> call;
 
@@ -943,6 +950,7 @@ Manager::switchTransport(const std::string& accountId, libsip_core::TransportTyp
     if (auto account = getAccount(accountId)) {
         return account->switchTransport(transportType);
     }
+    return false;
 }
 
 bool
@@ -1342,14 +1350,14 @@ Manager::joinParticipant(const std::string& accountId,
     auto call1Media = call1->getMediaAttributeList();
 
     attachLocalVideo = std::any_of(call1Media.begin(),
-                                     call1Media.end(),
-                                     [](const MediaAttribute& media) {
-                                         return media.hasValidVideo();
-                                     });
+                                   call1Media.end(),
+                                   [](const MediaAttribute& media) {
+                                       return media.hasValidVideo();
+                                   });
 
     // use default source if not found
     std::string source;
-    if(attachLocalVideo) {
+    if (attachLocalVideo) {
         for (auto m : call1Media) {
             if (m.type_ == MediaType::MEDIA_VIDEO) {
                 source = m.sourceUri_;
@@ -1369,13 +1377,13 @@ Manager::joinParticipant(const std::string& accountId,
     // is that true for call2 ?
     if (!attachLocalVideo) {
         attachLocalVideo = std::any_of(call2Media.begin(),
-                                     call2Media.end(),
-                                     [](const MediaAttribute& media) {
-                                         return media.hasValidVideo();
-                                     });
+                                       call2Media.end(),
+                                       [](const MediaAttribute& media) {
+                                           return media.hasValidVideo();
+                                       });
     }
 
-    if(attachLocalVideo) {
+    if (attachLocalVideo) {
         for (auto m : call2Media) {
             if (m.type_ == MediaType::MEDIA_VIDEO) {
                 source = m.sourceUri_;
@@ -1772,7 +1780,9 @@ Manager::incomingCallsWaiting()
 }
 
 void
-Manager::incomingCall(const std::string& accountId, Call& call, const std::map<std::string, std::string>& headers)
+Manager::incomingCall(const std::string& accountId,
+                      Call& call,
+                      const std::map<std::string, std::string>& headers)
 {
     if (not accountId.empty()) {
         pimpl_->stripSipPrefix(call);
@@ -2174,7 +2184,8 @@ Manager::startAudio()
     // Recreate audio driver with new settings
     pimpl_->audiodriver_.reset(pimpl_->base_.audioPreference.createAudioLayer());
 
-    constexpr std::array<AudioDeviceType, 2> TYPES {AudioDeviceType::CAPTURE, AudioDeviceType::PLAYBACK};
+    constexpr std::array<AudioDeviceType, 2> TYPES {AudioDeviceType::CAPTURE,
+                                                    AudioDeviceType::PLAYBACK};
 
     for (const auto& type : TYPES)
         if (pimpl_->audioStreamUsers_[(unsigned) type])
@@ -2243,7 +2254,7 @@ Manager::toggleRecordingCall(const std::string& accountId, const std::string& id
 bool
 Manager::startRecordedFilePlayback(const std::string& filepath)
 {
-    auto data_path =  Manager::instance().getDataPath();
+    auto data_path = Manager::instance().getDataPath();
 
     if (!data_path.has_value()) {
         return false;
@@ -2272,8 +2283,7 @@ Manager::startRecordedFilePlayback(const std::string& filepath)
     pimpl_->audiodriver_->putUrgentNoResize(*pimpl_->currentFile_->getBuffer());
 
     // todo: wait autio stop, then stop audio layer
-    scheduler().scheduleIn([audioGuard] { SIP_CORE_WARN("End of dtmf"); },
-                        std::chrono::seconds(3));
+    scheduler().scheduleIn([audioGuard] { SIP_CORE_WARN("End of dtmf"); }, std::chrono::seconds(3));
 
     return true;
 }
@@ -2501,12 +2511,12 @@ Manager::setAudioProcessor(const std::string& processor)
         pimpl_->initAudioDriver();
     }
 
-    if(audioPreference.getVadEnabled()) {
+    if (audioPreference.getVadEnabled()) {
         for (auto& call : callFactory.getAllCalls()) {
             if (auto sipCall = std::dynamic_pointer_cast<SIPCall>(call)) {
                 for (auto& audioRtp : sipCall->getRtpSessionList(MediaType::MEDIA_AUDIO)) {
                     auto& recv = std::static_pointer_cast<AudioRtpSession>(audioRtp)
-                            ->getAudioReceive();
+                                     ->getAudioReceive();
                     recv->setVAD(false);
                     recv->setVAD(true);
                 }
@@ -2530,8 +2540,7 @@ Manager::setVADState(bool state)
     for (auto& call : callFactory.getAllCalls()) {
         if (auto sipCall = std::dynamic_pointer_cast<SIPCall>(call)) {
             for (auto& audioRtp : sipCall->getRtpSessionList(MediaType::MEDIA_AUDIO)) {
-                auto& recv = std::static_pointer_cast<AudioRtpSession>(audioRtp)
-                        ->getAudioReceive();
+                auto& recv = std::static_pointer_cast<AudioRtpSession>(audioRtp)->getAudioReceive();
                 recv->setVAD(state);
             }
         }
@@ -2572,14 +2581,18 @@ Manager::ManagerPimpl::stripSipPrefix(Call& incomCall)
 
 // Internal helper method
 void
-Manager::ManagerPimpl::processIncomingCall(const std::string& accountId, Call& incomCall, const std::map<std::string, std::string>& headers)
+Manager::ManagerPimpl::processIncomingCall(const std::string& accountId,
+                                           Call& incomCall,
+                                           const std::map<std::string, std::string>& headers)
 {
     base_.stopTone();
 
     auto incomCallId = incomCall.getCallId();
     auto currentCall = base_.getCurrentCall();
 
-    if(currentCall && (currentCall->isConferenceParticipant() || currentCall->isRemoteConferenceParticipant())) {
+    if (currentCall
+        && (currentCall->isConferenceParticipant()
+            || currentCall->isRemoteConferenceParticipant())) {
         incomCall.refuse();
         return;
     }
@@ -2605,7 +2618,8 @@ Manager::ManagerPimpl::processIncomingCall(const std::string& accountId, Call& i
     emitSignal<libsip_core::CallSignal::IncomingCallWithMedia>(accountId,
                                                                incomCallId,
                                                                incomCall.getPeerNumber(),
-                                                               mediaList, headers);
+                                                               mediaList,
+                                                               headers);
 
     if (not base_.hasCurrentCall()) {
         incomCall.setState(Call::ConnectionState::RINGING);

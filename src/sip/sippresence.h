@@ -24,6 +24,7 @@
 #include <string>
 #include <list>
 #include <mutex>
+#include <vector>
 
 #include "noncopyable.h"
 #include "pjsip/sip_types.h"
@@ -152,6 +153,7 @@ public:
      * @param buddyUri  Remote user that we want to subscribe
      */
     void subscribeClient(const std::string& uri, bool flag);
+    void recoverSubscriptionsAndPublish(const std::string& contactHeader, bool republish);
     /**
      * Add a buddy in the buddy list.
      * @param b     PresSubClient pointer

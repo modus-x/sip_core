@@ -80,21 +80,49 @@ SIPEvents::subscribeClient(const std::string& uri, const std::string& event, boo
     /* Check if the buddy was already subscribed */
     for (const auto& c : sub_list_) {
         if (c->getURI() == uri && c->getEvent() == event) {
-            if (flag)
+            c->setDesired(flag);
+            if (flag) {
+                c->refreshContact(acc_->getContactHeader());
                 c->subscribe();
-            else
+            } else {
                 c->unsubscribe();
+            }
             return;
         }
     }
 
     if (flag) {
         CustomEventSubClient* c = new CustomEventSubClient(uri, event, this);
+        c->setDesired(true);
+        c->refreshContact(acc_->getContactHeader());
         if (!(c->subscribe())) {
             SIP_CORE_WARN("Failed send subscribe.");
             delete c;
         }
         // the uri has to be accepted before being added in the list
+    }
+}
+
+void
+SIPEvents::recoverSubscriptions(const std::string& contactHeader)
+{
+    std::vector<CustomEventSubClient*> subscriptions;
+    {
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
+        subscriptions.assign(sub_list_.begin(), sub_list_.end());
+    }
+
+    for (auto* sub : subscriptions) {
+        if (!sub || !sub->isDesired())
+            continue;
+        sub->refreshContact(contactHeader);
+        if (!sub->subscribe()) {
+            SIP_CORE_WARN("Failed to recover event subscription [%.*s] %.*s",
+                          (int) sub->getEvent().size(),
+                          sub->getEvent().data(),
+                          (int) sub->getURI().size(),
+                          sub->getURI().data());
+        }
     }
 }
 

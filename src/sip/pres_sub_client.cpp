@@ -356,6 +356,7 @@ PresSubClient::PresSubClient(const std::string& uri, SIPPresence* pres)
     , pool_(0)
     , status_()
     , sub_(NULL)
+    , desired_(true)
     , term_code_(0)
     , term_reason_()
     , timer_()
@@ -381,6 +382,12 @@ bool
 PresSubClient::isSubscribed()
 {
     return monitored_;
+}
+
+void
+PresSubClient::refreshContact(const std::string& contactHeader)
+{
+    contact_ = pj_strdup3(pool_, contactHeader.c_str());
 }
 
 std::string_view

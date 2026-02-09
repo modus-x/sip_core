@@ -347,6 +347,10 @@ void
 SIPCall::setSipTransport(const std::shared_ptr<SipTransport>& transport,
                          const std::string& contactHdr)
 {
+    const auto list_id = reinterpret_cast<uintptr_t>(this);
+    if (sipTransport_)
+        sipTransport_->removeStateListener(list_id);
+
     if (transport != sipTransport_) {
         SIP_CORE_DBG("[call:%s] Setting transport to [%p]", getCallId().c_str(), transport.get());
     }
@@ -373,9 +377,6 @@ SIPCall::setSipTransport(const std::shared_ptr<SipTransport>& transport,
         SIP_CORE_WARN("[call:%s] The signaling channel is encrypted but the media is not encrypted",
                       getCallId().c_str());
     }
-
-    const auto list_id = reinterpret_cast<uintptr_t>(this);
-    sipTransport_->removeStateListener(list_id);
 
     // listen for transport destruction
     sipTransport_->addStateListener(

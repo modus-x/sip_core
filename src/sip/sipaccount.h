@@ -40,6 +40,9 @@
 
 #include <vector>
 #include <map>
+#include <cstdint>
+#include <atomic>
+#include <utility>
 
 namespace sip_core {
 
@@ -301,6 +304,12 @@ public:
      * Switch back to main service route
      */
     void switchToMainRoute();
+    void switchRouteAndReregister(bool useBackup, const char* reason);
+
+    bool isOptionsSuccess200(int statusCode) const;
+    bool isTransportFailureFromOptions(int statusCode) const;
+    bool isRouteFailureFromOptions(int statusCode) const;
+    void scheduleTransportRecovery(const char* reason, pj_status_t status);
 
     virtual bool getSrtpFallback() const override { return config().srtpFallback; }
 
@@ -330,12 +339,13 @@ public:
 
     bool isRegistrationRefreshEnabled() const { return config().registrationRefreshEnabled; }
 
-    void setTransport(const std::shared_ptr<SipTransport>& = nullptr);
+    bool setTransport(const std::shared_ptr<SipTransport>& = nullptr);
 
     bool switchTransport(libsip_core::TransportType transportType) override;
 
     /**
-     * Try to register a new keepalive registration timer (only for UDP!) with current KA interval from config!
+     * Try to register a new keepalive registration timer (only for UDP!) with current KA interval
+     * from config!
      */
     void registerKeepAliveTimer();
 
@@ -388,7 +398,10 @@ public:
     // current transport type
     inline pjsip_transport_type_e getTransportType() const
     {
-        return transport_->getPjSipTransportType();
+        if (transport_)
+            return transport_->getPjSipTransportType();
+        return config().transport == libsip_core::TransportType::TCP ? PJSIP_TRANSPORT_TCP
+                                                                     : PJSIP_TRANSPORT_UDP;
     }
 
     /**
@@ -521,9 +534,7 @@ public:
      */
     bool mainRouteAvailable_ {false};
 
-
     void setCredentials(const std::vector<SipAccountConfig::Credentials>& creds);
-
 
     // set explicit transport destination and params for tdata
     bool setUpTransmissionData(pjsip_tx_data* tdata);
@@ -533,6 +544,8 @@ public:
     const IpAddr& getBackServiceRouteIp() { return backServiceRouteIp_; };
 
     std::atomic<bool> needsResubscribe_ {false};
+    std::atomic<bool> needsRepublish_ {false};
+    std::atomic<bool> pendingTransportRebind_ {false};
     std::string callUri_ {};
 
     void startBackupKeepAliveAfterRegister();
@@ -541,6 +554,11 @@ public:
     std::atomic<bool> pendingBackupKeepAliveStart_ {false};
 
     std::mutex switchFromCallRetry;
+    std::atomic<bool> routeSwitchPending_ {false};
+    std::atomic<bool> transportSwitchPending_ {false};
+    std::atomic<bool> transportRecoveryPending_ {false};
+    std::atomic<bool> isShuttingDown_ {false};
+    std::atomic<int64_t> lastTransportRecoveryMs_ {0};
 
 private:
     void doRegister1_();
@@ -550,7 +568,6 @@ private:
     // be updated (as the contact header)after the registration.
     bool initContactAddress();
     void updateContactHeader();
-
 
     NON_COPYABLE(SIPAccount);
 
@@ -575,6 +592,20 @@ private:
      */
     virtual void onTransportStateChanged(pjsip_transport_state state,
                                          const pjsip_transport_state_info* info);
+    bool switchTransportInternal(libsip_core::TransportType transportType,
+                                 bool persistConfig,
+                                 bool markRebind,
+                                 bool* changed = nullptr);
+    void scheduleConnectivityRecovery(const char* reason);
+    void recoverTransport(const std::string& reason, pj_status_t status);
+    void scheduleRecoveryInternal(const char* reason, pj_status_t status, bool debounced);
+    bool shouldRecoverTransport(pjsip_transport_state state, pj_status_t status) const;
+    bool isBenignTransportShutdown(pjsip_transport_state state, pj_status_t status) const;
+    void markTransportRebindRequired(const char* reason);
+    void runPostRegisterRecoverySync();
+    std::pair<std::string, pj_uint16_t> currentLocalBinding() const;
+    void resetViaTransport();
+    void cancelAutoReregistrationTimer();
 
     struct
     {
@@ -607,9 +638,9 @@ private:
      */
     std::string printContactHeader(const std::string& username,
                                    const std::string& displayName,
-                                          const std::string& address,
-                                          pj_uint16_t port,
-                                          const std::string& deviceKey = {});
+                                   const std::string& address,
+                                   pj_uint16_t port,
+                                   const std::string& deviceKey = {});
 
     /**
      * Resolved IP of hostname_ (for registration)
@@ -619,13 +650,12 @@ private:
     /**
      * Resolved IP of serviceRoute_ (for registration)
      */
-     IpAddr serviceRouteIp_;
-
+    IpAddr serviceRouteIp_;
 
     /**
      * Resolved IP of backServiceRoute_ (for registration)
      */
-     IpAddr backServiceRouteIp_;
+    IpAddr backServiceRouteIp_;
 
     /**
      * The pjsip client registration information
@@ -697,6 +727,10 @@ private:
     std::string contactHeader_;
     // Contact address (the address part of a SIP URI)
     IpAddr contactAddress_ {};
+    mutable std::mutex localBindingMutex_;
+    std::string lastLocalBindingAddress_ {};
+    pj_uint16_t lastLocalBindingPort_ {0};
+    bool hasLocalBindingSnapshot_ {false};
     pjsip_transport* via_tp_ {nullptr};
 
     /**
@@ -721,8 +755,6 @@ private:
      * Flag indicating if backup service route is currently being used
      */
     bool usingBackupRoute_ {false};
-
-
 };
 
 } // namespace sip_core

@@ -32,6 +32,7 @@
 #include "connectivity/ip_utils.h"
 #include "sip/sipaccount.h"
 #include "sip/sipaccount_config.h"
+#include "sip/sipvoiplink.h"
 #include "audio/audiolayer.h"
 #include "system_codec_container.h"
 #include "client/ring_signal.h"
@@ -787,7 +788,12 @@ connectivityChanged()
 {
     SIP_CORE_WARN("received connectivity changed - trying to re-connect enabled accounts");
 
-    for (const auto& account : sip_core::Manager::instance().getAllAccounts()) {
+    auto& manager = sip_core::Manager::instance();
+    if (auto* broker = manager.sipVoIPLink().sipTransportBroker.get()) {
+        broker->resetForConnectivityChange();
+    }
+
+    for (const auto& account : manager.getAllAccounts()) {
         account->connectivityChanged();
     }
 }

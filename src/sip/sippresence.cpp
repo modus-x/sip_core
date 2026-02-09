@@ -215,10 +215,13 @@ SIPPresence::subscribeClient(const std::string& uri, bool flag)
     for (const auto& c : sub_client_list_) {
         if (c->getURI() == uri) {
             // SIP_CORE_DBG("-PresSubClient:%s exists in the list. Replace it.", uri.c_str());
-            if (flag)
+            c->setDesired(flag);
+            if (flag) {
+                c->refreshContact(acc_->getContactHeader());
                 c->subscribe();
-            else
+            } else {
                 c->unsubscribe();
+            }
             return;
         }
     }
@@ -230,11 +233,57 @@ SIPPresence::subscribeClient(const std::string& uri, bool flag)
 
     if (flag) {
         PresSubClient* c = new PresSubClient(uri, this);
+        c->setDesired(true);
+        c->refreshContact(acc_->getContactHeader());
         if (!(c->subscribe())) {
             SIP_CORE_WARN("Failed send subscribe.");
             delete c;
         }
         // the buddy has to be accepted before being added in the list
+    }
+}
+
+void
+SIPPresence::recoverSubscriptionsAndPublish(const std::string& contactHeader, bool republish)
+{
+    std::vector<PresSubClient*> subscriptions;
+    {
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
+        subscriptions.assign(sub_client_list_.begin(), sub_client_list_.end());
+    }
+
+    for (auto* sub : subscriptions) {
+        if (!sub || !sub->isDesired())
+            continue;
+        sub->refreshContact(contactHeader);
+        if (!sub->subscribe()) {
+            SIP_CORE_WARN("Failed to recover presence subscription for %.*s",
+                          (int) sub->getURI().size(),
+                          sub->getURI().data());
+        }
+    }
+
+    if (!republish)
+        return;
+
+    if (publish_sess_) {
+        pjsip_publishc_destroy(publish_sess_);
+        publish_sess_ = NULL;
+    }
+
+    if (!enabled_ || !publish_supported_) {
+        SIP_CORE_DBG("Skipping presence republish for account %s (enabled=%d, supported=%d)",
+                     acc_->getAccountID().c_str(),
+                     enabled_,
+                     publish_supported_);
+        return;
+    }
+
+    const auto status = publish(this);
+    if (status != PJ_SUCCESS) {
+        SIP_CORE_WARN("Failed to recover presence publish session for account %s: %d",
+                      acc_->getAccountID().c_str(),
+                      status);
     }
 }
 
