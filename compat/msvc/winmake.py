@@ -86,6 +86,7 @@ def getLatestVSVersion():
     args = [
         '-latest',
         '-products *',
+        '-version [16.0,17.99]',
         '-requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64',
         '-property installationVersion'
     ]
@@ -133,6 +134,7 @@ def findVSLatestDir():
     args = [
         '-latest',
         '-products *',
+        '-version [16.0,17.99]',
         '-requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64',
         '-property installationPath'
     ]
