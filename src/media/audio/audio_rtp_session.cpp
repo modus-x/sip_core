@@ -424,19 +424,20 @@ AudioRtpSession::processRtcpChecker()
 void
 AudioRtpSession::attachRemoteRecorder(const MediaStream& ms)
 {
-    if (!mutex_.try_lock() || !recorder_ || !receiveThread_)
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    if (!recorder_ || !receiveThread_)
         return;
     if (auto ob = recorder_->addStream(ms)) {
         receiveThread_->attach(ob);
     }
-    mutex_.unlock();
 }
 
 // this is called from audio thread, be careful, audioInput_ can be already reset
 void
 AudioRtpSession::attachLocalRecorder(const MediaStream& ms)
 {
-    if (!mutex_.try_lock() || !recorder_ || !audioInput_)
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    if (!recorder_ || !audioInput_)
         return;
 
     if (audioInput_) {
@@ -444,8 +445,6 @@ AudioRtpSession::attachLocalRecorder(const MediaStream& ms)
             audioInput_->attach(ob);
         }
     }
-
-    mutex_.unlock();
 }
 
 void

@@ -185,6 +185,8 @@ VideoRtpSession::natPing()
 {
     SIP_CORE_DEBUG("VideoRtpSession Sending keep-alive BLACK rtp packet to session {:s}",
                    getRemoteRtpUri());
+
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (sender_) {
         sender_->sendBlackFrame(NO_DEVICE_WIDTH, NO_DEVICE_HEIGHT);
     }
@@ -581,11 +583,14 @@ VideoRtpSession::setMuted(bool mute, Direction dir)
             sender_->setMuted(mute);
         }
 
-        if (mute) {
-            setupKaTimer();
-        } else {
-            cancelKeepAliveTimer();
-        }
+        // We don't need this because we send black frames on the encoder side.
+        // Muted KA black frames together with encoder size black frames causes
+        // thread synchronization error leading to a core crash.
+        // if (mute) {
+        //     setupKaTimer();
+        // } else {
+        //     cancelKeepAliveTimer();
+        // }
 
         return;
     }
@@ -947,24 +952,24 @@ VideoRtpSession::processRtcpChecker()
 void
 VideoRtpSession::attachRemoteRecorder(const MediaStream& ms)
 {
-    if (!mutex_.try_lock() || !recorder_ || !receiveThread_)
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    if (!recorder_ || !receiveThread_)
         return;
     if (auto ob = recorder_->addStream(ms)) {
         receiveThread_->attach(ob);
     }
-    mutex_.unlock();
 }
 
 void
 VideoRtpSession::attachLocalRecorder(const MediaStream& ms)
 {
-    if (!mutex_.try_lock() || !recorder_ || !videoLocal_
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    if (!recorder_ || !videoLocal_
         || !Manager::instance().videoPreferences.getRecordPreview())
         return;
     if (auto ob = recorder_->addStream(ms)) {
         videoLocal_->attach(ob);
     }
-    mutex_.unlock();
 }
 
 void
