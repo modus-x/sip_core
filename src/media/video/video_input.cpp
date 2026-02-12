@@ -261,9 +261,9 @@ VideoInput::captureFrame()
         // Before attempting to recreate decoder, check if device is still available
         // For camera devices, verify the device hasn't been disconnected
         if (decOpts_.format == "video4linux2" || decOpts_.format == "dshow") {
-            if (!sip_core::getVideoDeviceMonitor().deviceExists(decOpts_.input)) {
+            if (!sip_core::getVideoDeviceMonitor().deviceExists(decOpts_.unique_id)) {
                 SIP_CORE_WARN("Device \"%s\" disconnected during capture, stopping",
-                              decOpts_.input.c_str());
+                              decOpts_.unique_id.c_str());
                 return false;
             }
         }
@@ -273,9 +273,9 @@ VideoInput::captureFrame()
         SIP_CORE_ERR() << "Failed to decode frame";
         // For repeated read errors, check if device still exists
         if (decOpts_.format == "video4linux2" || decOpts_.format == "dshow") {
-            if (!sip_core::getVideoDeviceMonitor().deviceExists(decOpts_.input)) {
+            if (!sip_core::getVideoDeviceMonitor().deviceExists(decOpts_.unique_id)) {
                 SIP_CORE_WARN("Device \"%s\" disconnected (read error), stopping",
-                              decOpts_.input.c_str());
+                              decOpts_.unique_id.c_str());
                 return false;
             }
         }
@@ -403,15 +403,15 @@ VideoInput::createDecoder()
         auto elapsed = std::chrono::steady_clock::now() - startTime;
         if (elapsed > maxTotalTime) {
             SIP_CORE_ERR("Timeout waiting for device \"%s\" to become available",
-                         decOpts_.input.c_str());
+                         decOpts_.unique_id.c_str());
             foundDecOpts(decOpts_);
             return;
         }
 
         // For camera devices, check if the device still exists before retrying
         if (decOpts_.format == "video4linux2" || decOpts_.format == "dshow") {
-            if (!sip_core::getVideoDeviceMonitor().deviceExists(decOpts_.input)) {
-                SIP_CORE_WARN("Device \"%s\" disconnected, stopping input", decOpts_.input.c_str());
+            if (!sip_core::getVideoDeviceMonitor().deviceExists(decOpts_.unique_id)) {
+                SIP_CORE_WARN("Device \"%s\" disconnected, stopping input", decOpts_.unique_id.c_str());
                 foundDecOpts(decOpts_);
                 return;
             }
