@@ -328,6 +328,10 @@ VideoRtpSession::startSender()
             // attach video input only when not muted
             if (!localMuted_.load()) {
                 attachVideoInput();
+            } else {
+                // Stream restart after negotiation can leave muted keepalive stopped.
+                // Re-ensure decodable muted RTP traffic once sender is available.
+                ensureMutedKeepAliveLocked();
             }
 
         } catch (const MediaEncoderException& e) {
@@ -594,6 +598,10 @@ VideoRtpSession::setMuted(bool mute, Direction dir)
     if (dir == Direction::SEND) {
         if (localMuted_.load() == mute) {
             SIP_CORE_DBG("[%p] Local already %s", this, mute ? "muted" : "un-muted");
+            if (mute) {
+                // Sender may have been restarted while muted; ensure keepalive is active.
+                ensureMutedKeepAliveLocked();
+            }
             return;
         }
 
@@ -647,17 +655,9 @@ VideoRtpSession::setMuted(bool mute, Direction dir)
 #endif
 
         if (mute) {
-            // Start sending black frames while muted (only for non-conference mode)
-            // This keeps the RTP stream alive and NAT pinholes open
-#ifndef VIDEO_CLIENT_INPUT
-            if (!conference_) {
-                sendMutedFrames_.store(true);
-                if (!mutedFrameThread_.isRunning()) {
-                    mutedFrameThread_.start();
-                    SIP_CORE_DBG("[%p] Started muted frame thread", this);
-                }
-            }
-#endif
+            // Start sending decodable black frames while muted.
+            // This keeps the RTP stream alive and NAT pinholes open.
+            ensureMutedKeepAliveLocked();
         } else {
             // Stop sending muted frames
             sendMutedFrames_.store(false);
@@ -689,6 +689,38 @@ VideoRtpSession::setMuted(bool mute, Direction dir)
             setupConferenceVideoPipeline(*conference_, Direction::RECV);
         }
     }
+}
+
+void
+VideoRtpSession::ensureMutedKeepAliveLocked()
+{
+#ifndef VIDEO_CLIENT_INPUT
+    // Keep this behavior scoped to standard 1:1 calls.
+    if (conference_) {
+        return;
+    }
+
+    if (!localMuted_.load()) {
+        return;
+    }
+
+    // Sender may not be ready yet (e.g. called before startSender()).
+    if (!sender_) {
+        SIP_CORE_DBG("[%p] Muted keepalive deferred: sender is not ready", this);
+        return;
+    }
+
+    sendMutedFrames_.store(true);
+    if (!mutedFrameThread_.isRunning()) {
+        // Send one decodable frame immediately to accelerate NAT hole punching.
+        sender_->sendBlackFrame(localVideoParams_.width > 0 ? localVideoParams_.width
+                                                            : NO_DEVICE_WIDTH,
+                                localVideoParams_.height > 0 ? localVideoParams_.height
+                                                             : NO_DEVICE_HEIGHT);
+        mutedFrameThread_.start();
+        SIP_CORE_DBG("[%p] Started muted frame thread", this);
+    }
+#endif
 }
 
 void

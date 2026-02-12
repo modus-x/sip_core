@@ -1508,7 +1508,8 @@ MediaEncoder::enableAccel(bool enableAccel)
 
 #ifdef ENABLE_VIDEO
 
-// make everything null and send it as dummy packet
+// Send an empty RTP packet (transport keepalive only, not decodable media).
+// Muted-video keepalive must use encoded black frames.
     void
     MediaEncoder::sendDummyPacket()
     {

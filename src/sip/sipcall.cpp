@@ -78,6 +78,25 @@ getVideoSettings()
 
 #endif
 
+static const char*
+mediaDirectionToString(MediaDirection direction)
+{
+    switch (direction) {
+    case MediaDirection::SENDRECV:
+        return "sendrecv";
+    case MediaDirection::SENDONLY:
+        return "sendonly";
+    case MediaDirection::RECVONLY:
+        return "recvonly";
+    case MediaDirection::INACTIVE:
+        return "inactive";
+    case MediaDirection::UNKNOWN:
+        break;
+    }
+
+    return "unknown";
+}
+
 static constexpr std::chrono::milliseconds MS_BETWEEN_2_KEYFRAME_REQUEST {1000};
 static constexpr auto MULTISTREAM_REQUIRED_VERSION_STR = "10.0.2"sv;
 static const std::vector<unsigned> MULTISTREAM_REQUIRED_VERSION
@@ -1808,6 +1827,25 @@ SIPCall::setupNegotiatedMedia()
             continue;
         }
 
+        if (local.type == MediaType::MEDIA_VIDEO) {
+            if (local.direction_ != MediaDirection::SENDRECV) {
+                SIP_CORE_WARN(
+                    "[call:%s] [SDP:slot#%u] Local video direction is '%s' (expected 'sendrecv'). "
+                    "Keeping RTP mute-based handling.",
+                    getCallId().c_str(),
+                    streamIdx,
+                    mediaDirectionToString(local.direction_));
+            }
+            if (remote.direction_ != MediaDirection::SENDRECV) {
+                SIP_CORE_WARN(
+                    "[call:%s] [SDP:slot#%u] Remote video direction is '%s' (expected 'sendrecv'). "
+                    "Keeping RTP mute-based handling.",
+                    getCallId().c_str(),
+                    streamIdx,
+                    mediaDirectionToString(remote.direction_));
+            }
+        }
+
         if (local.enabled and not local.codec) {
             SIP_CORE_WARN("[call:%s] [SDP:slot#%u] Missing local codec",
                           getCallId().c_str(),
@@ -2062,6 +2100,7 @@ bool
 SIPCall::updateAllMediaStreams(const std::vector<MediaAttribute>& mediaAttrList, bool isRemote)
 {
     SIP_CORE_DBG("[call:%s] New local media", getCallId().c_str());
+    (void) isRemote;
 
     if (mediaAttrList.size() > PJ_ICE_MAX_COMP / 2) {
         SIP_CORE_DEBUG("[call:{:s}] Too many medias, limit it ({:d} vs {:d})",
@@ -2086,10 +2125,23 @@ SIPCall::updateAllMediaStreams(const std::vector<MediaAttribute>& mediaAttrList,
 
         if (streamIdx < 0) {
             // Media does not exist, add a new one.
-            addMediaStream(newAttr);
+            auto normalizedAttr = newAttr;
+            if (normalizedAttr.type_ == MediaType::MEDIA_VIDEO) {
+                if (!normalizedAttr.muted_) {
+                    SIP_CORE_DBG(
+                        "[call:%s] New negotiated video stream [%s] forced muted by default policy",
+                        getCallId().c_str(),
+                        normalizedAttr.label_.c_str());
+                } else {
+                    SIP_CORE_DBG("[call:%s] New negotiated video stream [%s] is kept muted "
+                                 "(default policy)",
+                                 getCallId().c_str(),
+                                 normalizedAttr.label_.c_str());
+                }
+                normalizedAttr.muted_ = true;
+            }
+            addMediaStream(normalizedAttr);
             auto& stream = rtpStreams_.back();
-            // If the remote asks for a new stream, our side sends nothing
-            stream.mediaAttribute_->muted_ = isRemote ? true : stream.mediaAttribute_->muted_;
             createRtpSession(stream);
             SIP_CORE_DBG("[call:%s] Added a new media stream [%s] @ index %i",
                          getCallId().c_str(),

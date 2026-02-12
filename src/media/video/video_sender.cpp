@@ -76,6 +76,8 @@ VideoSender::setSource(const std::string& source)
 void
 VideoSender::natPing()
 {
+    // Legacy RTP keepalive: sends an empty RTP packet.
+    // Muted video NAT keepalive should use sendBlackFrame() (decodable media packet).
     videoEncoder_->sendDummyPacket();
 }
 
@@ -111,6 +113,7 @@ VideoSender::encodeAndSendVideo(const std::shared_ptr<VideoFrame>& input_frame)
 void
 VideoSender::sendBlackFrame(int width, int height)
 {
+    // Send a decodable black frame for muted-video NAT keepalive and stream continuity.
     auto black_frame = std::make_shared<VideoFrame>();
     black_frame->reserve(AV_PIX_FMT_YUV420P, width, height);
     libav_utils::fillWithBlack(black_frame->pointer());

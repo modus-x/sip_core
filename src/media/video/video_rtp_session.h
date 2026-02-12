@@ -189,6 +189,7 @@ private:
     // Thread for sending black frames when video is muted
     InterruptedThreadLoop mutedFrameThread_;
     void processMutedFrame();
+    void ensureMutedKeepAliveLocked();
     std::atomic<bool> sendMutedFrames_ {false};
     std::atomic<bool> localMuted_ {false};
 

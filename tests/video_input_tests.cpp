@@ -124,14 +124,23 @@ test_video_input_switching()
 void
 test_sdp_mute_mapping()
 {
-    const std::string sdp = "v=0\r\n"
-                            "o=- 0 0 IN IP4 127.0.0.1\r\n"
-                            "s=-\r\n"
-                            "c=IN IP4 127.0.0.1\r\n"
-                            "t=0 0\r\n"
-                            "m=video 5004 RTP/AVP 96\r\n"
-                            "a=rtpmap:96 VP8/90000\r\n"
-                            "a=recvonly\r\n";
+    const std::string recvOnlySdp = "v=0\r\n"
+                                    "o=- 0 0 IN IP4 127.0.0.1\r\n"
+                                    "s=-\r\n"
+                                    "c=IN IP4 127.0.0.1\r\n"
+                                    "t=0 0\r\n"
+                                    "m=video 5004 RTP/AVP 96\r\n"
+                                    "a=rtpmap:96 VP8/90000\r\n"
+                                    "a=recvonly\r\n";
+
+    const std::string sendRecvSdp = "v=0\r\n"
+                                    "o=- 0 0 IN IP4 127.0.0.1\r\n"
+                                    "s=-\r\n"
+                                    "c=IN IP4 127.0.0.1\r\n"
+                                    "t=0 0\r\n"
+                                    "m=video 5004 RTP/AVP 96\r\n"
+                                    "a=rtpmap:96 VP8/90000\r\n"
+                                    "a=sendrecv\r\n";
 
     pj_status_t status = pj_init();
     if (status != PJ_SUCCESS) {
@@ -148,8 +157,8 @@ test_sdp_mute_mapping()
     }
 
     pjmedia_sdp_session* session = nullptr;
-    auto sdpBuffer = sdp;
-    status = pjmedia_sdp_parse(pool, sdpBuffer.data(), sdpBuffer.size(), &session);
+    auto recvOnlySdpBuffer = recvOnlySdp;
+    status = pjmedia_sdp_parse(pool, recvOnlySdpBuffer.data(), recvOnlySdpBuffer.size(), &session);
     if (status != PJ_SUCCESS || session == nullptr) {
         pj_pool_release(pool);
         pj_caching_pool_destroy(&cp);
@@ -164,6 +173,24 @@ test_sdp_mute_mapping()
     auto localList = Sdp::getMediaAttributeListFromSdp(session, false, false);
     expect_true(localList.size() == 1, "Local media list should contain one entry");
     expect_true(!localList[0].muted_, "Local media should not inherit remote recvonly mute");
+
+    pjmedia_sdp_session* sendRecvSession = nullptr;
+    auto sendRecvSdpBuffer = sendRecvSdp;
+    status = pjmedia_sdp_parse(pool,
+                               sendRecvSdpBuffer.data(),
+                               sendRecvSdpBuffer.size(),
+                               &sendRecvSession);
+    if (status != PJ_SUCCESS || sendRecvSession == nullptr) {
+        pj_pool_release(pool);
+        pj_caching_pool_destroy(&cp);
+        pj_shutdown();
+        fail("Failed to parse sendrecv SDP");
+    }
+
+    auto sendRecvRemoteList = Sdp::getMediaAttributeListFromSdp(sendRecvSession, false, true);
+    expect_true(sendRecvRemoteList.size() == 1,
+                "Remote media list for sendrecv SDP should contain one entry");
+    expect_true(!sendRecvRemoteList[0].muted_, "Remote sendrecv SDP must not be treated as muted");
 
     pj_pool_release(pool);
     pj_caching_pool_destroy(&cp);

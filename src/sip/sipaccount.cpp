@@ -1956,8 +1956,23 @@ SIPAccount::doUnregister(std::function<void(bool)> released_cb)
 void
 SIPAccount::connectivityChanged()
 {
-    if (not isUsable()) {
-        // nothing to do
+    if (!isUsable()) {
+        SIP_CORE_DBG("Skipping connectivity-changed for account %s: account is not usable",
+                     accountID_.c_str());
+        return;
+    }
+
+    const auto registrationState = getRegistrationState();
+    const bool activeRegistration = registrationState == RegistrationState::REGISTERED;
+    const bool hasWorkingTransport = transport_ != nullptr && transportError_.empty();
+
+    if (!activeRegistration || !hasWorkingTransport) {
+        SIP_CORE_DBG("Skipping connectivity-changed for account %s: registration=%s, "
+                     "transportPresent=%d, transportError='%s'",
+                     accountID_.c_str(),
+                     Account::mapStateNumberToString(registrationState).c_str(),
+                     transport_ ? 1 : 0,
+                     transportError_.c_str());
         return;
     }
 
@@ -2609,7 +2624,6 @@ SIPAccount::printContactHeader(const std::string& username,
             << ";pn-prid=" << deviceKey;
     }
     contact << ">";
-
     return contact.str();
 }
 
