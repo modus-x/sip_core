@@ -1,4 +1,5 @@
 #include "media/video/video_input.h"
+#include "media/media_filter.h"
 #include "sip/sdp.h"
 
 #include <pjlib.h>
@@ -57,6 +58,41 @@ asset_path(const std::string& name)
         fail("Missing test asset: " + path.string());
     }
     return path.string();
+}
+
+MediaStream
+make_audio_stream(const std::string& name)
+{
+    return MediaStream(name, AV_SAMPLE_FMT_S16, {1, 48000}, 48000, 2, 960);
+}
+
+void
+test_audio_filter_compatibility()
+{
+    {
+        auto input = make_audio_stream("input");
+        MediaFilter single;
+        auto ret = single.initialize(
+            "[input]aformat=sample_fmts=s16:sample_rates=48000:channel_layouts=stereo",
+            {input});
+        expect_true(ret == 0, "Single-input audio filter graph should initialize");
+        auto output = single.getOutputParams();
+        expect_true(output.isValid() && !output.isVideo,
+                    "Single-input audio filter graph should expose valid audio output");
+    }
+
+    {
+        auto local = make_audio_stream("local");
+        auto peer = make_audio_stream("peer");
+        MediaFilter mixed;
+        auto ret = mixed.initialize(
+            "[local][peer]amix=inputs=2,aformat=sample_fmts=s16:sample_rates=48000:channel_layouts=stereo",
+            {local, peer});
+        expect_true(ret == 0, "Mixed-input audio filter graph should initialize");
+        auto output = mixed.getOutputParams();
+        expect_true(output.isValid() && !output.isVideo,
+                    "Mixed-input audio filter graph should expose valid audio output");
+    }
 }
 
 void
@@ -202,6 +238,7 @@ test_sdp_mute_mapping()
 int
 main()
 {
+    test_audio_filter_compatibility();
     test_video_input_mute_restart();
     test_video_input_switching();
     test_sdp_mute_mapping();

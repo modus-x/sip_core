@@ -194,6 +194,23 @@ MediaRecorder::startRecording()
     SIP_CORE_DBG() << "Start recording '" << getPath() << "'";
     if (initRecord() >= 0) {
         isRecording_ = true;
+        {
+            std::lock_guard<std::mutex> lk(mutexStreamSetup_);
+            bool hasVideo = false;
+            bool hasAudio = false;
+            for (const auto& stream : streams_) {
+                if (stream.second->info.isVideo)
+                    hasVideo = true;
+                else
+                    hasAudio = true;
+            }
+#ifdef ENABLE_VIDEO
+            if (hasVideo)
+                setupVideoOutput();
+#endif
+            if (hasAudio)
+                setupAudioOutput();
+        }
         record_ = std::thread([rec = shared_from_this()] {
             std::lock_guard<std::mutex> lk(rec->encoderMtx_);
             while (rec->isRecording()) {
@@ -248,7 +265,7 @@ MediaRecorder::stopRecording()
 
 Observer<std::shared_ptr<MediaFrame>>*
 MediaRecorder::addStream(const MediaStream& ms)
-    {
+{
     std::lock_guard<std::mutex> lk(mutexStreamSetup_);
     if (audioOnly_ && ms.isVideo) {
         SIP_CORE_ERR() << "Trying to add video stream to audio only recording";
@@ -270,10 +287,14 @@ MediaRecorder::addStream(const MediaStream& ms)
         // SIP_CORE_INFO("[Recorder: {:p}] Recorder already has '{:s}' as input", fmt::ptr(this), ms.name);
     }
 
-    if (ms.isVideo)
-        setupVideoOutput();
-    else
-        setupAudioOutput();
+    if (isRecording_) {
+        if (ms.isVideo)
+            setupVideoOutput();
+        else
+            setupAudioOutput();
+    } else {
+        SIP_CORE_DBG() << "Recorder stream setup skipped while recording is inactive";
+    }
     return it->second.get();
 }
 
@@ -288,10 +309,12 @@ MediaRecorder::removeStream(const MediaStream& ms)
     } else {
         // SIP_CORE_INFO("[Recorder: {:p}] Recorder removing '{:s}'", fmt::ptr(this), ms.name);
         streams_.erase(it);
-        if (ms.isVideo)
-            setupVideoOutput();
-        else
-            setupAudioOutput();
+        if (isRecording_) {
+            if (ms.isVideo)
+                setupVideoOutput();
+            else
+                setupAudioOutput();
+        }
     }
     return;
 }
@@ -340,14 +363,14 @@ MediaRecorder::onFrame(const std::string& name, const std::shared_ptr<MediaFrame
 #if defined(ENABLE_VIDEO) && defined(RING_ACCEL)
     }
 #endif // ENABLE_VIDEO && RING_ACCEL
-    
+
 #ifdef ENABLE_VIDEO
-if (ms.isVideo && videoFilter_ && outputVideoFilter_) {
-    clone->pointer()->pts = av_rescale_q_rnd(av_gettime() - startTimeStamp_,
-                                            {1, AV_TIME_BASE},
-                                            {1, targetFramerate_},
-                                            static_cast<AVRounding>(AV_ROUND_NEAR_INF
-                                                                    | AV_ROUND_PASS_MINMAX));
+    if (ms.isVideo && videoFilter_ && outputVideoFilter_) {
+        clone->pointer()->pts = av_rescale_q_rnd(av_gettime() - startTimeStamp_,
+                                                 {1, AV_TIME_BASE},
+                                                 {1, targetFramerate_},
+                                                 static_cast<AVRounding>(AV_ROUND_NEAR_INF
+                                                                         | AV_ROUND_PASS_MINMAX));
         std::lock_guard<std::mutex> lk(mutexFilterVideo_);
         videoFilter_->feedInput(clone->pointer(), name);
         auto videoFilterOutput = videoFilter_->readOutput();
@@ -355,28 +378,27 @@ if (ms.isVideo && videoFilter_ && outputVideoFilter_) {
             outputVideoFilter_->feedInput(videoFilterOutput->pointer(), "input");
             videoFilterOutput = outputVideoFilter_->readOutput();
         }
-        
-        if(videoFilterOutput)
-        {
+        if (videoFilterOutput) {
             auto delta = clone->pointer()->pts - lastVideoPts_;
-            if(delta) {
+            if (delta) {
                 std::lock_guard<std::mutex> lk(mutexFrameBuff_);
-                std::unique_ptr<MediaFrame> f = std::make_unique<MediaFrame>();;
+                std::unique_ptr<MediaFrame> f = std::make_unique<MediaFrame>();
                 f->copyFrom(*videoFilterOutput);
                 frameBuff_.emplace_back(std::move(f));
                 lastVideoPts_ = clone->pointer()->pts;
                 cv_.notify_one();
             }
         }
-        
-    } else if (audioFilter_ && outputAudioFilter_) {
-        #endif // ENABLE_VIDEO
+    }
+#endif // ENABLE_VIDEO
+
+    if (!ms.isVideo && audioFilter_ && outputAudioFilter_) {
         clone->pointer()->pts = av_rescale_q_rnd(av_gettime() - startTimeStamp_,
-                                             {1, AV_TIME_BASE},
-                                             ms.timeBase,
-                                             static_cast<AVRounding>(AV_ROUND_NEAR_INF
-                                                                     | AV_ROUND_PASS_MINMAX));
-        
+                                                 {1, AV_TIME_BASE},
+                                                 ms.timeBase,
+                                                 static_cast<AVRounding>(AV_ROUND_NEAR_INF
+                                                                         | AV_ROUND_PASS_MINMAX));
+
         std::lock_guard<std::mutex> lk(mutexFilterAudio_);
         audioFilter_->feedInput(clone->pointer(), name);
         auto audioFilterOutput = audioFilter_->readOutput();
@@ -385,15 +407,13 @@ if (ms.isVideo && videoFilter_ && outputVideoFilter_) {
             outputAudioFilter_->feedInput(audioFilterOutput->pointer(), "input");
             filteredFrame = outputAudioFilter_->readOutput();
         }
-        
+
         if (filteredFrame) {
             std::lock_guard<std::mutex> lk(mutexFrameBuff_);
             frameBuff_.emplace_back(std::move(filteredFrame));
             cv_.notify_one();
         }
-#ifdef ENABLE_VIDEO
     }
-#endif // ENABLE_VIDEO
 }
 
 int
@@ -506,6 +526,7 @@ MediaRecorder::setupVideoOutput()
     videoFilter_.reset(new MediaFilter);
     int ret = -1;
     int streams = peer.isValid() + local.isValid() + mixer.isValid();
+    std::string videoFilterDesc;
     switch (streams) {
     case 0: {
         SIP_CORE_WARN() << "Trying to record a video stream but none is valid";
@@ -524,11 +545,13 @@ MediaRecorder::setupVideoOutput()
             break;
         }
 
-        ret = videoFilter_->initialize(buildVideoFilter({}, inputStream), {inputStream});
+        videoFilterDesc = buildVideoFilter({}, inputStream);
+        ret = videoFilter_->initialize(videoFilterDesc, {inputStream});
         break;
     }
     case 2: // overlay local video over peer video
-        ret = videoFilter_->initialize(buildVideoFilter({peer}, local), {peer, local});
+        videoFilterDesc = buildVideoFilter({peer}, local);
+        ret = videoFilter_->initialize(videoFilterDesc, {peer, local});
         break;
     default:
         SIP_CORE_ERR() << "Recording more than 2 video streams is not supported";
@@ -537,9 +560,10 @@ MediaRecorder::setupVideoOutput()
 
 #ifdef ENABLE_VIDEO
     if (ret < 0) {
-        SIP_CORE_ERR() << "Failed to initialize video filter";
+        SIP_CORE_ERR() << "Failed to initialize video filter. Graph: " << videoFilterDesc;
         std::lock_guard<std::mutex> lk(mutexFilterVideo_);
         videoFilter_.reset();
+        outputVideoFilter_.reset();
         return;
     }
 
@@ -560,13 +584,12 @@ MediaRecorder::setupVideoOutput()
     if (scaledHeight > 720)
         scaleFilter += ",scale=-2:720";
 
-    ret = outputVideoFilter_
-              ->initialize("[input]" + scaleFilter
-                               + ",pad=1280:720:(ow-iw)/2:(oh-ih)/2,format=pix_fmts=yuv420p",
-                           {secondaryFilter});
+    auto outputVideoFilterDesc = "[input]" + scaleFilter
+                                 + ",pad=1280:720:(ow-iw)/2:(oh-ih)/2,format=pix_fmts=yuv420p";
+    ret = outputVideoFilter_->initialize(outputVideoFilterDesc, {secondaryFilter});
 
     if (ret < 0) {
-        SIP_CORE_ERR() << "Failed to initialize output video filter";
+        SIP_CORE_ERR() << "Failed to initialize output video filter. Graph: " << outputVideoFilterDesc;
     }
 
 #endif
@@ -643,6 +666,7 @@ MediaRecorder::setupAudioOutput()
     audioFilter_.reset(new MediaFilter);
     int ret = -1;
     int streams = peer.isValid() + local.isValid() + mixer.isValid();
+    std::string audioFilterDesc;
     switch (streams) {
     case 0: {
         SIP_CORE_WARN() << "Trying to record a audio stream but none is valid";
@@ -660,11 +684,13 @@ MediaRecorder::setupAudioOutput()
             SIP_CORE_ERR("Trying to record a stream but none is valid");
             break;
         }
-        ret = audioFilter_->initialize(buildAudioFilter({}, inputStream), {inputStream});
+        audioFilterDesc = buildAudioFilter({}, inputStream);
+        ret = audioFilter_->initialize(audioFilterDesc, {inputStream});
         break;
     }
     case 2: // mix both audio streams
-        ret = audioFilter_->initialize(buildAudioFilter({peer}, local), {peer, local});
+        audioFilterDesc = buildAudioFilter({peer}, local);
+        ret = audioFilter_->initialize(audioFilterDesc, {peer, local});
         break;
     default:
         SIP_CORE_ERR() << "Recording more than 2 audio streams is not supported";
@@ -672,9 +698,10 @@ MediaRecorder::setupAudioOutput()
     }
 
     if (ret < 0) {
-        SIP_CORE_ERR() << "Failed to initialize audio filter";
+        SIP_CORE_ERR() << "Failed to initialize audio filter. Graph: " << audioFilterDesc;
         std::lock_guard<std::mutex> lk(mutexFilterAudio_);
         audioFilter_.reset();
+        outputAudioFilter_.reset();
         return;
     }
 
@@ -689,12 +716,12 @@ MediaRecorder::setupAudioOutput()
     }
 
     outputAudioFilter_.reset(new MediaFilter);
-    ret = outputAudioFilter_->initialize(
-        "[input]aformat=sample_fmts=s16:sample_rates=48000:channel_layouts=stereo",
-        {secondaryFilter});
+    auto outputAudioFilterDesc
+        = "[input]aformat=sample_fmts=s16:sample_rates=48000:channel_layouts=stereo";
+    ret = outputAudioFilter_->initialize(outputAudioFilterDesc, {secondaryFilter});
 
     if (ret < 0) {
-        SIP_CORE_ERR() << "Failed to initialize output audio filter";
+        SIP_CORE_ERR() << "Failed to initialize output audio filter. Graph: " << outputAudioFilterDesc;
     }
 
     return;
@@ -704,7 +731,7 @@ std::string
 MediaRecorder::buildAudioFilter(const std::vector<MediaStream>& peers,
                                 const MediaStream& local) const
 {
-    std::string baseFilter = "aresample=osr=48000:ocl=stereo:osf=s16";
+    constexpr auto baseFilter = "aformat=sample_fmts=s16:sample_rates=48000:channel_layouts=stereo";
     std::stringstream a;
 
     switch (peers.size()) {
@@ -715,7 +742,7 @@ MediaRecorder::buildAudioFilter(const std::vector<MediaStream>& peers,
         a << "[" << local.name << "] ";
         for (const auto& ms : peers)
             a << "[" << ms.name << "] ";
-        a << " amix=inputs=" << peers.size() + (local.isValid() ? 1 : 0) << ", " << baseFilter;
+        a << "amix=inputs=" << peers.size() + (local.isValid() ? 1 : 0) << "," << baseFilter;
         break;
     }
 
@@ -725,16 +752,18 @@ MediaRecorder::buildAudioFilter(const std::vector<MediaStream>& peers,
 void
 MediaRecorder::flush()
 {
-    if (videoFilter_) {
+    {
         std::lock_guard<std::mutex> lk(mutexFilterVideo_);
-        videoFilter_->flush();
+        if (videoFilter_)
+            videoFilter_->flush();
         if (outputVideoFilter_)
             outputVideoFilter_->flush();
     }
 
-    if (audioFilter_) {
+    {
         std::lock_guard<std::mutex> lk(mutexFilterAudio_);
-        audioFilter_->flush();
+        if (audioFilter_)
+            audioFilter_->flush();
         if (outputAudioFilter_)
             outputAudioFilter_->flush();
     }

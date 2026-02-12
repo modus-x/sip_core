@@ -381,9 +381,11 @@ VideoRtpSession::stopSender()
 
             // detach recorder
             // TODO: Is this compatible with recording?
-            if (auto ob = recorder_->getStream(ms.name)) {
-                videoLocal_->detach(ob);
-                recorder_->removeStream(ms);
+            if (recorder_) {
+                if (auto ob = recorder_->getStream(ms.name)) {
+                    videoLocal_->detach(ob);
+                    recorder_->removeStream(ms);
+                }
             }
         }
 
@@ -476,10 +478,12 @@ VideoRtpSession::stopReceiver()
     if (socketPair_)
         socketPair_->setReadBlockingMode(false);
 
-    auto ms = receiveThread_->getInfo();
-    if (auto ob = recorder_->getStream(ms.name)) {
-        receiveThread_->detach(ob);
-        recorder_->removeStream(ms);
+    if (recorder_) {
+        auto ms = receiveThread_->getInfo();
+        if (auto ob = recorder_->getStream(ms.name)) {
+            receiveThread_->detach(ob);
+            recorder_->removeStream(ms);
+        }
     }
 
     receiveThread_->stopLoop();
@@ -677,9 +681,11 @@ VideoRtpSession::setMuted(bool mute, Direction dir)
     if ((receive_.onHold = mute)) {
         if (receiveThread_) {
             auto ms = receiveThread_->getInfo();
-            if (auto ob = recorder_->getStream(ms.name)) {
-                receiveThread_->detach(ob);
-                recorder_->removeStream(ms);
+            if (recorder_) {
+                if (auto ob = recorder_->getStream(ms.name)) {
+                    receiveThread_->detach(ob);
+                    recorder_->removeStream(ms);
+                }
             }
         }
         stopReceiver();
@@ -1084,24 +1090,24 @@ VideoRtpSession::processMutedFrame()
 void
 VideoRtpSession::attachRemoteRecorder(const MediaStream& ms)
 {
-    if (!mutex_.try_lock() || !recorder_ || !receiveThread_)
+    std::unique_lock<std::recursive_mutex> lock(mutex_, std::try_to_lock);
+    if (!lock.owns_lock() || !recorder_ || !receiveThread_)
         return;
     if (auto ob = recorder_->addStream(ms)) {
         receiveThread_->attach(ob);
     }
-    mutex_.unlock();
 }
 
 void
 VideoRtpSession::attachLocalRecorder(const MediaStream& ms)
 {
-    if (!mutex_.try_lock() || !recorder_ || !videoLocal_
+    std::unique_lock<std::recursive_mutex> lock(mutex_, std::try_to_lock);
+    if (!lock.owns_lock() || !recorder_ || !videoLocal_
         || !Manager::instance().videoPreferences.getRecordPreview())
         return;
     if (auto ob = recorder_->addStream(ms)) {
         videoLocal_->attach(ob);
     }
-    mutex_.unlock();
 }
 
 void

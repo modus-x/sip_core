@@ -273,14 +273,16 @@ AudioRtpSession::setMuted(bool muted, Direction dir)
     } else {
         if (receiveThread_) {
             auto ms = receiveThread_->getInfo();
-            if (muted) {
-                if (auto ob = recorder_->getStream(ms.name)) {
-                    receiveThread_->detach(ob);
-                    recorder_->removeStream(ms);
-                }
-            } else {
-                if (auto ob = recorder_->addStream(ms)) {
-                    receiveThread_->attach(ob);
+            if (recorder_) {
+                if (muted) {
+                    if (auto ob = recorder_->getStream(ms.name)) {
+                        receiveThread_->detach(ob);
+                        recorder_->removeStream(ms);
+                    }
+                } else {
+                    if (auto ob = recorder_->addStream(ms)) {
+                        receiveThread_->attach(ob);
+                    }
                 }
             }
             // do not stop receiving frames. just don't send them to our ring
@@ -424,19 +426,20 @@ AudioRtpSession::processRtcpChecker()
 void
 AudioRtpSession::attachRemoteRecorder(const MediaStream& ms)
 {
-    if (!mutex_.try_lock() || !recorder_ || !receiveThread_)
+    std::unique_lock<std::recursive_mutex> lock(mutex_, std::try_to_lock);
+    if (!lock.owns_lock() || !recorder_ || !receiveThread_)
         return;
     if (auto ob = recorder_->addStream(ms)) {
         receiveThread_->attach(ob);
     }
-    mutex_.unlock();
 }
 
 // this is called from audio thread, be careful, audioInput_ can be already reset
 void
 AudioRtpSession::attachLocalRecorder(const MediaStream& ms)
 {
-    if (!mutex_.try_lock() || !recorder_ || !audioInput_)
+    std::unique_lock<std::recursive_mutex> lock(mutex_, std::try_to_lock);
+    if (!lock.owns_lock() || !recorder_ || !audioInput_)
         return;
 
     if (audioInput_) {
@@ -444,8 +447,6 @@ AudioRtpSession::attachLocalRecorder(const MediaStream& ms)
             audioInput_->attach(ob);
         }
     }
-
-    mutex_.unlock();
 }
 
 void
