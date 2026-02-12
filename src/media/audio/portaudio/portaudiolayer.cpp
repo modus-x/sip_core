@@ -628,9 +628,6 @@ static void convertPaInputToInt16(const void* paBuffer,
                                    PaSampleFormat paFormat) {
     const size_t sampleCount = frameCount * channels;
     
-    SIP_CORE_DBG("[PortAudio Format Convert] Converting %zu samples from %s to Int16", 
-                 sampleCount, formatToString(paFormat));
-    
     switch (paFormat) {
         case paFloat32: {
             const float* src = static_cast<const float*>(paBuffer);
@@ -703,9 +700,6 @@ static void convertInt16ToPaOutput(const int16_t* inBuffer,
                                     int channels,
                                     PaSampleFormat paFormat) {
     const size_t sampleCount = frameCount * channels;
-    
-    SIP_CORE_DBG("[PortAudio Format Convert] Converting %zu samples from Int16 to %s",
-                 sampleCount, formatToString(paFormat));
     
     switch (paFormat) {
         case paFloat32: {
