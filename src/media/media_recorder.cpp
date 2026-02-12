@@ -538,6 +538,9 @@ MediaRecorder::setupVideoOutput()
 #ifdef ENABLE_VIDEO
     if (ret < 0) {
         SIP_CORE_ERR() << "Failed to initialize video filter";
+        std::lock_guard<std::mutex> lk(mutexFilterVideo_);
+        videoFilter_.reset();
+        return;
     }
 
     // setup output filter
@@ -670,6 +673,8 @@ MediaRecorder::setupAudioOutput()
 
     if (ret < 0) {
         SIP_CORE_ERR() << "Failed to initialize audio filter";
+        std::lock_guard<std::mutex> lk(mutexFilterAudio_);
+        audioFilter_.reset();
         return;
     }
 
@@ -723,13 +728,15 @@ MediaRecorder::flush()
     if (videoFilter_) {
         std::lock_guard<std::mutex> lk(mutexFilterVideo_);
         videoFilter_->flush();
-        outputVideoFilter_->flush();
+        if (outputVideoFilter_)
+            outputVideoFilter_->flush();
     }
 
     if (audioFilter_) {
         std::lock_guard<std::mutex> lk(mutexFilterAudio_);
         audioFilter_->flush();
-        outputAudioFilter_->flush();
+        if (outputAudioFilter_)
+            outputAudioFilter_->flush();
     }
     if (encoder_)
         encoder_->flush();

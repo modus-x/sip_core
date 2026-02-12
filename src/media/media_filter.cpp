@@ -226,6 +226,8 @@ MediaFilter::readOutput()
 void
 MediaFilter::flush()
 {
+    if (!initialized_)
+        return;
     for (size_t i = 0; i < inputs_.size(); ++i) {
         int ret = av_buffersrc_add_frame_flags(inputs_[i], nullptr, 0);
         if (ret < 0) {
