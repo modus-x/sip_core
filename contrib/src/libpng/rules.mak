@@ -4,6 +4,11 @@ LIBPNG_URL := https://nexus.svetlocal.ru/repository/github-artifacts/libpng-$(LI
 
 PKGS += libpng
 
+# force the usage of system package in linux
+ifdef HAVE_LINUX
+PKGS_FOUND += libpng
+endif
+
 DEPS_libpng = zlib
 
 LIBPNG_CMAKECONF = -DPNG_SHARED=OFF \

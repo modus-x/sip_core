@@ -4,8 +4,9 @@ LIBHARFBUZZ_URL := https://nexus.svetlocal.ru/repository/github-artifacts/harfbu
 
 PKGS += harfbuzz
 
-HBZ_CMAKECONF = -DBUILD_SHARED_LIBS=Off \
-				-DHB_HAVE_FREETYPE=ON
+HBZ_CMAKECONF = -DBUILD_SHARED_LIBS=OFF \
+				-DHB_HAVE_FREETYPE=ON \
+				-DCMAKE_POSITION_INDEPENDENT_CODE=ON
 
 $(TARBALLS)/harfbuzz-$(LIBHARFBUZZ_VERSION).tar.gz:
 	$(call download,$(LIBHARFBUZZ_URL))
