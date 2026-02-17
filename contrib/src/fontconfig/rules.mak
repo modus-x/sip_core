@@ -28,6 +28,6 @@ fontconfig: fontconfig-$(FONTCONFIG_VERSION).tar.gz .sum-fontconfig
 
 .fontconfig: fontconfig
 	cd $< && $(HOSTVARS) sh autogen.sh $(HOSTCONF) --disable-docs --enable-static \
-		--disable-shared --disable-cache-build --disable-docbook
+		--disable-shared --disable-cache-build --disable-docbook --with-pic
 	cd $< && $(HOSTVARS) $(MAKE) $(FONTCONFIG_INSTALL_SUBDIRS) install
 	touch $@
