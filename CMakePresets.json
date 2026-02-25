@@ -35,7 +35,7 @@
         },
         {
             "name": "linux",
-            "displayName": "latest linux configure",
+            "displayName": "Linux configure",
             "description": "Using compilers: C = /usr/bin/clang, CXX = /usr/bin/clang++",
             "binaryDir": "${sourceDir}/out/build/${presetName}",
             "cacheVariables": {
@@ -45,7 +45,6 @@
                 "CMAKE_BUILD_TYPE": "Debug",
                 "ENABLE_CLI_EXAMPLE": "ON",
                 "BUILD_DEPS": "ON",
-                "HW_ACCEL": "ON",
                 "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
             }
         }
