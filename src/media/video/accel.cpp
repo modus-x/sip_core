@@ -139,6 +139,16 @@ std::vector<HardwareAccel::HardwareAPI> HardwareAccel::apiListEnc_ = {
      false},
 };
 
+std::vector<HardwareAccel::HardwareAPI> HardwareAccel::apiListOpencl_ = {
+    {"opencl",
+     AV_HWDEVICE_TYPE_OPENCL,
+     AV_PIX_FMT_OPENCL,
+     AV_PIX_FMT_NV12,
+     { AV_CODEC_ID_NONE },
+     {{"default", DeviceState::NOT_TESTED},{"0.0", DeviceState::NOT_TESTED}},
+     false}
+};
+
 HardwareAccel::HardwareAccel(AVCodecID id,
                              const std::string& name,
                              AVHWDeviceType hwType,
@@ -348,9 +358,57 @@ HardwareAccel::transfer(const VideoFrame& frame)
 
         hwFrame->pts = input->pts; // transfer does not copy timestamp
         return framePtr;
-    } else {
-        SIP_CORE_ERR() << "Invalid hardware accelerator";
-        return nullptr;
+    } else { // CODEC_NONE for example for OpenCL filters
+        auto input = frame.pointer();
+        if (not input)
+            throw std::runtime_error("Cannot transfer null frame");
+
+        auto desc = av_pix_fmt_desc_get(static_cast<AVPixelFormat>(input->format));
+        if (!desc) {
+            throw std::runtime_error("Cannot transfer frame with invalid format");
+        }
+
+        auto out = std::make_unique<VideoFrame>();
+        if (desc->flags & AV_PIX_FMT_FLAG_HWACCEL) {
+            if (input->format != format_) {
+                SIP_CORE_ERR() << "Frame format mismatch: expected " << av_get_pix_fmt_name(format_)
+                        << ", got "
+                        << av_get_pix_fmt_name(static_cast<AVPixelFormat>(input->format));
+                return nullptr;
+            }
+
+            return transferToMainMemory(frame, swFormat_);
+        }
+        else {
+            if (input->format != swFormat_) {
+                SIP_CORE_ERR() << "Frame format mismatch: expected " << av_get_pix_fmt_name(swFormat_)
+                        << ", got "
+                        << av_get_pix_fmt_name(static_cast<AVPixelFormat>(input->format));
+                return nullptr;
+            }
+
+            auto framePtr = std::make_unique<VideoFrame>();
+            auto hwFrame = framePtr->pointer();
+
+            if ((ret = av_hwframe_get_buffer(framesCtx_, hwFrame, 0)) < 0) {
+                SIP_CORE_ERR() << "Failed to allocate hardware buffer: "
+                        << libav_utils::getError(ret).c_str();
+                return nullptr;
+            }
+
+            if (!hwFrame->hw_frames_ctx) {
+                SIP_CORE_ERR() << "Failed to allocate hardware buffer: Cannot allocate memory";
+                return nullptr;
+            }
+
+            if ((ret = av_hwframe_transfer_data(hwFrame, input, 0)) < 0) {
+                SIP_CORE_ERR() << "Failed to push frame to GPU: " << libav_utils::getError(ret).c_str();
+                return nullptr;
+            }
+
+            hwFrame->pts = input->pts; // transfer does not copy timestamp
+            return framePtr;
+        }
     }
 }
 
@@ -420,6 +478,13 @@ HardwareAccel::linkHardware(AVBufferRef* framesCtx)
     }
 }
 
+void
+HardwareAccel::linkFilter(MediaStream& ms)
+{
+    ms.deviceRef = av_buffer_ref(deviceCtx_);
+    ms.frameRef = av_buffer_ref(framesCtx_);
+}
+
 std::unique_ptr<VideoFrame>
 HardwareAccel::transferToMainMemory(const VideoFrame& frame, AVPixelFormat desiredFormat)
 {
@@ -476,7 +541,10 @@ std::list<HardwareAccel>
 HardwareAccel::getCompatibleAccel(AVCodecID id, int width, int height, CodecType type)
 {
     std::list<HardwareAccel> l;
-    const auto& list = (type == CODEC_ENCODER) ? &apiListEnc_ : &apiListDec_;
+
+    const auto& list = (type == CODEC_ENCODER) ? &apiListEnc_ :
+                       (type == CODEC_DECODER) ? &apiListDec_ :
+                       &apiListOpencl_;
     for (auto& api : *list) {
         const auto& it = std::find(api.supportedCodecs.begin(), api.supportedCodecs.end(), id);
         if (it != api.supportedCodecs.end()) {

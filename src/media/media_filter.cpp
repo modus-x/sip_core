@@ -280,6 +280,8 @@ MediaFilter::initInputFilter(AVFilterInOut* in, const MediaStream& msp)
         params->width = msp.width;
         params->height = msp.height;
         params->frame_rate = msp.frameRate;
+        if (msp.frameRef)
+            params->hw_frames_ctx = av_buffer_ref(msp.frameRef);
         buffersrc = avfilter_get_by_name("buffer");
     } else {
         params->sample_rate = msp.sampleRate;
@@ -301,6 +303,12 @@ MediaFilter::initInputFilter(AVFilterInOut* in, const MediaStream& msp)
     av_free(params);
     if (ret < 0)
         return fail("Failed to set filter graph input parameters", ret);
+    
+    if (msp.deviceRef) {
+        buffersrcCtx->hw_device_ctx = av_buffer_ref(msp.deviceRef);
+        if (!buffersrcCtx->hw_device_ctx)
+            return fail("Failed to set filter graph input parameters", -1);
+    }
 
     if ((ret = avfilter_init_str(buffersrcCtx, nullptr)) < 0)
         return fail("Failed to initialize buffer source", ret);

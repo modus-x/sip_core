@@ -23,6 +23,7 @@
 
 #include "libav_deps.h"
 #include "media_codec.h"
+#include "media_stream.h"
 
 #include <memory>
 #include <string>
@@ -153,6 +154,14 @@ public:
      */
     bool linkHardware(AVBufferRef* framesCtx);
 
+    /**
+     * @brief Links this HardwareAccel's frames context and device context
+     *  with the passed in filter's MediaStream.
+     *
+     * This serves to skip transferring a decoded frame back to main memory before encoding.
+     */
+    void linkFilter(MediaStream& ms);
+
     static std::list<HardwareAccel> getCompatibleAccel(AVCodecID id,
                                                        int width,
                                                        int height,
@@ -181,6 +190,7 @@ private:
     struct HardwareAPI;
     static std::vector<HardwareAPI> apiListDec_;
     static std::vector<HardwareAPI> apiListEnc_;
+    static std::vector<HardwareAPI> apiListOpencl_;
 
     int init_device(const char* name, const char* device, int flags);
     int init_device_type(std::string& dev);

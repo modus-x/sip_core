@@ -28,6 +28,9 @@
 #include "threadloop.h"
 #include "media_stream.h"
 #include "media_filter.h"
+#ifdef RING_ACCEL
+#include "accel.h"
+#endif
 
 #include <list>
 #include <chrono>
@@ -77,6 +80,9 @@ public:
         std::string active_border_color {"CornflowerBlue@1"}; // ffmpeg compatible colors only
         std::string inactive_border_color {"Blue@1"};         // ffmpeg compatible colors only
         bool remove_black_borders {true};
+    #ifdef RING_ACCEL
+        bool useHardware { true };
+    #endif
     };
 
     VideoMixer(const std::string& id, const std::string& localInput = {}, bool attachHost = true);
@@ -231,6 +237,19 @@ private:
                           int height,
                           bool active,
                           bool withText);
+#ifdef RING_ACCEL
+    bool initHardwareSnPFilter(MediaFilter& filter,
+                               int format,
+                               int x,
+                               int y,
+                               int w,
+                               int h);
+
+    int getHWFrame(const std::shared_ptr<VideoFrame>& input, std::shared_ptr<VideoFrame>& output);
+    std::shared_ptr<VideoFrame> getUnlinkedHWFrame(const VideoFrame& input);
+    std::shared_ptr<VideoFrame> getHWFrameFromSWFrame(const VideoFrame& input);
+    video::HardwareAccel* initHWAccel();
+#endif
 
     int addLayoutUpdate(const char* reason);
     void consumeLayoutUpdates(int count, const char* reason);
@@ -301,6 +320,14 @@ private:
 
     int64_t startTime_;
     int64_t lastTimestamp_;
+
+#ifdef RING_ACCEL
+    std::atomic_bool enableAccel_ = true;
+    bool fallback_ = false;
+    const std::string hardwareScaleAndPadFilterName_ = "SnP";
+    std::unique_ptr<video::HardwareAccel> accel_ = nullptr;
+    std::mutex accelMtx_;
+#endif
 };
 
 } // namespace video
