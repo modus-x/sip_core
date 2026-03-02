@@ -1,0 +1,777 @@
+diff --git a/ffmpeg/configure b/ffmpeg/configure
+index fa3b95c..31cee02 100644
+--- a/ffmpeg/configure	
++++ b/ffmpeg/configure
+@@ -4080,6 +4080,7 @@ sr_amf_filter_deps="amf"
+ vpp_amf_filter_deps="amf"
+ scale_qsv_filter_deps="libmfx"
+ scale_qsv_filter_select="qsvvpp"
++sv_participant_opencl_filter_deps="opencl libfreetype libharfbuzz"
+ scdet_filter_select="scene_sad"
+ scdet_vulkan_filter_deps="vulkan spirv_compiler"
+ select_filter_select="scene_sad"
+diff --git a/ffmpeg/libavfilter/Makefile b/ffmpeg/libavfilter/Makefile
+index 1f5de29..93ac60c 100644
+--- a/ffmpeg/libavfilter/Makefile	
++++ b/ffmpeg/libavfilter/Makefile
+@@ -477,6 +477,7 @@ OBJS-$(CONFIG_SCALE_VT_FILTER)               += vf_scale_vt.o scale_eval.o
+ OBJS-$(CONFIG_SCALE_VULKAN_FILTER)           += vf_scale_vulkan.o vulkan.o vulkan_filter.o
+ OBJS-$(CONFIG_SCALE2REF_FILTER)              += vf_scale.o scale_eval.o framesync.o
+ OBJS-$(CONFIG_SCALE2REF_NPP_FILTER)          += vf_scale_npp.o scale_eval.o
++OBJS-$(CONFIG_SV_PARTICIPANT_OPENCL_FILTER)  += vf_sv_participant_opencl.o opencl.o opencl/sv_participant.o
+ OBJS-$(CONFIG_SCDET_FILTER)                  += vf_scdet.o
+ OBJS-$(CONFIG_SCDET_VULKAN_FILTER)           += vf_scdet_vulkan.o
+ OBJS-$(CONFIG_SCHARR_FILTER)                 += vf_convolution.o
+diff --git a/ffmpeg/libavfilter/allfilters.c b/ffmpeg/libavfilter/allfilters.c
+index 84f15f8..401bdf1 100644
+--- a/ffmpeg/libavfilter/allfilters.c	
++++ b/ffmpeg/libavfilter/allfilters.c
+@@ -448,6 +448,7 @@ extern const FFFilter ff_vf_scale_vt;
+ extern const FFFilter ff_vf_scale_vulkan;
+ extern const FFFilter ff_vf_scale2ref;
+ extern const FFFilter ff_vf_scale2ref_npp;
++extern const FFFilter ff_vf_sv_participant_opencl;
+ extern const FFFilter ff_vf_scdet;
+ extern const FFFilter ff_vf_scdet_vulkan;
+ extern const FFFilter ff_vf_scharr;
+diff --git a/ffmpeg/libavfilter/opencl/sv_participant.cl b/ffmpeg/libavfilter/opencl/sv_participant.cl
+new file mode 100644
+index 0000000..f04f371
+--- /dev/null
++++ b/ffmpeg/libavfilter/opencl/sv_participant.cl
+@@ -0,0 +1,124 @@
++/*
++ * This file is part of FFmpeg.
++ *
++ * FFmpeg is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * FFmpeg is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with FFmpeg; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
++ */
++
++float4 scale_lankzos(__read_only  image2d_t src,
++                     const        int2      src_loc,
++                     const        int2      overlay_size,
++                     __constant   float    *cx,
++                     __constant   float    *cy,
++                     const        int2      flt_size)
++{
++    const sampler_t s_img = (CLK_NORMALIZED_COORDS_FALSE |
++                             CLK_ADDRESS_CLAMP_TO_EDGE |
++                             CLK_FILTER_NEAREST);
++
++    float2 dst_size = convert_float2(overlay_size);
++    float2 src_size = convert_float2(get_image_dim(src));
++
++    float2 src_coord = (convert_float2(src_loc) + 0.5f) * src_size / dst_size;
++    int2 src_pos = convert_int2(floor(src_coord - 0.5f));
++
++    float4 col = 0.0f;
++    for (int i = 0; i < flt_size.y; ++i) {
++        float4 s = 0.0f;
++        for (int j = 0; j < flt_size.x; ++j) {
++            float4 c = read_imagef(src, s_img, src_pos + (int2){flt_size.x/2 - j, flt_size.y/2 - i});
++            s += c * cx[src_loc.x * flt_size.x + j];
++        }
++        col += s * cy[src_loc.y * flt_size.y + i];
++    }
++
++    return col;
++}
++
++__kernel void overlay(__write_only image2d_t dst,
++                      __read_only  image2d_t main,
++                      __read_only  image2d_t overlay,
++                      const int2 overlay_loc,
++                      const int2 overlay_size,
++                      const int border_width,
++                      const float4 border_color,
++                      const int dir,
++                      __constant   float    *cx,
++                      __constant   float    *cy,
++                      const int2      flt_size)
++{
++    const sampler_t sampler = (CLK_NORMALIZED_COORDS_FALSE |
++                               CLK_FILTER_NEAREST | CLK_ADDRESS_NONE);
++
++    int2 global_loc = (int2)(get_global_id(0), get_global_id(1));
++
++    if (global_loc.x < overlay_loc.x + border_width ||
++        global_loc.y < overlay_loc.y + border_width || 
++        global_loc.x >= overlay_loc.x + overlay_size.x + 2 * border_width ||
++        global_loc.y >= overlay_loc.y + overlay_size.y + 2 * border_width) {
++        float4 val = read_imagef(main, sampler, global_loc);
++        write_imagef(dst, global_loc, val);
++    }
++    else if (global_loc.x < overlay_loc.x ||
++             global_loc.y < overlay_loc.y ||
++             global_loc.x >= overlay_loc.x + overlay_size.x ||
++             global_loc.y >= overlay_loc.y + overlay_size.y) {
++        write_imagef(dst, global_loc, border_color);
++    }
++    else {
++        int2 overlay_rel = global_loc - overlay_loc;
++        int xin = (dir & 2) ? (overlay_size.y - 1 - overlay_rel.y) : overlay_rel.y;
++        int yin = (dir & 1) ? (overlay_size.x - 1 - overlay_rel.x) : overlay_rel.x;
++        overlay_rel.x = xin;
++        overlay_rel.y = yin;
++        float4 val = scale_lankzos(overlay, overlay_rel, overlay_size, cx, cy, flt_size);
++        write_imagef(dst, global_loc, val);
++    }
++}
++
++__kernel void overlay_no_transpose(__write_only image2d_t dst,
++                      __read_only  image2d_t main,
++                      __read_only  image2d_t overlay,
++                      const int2 overlay_loc,
++                      const int2 overlay_size,
++                      const int border_width,
++                      const float4 border_color,
++                      __constant   float    *cx,
++                      __constant   float    *cy,
++                      const int2      flt_size)
++{
++    const sampler_t sampler = (CLK_NORMALIZED_COORDS_FALSE |
++                               CLK_FILTER_NEAREST | CLK_ADDRESS_NONE);
++
++    int2 global_loc = (int2)(get_global_id(0), get_global_id(1));
++
++    if (global_loc.x < overlay_loc.x + border_width ||
++        global_loc.y < overlay_loc.y + border_width || 
++        global_loc.x >= overlay_loc.x + overlay_size.x + 2 * border_width ||
++        global_loc.y >= overlay_loc.y + overlay_size.y + 2 * border_width) {
++        float4 val = read_imagef(main, sampler, global_loc);
++        write_imagef(dst, global_loc, val);
++    }
++    else if (global_loc.x < overlay_loc.x ||
++             global_loc.y < overlay_loc.y ||
++             global_loc.x >= overlay_loc.x + overlay_size.x ||
++             global_loc.y >= overlay_loc.y + overlay_size.y) {
++        write_imagef(dst, global_loc, border_color);
++    }
++    else {
++        int2 overlay_rel = global_loc - overlay_loc;
++        float4 val = scale_lankzos(overlay, overlay_rel, overlay_size, cx, cy, flt_size);
++        write_imagef(dst, global_loc, val);
++    }
++}
+\ No newline at end of file
+diff --git a/ffmpeg/libavfilter/opencl_source.h b/ffmpeg/libavfilter/opencl_source.h
+index b6930fb..f8a899c 100644
+--- a/ffmpeg/libavfilter/opencl_source.h	
++++ b/ffmpeg/libavfilter/opencl_source.h
+@@ -33,5 +33,6 @@ extern const char *ff_source_tonemap_cl;
+ extern const char *ff_source_transpose_cl;
+ extern const char *ff_source_unsharp_cl;
+ extern const char *ff_source_xfade_cl;
++extern const char *ff_source_sv_participant_cl;
+ 
+ #endif /* AVFILTER_OPENCL_SOURCE_H */
+diff --git a/ffmpeg/libavfilter/vf_sv_participant_opencl.c b/ffmpeg/libavfilter/vf_sv_participant_opencl.c
+new file mode 100644
+index 0000000..99795ff
+--- /dev/null
++++ b/ffmpeg/libavfilter/vf_sv_participant_opencl.c
+@@ -0,0 +1,593 @@
++/*
++ * This file is part of FFmpeg.
++ *
++ * FFmpeg is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * FFmpeg is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with FFmpeg; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
++ */
++
++#include "libavutil/log.h"
++#include "libavutil/opt.h"
++#include "libavutil/pixdesc.h"
++#include "libavutil/eval.h"
++
++#if CONFIG_LIBFONTCONFIG
++#include <fontconfig/fontconfig.h>
++#endif
++
++#include "avfilter.h"
++#include "filters.h"
++#include "framesync.h"
++#include "opencl.h"
++#include "opencl_source.h"
++#include "video.h"
++#include "transpose.h"
++#include "drawutils.h"
++
++#if CONFIG_LIBFRIBIDI
++#include <fribidi.h>
++#endif
++#include <ft2build.h>
++#include FT_FREETYPE_H
++#include FT_GLYPH_H
++#include FT_STROKER_H
++
++#include <hb.h>
++#include <hb-ft.h>
++
++#define NO_TRANSPOSE -1
++#define LANCZOS_RADIUS 3
++
++static const char *const var_names[] = {
++    "in_w",   "iw",
++    "in_h",   "ih",
++    "out_w",  "ow",
++    "out_h",  "oh",
++    "x",
++    "y",
++    "a",
++    "sar",
++    "dar",
++    NULL
++};
++
++enum var_name {
++    VAR_IN_W,   VAR_IW,
++    VAR_IN_H,   VAR_IH,
++    VAR_OUT_W,  VAR_OW,
++    VAR_OUT_H,  VAR_OH,
++    VAR_X,
++    VAR_Y,
++    VAR_A,
++    VAR_SAR,
++    VAR_DAR,
++    VARS_NB
++};
++
++typedef struct SvParticipantOpenCLContext {
++    // OpenCL common
++    OpenCLFilterContext ocf;
++    int              initialised;
++    cl_command_queue command_queue;
++    
++    // overlay params
++    cl_kernel        kernel;
++    FFFrameSync      fs;
++    int              nb_planes;
++    int              x_subsample;
++    int              y_subsample;
++
++    // transpose params
++    int dir;            ///< TransposeDir
++
++    // crop params
++    char *x_expr, *y_expr, *w_expr, *h_expr;
++    double cropped_sar;
++
++    // scale params
++    cl_mem  cx, cy;
++    int     src_w,    src_h;
++    cl_int2 flt_size;
++
++    // draw text params
++// #if CONFIG_LIBFONTCONFIG
++//     uint8_t *font;                  ///< font to be used
++// #endif
++//     char *fontsize_expr;            ///< expression for fontsize
++//     AVExpr *fontsize_pexpr;         ///< parsed expressions for fontsize
++//     uint8_t *fontfile;              ///< font to be used
++//     uint8_t *text;                  ///< text to be drawn
++//     unsigned int fontsize;          ///< font size to use
++//     unsigned int default_fontsize;  ///< default font size to use
++//     FFDrawContext dc;
++//     FFDrawColor fontcolor;          ///< foreground color
++
++    // common params
++    int              x;
++    int              y;
++    int              width;
++    int              height;
++    int              border_w;
++    uint8_t          bordercolor_rgba[4];
++    // Stored as a normalized float for passing to the OpenCL kernel
++    cl_float4        bordercolor_rgba_float;
++} SvParticipantOpenCLContext;
++
++static float sinc(float t)
++{
++    return (t == 0) ? 1.0 : sin(t * M_PI) / (t * M_PI);
++}
++
++static float lanczos(float t, float a)
++{
++    return (t < a) ? sinc(t) * sinc(t / a) : 0;
++}
++
++static int sv_participant_opencl_load(AVFilterContext *avctx,
++                                      enum AVPixelFormat main_format,
++                                      enum AVPixelFormat sv_participant_format)
++{
++    SvParticipantOpenCLContext *ctx = avctx->priv;
++    cl_int cle;
++    const char *kernel;
++    const AVPixFmtDescriptor *main_desc, *overlay_desc;
++    int err, i, j, main_planes, overlay_planes;
++    int filterw, filterh;
++    float scalex, scaley;
++    float *cx = NULL, *cy = NULL;
++    const char *source = ff_source_sv_participant_cl;
++
++    main_desc    = av_pix_fmt_desc_get(main_format);
++    overlay_desc = av_pix_fmt_desc_get(sv_participant_format);
++
++    err = ff_opencl_filter_load_program(avctx, &source, 1);
++    if (err < 0)
++        goto fail;
++
++    ctx->command_queue = clCreateCommandQueue(ctx->ocf.hwctx->context,
++                                              ctx->ocf.hwctx->device_id,
++                                              0, &cle);
++    CL_FAIL_ON_ERROR(AVERROR(EIO), "Failed to create OpenCL "
++                     "command queue %d.\n", cle);
++
++    main_planes = overlay_planes = 0;
++    for (i = 0; i < main_desc->nb_components; i++)
++        main_planes = FFMAX(main_planes,
++                            main_desc->comp[i].plane + 1);
++    for (i = 0; i < overlay_desc->nb_components; i++)
++        overlay_planes = FFMAX(overlay_planes,
++                               overlay_desc->comp[i].plane + 1);
++
++    ctx->nb_planes = main_planes;
++    ctx->x_subsample = 1 << main_desc->log2_chroma_w;
++    ctx->y_subsample = 1 << main_desc->log2_chroma_h;
++
++    if (ctx->x % ctx->x_subsample ||
++        ctx->y % ctx->y_subsample) {
++        av_log(avctx, AV_LOG_WARNING, "Warning: overlay position (%d, %d) "
++               "does not match subsampling (%d, %d).\n",
++               ctx->x, ctx->y, ctx->x_subsample, ctx->y_subsample);
++    }
++
++    if (main_planes != overlay_planes ||
++        main_desc->nb_components == overlay_desc->nb_components) {
++        av_log(avctx, AV_LOG_ERROR, "Overlay %s format over %s is not supported (alfa channel conflict).\n",
++               overlay_desc->name, main_desc->name);
++        return AVERROR(EINVAL);
++    }
++
++    scalex = FFMAX((float) ctx->src_w / ctx->width, 1);
++    scaley = FFMAX((float) ctx->src_h / ctx->height, 1);
++    filterw = ceil(2 * LANCZOS_RADIUS * scalex);
++    filterh = ceil(2 * LANCZOS_RADIUS * scaley);
++
++    filterw = FFMIN(filterw, ctx->src_w - 2);
++    filterw = FFMAX(filterw, 1);
++    filterh = FFMIN(filterh, ctx->src_h - 2);
++    filterh = FFMAX(filterh, 1);
++
++    ctx->flt_size.s[0] = filterw;
++    ctx->flt_size.s[1] = filterh;
++
++    av_log(avctx, AV_LOG_INFO, "filter size: %d %d.\n", filterw, filterh);
++
++    cx = av_malloc_array(ctx->width * filterw, sizeof(cl_float));
++    cy = av_malloc_array(ctx->height * filterh, sizeof(cl_float));
++
++    if (!cx || !cy) {
++        err = AVERROR(ENOMEM);
++        goto fail;
++    }
++
++    for (i = 0; i < ctx->width; ++i) {
++        float s_x = (i + 0.5) * ctx->src_w / ctx->width - 0.5;
++        float t = s_x - floor(s_x);  // fract
++
++        float sum = 0;
++        for (j = 0; j < filterw; ++j) {
++            int x = filterw/2 - j;
++            sum += cx[i * filterw + j] = lanczos((x - t) / scalex, LANCZOS_RADIUS);
++        }
++
++        for (j = 0; j < filterw; ++j)
++            cx[i * filterw + j] /= sum;
++    }
++
++    for (i = 0; i < ctx->height; ++i) {
++        float s_y = (i + 0.5) * ctx->src_h / ctx->height - 0.5;
++        float t = s_y - floor(s_y);  // fract
++
++        float sum = 0;
++        for (j = 0; j < filterh; ++j) {
++            int y = filterh/2 - j;
++            sum += cy[i * filterh + j] = lanczos((y - t) / scaley, LANCZOS_RADIUS);
++        }
++
++        for (j = 0; j < filterh; ++j)
++            cy[i * filterh + j] /= sum;
++    }
++
++    ctx->cx = clCreateBuffer(ctx->ocf.hwctx->context,
++                                CL_MEM_READ_ONLY     |
++                                CL_MEM_COPY_HOST_PTR |
++                                CL_MEM_HOST_NO_ACCESS,
++                                ctx->width * filterw * sizeof(cl_float),
++                                cx,
++                                &cle);
++
++    ctx->cy = clCreateBuffer(ctx->ocf.hwctx->context,
++                                CL_MEM_READ_ONLY     |
++                                CL_MEM_COPY_HOST_PTR |
++                                CL_MEM_HOST_NO_ACCESS,
++                                ctx->height * filterh * sizeof(cl_float),
++                                cy,
++                                &cle);
++    av_free(cx);
++    av_free(cy);
++    if (!ctx->cx || !ctx->cy) {
++        av_log(avctx, AV_LOG_ERROR, "Failed to create weights buffer: %d.\n", cle);
++        err = AVERROR(EIO);
++        goto fail;
++    }
++
++    if (ctx->dir == NO_TRANSPOSE)
++        kernel = "overlay_no_transpose";
++    else
++        kernel = "overlay";
++
++    av_log(avctx, AV_LOG_DEBUG, "Using kernel %s.\n", kernel);
++    ctx->kernel = clCreateKernel(ctx->ocf.program, kernel, &cle);
++    CL_FAIL_ON_ERROR(AVERROR(EIO), "Failed to create kernel %d.\n", cle);
++
++    ctx->initialised = 1;
++    return 0;
++
++fail:
++    if (ctx->command_queue)
++        clReleaseCommandQueue(ctx->command_queue);
++    if (ctx->kernel)
++        clReleaseKernel(ctx->kernel);
++    if (ctx->cx)
++        clReleaseMemObject(ctx->cx);
++    if (ctx->cy)
++        clReleaseMemObject(ctx->cy);
++    if (cx)
++        av_free(cx);
++    if (cy)
++        av_free(cy);
++    return err;
++}
++
++static int sv_participant_opencl_blend(FFFrameSync *fs)
++{
++    AVFilterContext    *avctx = fs->parent;
++    AVFilterLink     *outlink = avctx->outputs[0];
++    SvParticipantOpenCLContext *ctx = avctx->priv;
++    AVFrame *input_main, *input_overlay;
++    AVFrame *output;
++    cl_mem mem;
++    cl_int cle;
++    cl_int2 overlay_loc, overlay_size;
++    size_t global_work[2];
++    int kernel_arg = 0;
++    int err, plane;
++
++    err = ff_framesync_get_frame(fs, 0, &input_main, 0);
++    if (err < 0)
++        return err;
++    err = ff_framesync_get_frame(fs, 1, &input_overlay, 0);
++    if (err < 0)
++        return err;
++
++    if (!input_main->hw_frames_ctx || !input_overlay->hw_frames_ctx)
++        return AVERROR(EINVAL);
++
++    if (!ctx->initialised) {
++        AVHWFramesContext *main_fc =
++            (AVHWFramesContext*)input_main->hw_frames_ctx->data;
++        AVHWFramesContext *overlay_fc =
++            (AVHWFramesContext*)input_overlay->hw_frames_ctx->data;
++
++        err = sv_participant_opencl_load(avctx, main_fc->sw_format,
++                                         overlay_fc->sw_format);
++        if (err < 0)
++            return err;
++    }
++
++    output = ff_get_video_buffer(outlink, outlink->w, outlink->h);
++    if (!output) {
++        err = AVERROR(ENOMEM);
++        goto fail;
++    }
++
++    for (plane = 0; plane < ctx->nb_planes; plane++) {
++        kernel_arg = 0;
++
++        mem = (cl_mem)output->data[plane];
++        CL_SET_KERNEL_ARG(ctx->kernel, kernel_arg, cl_mem, &mem);
++        kernel_arg++;
++
++        mem = (cl_mem)input_main->data[plane];
++        CL_SET_KERNEL_ARG(ctx->kernel, kernel_arg, cl_mem, &mem);
++        kernel_arg++;
++
++        mem = (cl_mem)input_overlay->data[plane];
++        CL_SET_KERNEL_ARG(ctx->kernel, kernel_arg, cl_mem, &mem);
++        kernel_arg++;
++
++        
++        overlay_loc.s[0] = ctx->x / (plane == 0 ? 1 : ctx->x_subsample);
++        overlay_loc.s[1] = ctx->y / (plane == 0 ? 1 : ctx->y_subsample);
++
++        CL_SET_KERNEL_ARG(ctx->kernel, kernel_arg, cl_int2, &overlay_loc);
++        kernel_arg++;
++
++        overlay_size.s[0] = ctx->width / (plane == 0 ? 1 : ctx->x_subsample);
++        overlay_size.s[1] = ctx->height / (plane == 0 ? 1 : ctx->y_subsample);
++
++        CL_SET_KERNEL_ARG(ctx->kernel, kernel_arg, cl_int2, &overlay_loc);
++        kernel_arg++;
++
++        CL_SET_KERNEL_ARG(ctx->kernel, kernel_arg, cl_float4, &ctx->bordercolor_rgba_float);
++        kernel_arg++;
++
++        if(ctx->dir != NO_TRANSPOSE) {
++            CL_SET_KERNEL_ARG(ctx->kernel, kernel_arg, cl_int, &ctx->dir);
++            kernel_arg++;
++        }
++
++        CL_SET_KERNEL_ARG(ctx->kernel, kernel_arg, cl_mem, &ctx->cx);
++        kernel_arg++;
++        CL_SET_KERNEL_ARG(ctx->kernel, kernel_arg, cl_mem, &ctx->cy);
++        kernel_arg++;
++        CL_SET_KERNEL_ARG(ctx->kernel, kernel_arg, cl_int2, &ctx->flt_size);
++        kernel_arg++;
++
++        err = ff_opencl_filter_work_size_from_image(avctx, global_work,
++                                                    output, plane, 0);
++        if (err < 0)
++            goto fail;
++
++        cle = clEnqueueNDRangeKernel(ctx->command_queue, ctx->kernel, 2, NULL,
++                                     global_work, NULL, 0, NULL, NULL);
++        CL_FAIL_ON_ERROR(AVERROR(EIO), "Failed to enqueue kernel "
++                         "for plane %d: %d.\n", plane, cle);
++    }
++
++    cle = clFinish(ctx->command_queue);
++    CL_FAIL_ON_ERROR(AVERROR(EIO), "Failed to finish command queue: %d.\n", cle);
++
++    err = av_frame_copy_props(output, input_main);
++
++    av_log(avctx, AV_LOG_DEBUG, "Filter output: %s, %ux%u (%"PRId64").\n",
++           av_get_pix_fmt_name(output->format),
++           output->width, output->height, output->pts);
++
++    return ff_filter_frame(outlink, output);
++
++fail:
++    av_frame_free(&output);
++    return err;
++}
++
++static int sv_participant_opencl_config_output(AVFilterLink *outlink)
++{
++    AVFilterContext *avctx = outlink->src;
++    SvParticipantOpenCLContext *ctx = avctx->priv;
++    AVFilterLink *inlink = avctx->inputs[1];
++    FilterLink      *inl  = ff_filter_link(inlink);
++    FilterLink      *outl = ff_filter_link(outlink);
++    const AVPixFmtDescriptor *desc_in  = av_pix_fmt_desc_get(inlink->format);
++    double var_values[VARS_NB], res;
++    int err, ret;
++    char *expr;
++
++    var_values[VAR_IN_W]  = var_values[VAR_IW] = inlink->w;
++    var_values[VAR_IN_H]  = var_values[VAR_IH] = inlink->h;
++    var_values[VAR_OUT_W] = var_values[VAR_OW] = NAN;
++    var_values[VAR_OUT_H] = var_values[VAR_OH] = NAN;
++    var_values[VAR_A]     = (double) inlink->w / inlink->h;
++    var_values[VAR_SAR]   = inlink->sample_aspect_ratio.num ?
++        (double) inlink->sample_aspect_ratio.num / inlink->sample_aspect_ratio.den : 1;
++    var_values[VAR_DAR]   = var_values[VAR_A] * var_values[VAR_SAR];
++
++    av_expr_parse_and_eval(&res, (expr = ctx->w_expr),
++                           var_names, var_values,
++                           NULL, NULL, NULL, NULL, NULL, 0, ctx);
++    ctx->width = var_values[VAR_OUT_W] = var_values[VAR_OW] = res;
++    if ((ret = av_expr_parse_and_eval(&res, (expr = ctx->h_expr),
++                                      var_names, var_values,
++                                      NULL, NULL, NULL, NULL, NULL, 0, ctx)) < 0)
++        return ret;
++    ctx->height = var_values[VAR_OUT_H] = var_values[VAR_OH] = res;
++    if (!ctx->height)
++        var_values[VAR_OUT_H] = var_values[VAR_OH] = ctx->height = inlink->h;
++
++    /* evaluate the width again, as it may depend on the evaluated output height */
++    if ((ret = av_expr_parse_and_eval(&res, (expr = ctx->w_expr),
++                                      var_names, var_values,
++                                      NULL, NULL, NULL, NULL, NULL, 0, ctx)) < 0)
++        return ret;
++    ctx->width = var_values[VAR_OUT_W] = var_values[VAR_OW] = res;
++    if (!ctx->width)
++        var_values[VAR_OUT_W] = var_values[VAR_OW] = ctx->width = inlink->w;
++
++    /* evaluate x and y */
++    av_expr_parse_and_eval(&res, (expr = ctx->x_expr),
++                           var_names, var_values,
++                           NULL, NULL, NULL, NULL, NULL, 0, ctx);
++    ctx->x = var_values[VAR_X] = res;
++    if ((ret = av_expr_parse_and_eval(&res, (expr = ctx->y_expr),
++                                      var_names, var_values,
++                                      NULL, NULL, NULL, NULL, NULL, 0, ctx)) < 0)
++        return ret;
++    ctx->y = var_values[VAR_Y] = res;
++    /* evaluate x again, as it may depend on the evaluated y value */
++    if ((ret = av_expr_parse_and_eval(&res, (expr = ctx->x_expr),
++                                      var_names, var_values,
++                                      NULL, NULL, NULL, NULL, NULL, 0, ctx)) < 0)
++        return ret;
++
++    ctx->src_w = inlink->w;
++    ctx->src_h = inlink->h;
++
++    if (((int64_t) ctx->height * inlink->w) > INT_MAX  ||
++        ((int64_t) ctx->width * inlink->h) > INT_MAX)
++        av_log(ctx, AV_LOG_ERROR, "Rescaled value for width or height is too big.\n");
++
++    if (desc_in->log2_chroma_w != desc_in->log2_chroma_h) {
++        av_log(avctx, AV_LOG_ERROR, "Input format %s for overlay is not supported.\n",
++               desc_in->name);
++        return AVERROR(EINVAL);
++    }
++
++    err = ff_opencl_filter_config_output(outlink);
++    if (err < 0)
++        return err;
++
++    err = ff_framesync_init_dualinput(&ctx->fs, avctx);
++    if (err < 0)
++        return err;
++
++    return ff_framesync_configure(&ctx->fs);
++}
++
++static av_cold int sv_participant_opencl_init(AVFilterContext *avctx)
++{
++    SvParticipantOpenCLContext *ctx = avctx->priv;
++
++    for (int i = 0; i < 4; ++i) {
++        ctx->bordercolor_rgba_float.s[i] = (float)ctx->bordercolor_rgba[i] / 255.0;
++    }
++
++    ctx->fs.on_event = &sv_participant_opencl_blend;
++
++    return ff_opencl_filter_init(avctx);
++}
++
++static int sv_participant_opencl_activate(AVFilterContext *avctx)
++{
++    SvParticipantOpenCLContext *ctx = avctx->priv;
++
++    return ff_framesync_activate(&ctx->fs);
++}
++
++static av_cold void sv_participant_opencl_uninit(AVFilterContext *avctx)
++{
++    SvParticipantOpenCLContext *ctx = avctx->priv;
++    cl_int cle;
++
++    if (ctx->kernel) {
++        cle = clReleaseKernel(ctx->kernel);
++        if (cle != CL_SUCCESS)
++            av_log(avctx, AV_LOG_ERROR, "Failed to release "
++                   "kernel: %d.\n", cle);
++    }
++
++    if (ctx->command_queue) {
++        cle = clReleaseCommandQueue(ctx->command_queue);
++        if (cle != CL_SUCCESS)
++            av_log(avctx, AV_LOG_ERROR, "Failed to release "
++                   "command queue: %d.\n", cle);
++    }
++
++    ff_opencl_filter_uninit(avctx);
++
++    ff_framesync_uninit(&ctx->fs);
++}
++
++#define OFFSET(x) offsetof(SvParticipantOpenCLContext, x)
++#define FLAGS (AV_OPT_FLAG_FILTERING_PARAM | AV_OPT_FLAG_VIDEO_PARAM)
++#define TFLAGS (AV_OPT_FLAG_FILTERING_PARAM | AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_RUNTIME_PARAM)
++static const AVOption sv_participant_opencl_options[] = {
++    { "x",        "set the x offset for the overlayed image position", OFFSET(x_expr), AV_OPT_TYPE_STRING, {.str = "0"}, 0, INT16_MAX, TFLAGS },
++    { "y",        "set the y offset for the overlayed image position", OFFSET(y_expr), AV_OPT_TYPE_STRING, {.str = "0"}, 0, INT16_MAX, TFLAGS },
++    { "width",    "set the width for the overlayed image", OFFSET(w_expr), AV_OPT_TYPE_STRING, {.str = "iw"}, 0, 0, TFLAGS },
++    { "w",        "set the width for the overlayed image",   OFFSET(w_expr), AV_OPT_TYPE_STRING, {.str = "iw"}, 0, 0, TFLAGS },
++    { "height",   "set the height for the overlayed image",  OFFSET(h_expr), AV_OPT_TYPE_STRING, {.str = "ih"}, 0, 0, TFLAGS },
++    { "h",        "set the height for the overlayed image",  OFFSET(h_expr), AV_OPT_TYPE_STRING, {.str = "ih"}, 0, 0, TFLAGS },
++    { "crop_sar", "desired aspect ratio for overlayed image after cropping",  OFFSET(cropped_sar), AV_OPT_TYPE_RATIONAL, {.dbl = 0}, 0, INT_MAX, FLAGS },
++    { "b_width", "desired border width",  OFFSET(border_w), AV_OPT_TYPE_INT, {.i64 = 1}, 0, INT_MAX, FLAGS },
++    { "b_color", "desired border color",  OFFSET(bordercolor_rgba), AV_OPT_TYPE_COLOR, {.str="blue"}, 0, 0, FLAGS },
++    { "dir", "set transpose direction", OFFSET(dir), AV_OPT_TYPE_INT, { .i64 = NO_TRANSPOSE }, -1, 3, FLAGS, .unit = "dir" },
++        { "cclock_flip", "rotate counter-clockwise with vertical flip", 0, AV_OPT_TYPE_CONST, { .i64 = TRANSPOSE_CCLOCK_FLIP }, .flags=FLAGS, .unit = "dir" },
++        { "clock",       "rotate clockwise",                            0, AV_OPT_TYPE_CONST, { .i64 = TRANSPOSE_CLOCK       }, .flags=FLAGS, .unit = "dir" },
++        { "cclock",      "rotate counter-clockwise",                    0, AV_OPT_TYPE_CONST, { .i64 = TRANSPOSE_CCLOCK      }, .flags=FLAGS, .unit = "dir" },
++        { "clock_flip",  "rotate clockwise with vertical flip",         0, AV_OPT_TYPE_CONST, { .i64 = TRANSPOSE_CLOCK_FLIP  }, .flags=FLAGS, .unit = "dir" },
++// #if CONFIG_LIBFONTCONFIG
++//     { "font",        "Font name",            OFFSET(font),               AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS },
++// #endif
++//     {"fontfile",       "set font file",         OFFSET(fontfile),           AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
++//     {"text",           "set text",              OFFSET(text),               AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, TFLAGS},
++//     {"fontcolor",      "set foreground color",  OFFSET(fontcolor.rgba),     AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, TFLAGS},
++//     {"fontsize",       "set font size",         OFFSET(fontsize_expr),      AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, TFLAGS},
++//     { NULL }
++};
++
++AVFILTER_DEFINE_CLASS(sv_participant_opencl);
++
++static const AVFilterPad sv_participant_opencl_inputs[] = {
++    {
++        .name         = "main",
++        .type         = AVMEDIA_TYPE_VIDEO,
++        .config_props = &ff_opencl_filter_config_input,
++    },
++    {
++        .name         = "overlay",
++        .type         = AVMEDIA_TYPE_VIDEO,
++        .config_props = &ff_opencl_filter_config_input,
++    },
++};
++
++static const AVFilterPad sv_participant_opencl_outputs[] = {
++    {
++        .name          = "default",
++        .type          = AVMEDIA_TYPE_VIDEO,
++        .config_props  = &sv_participant_opencl_config_output,
++    },
++};
++
++const FFFilter ff_vf_sv_participant_opencl = {
++    .p.name          = "sv_participant_opencl",
++    .p.description   = NULL_IF_CONFIG_SMALL("Overlay Svetets participant video over main surface using OpenCL."),
++    .p.priv_class    = &sv_participant_opencl_class,
++    .p.flags         = AVFILTER_FLAG_HWDEVICE,
++    .priv_size       = sizeof(SvParticipantOpenCLContext),
++    .init            = &sv_participant_opencl_init,
++    .uninit          = &sv_participant_opencl_uninit,
++    .activate        = &sv_participant_opencl_activate,
++    FILTER_INPUTS(sv_participant_opencl_inputs),
++    FILTER_OUTPUTS(sv_participant_opencl_outputs),
++    FILTER_SINGLE_PIXFMT(AV_PIX_FMT_OPENCL),
++    .flags_internal  = FF_FILTER_FLAG_HWFRAME_AWARE,
++};

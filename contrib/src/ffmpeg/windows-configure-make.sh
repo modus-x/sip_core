@@ -139,7 +139,8 @@ FFMPEGCONF+='
             --enable-filter=hwdownload
             --enable-filter=drawbox
             --enable-filter=crop
-            --enable-filter=drawtext'
+            --enable-filter=drawtext
+            --enable-filter=sv_participant_opencl'
 
 FFMPEGCONF+='
             --enable-indev=dshow

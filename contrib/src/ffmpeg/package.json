@@ -16,7 +16,8 @@
     "patches": [
         "windows-configure.patch",
         "windows-configure-ffnvcodec.patch",
-        "windows-configure-libmfx-libvpl.patch"
+        "windows-configure-libmfx-libvpl.patch",
+        "ffmpeg-sv_participant_opencl.patch"
     ],
     "win_patches": [
     ],

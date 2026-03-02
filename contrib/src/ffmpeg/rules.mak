@@ -145,7 +145,8 @@ FFMPEGCONF += \
 	--enable-filter=pad \
 	--enable-filter=drawbox \
 	--enable-filter=crop \
-	--enable-filter=drawtext
+	--enable-filter=drawtext \
+	--enable-filter=sv_participant_opencl
 
 # platform specific options (LINUX / MAC)
 ifdef HAVE_LINUX
@@ -290,6 +291,7 @@ ffmpeg: ffmpeg-$(FFMPEG_HASH).tar.gz
 	(cd $@-$(FFMPEG_HASH) && tar x $(if ${BATCH_MODE},,-v) --strip-components=1 -f $<)
 	$(APPLY) $(SRC)/ffmpeg/ios-disable-b-frames.patch
 	$(APPLY) $(SRC)/ffmpeg/screen-sharing-x11-fix.patch
+	$(APPLY) $(SRC)/ffmpeg/ffmpeg-sv_participant_opencl.patch
 	$(UPDATE_AUTOCONFIG)
 	$(MOVE)
 
