@@ -44,7 +44,6 @@
                 "CMAKE_BUILD_TYPE": "Debug",
                 "ENABLE_CLI_EXAMPLE": "ON",
                 "BUILD_DEPS": "ON",
-                "HW_ACCEL": "ON",
                 "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
             }
         }

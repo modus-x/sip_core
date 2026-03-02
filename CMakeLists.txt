@@ -33,6 +33,7 @@ endif()
 # ##############################################################################
 option(ENABLE_CLI_EXAMPLE "Build with CLI example" OFF)
 option(ENABLE_VIDEO "Build with video support" ON)
+option(HW_ACCEL "Build with video hardware acceleration support" ON)
 option(BUILD_DEPS "Build deps" ON)
 
 set(PREBUILD_DEPS_PATHS
