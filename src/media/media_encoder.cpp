@@ -1179,7 +1179,12 @@ MediaEncoder::enableAccel(bool enableAccel)
         av_opt_set_int(encoderCtx, "qmin", qmin, AV_OPT_SEARCH_CHILDREN);
         av_opt_set_int(encoderCtx, "qmax", qmax, AV_OPT_SEARCH_CHILDREN);
         av_opt_set(encoderCtx, "preset", preset, AV_OPT_SEARCH_CHILDREN);
-
+        
+        // Also send PPS/SPS data with key frames in case reciever restarts its stream 
+        // GPU decoding falure for example
+        av_opt_set(encoderCtx, "repeat_headers", "1", AV_OPT_SEARCH_CHILDREN);
+        av_opt_set(encoderCtx, "forced-idr", "1", AV_OPT_SEARCH_CHILDREN);
+        
         // Optionally disable scene cut to reduce spikes
         av_opt_set_int(encoderCtx, "no-scenecut", 1, AV_OPT_SEARCH_CHILDREN);
         // Intra refresh may help error resilience / refresh gradually
@@ -1220,6 +1225,11 @@ MediaEncoder::enableAccel(bool enableAccel)
             av_opt_set_int(encoderCtx, "crf", -1, AV_OPT_SEARCH_CHILDREN);
             SIP_CORE_DEBUG("H265 encoder setup cbr: bitrate={:d} kbit/s", br);
         }
+
+        // Also send PPS/SPS data with key frames in case reciever restarts its stream 
+        // GPU decoding falure for example
+        av_opt_set(encoderCtx, "repeat_headers", "1", AV_OPT_SEARCH_CHILDREN); // forced-idr=1
+        av_opt_set(encoderCtx, "forced-idr", "1", AV_OPT_SEARCH_CHILDREN); // forced-idr=1
     }
 
     void

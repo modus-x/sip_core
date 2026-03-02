@@ -252,6 +252,7 @@ VideoReceiveThread::decodeFrame()
                        MediaDemuxer::getStatusStr(status));
     } else if (status == MediaDemuxer::Status::FallBack) {
         SIP_CORE_DBG("[{:p}] fallback", fmt::ptr(this));
+        isVideoConfigured_ = false;
         if (keyFrameRequestCallback_)
             keyFrameRequestCallback_();
     }
