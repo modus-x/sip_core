@@ -1,7 +1,6 @@
-diff --git a/ffmpeg/configure b/ffmpeg/configure
-index fa3b95c..31cee02 100644
---- a/ffmpeg/configure	
-+++ b/ffmpeg/configure
+diff --git a/configure b/configure
+--- a/configure	
++++ b/configure
 @@ -4080,6 +4080,7 @@ sr_amf_filter_deps="amf"
  vpp_amf_filter_deps="amf"
  scale_qsv_filter_deps="libmfx"
@@ -10,10 +9,9 @@ index fa3b95c..31cee02 100644
  scdet_filter_select="scene_sad"
  scdet_vulkan_filter_deps="vulkan spirv_compiler"
  select_filter_select="scene_sad"
-diff --git a/ffmpeg/libavfilter/Makefile b/ffmpeg/libavfilter/Makefile
-index 1f5de29..93ac60c 100644
---- a/ffmpeg/libavfilter/Makefile	
-+++ b/ffmpeg/libavfilter/Makefile
+diff --git a/libavfilter/Makefile b/libavfilter/Makefile
+--- a/libavfilter/Makefile	
++++ b/libavfilter/Makefile
 @@ -477,6 +477,7 @@ OBJS-$(CONFIG_SCALE_VT_FILTER)               += vf_scale_vt.o scale_eval.o
  OBJS-$(CONFIG_SCALE_VULKAN_FILTER)           += vf_scale_vulkan.o vulkan.o vulkan_filter.o
  OBJS-$(CONFIG_SCALE2REF_FILTER)              += vf_scale.o scale_eval.o framesync.o
@@ -22,10 +20,9 @@ index 1f5de29..93ac60c 100644
  OBJS-$(CONFIG_SCDET_FILTER)                  += vf_scdet.o
  OBJS-$(CONFIG_SCDET_VULKAN_FILTER)           += vf_scdet_vulkan.o
  OBJS-$(CONFIG_SCHARR_FILTER)                 += vf_convolution.o
-diff --git a/ffmpeg/libavfilter/allfilters.c b/ffmpeg/libavfilter/allfilters.c
-index 84f15f8..401bdf1 100644
---- a/ffmpeg/libavfilter/allfilters.c	
-+++ b/ffmpeg/libavfilter/allfilters.c
+diff --git a/libavfilter/allfilters.c b/libavfilter/allfilters.c
+--- a/libavfilter/allfilters.c	
++++ b/libavfilter/allfilters.c
 @@ -448,6 +448,7 @@ extern const FFFilter ff_vf_scale_vt;
  extern const FFFilter ff_vf_scale_vulkan;
  extern const FFFilter ff_vf_scale2ref;
@@ -34,11 +31,10 @@ index 84f15f8..401bdf1 100644
  extern const FFFilter ff_vf_scdet;
  extern const FFFilter ff_vf_scdet_vulkan;
  extern const FFFilter ff_vf_scharr;
-diff --git a/ffmpeg/libavfilter/opencl/sv_participant.cl b/ffmpeg/libavfilter/opencl/sv_participant.cl
+diff --git a/libavfilter/opencl/sv_participant.cl b/libavfilter/opencl/sv_participant.cl
 new file mode 100644
-index 0000000..f04f371
 --- /dev/null
-+++ b/ffmpeg/libavfilter/opencl/sv_participant.cl
++++ b/libavfilter/opencl/sv_participant.cl
 @@ -0,0 +1,124 @@
 +/*
 + * This file is part of FFmpeg.
@@ -165,10 +161,9 @@ index 0000000..f04f371
 +    }
 +}
 \ No newline at end of file
-diff --git a/ffmpeg/libavfilter/opencl_source.h b/ffmpeg/libavfilter/opencl_source.h
-index b6930fb..f8a899c 100644
---- a/ffmpeg/libavfilter/opencl_source.h	
-+++ b/ffmpeg/libavfilter/opencl_source.h
+diff --git a/libavfilter/opencl_source.h b/libavfilter/opencl_source.h
+--- a/libavfilter/opencl_source.h	
++++ b/libavfilter/opencl_source.h
 @@ -33,5 +33,6 @@ extern const char *ff_source_tonemap_cl;
  extern const char *ff_source_transpose_cl;
  extern const char *ff_source_unsharp_cl;
@@ -176,11 +171,10 @@ index b6930fb..f8a899c 100644
 +extern const char *ff_source_sv_participant_cl;
  
  #endif /* AVFILTER_OPENCL_SOURCE_H */
-diff --git a/ffmpeg/libavfilter/vf_sv_participant_opencl.c b/ffmpeg/libavfilter/vf_sv_participant_opencl.c
+diff --git a/libavfilter/vf_sv_participant_opencl.c b/libavfilter/vf_sv_participant_opencl.c
 new file mode 100644
-index 0000000..99795ff
 --- /dev/null
-+++ b/ffmpeg/libavfilter/vf_sv_participant_opencl.c
++++ b/libavfilter/vf_sv_participant_opencl.c
 @@ -0,0 +1,593 @@
 +/*
 + * This file is part of FFmpeg.

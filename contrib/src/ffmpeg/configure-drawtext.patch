@@ -1,6 +1,6 @@
-diff --git a/configure-old b/configure
+diff --git a/configure b/configure
 index 9052f18..da02571 100644
---- a/configure-old
+--- a/configure
 +++ b/configure
 @@ -7125,10 +7125,6 @@ enabled libfdk_aac        && { check_pkg_config libfdk_aac fdk-aac "fdk-aac/aace
  flite_extralibs="-lflite_cmu_time_awb -lflite_cmu_us_awb -lflite_cmu_us_kal -lflite_cmu_us_kal16 -lflite_cmu_us_rms -lflite_cmu_us_slt -lflite_usenglish -lflite_cmulex -lflite"
