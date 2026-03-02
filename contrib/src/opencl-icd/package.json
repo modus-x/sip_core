@@ -1,0 +1,16 @@
+{
+    "name": "opencl-icd",
+    "version": "2025.07.22",
+    "url": "https://nexus.svetlocal.ru/repository/github-artifacts/OpenCL-ICD-Loader-__VERSION__.tar.gz",
+    "deps": [ "opencl-headers" ],
+    "project_paths": [],
+    "with_env" : "",
+    "custom_scripts":
+    {
+        "pre_build": [ 
+            "mkdir build & cd build & cmake .. -G %CMAKE_GENERATOR% -D CMAKE_INSTALL_PREFIX=%INSTALL_PREFIX% -D CMAKE_PREFIX_PATH=%INSTALL_PREFIX%" 
+        ],
+        "build": [ "cmake --build ./build --target install" ],
+        "post_build": [ "cd \"%INSTALL_PREFIX%\\lib\" & move OpenCL.lib \"%INSTALL_PREFIX%\\lib\\x64\"" ]
+    }
+}

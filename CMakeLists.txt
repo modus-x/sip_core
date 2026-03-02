@@ -596,6 +596,8 @@ if(MSVC)
             optimized
             ${DEPS_RELEASE}/lib/x64/vpl.lib
             optimized
+            ${DEPS_RELEASE}/lib/x64/OpenCL.lib
+            optimized
             ${DEPS_RELEASE}/libyaml-cppmd.lib
             optimized
             ${DEPS_RELEASE}/fmt.lib
@@ -637,6 +639,8 @@ if(MSVC)
             ${DEPS_DEBUG}/lib/x64/libzlib.lib
             debug
             ${DEPS_DEBUG}/lib/x64/vpl.lib
+            debug
+            ${DEPS_DEBUG}/lib/x64/OpenCL.lib
             debug
             ${DEPS_DEBUG}/libyaml-cppmdd.lib
             debug

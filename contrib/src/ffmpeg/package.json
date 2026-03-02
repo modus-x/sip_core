@@ -10,7 +10,8 @@
         "fontconfig",
         "harfbuzz",
         "ffnvcodec",
-        "libvpl"
+        "libvpl",
+        "opencl-icd"
     ],
     "patches": [
         "windows-configure.patch",

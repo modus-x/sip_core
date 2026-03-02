@@ -1,0 +1,15 @@
+{
+    "name": "opencl-headers",
+    "version": "2025.07.22",
+    "url": "https://nexus.svetlocal.ru/repository/github-artifacts/OpenCL-Headers-__VERSION__.tar.gz",
+    "deps": [],
+    "with_env" : "",
+    "custom_scripts":
+    {
+        "pre_build": [ 
+            "mkdir build & cd build & cmake .. -G %CMAKE_GENERATOR% -D CMAKE_INSTALL_PREFIX=%INSTALL_PREFIX%" 
+        ],
+        "build": [ "cmake --build ./build --target install" ],
+        "post_build": []
+    }
+}

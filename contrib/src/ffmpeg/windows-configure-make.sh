@@ -35,6 +35,7 @@ FFMPEGCONF+='
             --enable-d3d12va
             --enable-cuda
             --enable-cuvid
+            --enable-opencl
             --enable-libfreetype
             --enable-libfontconfig
             --enable-iconv
@@ -171,7 +172,7 @@ FFMPEGCONF+='
 echo "configure and make ffmpeg for win32-x64... in $(pwd)"
 
 # extra libs
-EXTRALDFLAGS="libopus.lib libx264.lib libvpx.lib libfreetype.lib libfontconfig.lib harfbuzz.lib vpl.lib"
+EXTRALDFLAGS="libopus.lib libx264.lib libvpx.lib libfreetype.lib libfontconfig.lib harfbuzz.lib vpl.lib OpenCL.lib"
 
 # configure debug / release libs
 if [ "$1" == "Debug" ]; then
