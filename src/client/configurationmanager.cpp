@@ -70,12 +70,14 @@ registerEventPackage(const std::string& eventPackage, int expires)
 }
 
 int
-getKeepAliveInterval(const std::string& accountId) {
+getKeepAliveInterval(const std::string& accountId)
+{
     return sip_core::Manager::instance().getKeepAliveInterval(accountId);
-
 }
 
-void setKeepAliveInterval(const std::string& accountId, int interval) {
+void
+setKeepAliveInterval(const std::string& accountId, int interval)
+{
     sip_core::Manager::instance().setKeepAliveInterval(accountId, interval);
 }
 
@@ -789,13 +791,34 @@ connectivityChanged()
     SIP_CORE_WARN("received connectivity changed - trying to re-connect enabled accounts");
 
     auto& manager = sip_core::Manager::instance();
-    if (auto* broker = manager.sipVoIPLink().sipTransportBroker.get()) {
-        broker->resetForConnectivityChange();
+    std::vector<std::shared_ptr<SIPAccount>> eligibleSipAccounts;
+    for (const auto& account : manager.getAllAccounts()) {
+        auto sipAccount = std::dynamic_pointer_cast<SIPAccount>(account);
+        if (!sipAccount)
+            continue;
+        if (!sipAccount->shouldHandleConnectivityChange()) {
+            SIP_CORE_DBG("Connectivity changed: skipping account %s (not eligible)",
+                         sipAccount->getAccountID().c_str());
+            continue;
+        }
+        eligibleSipAccounts.emplace_back(std::move(sipAccount));
     }
 
-    for (const auto& account : manager.getAllAccounts()) {
-        account->connectivityChanged();
+    if (eligibleSipAccounts.empty()) {
+        SIP_CORE_WARN("Connectivity changed: no eligible SIP accounts, skipping recovery");
+        return;
     }
+
+    SIP_CORE_WARN("Connectivity changed: resetting SIP transports and recovering %zu SIP accounts",
+                  eligibleSipAccounts.size());
+
+    if (auto* broker = manager.sipVoIPLink().sipTransportBroker.get())
+        broker->resetForConnectivityChange();
+
+    for (const auto& account : eligibleSipAccounts)
+        account->handleConnectivityChangedForced("connectivity-changed");
+
+    SIP_CORE_DBG("Connectivity changed: recovery dispatch complete");
 }
 
 bool

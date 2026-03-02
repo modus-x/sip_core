@@ -597,6 +597,7 @@ SIPAccount::~SIPAccount() noexcept
 {
     isShuttingDown_.store(true);
     transportRecoveryPending_.store(false);
+    connectivityRecoveryRequested_.store(false);
 
     cancelKeepAliveTimer();
     cancelMainRouteKeepAliveTimer();
@@ -1254,21 +1255,7 @@ SIPAccount::scheduleTransportRecovery(const char* reason, pj_status_t status)
 void
 SIPAccount::scheduleConnectivityRecovery(const char* reason)
 {
-    if (isShuttingDown_.load() || !isUsable()) {
-        SIP_CORE_DBG("Skipping connectivity recovery for account %s: shutting down or unusable",
-                     accountID_.c_str());
-        return;
-    }
-
-    markTransportRebindRequired(reason ? reason : "connectivity-changed");
-    cancelAutoReregistrationTimer();
-    resetAutoRegistration();
-
-    SIP_CORE_WARN("Connectivity recovery requested for account %s (%s)",
-                  accountID_.c_str(),
-                  reason ? reason : "unspecified");
-
-    scheduleRecoveryInternal(reason, PJSIP_SC_TSX_TRANSPORT_ERROR, false);
+    handleConnectivityChangedForced(reason);
 }
 
 void
@@ -1295,7 +1282,13 @@ SIPAccount::scheduleRecoveryInternal(const char* reason, pj_status_t status, boo
 
     bool expected = false;
     if (!transportRecoveryPending_.compare_exchange_strong(expected, true)) {
-        SIP_CORE_DBG("Transport recovery already pending for account %s", accountID_.c_str());
+        if (!debounced && connectivityRecoveryRequested_.load()) {
+            SIP_CORE_WARN("Connectivity recovery already pending for account %s, coalescing "
+                          "additional request",
+                          accountID_.c_str());
+        } else {
+            SIP_CORE_DBG("Transport recovery already pending for account %s", accountID_.c_str());
+        }
         return;
     }
 
@@ -1313,6 +1306,20 @@ SIPAccount::recoverTransport(const std::string& reason, pj_status_t status)
 {
     if (!transportRecoveryPending_.exchange(false))
         return;
+    const bool connectivityRequested = connectivityRecoveryRequested_.exchange(false);
+    const bool connectivityReason = reason.rfind("connectivity-changed", 0) == 0;
+
+    auto schedulePendingConnectivityRecovery = [&] {
+        if (!isUsable() || isShuttingDown_.load())
+            return;
+        if (connectivityRecoveryRequested_.exchange(false)) {
+            SIP_CORE_WARN("Connectivity recovery was re-requested while recovery was in progress "
+                          "for account %s, scheduling follow-up recovery",
+                          accountID_.c_str());
+            handleConnectivityChangedForced("connectivity-changed-coalesced");
+        }
+    };
+
     if (isShuttingDown_.load() || !isUsable())
         return;
     if (!link_.sipTransportBroker || !link_.getEndpoint())
@@ -1324,6 +1331,10 @@ SIPAccount::recoverTransport(const std::string& reason, pj_status_t status)
                   reason.c_str(),
                   status,
                   sip_utils::sip_strerror(status).c_str());
+
+    if (connectivityRequested || connectivityReason)
+        resetNetworkRuntimeStateForConnectivityChange();
+
     markTransportRebindRequired(reason.c_str());
 
     cancelKeepAliveTimer();
@@ -1335,17 +1346,46 @@ SIPAccount::recoverTransport(const std::string& reason, pj_status_t status)
     setTransport(nullptr);
 
     if (!switchTransportInternal(config().transport, false, false, nullptr)) {
+        SIP_CORE_ERR("Transport recreation failed during recovery for account %s",
+                     accountID_.c_str());
         setRegistrationState(RegistrationState::ERROR_GENERIC, PJSIP_SC_TSX_TRANSPORT_ERROR);
+        schedulePendingConnectivityRecovery();
         return;
     }
 
+    SIP_CORE_WARN("Transport recreation succeeded during recovery for account %s, triggering "
+                  "re-registration",
+                  accountID_.c_str());
     doRegister();
+    schedulePendingConnectivityRecovery();
 }
 
 void
 SIPAccount::resetViaTransport()
 {
     via_tp_ = nullptr;
+}
+
+void
+SIPAccount::resetNetworkRuntimeStateForConnectivityChange()
+{
+    SIP_CORE_WARN("Resetting network runtime state for account %s before connectivity recovery",
+                  accountID_.c_str());
+
+    receivedParameter_.clear();
+    rPort_ = -1;
+    transportError_.clear();
+    transportStatus_ = PJSIP_SC_TRYING;
+
+    via_addr_.host.ptr = nullptr;
+    via_addr_.host.slen = 0;
+    via_addr_.port = 0;
+    resetViaTransport();
+
+    std::lock_guard<std::mutex> lock(localBindingMutex_);
+    hasLocalBindingSnapshot_ = false;
+    lastLocalBindingAddress_.clear();
+    lastLocalBindingPort_ = 0;
 }
 
 void
@@ -1956,27 +1996,51 @@ SIPAccount::doUnregister(std::function<void(bool)> released_cb)
 void
 SIPAccount::connectivityChanged()
 {
-    if (!isUsable()) {
-        SIP_CORE_DBG("Skipping connectivity-changed for account %s: account is not usable",
-                     accountID_.c_str());
-        return;
-    }
+    handleConnectivityChangedForced("connectivity-changed");
+}
 
-    const auto registrationState = getRegistrationState();
-    const bool activeRegistration = registrationState == RegistrationState::REGISTERED;
-    const bool hasWorkingTransport = transport_ != nullptr && transportError_.empty();
+bool
+SIPAccount::shouldHandleConnectivityChange() const
+{
+    if (isShuttingDown_.load())
+        return false;
+    if (!isUsable())
+        return false;
 
-    if (!activeRegistration || !hasWorkingTransport) {
-        SIP_CORE_DBG("Skipping connectivity-changed for account %s: registration=%s, "
-                     "transportPresent=%d, transportError='%s'",
+    const bool hasRegistrationIntent = bRegister_
+                                       || getRegistrationState() != RegistrationState::UNREGISTERED
+                                       || transport_;
+    return hasRegistrationIntent;
+}
+
+void
+SIPAccount::handleConnectivityChangedForced(const char* reason)
+{
+    if (!shouldHandleConnectivityChange()) {
+        SIP_CORE_DBG("Skipping forced connectivity recovery for account %s: registrationIntent=%d, "
+                     "usable=%d, shuttingDown=%d",
                      accountID_.c_str(),
-                     Account::mapStateNumberToString(registrationState).c_str(),
-                     transport_ ? 1 : 0,
-                     transportError_.c_str());
+                     (bRegister_ || getRegistrationState() != RegistrationState::UNREGISTERED
+                      || transport_)
+                         ? 1
+                         : 0,
+                     isUsable() ? 1 : 0,
+                     isShuttingDown_.load() ? 1 : 0);
         return;
     }
 
-    scheduleConnectivityRecovery("connectivity-changed");
+    connectivityRecoveryRequested_.store(true);
+    markTransportRebindRequired(reason ? reason : "connectivity-changed");
+    cancelAutoReregistrationTimer();
+    resetAutoRegistration();
+
+    SIP_CORE_WARN("Forced connectivity recovery requested for account %s (%s)",
+                  accountID_.c_str(),
+                  reason ? reason : "unspecified");
+
+    scheduleRecoveryInternal(reason ? reason : "connectivity-changed",
+                             PJSIP_SC_TSX_TRANSPORT_ERROR,
+                             false);
 }
 
 void

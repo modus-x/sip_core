@@ -464,6 +464,8 @@ public:
                              bool onlyConnected = false) override;
 
     void connectivityChanged() override;
+    bool shouldHandleConnectivityChange() const;
+    void handleConnectivityChangedForced(const char* reason);
 
     std::string getUserUri() const override;
 
@@ -557,6 +559,7 @@ public:
     std::atomic<bool> routeSwitchPending_ {false};
     std::atomic<bool> transportSwitchPending_ {false};
     std::atomic<bool> transportRecoveryPending_ {false};
+    std::atomic<bool> connectivityRecoveryRequested_ {false};
     std::atomic<bool> isShuttingDown_ {false};
     std::atomic<int64_t> lastTransportRecoveryMs_ {0};
 
@@ -605,6 +608,7 @@ private:
     void runPostRegisterRecoverySync();
     std::pair<std::string, pj_uint16_t> currentLocalBinding() const;
     void resetViaTransport();
+    void resetNetworkRuntimeStateForConnectivityChange();
     void cancelAutoReregistrationTimer();
 
     struct
