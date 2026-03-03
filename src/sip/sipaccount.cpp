@@ -2000,17 +2000,50 @@ SIPAccount::connectivityChanged()
 }
 
 bool
-SIPAccount::shouldHandleConnectivityChange() const
+SIPAccount::hasRunningTransportForConnectivityChange() const
 {
-    if (isShuttingDown_.load())
-        return false;
-    if (!isUsable())
+    if (isShuttingDown_.load() || !isUsable())
         return false;
 
-    const bool hasRegistrationIntent = bRegister_
-                                       || getRegistrationState() != RegistrationState::UNREGISTERED
-                                       || transport_;
-    return hasRegistrationIntent;
+    if (!transport_ || transportRecoveryPending_.load())
+        return false;
+
+    switch (transport_->getTransportType()) {
+    case libsip_core::TransportType::TCP:
+        return transport_->isConnected() || transportStatus_ == PJSIP_SC_OK;
+    case libsip_core::TransportType::UDP:
+        // UDP is connectionless; transport presence is sufficient for "running".
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool
+SIPAccount::shouldHandleConnectivityChange() const
+{
+    const bool shuttingDown = isShuttingDown_.load();
+    const bool usable = isUsable();
+    const bool hasTransport = static_cast<bool>(transport_);
+    const auto regState = getRegistrationState();
+    const bool hasRegistrationIntent = bRegister_ || regState != RegistrationState::UNREGISTERED
+                                       || hasTransport;
+    const bool hasRunningTransport = hasRunningTransportForConnectivityChange();
+    const bool pendingRecovery = transportRecoveryPending_.load();
+    const bool eligible = !shuttingDown && usable && hasRegistrationIntent && hasRunningTransport;
+
+    SIP_CORE_DBG("Connectivity eligibility for account %s: eligible=%d, state=%s, bRegister=%d, "
+                 "transportPresent=%d, runningTransport=%d, recoveryPending=%d, transportState=%d",
+                 accountID_.c_str(),
+                 eligible ? 1 : 0,
+                 Account::mapStateNumberToString(regState).c_str(),
+                 bRegister_ ? 1 : 0,
+                 hasTransport ? 1 : 0,
+                 hasRunningTransport ? 1 : 0,
+                 pendingRecovery ? 1 : 0,
+                 static_cast<int>(transportStatus_));
+
+    return eligible;
 }
 
 void

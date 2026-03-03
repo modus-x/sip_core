@@ -51,6 +51,7 @@
 #include <cstring>
 #include <sstream>
 #include <math.h>
+#include <chrono>
 
 #ifdef _WIN32
 #undef interface
@@ -62,6 +63,24 @@ constexpr unsigned CODECS_NOT_LOADED = 0x1000; /** Codecs not found */
 
 using sip_core::SIPAccount;
 using sip_core::AudioDeviceType;
+
+namespace {
+constexpr int64_t CONNECTIVITY_SKIP_WARN_INTERVAL_MS = 5000;
+
+bool
+shouldLogConnectivitySkipWarn()
+{
+    static std::atomic<int64_t> lastWarnMs {0};
+    const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                         std::chrono::steady_clock::now().time_since_epoch())
+                         .count();
+    const auto last = lastWarnMs.load();
+    if (last > 0 && (now - last) < CONNECTIVITY_SKIP_WARN_INTERVAL_MS)
+        return false;
+    lastWarnMs.store(now);
+    return true;
+}
+} // namespace
 
 bool
 registerEventPackage(const std::string& eventPackage, int expires)
@@ -791,6 +810,24 @@ connectivityChanged()
     SIP_CORE_WARN("received connectivity changed - trying to re-connect enabled accounts");
 
     auto& manager = sip_core::Manager::instance();
+    auto& sipVoipLink = manager.sipVoIPLink();
+    if (!sipVoipLink.getEndpoint()) {
+        if (shouldLogConnectivitySkipWarn()) {
+            SIP_CORE_WARN("Connectivity changed ignored: SIP endpoint is not ready yet");
+        } else {
+            SIP_CORE_DBG("Connectivity changed ignored: SIP endpoint not ready");
+        }
+        return;
+    }
+    if (!sipVoipLink.sipTransportBroker) {
+        if (shouldLogConnectivitySkipWarn()) {
+            SIP_CORE_WARN("Connectivity changed ignored: SIP transport broker is not ready yet");
+        } else {
+            SIP_CORE_DBG("Connectivity changed ignored: SIP transport broker not ready");
+        }
+        return;
+    }
+
     std::vector<std::shared_ptr<SIPAccount>> eligibleSipAccounts;
     for (const auto& account : manager.getAllAccounts()) {
         auto sipAccount = std::dynamic_pointer_cast<SIPAccount>(account);
@@ -805,14 +842,19 @@ connectivityChanged()
     }
 
     if (eligibleSipAccounts.empty()) {
-        SIP_CORE_WARN("Connectivity changed: no eligible SIP accounts, skipping recovery");
+        if (shouldLogConnectivitySkipWarn()) {
+            SIP_CORE_WARN("Connectivity changed ignored: no SIP accounts with running transports");
+        } else {
+            SIP_CORE_DBG("Connectivity changed ignored: no eligible SIP accounts with running "
+                         "transports");
+        }
         return;
     }
 
     SIP_CORE_WARN("Connectivity changed: resetting SIP transports and recovering %zu SIP accounts",
                   eligibleSipAccounts.size());
 
-    if (auto* broker = manager.sipVoIPLink().sipTransportBroker.get())
+    if (auto* broker = sipVoipLink.sipTransportBroker.get())
         broker->resetForConnectivityChange();
 
     for (const auto& account : eligibleSipAccounts)

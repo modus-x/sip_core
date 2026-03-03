@@ -464,6 +464,7 @@ public:
                              bool onlyConnected = false) override;
 
     void connectivityChanged() override;
+    bool hasRunningTransportForConnectivityChange() const;
     bool shouldHandleConnectivityChange() const;
     void handleConnectivityChangedForced(const char* reason);
 
