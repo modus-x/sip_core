@@ -72,7 +72,11 @@ MediaPlayer::configureMediaInputs()
         emitInfo();
         return false;
     }
-    demuxer_->findStreamInfo();
+    if (demuxer_->findStreamInfo() < 0) {
+        SIP_CORE_ERR("Could not find stream info for media player input '%s'", path_.c_str());
+        emitInfo();
+        return false;
+    }
 
     pauseInterval_ = 0;
     startTime_ = av_gettime();
@@ -224,7 +228,7 @@ MediaPlayer::seekToTime(int64_t time)
     demuxer_->updateCurrentState(MediaDemuxer::CurrentState::Demuxing);
 
     int64_t currentTime = av_gettime();
-    if (paused_){
+    if (paused_) {
         pauseInterval_ += currentTime - lastPausedTime_;
         lastPausedTime_ = currentTime;
     }

@@ -36,6 +36,8 @@
 #include <mutex>
 #include <condition_variable>
 #include <array>
+#include <cstdint>
+#include <chrono>
 
 #if __APPLE__
 #import "TargetConditionals.h"
@@ -121,6 +123,9 @@ private:
     std::string currentResource_;
     std::atomic<bool> switchPending_ = {false};
     std::atomic_bool isStopped_ = {false};
+    std::atomic<int64_t> startupDeadlineUs_ {0};
+    enum class StartupAbortReason : uint8_t { None, StopRequested, Timeout };
+    std::atomic<StartupAbortReason> startupAbortReason_ {StartupAbortReason::None};
 
     DeviceParams decOpts_;
     std::promise<DeviceParams> foundDecOpts_;
@@ -129,7 +134,8 @@ private:
 
     std::atomic_bool decOptsFound_ {false};
 
-    // set value to promise. you can listen for another thread for foundDecOpts_, which it returned from switchInput
+    // set value to promise. you can listen for another thread for foundDecOpts_, which it returned
+    // from switchInput
     void foundDecOpts(const DeviceParams& params);
 
     void clearOptions();
@@ -140,10 +146,14 @@ private:
     bool initAVFoundation(const std::string& display);
     bool initFile(std::string path);
     bool initWindowsCapture(const std::string& params);
-    #if defined(_WIN32) && defined(USE_DSHOW_SCREEN_CAPTURE)
+#if defined(_WIN32) && defined(USE_DSHOW_SCREEN_CAPTURE)
     bool initScreenCaptureRecorder(const std::string& params);
-    #endif
+#endif
     bool isCapturing() const noexcept;
+    bool shouldInterruptDecoderIo() noexcept;
+    bool isStartupDeadlineExceeded() const noexcept;
+    void setStartupDeadline(std::chrono::steady_clock::time_point deadline) noexcept;
+    void clearStartupDeadline() noexcept;
 
     void switchDevice();
     bool capturing_ {false};

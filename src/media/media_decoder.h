@@ -110,7 +110,7 @@ public:
     void setInterruptCallback(int (*cb)(void*), void* opaque);
     void setIOContext(MediaIOHandle* ioctx);
 
-    void findStreamInfo();
+    int findStreamInfo();
     int selectStream(AVMediaType type);
 
     // this sets callbacks, in which compressed bytes from Packets will be decoded
@@ -205,7 +205,8 @@ public:
     int setupAudio() { return setup(AVMEDIA_TYPE_AUDIO); }
     int setupVideo() { return setup(AVMEDIA_TYPE_VIDEO); }
 
-    // forward to demuxer. at the end, if stream was setup correctly, MediaDecoder's decode ,ethod will be called
+    // forward to demuxer. at the end, if stream was setup correctly, MediaDecoder's decode ,ethod
+    // will be called
     MediaDemuxer::Status decode();
 
     DecodeStatus flush();
@@ -295,6 +296,7 @@ private:
 
     std::function<void()> contextCallback_;
     std::atomic_bool firstDecode_ {true};
+
 protected:
     AVDictionary* options_ = nullptr;
 };
