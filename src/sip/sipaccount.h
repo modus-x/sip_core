@@ -43,6 +43,7 @@
 #include <cstdint>
 #include <atomic>
 #include <utility>
+#include <deque>
 
 namespace sip_core {
 
@@ -309,6 +310,36 @@ public:
     bool isOptionsSuccess200(int statusCode) const;
     bool isTransportFailureFromOptions(int statusCode) const;
     bool isRouteFailureFromOptions(int statusCode) const;
+    static uint32_t resolveMainRouteProbeIntervalSec(uint32_t keepAliveIntervalSec,
+                                                     bool fastProbeEnabled);
+    static uint32_t resolveActiveKeepAliveIntervalSec(uint32_t keepAliveIntervalSec,
+                                                      bool fastProbeEnabled,
+                                                      bool noRouteMode);
+    static bool shouldEnableMainRouteFastProbeForStatusCode(int statusCode);
+    static bool shouldDisableMainRouteFastProbeForStatusCode(int statusCode);
+    static bool shouldEnableActiveNoRouteFastProbeForStatusCode(int statusCode);
+    static bool shouldDisableActiveNoRouteFastProbeForStatusCode(int statusCode);
+    static bool isTransientOptionsFailureCode(int statusCode);
+    static bool isHardOptionsFailureCode(int statusCode);
+    static bool shouldSuppressOptionsRecoveryAttempt(std::deque<int64_t>& attemptMs,
+                                                     int64_t nowMs,
+                                                     size_t maxAttempts,
+                                                     int64_t windowMs);
+    bool isMainRouteFastProbeEnabled() const;
+    uint32_t getMainRouteProbeIntervalSec() const;
+    bool isNoRouteKeepAliveMode() const;
+    bool isActiveNoRouteFastProbeEnabled() const;
+    uint32_t getActiveKeepAliveIntervalSec() const;
+    void enableMainRouteFastProbe(const char* reason);
+    void disableMainRouteFastProbe(const char* reason);
+    void rescheduleMainRouteProbeNow(uint32_t seconds);
+    void enableActiveNoRouteFastProbe(const char* reason, bool rescheduleNow = true);
+    void disableActiveNoRouteFastProbe(const char* reason);
+    void rescheduleActiveKeepAliveNow(uint32_t seconds);
+    bool isTransientOptionsFailure(int statusCode) const;
+    bool isHardOptionsFailure(int statusCode) const;
+    void handleNoBackupOptionsRouteFailure(int statusCode);
+    void handleUdpRawKeepAliveSendFailure(pj_status_t status);
     void scheduleTransportRecovery(const char* reason, pj_status_t status);
 
     virtual bool getSrtpFallback() const override { return config().srtpFallback; }
@@ -562,7 +593,13 @@ public:
     std::atomic<bool> transportRecoveryPending_ {false};
     std::atomic<bool> connectivityRecoveryRequested_ {false};
     std::atomic<bool> isShuttingDown_ {false};
+    std::atomic<bool> mainRouteFastProbeEnabled_ {false};
+    std::atomic<bool> activeNoRouteFastProbeEnabled_ {false};
     std::atomic<int64_t> lastTransportRecoveryMs_ {0};
+    std::mutex optionsRecoveryMutex_;
+    std::deque<int64_t> optionsRecoveryAttemptMs_;
+    std::mutex rawKeepAliveRecoveryMutex_;
+    std::deque<int64_t> rawKeepAliveRecoveryAttemptMs_;
 
 private:
     void doRegister1_();
@@ -611,6 +648,10 @@ private:
     void resetViaTransport();
     void resetNetworkRuntimeStateForConnectivityChange();
     void cancelAutoReregistrationTimer();
+    void resetOptionsRecoveryWindow();
+    bool shouldSuppressOptionsRecovery();
+    void resetRawKeepAliveRecoveryWindow();
+    bool shouldSuppressRawKeepAliveRecovery();
 
     struct
     {

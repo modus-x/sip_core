@@ -725,6 +725,23 @@
 
 Ничего не возвращает.
 Логика: `Manager::setKeepAliveInterval`.
+Примечание: `0` отключает keep-alive-детекцию по OPTIONS и связанные keep-alive/probe таймеры.
+Примечание: при отсутствии backup route транзиентные ошибки OPTIONS (например `408/500/502/503/504`)
+инициируют транспортное восстановление и повторную регистрацию; нетранзиентные ошибки остаются в
+`ERROR_GENERIC`.
+Примечание: в режиме UDP Packet keep-alive (`keepAliveType=Packet`) ошибка отправки raw keep-alive
+(`pjsip_tpmgr_send_raw`) теперь также инициирует транспортное восстановление и повторную регистрацию.
+Для защиты от флаппинга применяется ограничитель: не более 3 немедленных восстановлений за 60 секунд,
+после чего используется обычный `scheduleReregistration()`.
+Примечание: при работе через backup route, если main-route OPTIONS probe возвращает не `200` (или
+транспортную ошибку), интервал main-route probe автоматически уменьшается до `1` секунды. После
+первого `200 OK` интервал восстанавливается к пользовательскому `keepAliveInterval`, и выполняется
+немедленный failback на main route с re-register.
+Примечание: если `serviceRoute` и `backServiceRoute` не заданы (no-route режим), для активного
+keep-alive также включается адаптивный `1s` интервал: при ошибках (`OPTIONS` non-`200`/transport
+error или raw UDP send failure в Packet-режиме) интервал уменьшается до `1` секунды, а после
+восстановления (`OPTIONS 200 OK` или успешная raw UDP отправка) возвращается к заданному
+`keepAliveInterval`.
 
 ### `registerEventPackage(eventPackage: String, expires: Int): Boolean`
 Регистрация SIP event package.
@@ -1246,10 +1263,12 @@
 
 ### `setTsxTimers(t1: UInt, t2: UInt, t4: UInt, td: UInt)`
 Установка SIP-таймеров транзакций.
-- `t1`, `t2`, `t4`, `td`: значения таймеров.
+- `t1`, `t2`, `t4`, `td`: значения таймеров в миллисекундах.
 
 Ничего не возвращает.
 Логика: проксирует в `Manager::setTsxTimers`.
+Примечание: для keep-alive OPTIONS практическая верхняя оценка времени до старта восстановления:
+`time_to_recovery_start ~= keepAliveInterval + td`.
 
 ### `getSupportedAudioManagers(): List<String>`
 Получение списка поддерживаемых аудио-менеджеров.

@@ -633,9 +633,34 @@ Manager::setKeepAliveInterval(const std::string& accountId, int interval)
     if (auto account = getAccount(accountId)) {
         if (account->config().type == ACCOUNT_TYPE_SIP) {
             auto sipAccount = std::static_pointer_cast<SIPAccount>(account);
+            const bool restoreMainRouteFastProbe = sipAccount->isUsingBackupRoute()
+                                                   && sipAccount->isMainRouteFastProbeEnabled()
+                                                   && interval > 0;
+            const bool restoreActiveNoRouteFastProbe
+                = sipAccount->isNoRouteKeepAliveMode()
+                  && sipAccount->isActiveNoRouteFastProbeEnabled() && interval > 0;
             sipAccount->editConfig(
                 [&](SipAccountConfig& config) { config.keepAliveInterval = interval; });
-            sipAccount->registerKeepAliveTimer();
+
+            sipAccount->cancelKeepAliveTimer();
+            sipAccount->cancelMainRouteKeepAliveTimer();
+            sipAccount->cancelBackupRouteKeepAliveTimer();
+
+            if (sipAccount->isUsable() && sipAccount->getTransport()) {
+                sipAccount->registerKeepAliveTimer();
+                if (restoreActiveNoRouteFastProbe)
+                    sipAccount->enableActiveNoRouteFastProbe("manager-keepalive-interval-refresh");
+                if (sipAccount->hasBackServiceRoute()) {
+                    if (sipAccount->isUsingBackupRoute()) {
+                        sipAccount->registerMainRouteKeepAliveTimer();
+                        if (restoreMainRouteFastProbe)
+                            sipAccount->enableMainRouteFastProbe(
+                                "manager-keepalive-interval-refresh");
+                    } else {
+                        sipAccount->registerBackupRouteKeepAliveTimer();
+                    }
+                }
+            }
         }
     }
 }

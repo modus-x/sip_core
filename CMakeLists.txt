@@ -826,6 +826,10 @@ if(BUILD_TESTING)
   add_executable(video_input_tests tests/video_input_tests.cpp)
   target_link_libraries(video_input_tests PRIVATE ${PROJECT_NAME})
   add_test(NAME video_input_tests COMMAND video_input_tests)
+
+  add_executable(sipaccount_recovery_tests tests/sipaccount_recovery_tests.cpp)
+  target_link_libraries(sipaccount_recovery_tests PRIVATE ${PROJECT_NAME})
+  add_test(NAME sipaccount_recovery_tests COMMAND sipaccount_recovery_tests)
 endif()
 
 # install
