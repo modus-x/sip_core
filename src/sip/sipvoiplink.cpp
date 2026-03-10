@@ -979,9 +979,10 @@ invite_session_state_changed_cb(pjsip_inv_session* inv, pjsip_event* ev)
             call->onPeerRinging();
         }
 
-        // svetets call manager gives us this when we should start receiving the media
-        if (status_code == PJSIP_SC_PROGRESS) {
-            call->onAnswered();
+        // Early media (183 Session Progress): start provisional media flow only.
+        // Do not promote call state to ACTIVE/CONNECTED yet.
+        if (status_code == PJSIP_SC_PROGRESS && inv->role == PJSIP_ROLE_UAC) {
+            call->onEarlyMediaProgress183();
         }
         break;
 

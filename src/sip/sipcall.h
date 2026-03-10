@@ -199,6 +199,10 @@ public:
      */
     void onAnswered();
     /**
+     * Peer sent 183 Session Progress with SDP (early media).
+     */
+    void onEarlyMediaProgress183();
+    /**
      * Called to report server/internal errors
      * @param cause Optional error code
      */
@@ -317,6 +321,8 @@ private:
     mutable std::mutex transportMtx_ {};
 
     void setupNegotiatedMedia();
+    void startEarlyMediaLocked();
+    void promoteEarlyMediaToActiveLocked();
 
     void setCallMediaLocal();
 
@@ -410,6 +416,8 @@ private:
     unsigned int localVideoPort_ {0};
 
     bool mediaRestartRequired_ {true};
+    bool earlyMediaRequested_ {false};
+    bool earlyMediaStarted_ {false};
     bool srtpEnabled_ {false};
     bool rtcpMuxEnabled_ {false};
 

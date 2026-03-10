@@ -1561,6 +1561,10 @@ void
 SIPCall::onAnswered()
 {
     SIP_CORE_WARN("[call:%s] onAnswered()", getCallId().c_str());
+    {
+        std::lock_guard<std::recursive_mutex> lk {callMutex_};
+        promoteEarlyMediaToActiveLocked();
+    }
     runOnMainThread([w = weak()] {
         if (auto shared = w.lock()) {
             if (shared->getConnectionState() != ConnectionState::CONNECTED) {
@@ -1571,6 +1575,90 @@ SIPCall::onAnswered()
             }
         }
     });
+}
+
+void
+SIPCall::onEarlyMediaProgress183()
+{
+    std::lock_guard<std::recursive_mutex> lk {callMutex_};
+
+    if (getCallType() != CallType::OUTGOING or !inviteSession_ or !sdp_) {
+        return;
+    }
+
+    if (inviteSession_->state != PJSIP_INV_STATE_EARLY
+        || getConnectionState() == ConnectionState::CONNECTED) {
+        return;
+    }
+
+    SIP_CORE_DBG("[call:%s] Received 183 Session Progress: enabling early audio media",
+                 getCallId().c_str());
+
+    earlyMediaRequested_ = true;
+
+    // If SDP is not active yet, early media startup will happen from onMediaNegotiationComplete().
+    if (!sdp_->getActiveLocalSdpSession() or !sdp_->getActiveRemoteSdpSession()) {
+        SIP_CORE_DBG("[call:%s] 183 received before active SDP; waiting media negotiation callback",
+                     getCallId().c_str());
+        return;
+    }
+
+    setupNegotiatedMedia();
+    stopAllMedia();
+    updateRemoteMedia();
+    startEarlyMediaLocked();
+}
+
+void
+SIPCall::startEarlyMediaLocked()
+{
+    bool started = false;
+
+    for (const auto& stream : rtpStreams_) {
+        if (!stream.rtpSession_ || stream.rtpSession_->getMediaType() != MediaType::MEDIA_AUDIO) {
+            continue;
+        }
+
+        auto audioRtp = std::dynamic_pointer_cast<AudioRtpSession>(stream.rtpSession_);
+        if (!audioRtp) {
+            continue;
+        }
+
+        audioRtp->startEarlyMedia();
+        started = true;
+    }
+
+    earlyMediaStarted_ = started;
+    if (!started) {
+        SIP_CORE_WARN("[call:%s] Early media requested but no audio RTP session is available",
+                      getCallId().c_str());
+    }
+}
+
+void
+SIPCall::promoteEarlyMediaToActiveLocked()
+{
+    if (!earlyMediaStarted_) {
+        return;
+    }
+
+    SIP_CORE_DBG("[call:%s] Promoting early media to active media", getCallId().c_str());
+
+    for (const auto& stream : rtpStreams_) {
+        if (!stream.rtpSession_ || stream.rtpSession_->getMediaType() != MediaType::MEDIA_AUDIO) {
+            continue;
+        }
+
+        auto audioRtp = std::dynamic_pointer_cast<AudioRtpSession>(stream.rtpSession_);
+        if (!audioRtp) {
+            continue;
+        }
+
+        audioRtp->promoteEarlyMediaToActive();
+    }
+
+    earlyMediaStarted_ = false;
+    earlyMediaRequested_ = false;
 }
 
 void
@@ -2329,7 +2417,37 @@ SIPCall::onMediaNegotiationComplete()
         // RESTART the media always....
         stopAllMedia();
         updateRemoteMedia();
-        startAllMedia();
+
+        const bool startEarlyMedia = getCallType() == CallType::OUTGOING and inviteSession_
+                                     and inviteSession_->state == PJSIP_INV_STATE_EARLY
+                                     and earlyMediaRequested_
+                                     and getConnectionState() != ConnectionState::CONNECTED;
+
+        if (startEarlyMedia) {
+            SIP_CORE_DBG("[call:%s] Starting early audio media after negotiation",
+                         getCallId().c_str());
+            startEarlyMediaLocked();
+        } else {
+            if (earlyMediaStarted_) {
+                for (const auto& stream : rtpStreams_) {
+                    if (!stream.rtpSession_
+                        || stream.rtpSession_->getMediaType() != MediaType::MEDIA_AUDIO) {
+                        continue;
+                    }
+
+                    auto audioRtp = std::dynamic_pointer_cast<AudioRtpSession>(stream.rtpSession_);
+                    if (audioRtp) {
+                        audioRtp->stopEarlyMedia();
+                    }
+                }
+                earlyMediaStarted_ = false;
+            }
+
+            startAllMedia();
+            if (inviteSession_ and inviteSession_->state != PJSIP_INV_STATE_EARLY) {
+                earlyMediaRequested_ = false;
+            }
+        }
     }
 
     reportMediaNegotiationStatus();

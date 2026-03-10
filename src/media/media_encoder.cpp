@@ -1506,19 +1506,19 @@ MediaEncoder::enableAccel(bool enableAccel)
         return "";
     }
 
-#ifdef ENABLE_VIDEO
-
 // Send an empty RTP packet (transport keepalive only, not decodable media).
 // Muted-video keepalive must use encoded black frames.
-    void
-    MediaEncoder::sendDummyPacket()
-    {
-        AVPacket pkt;
-        av_init_packet(&pkt);
-        pkt.data = nullptr;
-        pkt.size = 0;
-        send(pkt, -1, true);
-    }
+void
+MediaEncoder::sendDummyPacket()
+{
+    AVPacket pkt;
+    av_init_packet(&pkt);
+    pkt.data = nullptr;
+    pkt.size = 0;
+    send(pkt, -1, true);
+}
+
+#ifdef ENABLE_VIDEO
 
     int
     MediaEncoder::getHWFrame(const std::shared_ptr<VideoFrame>& input,

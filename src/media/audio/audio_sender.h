@@ -59,6 +59,7 @@ namespace sip_core {
 
         uint16_t getLastSeqValue();
         int setPacketLoss(uint64_t pl);
+        void natPing();
 
         void setVoiceCallback(std::function<void(bool)> cb);
 

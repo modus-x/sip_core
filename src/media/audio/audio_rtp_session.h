@@ -64,6 +64,9 @@ public:
     void deinitRecorder() override;
 
     void sendRtpEvents(const std::string& events, double duration, unsigned int volume);
+    void startEarlyMedia();
+    void stopEarlyMedia();
+    void promoteEarlyMediaToActive();
 
     std::shared_ptr<AudioInput>& getAudioLocal() { return audioInput_; }
     std::unique_ptr<AudioReceiveThread>& getAudioReceive() { return receiveThread_; }
@@ -75,6 +78,11 @@ public:
     virtual rtcpSRHeader getRtcpSR() override;
 
 private:
+    void ensureSocketPairLocked();
+    void ensureEarlySenderLocked();
+    void startNatPunchingLocked();
+    void stopNatPunchingLocked();
+    void processNatPunch();
     void startSender();
     void startReceiver();
     bool check_RCTP_Info_RR(RTCPInfo& rtcpi);
@@ -90,14 +98,17 @@ private:
     uint16_t initSeqVal_ {0};
     bool muteState_ {false};
     bool receiverActive_ {true};
+    bool earlyMediaMode_ {false};
     unsigned packetLoss_ {10};
     DeviceParams localAudioParams_;
 
     InterruptedThreadLoop rtcpCheckerThread_;
+    InterruptedThreadLoop natPunchThread_;
     void processRtcpChecker();
 
     // Interval in seconds between RTCP checking
     std::chrono::seconds rtcp_checking_interval {4};
+    std::chrono::milliseconds natPunchInterval_ {1000};
 
     std::function<void(const std::string& id, bool)> voiceCallback_;
 

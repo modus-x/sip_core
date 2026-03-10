@@ -231,8 +231,16 @@
  
          return audioEncoder_->setPacketLoss(pl);
      }
- 
- 
+
+     void
+     AudioSender::natPing()
+     {
+         if (audioEncoder_) {
+             audioEncoder_->sendDummyPacket();
+         }
+     }
+
+
      unsigned int
      AudioSender::createDtmfPayload(RtpDtmfPayload* payload, bool* first, bool* last)
      {
