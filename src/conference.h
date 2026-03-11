@@ -374,7 +374,9 @@ public:
     void hangupParticipant(const std::string& accountUri, const std::string& deviceId = "");
     void setHandRaised(const std::string& uri, const bool& state);
     void setVoiceActivity(const std::string& id, const bool& newState);
+    void setVoiceActivityForCall(const std::string& callId, const bool& newState);
     void setVoiceActivity(const Json::Value& json);
+    void setVoiceInactiveHoldMs(int holdMs);
 
     void muteParticipant(const std::string& uri, const bool& state);
     void muteLocalHost(bool is_muted, const std::string& mediaType);

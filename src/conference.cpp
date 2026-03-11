@@ -21,6 +21,7 @@
 
 #include <regex>
 #include <sstream>
+#include <algorithm>
 
 #include "conference.h"
 #include "manager.h"
@@ -189,12 +190,16 @@ Conference::Conference(const std::shared_ptr<Account>& account,
     auto conf_res = split_string_to_unsigned(sip_core::Manager::instance()
                                                  .videoPreferences.getConferenceResolution(),
                                              'x');
+    const auto voiceInactiveHoldMs
+        = sip_core::Manager::instance().videoPreferences.getConferenceVoiceInactiveHoldMs();
     if (conf_res.size() == 2u) {
 #if defined(__APPLE__) && TARGET_OS_MAC
-        videoMixer_->setParameters({(int)conf_res[0], (int)conf_res[1], AV_PIX_FMT_NV12});
+        auto params = video::VideoMixer::Parameters {(int) conf_res[0], (int) conf_res[1], AV_PIX_FMT_NV12};
 #else
-        videoMixer_->setParameters({(int)conf_res[0], (int)conf_res[1]});
+        auto params = video::VideoMixer::Parameters {(int) conf_res[0], (int) conf_res[1]};
 #endif
+        params.voice_inactive_hold_ms = voiceInactiveHoldMs;
+        videoMixer_->setParameters(params);
     } else {
         SIP_CORE_ERR("Conference resolution is invalid");
     }
@@ -1206,14 +1211,18 @@ Conference::isVoiceActive(std::string_view streamId) const
 void
 Conference::setVoiceActivity(const std::string& streamId, const bool& newState)
 {
-    // verify that streamID exists in our confInfo
+    // verify that streamID exists in conference info (local or remote-host propagated)
     bool exists = false;
     {
         std::lock_guard<std::mutex> lk(confInfoMutex_);
-        for (auto& participant : confInfo_) {
-            if (participant.sinkId == streamId) {
-                exists = true;
-                break;
+        auto hasSink = [&streamId](const auto& participantInfo) { return participantInfo.sinkId == streamId; };
+        exists = std::any_of(confInfo_.begin(), confInfo_.end(), hasSink);
+        if (!exists) {
+            for (const auto& [_, remoteConfInfo] : remoteHosts_) {
+                if (std::any_of(remoteConfInfo.begin(), remoteConfInfo.end(), hasSink)) {
+                    exists = true;
+                    break;
+                }
             }
         }
     }
@@ -1246,58 +1255,130 @@ Conference::setVoiceActivity(const std::string& streamId, const bool& newState)
 }
 
 void
+Conference::setVoiceActivityForCall(const std::string& callId, const bool& newState)
+{
+    ConfInfo confInfoSnapshot;
+    {
+        std::lock_guard<std::mutex> lk(confInfoMutex_);
+        confInfoSnapshot = confInfo_;
+    }
+
+    std::set<std::string> sinkIds;
+    auto call = getCall(callId);
+    for (const auto& participantInfo : confInfoSnapshot) {
+        if (participantInfo.sinkId.empty())
+            continue;
+        if (!participantInfo.callId.empty() && participantInfo.callId == callId) {
+            sinkIds.emplace(participantInfo.sinkId);
+            continue;
+        }
+        if (call && participantInfo.uri == call->getPeerNumber())
+            sinkIds.emplace(participantInfo.sinkId);
+    }
+
+    if (sinkIds.empty()) {
+        SIP_CORE_DBG("No conference participant found for callId: %s", callId.c_str());
+        return;
+    }
+
+    bool needsUpdate = false;
+    for (const auto& sinkId : sinkIds) {
+        auto previousState = isVoiceActive(sinkId);
+        if (previousState == newState)
+            continue;
+
+        if (newState)
+            streamsVoiceActive.emplace(sinkId);
+        else
+            streamsVoiceActive.erase(sinkId);
+
+        needsUpdate = true;
+    }
+
+    if (needsUpdate)
+        updateVoiceActivity();
+}
+
+void
 Conference::setVoiceActivity(const Json::Value& json)
 {
-    bool needsUpdate = false;
-    for (const auto& participantInfo : json) {
-        if (!json.isMember("uri") || !json.isMember("state") || !json.isMember("sinkId"))
-            continue;
-            
-        auto uri = json["uri"].asString();
-        auto sinkId = json["sinkId"].asString();
-        auto state = json["state"].asBool();
-        
+    auto applyVoiceState = [this](const Json::Value& participantInfo, bool& needsUpdate) {
+        if (!participantInfo.isObject() || !participantInfo.isMember("sinkId")
+            || !participantInfo.isMember("state"))
+            return;
+
+        auto sinkId = participantInfo["sinkId"].asString();
+        auto state = participantInfo["state"].asBool();
+        if (sinkId.empty())
+            return;
+
         bool exists = false;
         {
             std::lock_guard<std::mutex> lk(confInfoMutex_);
-            for (auto& participant : confInfo_) {
-                if (participant.sinkId == sinkId) {
-                    exists = true;
-                    break;
+            auto hasSink = [&sinkId](const auto& p) { return p.sinkId == sinkId; };
+            exists = std::any_of(confInfo_.begin(), confInfo_.end(), hasSink);
+            if (!exists) {
+                for (const auto& [_, remoteConfInfo] : remoteHosts_) {
+                    if (std::any_of(remoteConfInfo.begin(), remoteConfInfo.end(), hasSink)) {
+                        exists = true;
+                        break;
+                    }
                 }
             }
         }
 
         if (!exists) {
             SIP_CORE_ERR("participant not found with streamId: %s", sinkId.c_str());
-            continue;
+            return;
         }
 
         auto previousState = isVoiceActive(sinkId);
 
         if (previousState == state) {
             // no change, do not send out updates
-            continue;
+            return;
         }
 
         if (state and not previousState) {
             // voice going from inactive to active
             streamsVoiceActive.emplace(sinkId);
             needsUpdate = true;
-            continue;
+            return;
         }
 
         if (not state and previousState) {
             // voice going from active to inactive
             streamsVoiceActive.erase(sinkId);
             needsUpdate = true;
-            continue;
+            return;
         }
+
+    };
+
+    bool needsUpdate = false;
+    if (json.isArray()) {
+        for (const auto& participantInfo : json)
+            applyVoiceState(participantInfo, needsUpdate);
+    } else if (json.isObject() && json.isMember("p") && json["p"].isArray()) {
+        for (const auto& participantInfo : json["p"])
+            applyVoiceState(participantInfo, needsUpdate);
+    } else if (json.isObject()) {
+        applyVoiceState(json, needsUpdate);
     }
 
-    if(needsUpdate) {
+    if (needsUpdate)
         updateVoiceActivity();
-    }
+}
+
+void
+Conference::setVoiceInactiveHoldMs(int holdMs)
+{
+#ifdef ENABLE_VIDEO
+    if (videoMixer_)
+        videoMixer_->setVoiceInactiveHoldMs(holdMs);
+#else
+    (void) holdMs;
+#endif
 }
 
 void
@@ -1371,9 +1452,14 @@ Conference::updateVoiceActivity()
             }
 
             participantInfo.voiceActivity = newActivity;
+            voiceStates[participantInfo.sinkId] = participantInfo.voiceActivity;
         }
-        for (auto p : confInfo_) {
-            voiceStates[p.sinkId] = p.voiceActivity;
+
+        for (auto& [_, remoteConfInfo] : remoteHosts_) {
+            for (auto& participantInfo : remoteConfInfo) {
+                participantInfo.voiceActivity = isVoiceActive(participantInfo.sinkId);
+                voiceStates[participantInfo.sinkId] = participantInfo.voiceActivity;
+            }
         }
     }
     // NOTE: All operations below are done OUTSIDE the confInfoMutex_ lock

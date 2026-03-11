@@ -51,6 +51,7 @@ AudioLayer::AudioLayer(const AudioPreference& pref)
     , audioInputFormat_(Manager::instance().getRingBufferPool().getInternalAudioFormat())
     , urgentRingBuffer_("urgentRingBuffer_id", SIZEBUF, audioFormat_)
     , resampler_(new Resampler)
+    , vadSensitivity_(pref.getVoiceActivitySensitivity())
     , lastNotificationTime_()
 {
     urgentRingBuffer_.createReadOffset(RingBufferPool::DEFAULT_ID);
@@ -231,6 +232,7 @@ AudioLayer::createAudioProcessor()
         shouldUseAudioProcessorEchoCancel(hasNativeAEC_, pref_.getEchoCanceller()));
 
     audioProcessor->enableVoiceActivityDetection(pref_.getVadEnabled());
+    applyVadSensitivityLocked();
 
     if (pref_.getAudioProcessor() == "webrtc") {
 #if HAVE_WEBRTC_AP
@@ -246,6 +248,27 @@ AudioLayer::destroyAudioProcessor()
 {
     // delete it
     audioProcessor.reset();
+}
+
+int
+AudioLayer::clampVadSensitivity(int32_t sensitivity)
+{
+    if (sensitivity < 0)
+        return 0;
+    if (sensitivity > 3)
+        return 3;
+    return static_cast<int>(sensitivity);
+}
+
+void
+AudioLayer::applyVadSensitivityLocked()
+{
+#if HAVE_WEBRTC_AP
+    if (pref_.getAudioProcessor() == "webrtc" && audioProcessor) {
+        if (auto* webRtc = dynamic_cast<WebRTCAudioProcessor*>(audioProcessor.get()))
+            webRtc->setVadSensitivity(vadSensitivity_);
+    }
+#endif
 }
 
 void
@@ -425,6 +448,14 @@ AudioLayer::setWebRtcParams(const libsip_core::WebRtcParams params)
         webRtc->setWebRtcParams(params);
     }
 #endif
+}
+
+void
+AudioLayer::setVadSensitivity(int32_t sensitivity)
+{
+    std::lock_guard<std::mutex> lock(audioProcessorMutex);
+    vadSensitivity_ = clampVadSensitivity(sensitivity);
+    applyVadSensitivityLocked();
 }
 
 } // namespace sip_core

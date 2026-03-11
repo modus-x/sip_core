@@ -541,6 +541,30 @@ setVADState(bool enabled)
     sip_core::Manager::instance().setVADState(enabled);
 }
 
+int32_t
+getVADSensitivity()
+{
+    return sip_core::Manager::instance().getVADSensitivity();
+}
+
+void
+setVADSensitivity(int32_t sensitivity)
+{
+    sip_core::Manager::instance().setVADSensitivity(sensitivity);
+}
+
+int32_t
+getConferenceVoiceInactiveHoldMs()
+{
+    return sip_core::Manager::instance().getConferenceVoiceInactiveHoldMs();
+}
+
+void
+setConferenceVoiceInactiveHoldMs(int32_t holdMs)
+{
+    sip_core::Manager::instance().setConferenceVoiceInactiveHoldMs(holdMs);
+}
+
 std::string
 getRecordPath()
 {

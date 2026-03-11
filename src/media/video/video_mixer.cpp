@@ -244,24 +244,73 @@ void
 VideoMixer::setVoiceActivity(const std::string& streamId, bool state)
 {
     std::unique_lock lock(rwMutex_);
-    voiceActivity_[streamId] = state;
-    updateLayout("setVoiceActivity(single)");
+    bool layoutChanged = false;
+    applyVoiceActivityStateLocked(streamId, state, std::chrono::steady_clock::now(), layoutChanged);
+    if (layoutChanged)
+        updateLayout("setVoiceActivity(single)");
 }
 
 void
 VideoMixer::setVoiceActivity(const std::map<std::string, bool>& states)
 {
     std::unique_lock lock(rwMutex_);
-    voiceActivity_ = states;
-    updateLayout("setVoiceActivity(map)");
+    bool layoutChanged = false;
+    const auto now = std::chrono::steady_clock::now();
+    for (const auto& [streamId, state] : states)
+        applyVoiceActivityStateLocked(streamId, state, now, layoutChanged);
+    removeStaleVoiceStatesLocked(states, layoutChanged);
+    if (layoutChanged)
+        updateLayout("setVoiceActivity(map)");
 }
 
 void
 VideoMixer::setVoiceActivity(const std::map<std::string, bool>&& states)
 {
     std::unique_lock lock(rwMutex_);
-    voiceActivity_ = std::move(states);
-    updateLayout("setVoiceActivity(move)");
+    bool layoutChanged = false;
+    const auto now = std::chrono::steady_clock::now();
+    for (const auto& [streamId, state] : states)
+        applyVoiceActivityStateLocked(streamId, state, now, layoutChanged);
+    removeStaleVoiceStatesLocked(states, layoutChanged);
+    if (layoutChanged)
+        updateLayout("setVoiceActivity(move)");
+}
+
+void
+VideoMixer::setVoiceInactiveHoldMs(int holdMs)
+{
+    std::unique_lock lock(rwMutex_);
+    const auto clampedHoldMs = clampVoiceInactiveHoldMs(holdMs);
+    if (voiceInactiveHoldMs_ == clampedHoldMs)
+        return;
+
+    voiceInactiveHoldMs_ = clampedHoldMs;
+    bool layoutChanged = false;
+    const auto now = std::chrono::steady_clock::now();
+    for (const auto& [streamId, rawState] : voiceActivityRaw_) {
+        if (rawState) {
+            voiceInactiveDeadlines_.erase(streamId);
+            continue;
+        }
+
+        auto displayIt = voiceActivityDisplay_.find(streamId);
+        const bool displayState = displayIt != voiceActivityDisplay_.end() ? displayIt->second : false;
+        if (!displayState) {
+            voiceInactiveDeadlines_.erase(streamId);
+            continue;
+        }
+
+        if (voiceInactiveHoldMs_ == 0) {
+            voiceActivityDisplay_[streamId] = false;
+            voiceInactiveDeadlines_.erase(streamId);
+            layoutChanged = true;
+        } else {
+            voiceInactiveDeadlines_[streamId] = now + std::chrono::milliseconds(voiceInactiveHoldMs_);
+        }
+    }
+
+    if (layoutChanged)
+        updateLayout("setVoiceInactiveHoldMs");
 }
 
 bool
@@ -339,6 +388,109 @@ VideoMixer::consumeLayoutUpdates(int count, const char* reason)
                  current);
 }
 
+int
+VideoMixer::clampVoiceInactiveHoldMs(int holdMs)
+{
+    return holdMs < 0 ? 0 : holdMs;
+}
+
+void
+VideoMixer::applyVoiceActivityStateLocked(const std::string& streamId,
+                                          bool state,
+                                          std::chrono::steady_clock::time_point now,
+                                          bool& layoutChanged)
+{
+    auto rawIt = voiceActivityRaw_.find(streamId);
+    const bool previousRaw = rawIt != voiceActivityRaw_.end() ? rawIt->second : false;
+    auto displayIt = voiceActivityDisplay_.find(streamId);
+    const bool previousDisplay = displayIt != voiceActivityDisplay_.end() ? displayIt->second : false;
+
+    if (rawIt == voiceActivityRaw_.end() && !state)
+        return;
+
+    if (previousRaw == state)
+        return;
+
+    if (rawIt == voiceActivityRaw_.end())
+        voiceActivityRaw_.emplace(streamId, state);
+    else
+        rawIt->second = state;
+
+    if (state) {
+        voiceInactiveDeadlines_.erase(streamId);
+        if (!previousDisplay) {
+            voiceActivityDisplay_[streamId] = true;
+            layoutChanged = true;
+        } else {
+            voiceActivityDisplay_[streamId] = true;
+        }
+        return;
+    }
+
+    // state is false
+    if (voiceInactiveHoldMs_ == 0) {
+        voiceInactiveDeadlines_.erase(streamId);
+        if (previousDisplay) {
+            voiceActivityDisplay_[streamId] = false;
+            layoutChanged = true;
+        } else {
+            voiceActivityDisplay_[streamId] = false;
+        }
+    } else if (previousDisplay) {
+        voiceInactiveDeadlines_[streamId] = now + std::chrono::milliseconds(voiceInactiveHoldMs_);
+    } else {
+        voiceInactiveDeadlines_.erase(streamId);
+    }
+}
+
+void
+VideoMixer::removeStaleVoiceStatesLocked(const std::map<std::string, bool>& states, bool& layoutChanged)
+{
+    for (auto it = voiceActivityRaw_.begin(); it != voiceActivityRaw_.end();) {
+        if (states.find(it->first) != states.end()) {
+            ++it;
+            continue;
+        }
+        const auto streamId = it->first;
+        auto displayIt = voiceActivityDisplay_.find(streamId);
+        if (displayIt != voiceActivityDisplay_.end() && displayIt->second)
+            layoutChanged = true;
+        voiceActivityDisplay_.erase(streamId);
+        voiceInactiveDeadlines_.erase(streamId);
+        it = voiceActivityRaw_.erase(it);
+    }
+}
+
+bool
+VideoMixer::expireVoiceHoldsLocked(std::chrono::steady_clock::time_point now)
+{
+    bool layoutChanged = false;
+    for (auto it = voiceInactiveDeadlines_.begin(); it != voiceInactiveDeadlines_.end();) {
+        const auto& streamId = it->first;
+        auto rawIt = voiceActivityRaw_.find(streamId);
+        if (rawIt == voiceActivityRaw_.end()) {
+            voiceActivityDisplay_.erase(streamId);
+            it = voiceInactiveDeadlines_.erase(it);
+            continue;
+        }
+        if (rawIt->second) {
+            it = voiceInactiveDeadlines_.erase(it);
+            continue;
+        }
+        if (it->second > now) {
+            ++it;
+            continue;
+        }
+        auto displayIt = voiceActivityDisplay_.find(streamId);
+        if (displayIt != voiceActivityDisplay_.end() && displayIt->second) {
+            displayIt->second = false;
+            layoutChanged = true;
+        }
+        it = voiceInactiveDeadlines_.erase(it);
+    }
+    return layoutChanged;
+}
+
 void
 VideoMixer::attachVideo(Observable<std::shared_ptr<MediaFrame>>* frame,
                         const std::string& callId,
@@ -396,7 +548,7 @@ std::map<std::string, bool>
 VideoMixer::getVoiceActivity()
 {
     std::shared_lock lk(rwMutex_);
-    return voiceActivity_;
+    return voiceActivityDisplay_;
 }
 
 void
@@ -520,6 +672,12 @@ VideoMixer::process()
     // First, process any pending detach requests safely
     processPendingDetaches();
 
+    {
+        std::unique_lock lock(rwMutex_);
+        if (expireVoiceHoldsLocked(std::chrono::steady_clock::now()))
+            updateLayout("voice inactive hold expired");
+    }
+
     nextProcess_ += std::chrono::duration_cast<std::chrono::microseconds>(FRAME_DURATION);
     const auto delay = nextProcess_ - std::chrono::steady_clock::now();
     if (delay.count() > 0)
@@ -555,7 +713,7 @@ VideoMixer::process()
         VideoToStream streamInfoCache = getVideoToStreamInfo();
 
         // Snapshot voice activity while rwMutex_ is held by the caller.
-        std::map<std::string, bool> voiceActivitySnapshot = voiceActivity_;
+        std::map<std::string, bool> voiceActivitySnapshot = voiceActivityDisplay_;
 
         const int pendingLayoutUpdates = layoutUpdated_.load(std::memory_order_acquire);
         bool needsUpdate = pendingLayoutUpdates > 0;
@@ -1085,6 +1243,7 @@ VideoMixer::setParameters(const Parameters& params)
     active_border_color_ = params.active_border_color;
     inactive_border_color_ = params.inactive_border_color;
     remove_black_borders_ = params.remove_black_borders;
+    voiceInactiveHoldMs_ = clampVoiceInactiveHoldMs(params.voice_inactive_hold_ms);
 
     // cleanup the previous frame to have a nice copy in rendering method
     std::shared_ptr<VideoFrame> previous_p(obtainLastFrame());

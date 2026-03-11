@@ -46,6 +46,7 @@ AudioReceiveThread::AudioReceiveThread(const std::string& id,
             std::bind(&AudioReceiveThread::process, this),
             std::bind(&AudioReceiveThread::cleanup, this),
             ThreadLoop::ThreadPriority::HIGH)
+    , vadSensitivity_(sip_core::Manager::instance().audioPreference.getVoiceActivitySensitivity())
 {}
 
 AudioReceiveThread::~AudioReceiveThread()
@@ -209,6 +210,7 @@ AudioReceiveThread::createAudioProcessor()
     }
     
     audioProcessor_->enableVoiceActivityDetection(true);
+    applyVadSensitivityLocked();
 }
 
 void
@@ -285,6 +287,36 @@ AudioReceiveThread::setVAD(bool active)
         createAudioProcessor();
     else
         destroyAudioProcessor();
+}
+
+int
+AudioReceiveThread::clampVadSensitivity(int32_t sensitivity)
+{
+    if (sensitivity < 0)
+        return 0;
+    if (sensitivity > 3)
+        return 3;
+    return static_cast<int>(sensitivity);
+}
+
+void
+AudioReceiveThread::applyVadSensitivityLocked()
+{
+#if HAVE_WEBRTC_AP
+    if (sip_core::Manager::instance().audioPreference.getAudioProcessor() == "webrtc"
+        && audioProcessor_) {
+        if (auto* webRtc = dynamic_cast<WebRTCAudioProcessor*>(audioProcessor_.get()))
+            webRtc->setVadSensitivity(vadSensitivity_);
+    }
+#endif
+}
+
+void
+AudioReceiveThread::setVadSensitivity(int32_t sensitivity)
+{
+    std::lock_guard<std::mutex> lock(audioProcessorMutex_);
+    vadSensitivity_ = clampVadSensitivity(sensitivity);
+    applyVadSensitivityLocked();
 }
 
 }; // namespace sip_core

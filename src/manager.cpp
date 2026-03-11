@@ -2526,6 +2526,66 @@ Manager::isVADEnabled() const
     return audioPreference.getVadEnabled();
 }
 
+int32_t
+Manager::getVADSensitivity() const
+{
+    return audioPreference.getVoiceActivitySensitivity();
+}
+
+void
+Manager::setVADSensitivity(int32_t sensitivity)
+{
+    audioPreference.setVoiceActivitySensitivity(sensitivity);
+    const auto clampedSensitivity = audioPreference.getVoiceActivitySensitivity();
+
+    {
+        std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
+        if (pimpl_->audiodriver_)
+            pimpl_->audiodriver_->setVadSensitivity(clampedSensitivity);
+    }
+
+    for (auto& call : callFactory.getAllCalls()) {
+        if (auto sipCall = std::dynamic_pointer_cast<SIPCall>(call)) {
+            for (auto& audioRtp : sipCall->getRtpSessionList(MediaType::MEDIA_AUDIO)) {
+                auto& recv = std::static_pointer_cast<AudioRtpSession>(audioRtp)->getAudioReceive();
+                if (recv)
+                    recv->setVadSensitivity(clampedSensitivity);
+            }
+        }
+    }
+
+    saveConfig();
+}
+
+int32_t
+Manager::getConferenceVoiceInactiveHoldMs() const
+{
+#ifdef ENABLE_VIDEO
+    return videoPreferences.getConferenceVoiceInactiveHoldMs();
+#else
+    return 0;
+#endif
+}
+
+void
+Manager::setConferenceVoiceInactiveHoldMs(int32_t holdMs)
+{
+#ifdef ENABLE_VIDEO
+    videoPreferences.setConferenceVoiceInactiveHoldMs(holdMs);
+    const auto clampedHoldMs = videoPreferences.getConferenceVoiceInactiveHoldMs();
+
+    for (const auto& account : getAllAccounts()) {
+        for (const auto& confId : account->getConferenceList()) {
+            if (auto conf = account->getConference(confId))
+                conf->setVoiceInactiveHoldMs(clampedHoldMs);
+        }
+    }
+#else
+    (void) holdMs;
+#endif
+    saveConfig();
+}
+
 void
 Manager::setAudioProcessor(const std::string& processor)
 {

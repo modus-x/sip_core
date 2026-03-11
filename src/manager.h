@@ -553,6 +553,14 @@ public:
 
     void setVADState(bool state);
 
+    int32_t getVADSensitivity() const;
+
+    void setVADSensitivity(int32_t sensitivity);
+
+    int32_t getConferenceVoiceInactiveHoldMs() const;
+
+    void setConferenceVoiceInactiveHoldMs(int32_t holdMs);
+
     void setAudioProcessor(const std::string& processor);
 
     void setWebRtcParams(const libsip_core::WebRtcParams& params);

@@ -719,6 +719,7 @@ VideoRtpSession::ensureMutedKeepAliveLocked()
     sendMutedFrames_.store(true);
     if (!mutedFrameThread_.isRunning()) {
         // Send one decodable frame immediately to accelerate NAT hole punching.
+        // SIP hold-blackout path also relies on this muted-frame sender.
         sender_->sendBlackFrame(localVideoParams_.width > 0 ? localVideoParams_.width
                                                             : NO_DEVICE_WIDTH,
                                 localVideoParams_.height > 0 ? localVideoParams_.height

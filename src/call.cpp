@@ -692,7 +692,6 @@ Call::setConferenceInfo(const std::string& msg)
 void
 Call::setConferenceVoiceActivity(const std::string& msg)
 {
-    ConfInfo newInfo;
     Json::Value json;
     std::string err;
     Json::CharReaderBuilder rbuilder;
@@ -702,32 +701,69 @@ Call::setConferenceVoiceActivity(const std::string& msg)
     }
 
     if (not isConferenceParticipant()) {
-        
-        if(!json.isObject())
-            return;
+        struct VoiceUpdate
+        {
+            std::string uri;
+            std::string sinkId;
+            bool state;
+        };
 
-        for (const auto& participantInfo : json) {
+        std::vector<VoiceUpdate> updates;
+        auto parseUpdate = [&updates](const Json::Value& participantInfo) {
+            if (!participantInfo.isObject() || !participantInfo.isMember("state"))
+                return;
+            VoiceUpdate update {
+                participantInfo.isMember("uri") ? participantInfo["uri"].asString() : "",
+                participantInfo.isMember("sinkId") ? participantInfo["sinkId"].asString() : "",
+                participantInfo["state"].asBool(),
+            };
+            if (update.uri.empty() && update.sinkId.empty())
+                return;
+            updates.emplace_back(std::move(update));
+        };
 
-            if (!participantInfo.isObject() || !participantInfo.isMember("uri") || 
-                     !participantInfo.isMember("state") || !participantInfo.isMember("sinkId"))
-                continue;
-                
-            auto uri = participantInfo["uri"].asString();
-            auto sinkId = participantInfo["sinkId"].asString();
-            auto state = participantInfo["state"].asBool();
-            
-            {
-                std::lock_guard<std::mutex> lk(confInfoMutex_);
-                // confID_ empty -> participant set confInfo with the received one
-                auto participant = std::find_if(confInfo_.begin(), confInfo_.end(), [&uri] (const ParticipantInfo& p) {
-                    return uri == p.uri;
-                });
+        if (json.isArray()) {
+            for (const auto& participantInfo : json)
+                parseUpdate(participantInfo);
+        } else if (json.isObject() && json.isMember("p") && json["p"].isArray()) {
+            for (const auto& participantInfo : json["p"])
+                parseUpdate(participantInfo);
+        } else if (json.isObject()) {
+            parseUpdate(json);
+        }
 
-                if(participant != confInfo_.end()) {
-                    participant->voiceActivity = state;
+        bool hasChanges = false;
+        std::vector<std::map<std::string, std::string>> updatedInfos;
+        {
+            std::lock_guard<std::mutex> lk(confInfoMutex_);
+            for (const auto& update : updates) {
+                auto participant = confInfo_.end();
+                if (!update.sinkId.empty()) {
+                    participant = std::find_if(confInfo_.begin(),
+                                               confInfo_.end(),
+                                               [&update](const ParticipantInfo& p) {
+                                                   return update.sinkId == p.sinkId;
+                                               });
+                }
+                if (participant == confInfo_.end() && !update.uri.empty()) {
+                    participant = std::find_if(confInfo_.begin(),
+                                               confInfo_.end(),
+                                               [&update](const ParticipantInfo& p) {
+                                                   return update.uri == p.uri;
+                                               });
+                }
+
+                if (participant != confInfo_.end() && participant->voiceActivity != update.state) {
+                    participant->voiceActivity = update.state;
+                    hasChanges = true;
                 }
             }
+            if (hasChanges)
+                updatedInfos = confInfo_.toVectorMapStringString();
         }
+
+        if (hasChanges)
+            sip_core::emitSignal<libsip_core::CallSignal::OnConferenceInfosUpdated>(id_, updatedInfos);
     } else if (auto conf = conf_.lock()) {
         conf->setVoiceActivity(json);
     }

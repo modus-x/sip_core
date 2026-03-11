@@ -41,6 +41,7 @@ public:
     void enableAutomaticGainControl(bool enabled) override;
     void enableVoiceActivityDetection(bool enabled) override;
     void setWebRtcParams(const libsip_core::WebRtcParams& params);
+    void setVadSensitivity(int sensitivity);
 
 private:
     std::unique_ptr<webrtc::AudioProcessing> apm;
@@ -55,5 +56,6 @@ private:
     bool limiter_ {false};
     int compressionGainDb_ {0};
     bool agc_ {false};
+    int vadSensitivity_ {3};
 };
 } // namespace sip_core

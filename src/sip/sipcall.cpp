@@ -282,7 +282,7 @@ SIPCall::setupVoiceCallback(const std::shared_ptr<RtpSession>& rtpSession)
     audioRtp->setVoiceCallback([w = weak()](const std::string& streamId, bool voice) {
         // this is called whenever voice is detected on the local audio
 
-        runOnMainThread([w, &streamId, voice] {
+        runOnMainThread([w, streamId, voice] {
             if (auto thisPtr = w.lock()) {
                 std::string defaultId = "";
 #ifdef ENABLE_VIDEO
@@ -1267,6 +1267,11 @@ SIPCall::hold()
         stream.mediaAttribute_->onHold_ = true;
     }
 
+#ifdef ENABLE_VIDEO
+    // Keep outbound video decodable during local hold even if re-INVITE is not forwarded.
+    applyLocalHoldVideoBlackout(true, true);
+#endif
+
     if (SIPSessionReinvite() != PJ_SUCCESS) {
         SIP_CORE_WARN("[call:%s] Reinvite failed", getCallId().c_str());
         return false;
@@ -1324,6 +1329,10 @@ SIPCall::internalOffHold(const std::function<void()>& sdp_cb)
         for (auto& stream : rtpStreams_) {
             stream.mediaAttribute_->onHold_ = false;
         }
+#ifdef ENABLE_VIDEO
+        // Restore normal local/remote mute handling before negotiating hold-off.
+        applyLocalHoldVideoBlackout(false, false);
+#endif
         if (SIPSessionReinvite(getMediaAttributeList()) != PJ_SUCCESS) {
             SIP_CORE_WARN("[call:%s] resuming hold", getCallId().c_str());
             hold();
@@ -2007,6 +2016,13 @@ SIPCall::startAllMedia()
         }
     }
 
+#ifdef ENABLE_VIDEO
+    if (getState() == CallState::HOLD) {
+        // Keep audio stopped on local hold, but continue sending black video frames.
+        applyLocalHoldVideoBlackout(true, true);
+    }
+#endif
+
     // Media is restarted, we can process the last holding request.
     if (remainingRequest_ != Request::NoRequest) {
         bool result = true;
@@ -2034,6 +2050,47 @@ SIPCall::startAllMedia()
         remainingRequest_ = Request::NoRequest;
     }
 }
+
+#ifdef ENABLE_VIDEO
+void
+SIPCall::applyLocalHoldVideoBlackout(bool enable, bool startSessionsIfNeeded)
+{
+    for (auto& stream : rtpStreams_) {
+        if (!stream.rtpSession_ || !stream.mediaAttribute_
+            || stream.mediaAttribute_->type_ != MediaType::MEDIA_VIDEO) {
+            continue;
+        }
+
+        auto videoRtp = std::dynamic_pointer_cast<video::VideoRtpSession>(stream.rtpSession_);
+        if (!videoRtp) {
+            continue;
+        }
+
+        if (enable) {
+            SIP_CORE_DBG("[call:%s] [%s] enabling hold video blackout",
+                         getCallId().c_str(),
+                         stream.mediaAttribute_->label_.c_str());
+            videoRtp->setMuted(true, RtpSession::Direction::SEND);
+            videoRtp->setMuted(true, RtpSession::Direction::RECV);
+            if (startSessionsIfNeeded) {
+                videoRtp->start();
+            }
+            continue;
+        }
+
+        const bool localMuted = stream.mediaAttribute_->muted_;
+        const bool remoteMuted = stream.remoteMediaAttribute_ ? stream.remoteMediaAttribute_->muted_
+                                                              : false;
+        SIP_CORE_DBG("[call:%s] [%s] disabling hold video blackout (localMuted=%s, remoteMuted=%s)",
+                     getCallId().c_str(),
+                     stream.mediaAttribute_->label_.c_str(),
+                     localMuted ? "true" : "false",
+                     remoteMuted ? "true" : "false");
+        videoRtp->setMuted(localMuted, RtpSession::Direction::SEND);
+        videoRtp->setMuted(remoteMuted, RtpSession::Direction::RECV);
+    }
+}
+#endif
 
 void
 SIPCall::restartMediaSender()
@@ -3141,11 +3198,7 @@ SIPCall::peerVoice(bool voice)
     peerVoice_ = voice;
 
     if (auto conference = conf_.lock()) {
-        if (auto sink = sip_core::Manager::instance().getSinkClient(this->getCallId())) {
-            conference->setVoiceActivity(sip_utils::streamId(sink->getId(),
-                                                             sip_utils::DEFAULT_VIDEO_STREAMID),
-                                         voice);
-        }
+        conference->setVoiceActivityForCall(getCallId(), voice);
     } else {
         // one-to-one call
 

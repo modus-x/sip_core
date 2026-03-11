@@ -77,6 +77,7 @@ public:
         std::string active_border_color {"CornflowerBlue@1"}; // ffmpeg compatible colors only
         std::string inactive_border_color {"Blue@1"};         // ffmpeg compatible colors only
         bool remove_black_borders {true};
+        int voice_inactive_hold_ms {500};
     };
 
     VideoMixer(const std::string& id, const std::string& localInput = {}, bool attachHost = true);
@@ -122,6 +123,7 @@ public:
     void setVoiceActivity(const std::string& streamId, bool state);
     void setVoiceActivity(const std::map<std::string, bool>& states);
     void setVoiceActivity(const std::map<std::string, bool>&& states);
+    void setVoiceInactiveHoldMs(int holdMs);
 
     bool hasActive()
     {
@@ -234,6 +236,13 @@ private:
 
     int addLayoutUpdate(const char* reason);
     void consumeLayoutUpdates(int count, const char* reason);
+    void applyVoiceActivityStateLocked(const std::string& streamId,
+                                       bool state,
+                                       std::chrono::steady_clock::time_point now,
+                                       bool& layoutChanged);
+    void removeStaleVoiceStatesLocked(const std::map<std::string, bool>& states, bool& layoutChanged);
+    bool expireVoiceHoldsLocked(std::chrono::steady_clock::time_point now);
+    static int clampVoiceInactiveHoldMs(int holdMs);
 
     void startSink();
     void stopSink();
@@ -288,8 +297,13 @@ private:
     std::mutex pendingDetachMtx_ {};
     std::vector<Observable<std::shared_ptr<MediaFrame>>*> pendingDetaches_ {};
 
-    // pair streamId -> activity state
-    std::map<std::string, bool> voiceActivity_;
+    // pair streamId -> raw voice activity state
+    std::map<std::string, bool> voiceActivityRaw_;
+    // pair streamId -> effective display activity state
+    std::map<std::string, bool> voiceActivityDisplay_;
+    // pair streamId -> inactive deadline while applying hold
+    std::map<std::string, std::chrono::steady_clock::time_point> voiceInactiveDeadlines_;
+    int voiceInactiveHoldMs_ {500};
 
     // pair callId -> streamId
     // in case of local participant, it will be empty

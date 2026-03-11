@@ -207,12 +207,12 @@ public:
      * @param cause Optional error code
      */
     void onFailure(signed cause = 0);
-    
+
     /**
      * Check if this call can be retried with backup route
      */
     bool canRetryWithBackupRoute() const { return canRetryWithBackupRoute_; }
-    
+
     /**
      * Disable retry with backup route (after first attempt)
      */
@@ -323,6 +323,9 @@ private:
     void setupNegotiatedMedia();
     void startEarlyMediaLocked();
     void promoteEarlyMediaToActiveLocked();
+#ifdef ENABLE_VIDEO
+    void applyLocalHoldVideoBlackout(bool enable, bool startSessionsIfNeeded);
+#endif
 
     void setCallMediaLocal();
 

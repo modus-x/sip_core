@@ -121,6 +121,7 @@ static constexpr const char* AGC_KEY {"automaticGainControl"};
 static constexpr const char* CAPTURE_MUTED_KEY {"captureMuted"};
 static constexpr const char* PLAYBACK_MUTED_KEY {"playbackMuted"};
 static constexpr const char* VAD_KEY {"voiceActivityDetection"};
+static constexpr const char* VAD_SENSITIVITY_KEY {"voiceActivitySensitivity"};
 static constexpr const char* ECHO_CANCEL_KEY {"echoCancel"};
 
 #ifdef ENABLE_VIDEO
@@ -131,6 +132,7 @@ static constexpr const char* ENCODING_ACCELERATED_KEY {"encodingAccelerated"};
 static constexpr const char* RECORD_PREVIEW_KEY {"recordPreview"};
 static constexpr const char* RECORD_QUALITY_KEY {"recordQuality"};
 static constexpr const char* CONFERENCE_RESOLUTION_KEY {"conferenceResolution"};
+static constexpr const char* CONFERENCE_VOICE_INACTIVE_HOLD_MS_KEY {"conferenceVoiceInactiveHoldMs"};
 #endif
 
 static constexpr int PULSE_LENGTH_DEFAULT {250}; /** Default DTMF length */
@@ -271,6 +273,7 @@ AudioPreference::AudioPreference()
     , denoise_("off")
     , agcEnabled_(true)
     , vadEnabled_(true)
+    , voiceActivitySensitivity_(3)
     , echoCanceller_("off")
     , captureMuted_(false)
     , playbackMuted_(false)
@@ -430,6 +433,7 @@ AudioPreference::serialize(YAML::Emitter& out) const
     out << YAML::Key << NOISE_REDUCE_KEY << YAML::Value << denoise_;
     out << YAML::Key << ECHO_CANCEL_KEY << YAML::Value << echoCanceller_;
     out << YAML::Key << VAD_KEY << YAML::Value << vadEnabled_;
+    out << YAML::Key << VAD_SENSITIVITY_KEY << YAML::Value << voiceActivitySensitivity_;
     out << YAML::Key << AGC_KEY << YAML::Value << agcEnabled_;
     out << YAML::EndMap;
 }
@@ -488,6 +492,8 @@ AudioPreference::unserialize(const YAML::Node& in)
     parseValue(node, AUDIO_PROCESSOR_KEY, audioProcessor_);
     parseValue(node, NOISE_REDUCE_KEY, denoise_);
     parseValue(node, VAD_KEY, vadEnabled_);
+    parseValue(node, VAD_SENSITIVITY_KEY, voiceActivitySensitivity_);
+    setVoiceActivitySensitivity(voiceActivitySensitivity_);
     parseValue(node, AGC_KEY, agcEnabled_);
     parseValue(node, ECHO_CANCEL_KEY, echoCanceller_);
 }
@@ -499,6 +505,7 @@ VideoPreferences::VideoPreferences()
     , recordPreview_(true)
     , recordQuality_(0)
     , conferenceResolution_(DEFAULT_CONFERENCE_RESOLUTION)
+    , conferenceVoiceInactiveHoldMs_(500)
 {}
 
 void
@@ -512,6 +519,8 @@ VideoPreferences::serialize(YAML::Emitter& out) const
     out << YAML::Key << ENCODING_ACCELERATED_KEY << YAML::Value << encodingAccelerated_;
 #endif
     out << YAML::Key << CONFERENCE_RESOLUTION_KEY << YAML::Value << conferenceResolution_;
+    out << YAML::Key << CONFERENCE_VOICE_INACTIVE_HOLD_MS_KEY << YAML::Value
+        << conferenceVoiceInactiveHoldMs_;
     getVideoDeviceMonitor().serialize(out);
     out << YAML::EndMap;
 }
@@ -542,6 +551,8 @@ VideoPreferences::unserialize(const YAML::Node& in)
     } catch (...) {
         conferenceResolution_ = DEFAULT_CONFERENCE_RESOLUTION;
     }
+    parseValue(node, CONFERENCE_VOICE_INACTIVE_HOLD_MS_KEY, conferenceVoiceInactiveHoldMs_);
+    setConferenceVoiceInactiveHoldMs(conferenceVoiceInactiveHoldMs_);
     getVideoDeviceMonitor().unserialize(in);
 }
 #endif // ENABLE_VIDEO

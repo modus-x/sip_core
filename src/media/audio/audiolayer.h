@@ -99,6 +99,7 @@ public:
     virtual int getIndexRingtone() const = 0;
 
     void setWebRtcParams(const libsip_core::WebRtcParams params);
+    void setVadSensitivity(int32_t sensitivity);
 
     inline const AudioProcessor* getAudioProcessor() const { 
         return audioProcessor ? audioProcessor.get() : nullptr;
@@ -322,6 +323,10 @@ private:
 
     void createAudioProcessor();
     void destroyAudioProcessor();
+    void applyVadSensitivityLocked();
+    static int clampVadSensitivity(int32_t sensitivity);
+
+    int vadSensitivity_ {3};
 
     // Set to "true" to play the incoming call notification (beep)
     // when the playback is on (typically when there is already an

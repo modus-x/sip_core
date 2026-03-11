@@ -236,6 +236,18 @@ public:
 
     void setVad(bool enable) { vadEnabled_ = enable; }
 
+    int getVoiceActivitySensitivity() const { return voiceActivitySensitivity_; }
+
+    void setVoiceActivitySensitivity(int sensitivity)
+    {
+        if (sensitivity < 0)
+            voiceActivitySensitivity_ = 0;
+        else if (sensitivity > 3)
+            voiceActivitySensitivity_ = 3;
+        else
+            voiceActivitySensitivity_ = sensitivity;
+    }
+
     const std::string& getEchoCanceller() const { return echoCanceller_; }
 
     void setEchoCancel(const std::string& canceller) { echoCanceller_ = canceller; }
@@ -271,6 +283,7 @@ private:
     std::string denoise_;
     bool agcEnabled_;
     bool vadEnabled_;
+    int voiceActivitySensitivity_;
     std::string echoCanceller_;
 
     // webrtc params
@@ -328,12 +341,20 @@ public:
 
     void setConferenceResolution(const std::string& res) { conferenceResolution_ = res; }
 
+    int getConferenceVoiceInactiveHoldMs() const { return conferenceVoiceInactiveHoldMs_; }
+
+    void setConferenceVoiceInactiveHoldMs(int holdMs)
+    {
+        conferenceVoiceInactiveHoldMs_ = holdMs < 0 ? 0 : holdMs;
+    }
+
 private:
     bool decodingAccelerated_;
     bool encodingAccelerated_;
     bool recordPreview_;
     int recordQuality_;
     std::string conferenceResolution_;
+    int conferenceVoiceInactiveHoldMs_;
     constexpr static const char* const CONFIG_LABEL = "video";
 };
 #endif // ENABLE_VIDEO

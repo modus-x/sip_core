@@ -30,6 +30,7 @@
 #include "threadloop.h"
 
 #include <functional>
+#include <cstdint>
 #include <sstream>
 
 #include "audio-processing/null_audio_processor.h"
@@ -61,6 +62,7 @@ public:
     void stopReceiver();
     void setMuted(bool muted);
     void setVAD(bool active);
+    void setVadSensitivity(int32_t sensitivity);
     
 
     void setSuccessfulSetupCb(const std::function<void(MediaType, bool)>& cb)
@@ -80,6 +82,8 @@ private:
 
     void createAudioProcessor();
     void destroyAudioProcessor();
+    void applyVadSensitivityLocked();
+    static int clampVadSensitivity(int32_t sensitivity);
 
     std::mutex audioProcessorMutex_ {};
     std::unique_ptr<AudioProcessor> audioProcessor_;
@@ -114,6 +118,7 @@ private:
     std::function<void(const MediaStream& ms)> recorderCallback_;
 
     bool muteState_ {false};
+    int vadSensitivity_ {3};
 };
 
 } // namespace sip_core
