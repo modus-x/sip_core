@@ -532,7 +532,7 @@ VideoRtpSession::start()
     }
 
     try {
-        socketPair_.reset(new SocketPair(getRemoteRtpUri().c_str(), receive_.addr.getPort()));
+        socketPair_.reset(new SocketPair(getRemoteRtpUri().c_str(), takeReservedSocketPair()));
 
         last_REMB_inc_ = clock::now();
         last_REMB_dec_ = clock::now();

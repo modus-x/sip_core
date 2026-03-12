@@ -1129,15 +1129,24 @@ SIPAccount::newOutgoingCall(std::string_view toUrl,
     else
         sdp.setPublishedIP(getPublishedAddress());
 
-    // TODO. We should not dot his here. Move it to SIPCall.
-    const bool created = sdp.createOffer(
-        MediaAttribute::buildMediaAttributesList(mediaList, isSrtpEnabled()));
+    auto mediaAttrList = MediaAttribute::buildMediaAttributesList(mediaList, isSrtpEnabled());
+    if (!call->prepareLocalMediaReservations(mediaAttrList)) {
+        call->onFailure();
+        return call;
+    }
+
+    // TODO. We should not do this here. Move it to SIPCall.
+    const bool created = sdp.createOffer(mediaAttrList);
+    if (!created) {
+        call->clearPendingLocalReservations();
+    }
 
     if (created) {
         std::weak_ptr<SIPCall> weak_call = call;
         manager.scheduler().run([this, weak_call] {
             if (auto call = weak_call.lock()) {
                 if (not SIPStartCall(call)) {
+                    call->clearPendingLocalReservations();
                     SIP_CORE_ERR("Could not send outgoing INVITE request for new call");
                     call->onFailure();
                 }

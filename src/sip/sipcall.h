@@ -105,7 +105,6 @@ private:
     void merge(Call& call) override; // not public - only called by Call
 
 public:
-
     void setExtraSipHeaders(std::map<std::string, std::string> extraHeaders);
     void answer() override;
     void answer(const std::vector<libsip_core::MediaMap>& mediaList) override;
@@ -122,7 +121,9 @@ public:
     bool offhold(OnReadyCb&& cb) override;
     void switchInput(const std::string& resource = {}) override;
     void peerHungup() override;
-    void carryingDTMFdigits(const std::string& dtmfEvents, double duration, unsigned int volume) override;
+    void carryingDTMFdigits(const std::string& dtmfEvents,
+                            double duration,
+                            unsigned int volume) override;
     bool requestMediaChange(const std::vector<libsip_core::MediaMap>& mediaList) override;
     std::vector<libsip_core::MediaMap> currentMediaList() const override;
     void sendTextMessage(const std::map<std::string, std::string>& messages,
@@ -188,6 +189,8 @@ public:
      * Return the SDP's manager of this call
      */
     Sdp& getSDP() { return *sdp_; }
+    bool prepareLocalMediaReservations(const std::vector<MediaAttribute>& mediaAttrList);
+    void clearPendingLocalReservations();
 
     // Implementation of events reported by SipVoipLink.
     /**
@@ -295,13 +298,14 @@ public:
      */
     void reportMediaNegotiationStatus();
 
-    void setInitialServiceRoute(const std::string& serviceRoute) { initialServiceRoute_ = serviceRoute; }
+    void setInitialServiceRoute(const std::string& serviceRoute)
+    {
+        initialServiceRoute_ = serviceRoute;
+    }
 
     std::string getInitialServiceRoute() const { return initialServiceRoute_; }
 
 private:
-    void generateMediaPorts();
-
     void deinitRecorder();
 
     void rtpSetupSuccess();
@@ -326,8 +330,6 @@ private:
 #ifdef ENABLE_VIDEO
     void applyLocalHoldVideoBlackout(bool enable, bool startSessionsIfNeeded);
 #endif
-
-    void setCallMediaLocal();
 
     void startIceMedia();
     void onIceNegoSucceed();
@@ -366,6 +368,9 @@ private:
                              const std::shared_ptr<MediaAttribute>& mediaAttr,
                              const MediaDescription& localMedia,
                              const MediaDescription& remoteMedia);
+    uint16_t getPublishedMediaFamily() const;
+    void applyPendingLocalPortsToSdp();
+    static bool hasEnabledMedia(const std::vector<MediaAttribute>& mediaAttrList, MediaType type);
     // Find the stream index with the matching label
     int findRtpStreamIndex(const std::string& label) const;
 
@@ -417,6 +422,10 @@ private:
     unsigned int localAudioPort_ {0};
     /** Local video port, as seen by me. */
     unsigned int localVideoPort_ {0};
+    std::optional<ReservedSocketPair> pendingAudioSocketPair_ {};
+#ifdef ENABLE_VIDEO
+    std::optional<ReservedSocketPair> pendingVideoSocketPair_ {};
+#endif
 
     bool mediaRestartRequired_ {true};
     bool earlyMediaRequested_ {false};

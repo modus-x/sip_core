@@ -27,7 +27,6 @@
 #include "config.h"
 #endif
 
-#include "sip/sipaccount.h"
 #include "sip/sipvoiplink.h"
 #include "string_utils.h"
 #include "base64.h"
@@ -74,13 +73,7 @@ Sdp::Sdp(const std::string& id)
         throw std::runtime_error("pj_pool_create() failed");
 }
 
-Sdp::~Sdp()
-{
-    SIPAccount::releasePort(localAudioRtpPort_);
-#ifdef ENABLE_VIDEO
-    SIPAccount::releasePort(localVideoRtpPort_);
-#endif
-}
+Sdp::~Sdp() {}
 
 std::shared_ptr<AccountCodecInfo>
 Sdp::findCodecBySpec(std::string_view codec, const unsigned clockrate) const

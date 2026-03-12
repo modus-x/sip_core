@@ -20,8 +20,8 @@
  *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301 USA.
  */
 
-#include "connectivity/ip_utils.h"   // MUST BE INCLUDED FIRST
-#include "libav_deps.h" // THEN THIS ONE AFTER
+#include "connectivity/ip_utils.h" // MUST BE INCLUDED FIRST
+#include "libav_deps.h"            // THEN THIS ONE AFTER
 
 #include "socket_pair.h"
 #include "libav_utils.h"
@@ -32,11 +32,13 @@
 #include <string>
 #include <algorithm>
 #include <iterator>
+#include <sstream>
 
 extern "C" {
 #include "srtp.h"
 }
 
+#include <cerrno>
 #include <cstring>
 #include <stdexcept>
 #include <unistd.h>
@@ -133,7 +135,7 @@ ff_network_wait_fd(int fd)
 }
 
 static int
-udp_socket_create(int family, int port)
+create_nonblocking_udp_socket(int family)
 {
     int udp_fd = -1;
 
@@ -157,31 +159,218 @@ udp_socket_create(int family, int port)
     if (udp_fd < 0) {
         SIP_CORE_ERR("socket() failed");
         strErr();
-        return -1;
-    }
-
-    auto bind_addr = ip_utils::getAnyHostAddr(family);
-    if (not bind_addr.isIpv4() and not bind_addr.isIpv6()) {
-        SIP_CORE_ERR("No IPv4/IPv6 host found for family %u", family);
-        close(udp_fd);
-        return -1;
-    }
-
-    bind_addr.setPort(port);
-    SIP_CORE_DBG("use local address: %s", bind_addr.toString(true, true).c_str());
-    if (::bind(udp_fd, bind_addr, bind_addr.getLength()) < 0) {
-        SIP_CORE_ERR("bind() failed");
-        strErr();
-        close(udp_fd);
-        udp_fd = -1;
     }
 
     return udp_fd;
 }
 
-SocketPair::SocketPair(const char* uri, int localPort)
+static void
+close_socket_handle(int& handle) noexcept
 {
-    openSockets(uri, localPort);
+    if (handle >= 0) {
+        if (close(handle))
+            strErr();
+        handle = -1;
+    }
+}
+
+static int
+last_socket_error_code()
+{
+#ifdef _WIN32
+    return WSAGetLastError();
+#else
+    return errno;
+#endif
+}
+
+static std::string
+last_socket_error_message(int err)
+{
+#ifdef _WIN32
+    return "winsock error";
+#else
+    return std::strerror(err);
+#endif
+}
+
+static bool
+bind_udp_socket(int handle, int family, uint16_t port, const char* mediaKind, const char* component)
+{
+    auto bind_addr = ip_utils::getAnyHostAddr(family);
+    if (not bind_addr.isIpv4() and not bind_addr.isIpv6()) {
+        SIP_CORE_ERR("[%s] No IPv4/IPv6 wildcard host found for family %u", mediaKind, family);
+        return false;
+    }
+
+    bind_addr.setPort(port);
+    SIP_CORE_DBG("[%s] trying %s socket on local address %s",
+                 mediaKind,
+                 component,
+                 bind_addr.toString(true, true).c_str());
+
+    if (::bind(handle, bind_addr, bind_addr.getLength()) < 0) {
+        const auto err = last_socket_error_code();
+        SIP_CORE_WARN("[%s] bind failed for %s socket %s: (%d) %s",
+                      mediaKind,
+                      component,
+                      bind_addr.toString(true, true).c_str(),
+                      err,
+                      last_socket_error_message(err).c_str());
+        return false;
+    }
+
+    return true;
+}
+
+static std::mutex&
+reservation_mutex()
+{
+    static std::mutex mutex;
+    return mutex;
+}
+
+ReservedSocketPair::ReservedSocketPair(
+    uint16_t family, int rtpHandle, int rtcpHandle, uint16_t rtpPort, uint16_t rtcpPort) noexcept
+    : family_(family)
+    , rtpHandle_(rtpHandle)
+    , rtcpHandle_(rtcpHandle)
+    , rtpPort_(rtpPort)
+    , rtcpPort_(rtcpPort)
+{}
+
+ReservedSocketPair::~ReservedSocketPair()
+{
+    reset();
+}
+
+ReservedSocketPair::ReservedSocketPair(ReservedSocketPair&& other) noexcept
+{
+    *this = std::move(other);
+}
+
+ReservedSocketPair&
+ReservedSocketPair::operator=(ReservedSocketPair&& other) noexcept
+{
+    if (this == &other)
+        return *this;
+
+    reset();
+    family_ = other.family_;
+    rtpHandle_ = other.rtpHandle_;
+    rtcpHandle_ = other.rtcpHandle_;
+    rtpPort_ = other.rtpPort_;
+    rtcpPort_ = other.rtcpPort_;
+
+    other.family_ = AF_UNSPEC;
+    other.rtpHandle_ = -1;
+    other.rtcpHandle_ = -1;
+    other.rtpPort_ = 0;
+    other.rtcpPort_ = 0;
+    return *this;
+}
+
+bool
+ReservedSocketPair::valid() const noexcept
+{
+    return (family_ == AF_INET || family_ == AF_INET6) && rtpHandle_ >= 0 && rtcpHandle_ >= 0
+           && rtpPort_ != 0 && rtcpPort_ != 0;
+}
+
+void
+ReservedSocketPair::reset() noexcept
+{
+    close_socket_handle(rtpHandle_);
+    close_socket_handle(rtcpHandle_);
+    family_ = AF_UNSPEC;
+    rtpPort_ = 0;
+    rtcpPort_ = 0;
+}
+
+int
+ReservedSocketPair::releaseRtpHandle() noexcept
+{
+    auto handle = rtpHandle_;
+    rtpHandle_ = -1;
+    return handle;
+}
+
+int
+ReservedSocketPair::releaseRtcpHandle() noexcept
+{
+    auto handle = rtcpHandle_;
+    rtcpHandle_ = -1;
+    return handle;
+}
+
+ReservedSocketPair
+reserveSocketPairInRange(uint16_t family,
+                         const std::pair<uint16_t, uint16_t>& range,
+                         const char* mediaKind)
+{
+    if (family != AF_INET && family != AF_INET6) {
+        throw std::runtime_error("Unsupported RTP socket family");
+    }
+
+    if (range.first == 0 || range.second <= range.first) {
+        throw std::runtime_error("Invalid RTP port range");
+    }
+
+    const uint16_t firstCandidate = (range.first % 2 == 0) ? range.first : range.first + 1;
+    const uint16_t upperBound = static_cast<uint16_t>(range.second - 1);
+    const uint16_t lastCandidate = (upperBound % 2 == 0) ? upperBound
+                                                         : static_cast<uint16_t>(upperBound - 1);
+
+    if (firstCandidate > lastCandidate) {
+        std::ostringstream oss;
+        oss << "No free " << mediaKind << " RTP/RTCP pair available in configured range ["
+            << range.first << "-" << range.second << "]";
+        SIP_CORE_ERR("%s", oss.str().c_str());
+        throw std::runtime_error(oss.str());
+    }
+
+    std::lock_guard<std::mutex> lk(reservation_mutex());
+
+    for (uint32_t candidate = firstCandidate; candidate <= lastCandidate; candidate += 2) {
+        const auto rtpPort = static_cast<uint16_t>(candidate);
+        const auto rtcpPort = static_cast<uint16_t>(candidate + 1);
+
+        int rtpHandle = create_nonblocking_udp_socket(family);
+        if (rtpHandle < 0) {
+            throw std::runtime_error("Failed to create RTP socket");
+        }
+
+        if (!bind_udp_socket(rtpHandle, family, rtpPort, mediaKind, "RTP")) {
+            close_socket_handle(rtpHandle);
+            continue;
+        }
+
+        int rtcpHandle = create_nonblocking_udp_socket(family);
+        if (rtcpHandle < 0) {
+            close_socket_handle(rtpHandle);
+            throw std::runtime_error("Failed to create RTCP socket");
+        }
+
+        if (!bind_udp_socket(rtcpHandle, family, rtcpPort, mediaKind, "RTCP")) {
+            close_socket_handle(rtpHandle);
+            close_socket_handle(rtcpHandle);
+            continue;
+        }
+
+        SIP_CORE_WARN("[%s] reserved local RTP/RTCP ports %u/%u", mediaKind, rtpPort, rtcpPort);
+        return ReservedSocketPair {family, rtpHandle, rtcpHandle, rtpPort, rtcpPort};
+    }
+
+    std::ostringstream oss;
+    oss << "No free " << mediaKind << " RTP/RTCP pair available in configured range ["
+        << range.first << "-" << range.second << "]";
+    SIP_CORE_ERR("%s", oss.str().c_str());
+    throw std::runtime_error(oss.str());
+}
+
+SocketPair::SocketPair(const char* uri, ReservedSocketPair&& reserved)
+{
+    openSockets(uri, std::move(reserved));
 }
 
 SocketPair::~SocketPair()
@@ -319,16 +508,21 @@ SocketPair::stopSendOp(bool state)
 void
 SocketPair::closeSockets()
 {
-    if (rtcpHandle_ > 0 and close(rtcpHandle_))
-        strErr();
-    if (rtpHandle_ > 0 and close(rtpHandle_))
-        strErr();
+    close_socket_handle(rtcpHandle_);
+    close_socket_handle(rtpHandle_);
 }
 
 void
-SocketPair::openSockets(const char* uri, int local_rtp_port)
+SocketPair::openSockets(const char* uri, ReservedSocketPair&& reserved)
 {
-    SIP_CORE_DBG("Creating rtp socket for uri %s on port %d", uri, local_rtp_port);
+    if (!reserved) {
+        throw std::runtime_error("Reserved socket pair is invalid");
+    }
+
+    SIP_CORE_DBG("Creating rtp socket for uri %s using reserved local ports %u/%u",
+                 uri,
+                 reserved.rtpPort(),
+                 reserved.rtcpPort());
 
     char hostname[256];
     char path[1024];
@@ -336,7 +530,8 @@ SocketPair::openSockets(const char* uri, int local_rtp_port)
 
     av_url_split(NULL, 0, NULL, 0, hostname, sizeof(hostname), &dst_rtp_port, path, sizeof(path), uri);
 
-    const int local_rtcp_port = local_rtp_port + 1;
+    const auto local_rtp_port = reserved.rtpPort();
+    const auto local_rtcp_port = reserved.rtcpPort();
     const int dst_rtcp_port = dst_rtp_port + 1;
 
     rtpDestAddr_ = IpAddr {hostname};
@@ -344,20 +539,23 @@ SocketPair::openSockets(const char* uri, int local_rtp_port)
     rtcpDestAddr_ = IpAddr {hostname};
     rtcpDestAddr_.setPort(dst_rtcp_port);
 
-    // Open local sockets (RTP/RTCP)
-    if ((rtpHandle_ = udp_socket_create(rtpDestAddr_.getFamily(), local_rtp_port)) == -1
-        or (rtcpHandle_ = udp_socket_create(rtcpDestAddr_.getFamily(), local_rtcp_port)) == -1) {
-        closeSockets();
-        SIP_CORE_ERR("[%p] Sockets creation failed", this);
-        throw std::runtime_error("Sockets creation failed");
+    if (rtpDestAddr_.getFamily() != reserved.family()) {
+        SIP_CORE_ERR("[%p] Reserved socket family %u does not match remote RTP family %u",
+                     this,
+                     reserved.family(),
+                     rtpDestAddr_.getFamily());
+        throw std::runtime_error("Reserved socket family mismatch");
     }
 
+    rtpHandle_ = reserved.releaseRtpHandle();
+    rtcpHandle_ = reserved.releaseRtcpHandle();
+
     SIP_CORE_WARN("SocketPair: local{%d,%d} / %s{%d,%d}",
-              local_rtp_port,
-              local_rtcp_port,
-              hostname,
-              dst_rtp_port,
-              dst_rtcp_port);
+                  local_rtp_port,
+                  local_rtcp_port,
+                  hostname,
+                  dst_rtp_port,
+                  dst_rtcp_port);
 }
 
 MediaIOHandle*

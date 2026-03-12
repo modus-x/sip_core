@@ -830,6 +830,10 @@ if(BUILD_TESTING)
   add_executable(sipaccount_recovery_tests tests/sipaccount_recovery_tests.cpp)
   target_link_libraries(sipaccount_recovery_tests PRIVATE ${PROJECT_NAME})
   add_test(NAME sipaccount_recovery_tests COMMAND sipaccount_recovery_tests)
+
+  add_executable(socket_pair_reservation_tests tests/socket_pair_reservation_tests.cpp)
+  target_link_libraries(socket_pair_reservation_tests PRIVATE ${PROJECT_NAME})
+  add_test(NAME socket_pair_reservation_tests COMMAND socket_pair_reservation_tests)
 endif()
 
 # install

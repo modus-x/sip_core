@@ -116,8 +116,6 @@ SIPCall::SIPCall(const std::shared_ptr<SIPAccountBase>& account,
 {
     sip_core_tracepoint(call_start, callId.c_str());
 
-    setCallMediaLocal();
-
     // Set the media caps.
     sdp_->setLocalMediaCapabilities(MediaType::MEDIA_AUDIO,
                                     account->getActiveAccountCodecInfoList(MEDIA_AUDIO));
@@ -229,6 +227,27 @@ SIPCall::configureRtpSession(const std::shared_ptr<RtpSession>& rtpSession,
     rtpSession->setMtu(new_mtu);
     rtpSession->updateMedia(remoteMedia, localMedia);
 
+    if (localMedia.type == MediaType::MEDIA_AUDIO) {
+        if (pendingAudioSocketPair_) {
+            localAudioPort_ = pendingAudioSocketPair_->rtpPort();
+            rtpSession->setReservedSocketPair(std::move(*pendingAudioSocketPair_));
+            pendingAudioSocketPair_.reset();
+        } else if (!localMedia.enabled) {
+            localAudioPort_ = 0;
+        }
+    }
+#ifdef ENABLE_VIDEO
+    else if (localMedia.type == MediaType::MEDIA_VIDEO) {
+        if (pendingVideoSocketPair_) {
+            localVideoPort_ = pendingVideoSocketPair_->rtpPort();
+            rtpSession->setReservedSocketPair(std::move(*pendingVideoSocketPair_));
+            pendingVideoSocketPair_.reset();
+        } else if (!localMedia.enabled) {
+            localVideoPort_ = 0;
+        }
+    }
+#endif
+
     // Mute/un-mute media
     if (mediaAttr->muted_) {
         rtpSession->setMuted(true);
@@ -311,49 +330,113 @@ SIPCall::getSIPAccount() const
     return std::static_pointer_cast<SIPAccountBase>(getAccount().lock());
 }
 
-void
-SIPCall::setCallMediaLocal()
+bool
+SIPCall::hasEnabledMedia(const std::vector<MediaAttribute>& mediaAttrList, MediaType type)
 {
-    if (localAudioPort_ == 0
-#ifdef ENABLE_VIDEO
-        || localVideoPort_ == 0
-#endif
-    )
-        generateMediaPorts();
+    return std::any_of(mediaAttrList.begin(), mediaAttrList.end(), [type](const auto& mediaAttr) {
+        return mediaAttr.type_ == type && mediaAttr.enabled_;
+    });
+}
+
+uint16_t
+SIPCall::getPublishedMediaFamily() const
+{
+    if (!sdp_) {
+        return AF_UNSPEC;
+    }
+
+    auto publishedAddr = sdp_->getPublishedIPAddr();
+    if (!publishedAddr) {
+        return AF_UNSPEC;
+    }
+
+    return publishedAddr.getFamily();
 }
 
 void
-SIPCall::generateMediaPorts()
+SIPCall::applyPendingLocalPortsToSdp()
 {
-    auto account = getSIPAccount();
-    if (!account) {
-        SIP_CORE_ERR("No account detected");
+    if (!sdp_) {
         return;
     }
 
-    // TODO. Setting specfic range for RTP ports is obsolete, in
-    // particular in the context of ICE.
-
-    // Reference: http://www.cs.columbia.edu/~hgs/rtp/faq.html#ports
-    // We only want to set ports to new values if they haven't been set
-    const unsigned callLocalAudioPort = account->generateAudioPort();
-    if (localAudioPort_ != 0)
-        account->releasePort(localAudioPort_);
-    localAudioPort_ = callLocalAudioPort;
-    sdp_->setLocalPublishedAudioPorts(callLocalAudioPort,
-                                      rtcpMuxEnabled_ ? 0 : callLocalAudioPort + 1);
+    const auto audioRtpPort = pendingAudioSocketPair_ ? pendingAudioSocketPair_->rtpPort()
+                                                      : static_cast<uint16_t>(localAudioPort_);
+    const auto audioRtcpPort = pendingAudioSocketPair_
+                                   ? pendingAudioSocketPair_->rtcpPort()
+                                   : static_cast<uint16_t>(localAudioPort_ ? localAudioPort_ + 1
+                                                                           : 0);
+    sdp_->setLocalPublishedAudioPorts(audioRtpPort,
+                                      rtcpMuxEnabled_ || audioRtpPort == 0 ? 0 : audioRtcpPort);
 
 #ifdef ENABLE_VIDEO
-    // https://projects.savoirfairelinux.com/issues/17498
-    const unsigned int callLocalVideoPort = account->generateVideoPort();
-    if (localVideoPort_ != 0)
-        account->releasePort(localVideoPort_);
-    // this should already be guaranteed by SIPAccount
-    assert(localAudioPort_ != callLocalVideoPort);
-    localVideoPort_ = callLocalVideoPort;
-    sdp_->setLocalPublishedVideoPorts(callLocalVideoPort,
-                                      rtcpMuxEnabled_ ? 0 : callLocalVideoPort + 1);
+    const auto videoRtpPort = pendingVideoSocketPair_ ? pendingVideoSocketPair_->rtpPort()
+                                                      : static_cast<uint16_t>(localVideoPort_);
+    const auto videoRtcpPort = pendingVideoSocketPair_
+                                   ? pendingVideoSocketPair_->rtcpPort()
+                                   : static_cast<uint16_t>(localVideoPort_ ? localVideoPort_ + 1
+                                                                           : 0);
+    sdp_->setLocalPublishedVideoPorts(videoRtpPort,
+                                      rtcpMuxEnabled_ || videoRtpPort == 0 ? 0 : videoRtcpPort);
 #endif
+}
+
+bool
+SIPCall::prepareLocalMediaReservations(const std::vector<MediaAttribute>& mediaAttrList)
+{
+    std::lock_guard<std::recursive_mutex> lk {callMutex_};
+
+    auto account = getSIPAccount();
+    if (!account) {
+        SIP_CORE_ERR("[call:%s] No account detected", getCallId().c_str());
+        return false;
+    }
+
+    const auto family = getPublishedMediaFamily();
+    if (family != AF_INET && family != AF_INET6) {
+        SIP_CORE_ERR("[call:%s] Local published address is unavailable, cannot reserve RTP ports",
+                     getCallId().c_str());
+        return false;
+    }
+
+    std::optional<ReservedSocketPair> pendingAudio;
+#ifdef ENABLE_VIDEO
+    std::optional<ReservedSocketPair> pendingVideo;
+#endif
+
+    try {
+        if (hasEnabledMedia(mediaAttrList, MediaType::MEDIA_AUDIO)) {
+            pendingAudio.emplace(account->reserveAudioSocketPair(family));
+        }
+#ifdef ENABLE_VIDEO
+        if (hasEnabledMedia(mediaAttrList, MediaType::MEDIA_VIDEO)) {
+            pendingVideo.emplace(account->reserveVideoSocketPair(family));
+        }
+#endif
+    } catch (const std::exception& e) {
+        SIP_CORE_ERR("[call:%s] Failed to reserve local media ports: %s",
+                     getCallId().c_str(),
+                     e.what());
+        return false;
+    }
+
+    pendingAudioSocketPair_ = std::move(pendingAudio);
+#ifdef ENABLE_VIDEO
+    pendingVideoSocketPair_ = std::move(pendingVideo);
+#endif
+    applyPendingLocalPortsToSdp();
+    return true;
+}
+
+void
+SIPCall::clearPendingLocalReservations()
+{
+    std::lock_guard<std::recursive_mutex> lk {callMutex_};
+    pendingAudioSocketPair_.reset();
+#ifdef ENABLE_VIDEO
+    pendingVideoSocketPair_.reset();
+#endif
+    applyPendingLocalPortsToSdp();
 }
 
 const std::string&
@@ -447,9 +530,10 @@ SIPCall::SIPSessionReinvite(const std::vector<MediaAttribute>& mediaAttrList)
                  getCallId().c_str(),
                  pjsip_inv_state_name(inviteSession_->state));
 
-    // Generate new ports to receive the new media stream
-    // LibAV doesn't discriminate SSRCs and will be confused about Seq changes on a given port
-    generateMediaPorts();
+    // Reserve the next local transport before advertising it in SDP.
+    if (!prepareLocalMediaReservations(mediaAttrList)) {
+        return !PJ_SUCCESS;
+    }
 
     sdp_->setActiveRemoteSdpSession(nullptr);
     sdp_->setActiveLocalSdpSession(nullptr);
@@ -460,8 +544,10 @@ SIPCall::SIPSessionReinvite(const std::vector<MediaAttribute>& mediaAttrList)
         return !PJ_SUCCESS;
     }
 
-    if (not sdp_->createOffer(mediaAttrList))
+    if (not sdp_->createOffer(mediaAttrList)) {
+        clearPendingLocalReservations();
         return !PJ_SUCCESS;
+    }
 
     pjsip_tx_data* tdata;
     auto local_sdp = sdp_->getLocalSdpSession();
@@ -484,10 +570,13 @@ SIPCall::SIPSessionReinvite(const std::vector<MediaAttribute>& mediaAttrList)
                      sip_utils::sip_strerror(result).c_str());
         // Canceling internals without sending (anyways the send has just failed!)
         pjsip_inv_cancel_reinvite(inviteSession_.get(), &tdata);
-    } else
+        clearPendingLocalReservations();
+    } else {
         SIP_CORE_ERR("[call:%s] Failed to create REINVITE msg (pjsip: %s)",
                      getCallId().c_str(),
                      sip_utils::sip_strerror(result).c_str());
+        clearPendingLocalReservations();
+    }
 
     return !PJ_SUCCESS;
 }
@@ -807,8 +896,17 @@ SIPCall::answer(const std::vector<libsip_core::MediaMap>& mediaList)
         updateMediaStream(mediaAttrList[idx], idx);
     }
 
-    // Create the SDP answer
-    sdp_->processIncomingOffer(mediaAttrList);
+    if (inviteSession_->neg) {
+        if (!prepareLocalMediaReservations(mediaAttrList)) {
+            return;
+        }
+
+        if (!sdp_->processIncomingOffer(mediaAttrList)) {
+            clearPendingLocalReservations();
+            SIP_CORE_ERR("[call:%s] Could not prepare the SDP answer", getCallId().c_str());
+            return;
+        }
+    }
 
     if (not inviteSession_->neg) {
         // We are answering to an INVITE that did not include a media offer (SDP).
@@ -825,8 +923,13 @@ SIPCall::answer(const std::vector<libsip_core::MediaMap>& mediaList)
                       getCallId().c_str());
 
         Manager::instance().sipVoIPLink().createSDPOffer(inviteSession_.get());
+    }
 
-        generateMediaPorts();
+    if (!sdp_->getLocalSdpSession()) {
+        clearPendingLocalReservations();
+        SIP_CORE_ERR("[call:%s] No valid local SDP session available for answer",
+                     getCallId().c_str());
+        return;
     }
 
     if (!inviteSession_->last_answer)
@@ -835,10 +938,13 @@ SIPCall::answer(const std::vector<libsip_core::MediaMap>& mediaList)
     // Set the SIP final answer (200 OK).
     pjsip_tx_data* tdata;
     if (pjsip_inv_answer(inviteSession_.get(), PJSIP_SC_OK, NULL, sdp_->getLocalSdpSession(), &tdata)
-        != PJ_SUCCESS)
+        != PJ_SUCCESS) {
+        clearPendingLocalReservations();
         throw std::runtime_error("Could not init invite request answer (200 OK)");
+    }
 
     if (contactHeader_.empty()) {
+        clearPendingLocalReservations();
         throw std::runtime_error("Cant answer with an invalid contact header");
     }
 
@@ -852,6 +958,7 @@ SIPCall::answer(const std::vector<libsip_core::MediaMap>& mediaList)
     sip_utils::addUserAgentHeader(account->getUserAgentName(), tdata);
 
     if (pjsip_inv_send_msg(inviteSession_.get(), tdata) != PJ_SUCCESS) {
+        clearPendingLocalReservations();
         setInviteSession();
         throw std::runtime_error("Could not send invite request answer (200 OK)");
     }
@@ -914,23 +1021,31 @@ SIPCall::answerMediaChangeRequest(const std::vector<libsip_core::MediaMap>& medi
     if (!updateAllMediaStreams(mediaAttrList, isRemote))
         return;
 
+    if (!prepareLocalMediaReservations(mediaAttrList)) {
+        return;
+    }
+
     if (not sdp_->processIncomingOffer(mediaAttrList)) {
+        clearPendingLocalReservations();
         SIP_CORE_WARN("[call:%s] Could not process the new offer, ignoring", getCallId().c_str());
         return;
     }
 
     if (not sdp_->getRemoteSdpSession()) {
+        clearPendingLocalReservations();
         SIP_CORE_ERR("[call:%s] No valid remote SDP session", getCallId().c_str());
         return;
     }
 
     if (not sdp_->startNegotiation()) {
+        clearPendingLocalReservations();
         SIP_CORE_ERR("[call:%s] Could not start media negotiation for a re-invite request",
                      getCallId().c_str());
         return;
     }
 
     if (pjsip_inv_set_sdp_answer(inviteSession_.get(), sdp_->getLocalSdpSession()) != PJ_SUCCESS) {
+        clearPendingLocalReservations();
         SIP_CORE_ERR("[call:%s] Could not start media negotiation for a re-invite request",
                      getCallId().c_str());
         return;
@@ -938,6 +1053,7 @@ SIPCall::answerMediaChangeRequest(const std::vector<libsip_core::MediaMap>& medi
 
     pjsip_tx_data* tdata;
     if (pjsip_inv_answer(inviteSession_.get(), PJSIP_SC_OK, NULL, NULL, &tdata) != PJ_SUCCESS) {
+        clearPendingLocalReservations();
         SIP_CORE_ERR("[call:%s] Could not init answer to a re-invite request", getCallId().c_str());
         return;
     }
@@ -950,6 +1066,7 @@ SIPCall::answerMediaChangeRequest(const std::vector<libsip_core::MediaMap>& medi
     sip_utils::addUserAgentHeader(account->getUserAgentName(), tdata);
 
     if (pjsip_inv_send_msg(inviteSession_.get(), tdata) != PJ_SUCCESS) {
+        clearPendingLocalReservations();
         SIP_CORE_ERR("[call:%s] Could not send answer to a re-invite request", getCallId().c_str());
         setInviteSession();
         return;
@@ -1513,9 +1630,14 @@ SIPCall::removeCall()
 {
     std::lock_guard<std::recursive_mutex> lk {callMutex_};
     SIP_CORE_DBG("[call:%s] removeCall()", getCallId().c_str());
+    pendingAudioSocketPair_.reset();
+#ifdef ENABLE_VIDEO
+    pendingVideoSocketPair_.reset();
+#endif
     if (sdp_) {
         sdp_->setActiveLocalSdpSession(nullptr);
         sdp_->setActiveRemoteSdpSession(nullptr);
+        applyPendingLocalPortsToSdp();
     }
     Call::removeCall();
 
@@ -1978,6 +2100,19 @@ SIPCall::setupNegotiatedMedia()
 
         configureRtpSession(rtpStream.rtpSession_, rtpStream.mediaAttribute_, local, remote);
     }
+
+    if (pendingAudioSocketPair_) {
+        SIP_CORE_WARN("[call:%s] Releasing unused pending audio transport reservation",
+                      getCallId().c_str());
+        pendingAudioSocketPair_.reset();
+    }
+#ifdef ENABLE_VIDEO
+    if (pendingVideoSocketPair_) {
+        SIP_CORE_WARN("[call:%s] Releasing unused pending video transport reservation",
+                      getCallId().c_str());
+        pendingVideoSocketPair_.reset();
+    }
+#endif
 
     // TODO. Do we really use this?
     if (not isSubcall() and peerHolding_ != peer_holding) {
@@ -2712,11 +2847,26 @@ SIPCall::onReceiveOfferIn200OK(const pjmedia_sdp_session* offer)
 
     initMediaStreams(mediaList);
 
-    sdp_->processIncomingOffer(mediaList);
+    if (!prepareLocalMediaReservations(mediaList)) {
+        return;
+    }
 
-    sdp_->startNegotiation();
+    if (!sdp_->processIncomingOffer(mediaList)) {
+        clearPendingLocalReservations();
+        SIP_CORE_ERR("[call:%s] Could not prepare local SDP answer for offer in 200 OK",
+                     getCallId().c_str());
+        return;
+    }
+
+    if (!sdp_->startNegotiation()) {
+        clearPendingLocalReservations();
+        SIP_CORE_ERR("[call:%s] Could not start media negotiation for offer in 200 OK",
+                     getCallId().c_str());
+        return;
+    }
 
     if (pjsip_inv_set_sdp_answer(inviteSession_.get(), sdp_->getLocalSdpSession()) != PJ_SUCCESS) {
+        clearPendingLocalReservations();
         SIP_CORE_ERR("[call:%s] Could not start media negotiation for a re-invite request",
                      getCallId().c_str());
     }
@@ -3124,6 +3274,10 @@ SIPCall::merge(Call& call)
     peerHolding_ = subcall.peerHolding_;
     localAudioPort_ = subcall.localAudioPort_;
     localVideoPort_ = subcall.localVideoPort_;
+    pendingAudioSocketPair_ = std::move(subcall.pendingAudioSocketPair_);
+#ifdef ENABLE_VIDEO
+    pendingVideoSocketPair_ = std::move(subcall.pendingVideoSocketPair_);
+#endif
     peerUserAgent_ = subcall.peerUserAgent_;
     peerAllowedMethods_ = subcall.peerAllowedMethods_;
     Call::merge(subcall);

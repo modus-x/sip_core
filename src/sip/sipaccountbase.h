@@ -31,8 +31,8 @@
 #include "noncopyable.h"
 #include "im/message_engine.h"
 #include "sipaccountbase_config.h"
+#include "media/socket_pair.h"
 
-#include <array>
 #include <deque>
 #include <map>
 #include <memory>
@@ -74,10 +74,6 @@ enum class MatchRank { NONE, PARTIAL, FULL };
 class SIPAccountBase : public Account
 {
 public:
-    constexpr static unsigned MAX_PORT {65536};
-    constexpr static unsigned HALF_MAX_PORT {MAX_PORT / 2};
-
-
     /**
      * Constructor
      * @param accountID The account identifier
@@ -156,16 +152,12 @@ public:
     virtual std::string getToUri(const std::string& username) const = 0;
 
     /**
-     * Socket port generators for media
-     * Note: given ports are application wide, a port cannot be given again
-     * by any account instances until it's released by the static method
-     * releasePort().
+     * Reserve a pre-bound RTP/RTCP socket pair for local media.
      */
-    uint16_t generateAudioPort() const;
+    ReservedSocketPair reserveAudioSocketPair(uint16_t family) const;
 #ifdef ENABLE_VIDEO
-    uint16_t generateVideoPort() const;
+    ReservedSocketPair reserveVideoSocketPair(uint16_t family) const;
 #endif
-    static void releasePort(uint16_t port) noexcept;
 
     virtual void sendMessage(const std::string& to,
                              const std::map<std::string, std::string>& payloads,
@@ -237,11 +229,6 @@ protected:
 
     pj_status_t transportStatus_ {PJSIP_SC_TRYING};
     std::string transportError_ {};
-
-    static std::array<bool, HALF_MAX_PORT>& getPortsReservation() noexcept;
-    static uint16_t acquirePort(uint16_t port);
-    uint16_t getRandomEvenPort(const std::pair<uint16_t, uint16_t>& range) const;
-    uint16_t acquireRandomEvenPort(const std::pair<uint16_t, uint16_t>& range) const;
 
     /**
      * The deamon can be launched without any client (or with a non ready client)

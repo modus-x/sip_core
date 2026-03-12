@@ -85,7 +85,7 @@ AudioRtpSession::ensureSocketPairLocked()
         return;
     }
 
-    socketPair_.reset(new SocketPair(getRemoteRtpUri().c_str(), receive_.addr.getPort()));
+    socketPair_.reset(new SocketPair(getRemoteRtpUri().c_str(), takeReservedSocketPair()));
 
     if (send_.crypto and receive_.crypto) {
         socketPair_->createSRTP(receive_.crypto.getCryptoSuite().c_str(),
@@ -270,9 +270,7 @@ AudioRtpSession::startSender()
 #endif
 
     if (voiceCallback_) {
-        sender_->setVoiceCallback([this, localId](bool active) {
-            voiceCallback_(localId, active);
-        });
+        sender_->setVoiceCallback([this, localId](bool active) { voiceCallback_(localId, active); });
     }
 
     // NOTE do after sender/encoder are ready
@@ -320,9 +318,7 @@ AudioRtpSession::startReceiver()
                                                 mtu_));
 
     if (voiceCallback_)
-        receiveThread_->setVoiceCallback([this](bool active) {
-            voiceCallback_(streamId_, active);
-        });
+        receiveThread_->setVoiceCallback([this](bool active) { voiceCallback_(streamId_, active); });
 
     receiveThread_->setRecorderCallback([this](const MediaStream& ms) { attachRemoteRecorder(ms); });
     receiveThread_->addIOContext(*socketPair_);
@@ -429,21 +425,17 @@ AudioRtpSession::setVoiceCallback(std::function<void(const std::string&, bool)> 
 #endif
 
     if (sender_) {
-        sender_->setVoiceCallback([this, localId](bool active) {
-            voiceCallback_(localId, active);
-        });
+        sender_->setVoiceCallback([this, localId](bool active) { voiceCallback_(localId, active); });
     }
     if (receiveThread_) {
-        receiveThread_->setVoiceCallback([this](bool active) {
-            voiceCallback_(streamId_, active);
-        });
+        receiveThread_->setVoiceCallback([this](bool active) { voiceCallback_(streamId_, active); });
     }
 }
 
 rtcpRRHeader
 AudioRtpSession::getRtcpRR()
 {
-    if(socketPair_)
+    if (socketPair_)
         return socketPair_->getLastRtcpRR();
 
     return {};
@@ -452,15 +444,16 @@ AudioRtpSession::getRtcpRR()
 rtcpREMBHeader
 AudioRtpSession::getRtcpREMB()
 {
-    if(socketPair_)
+    if (socketPair_)
         return socketPair_->getLastRtcpREMB();
 
     return {};
 }
 
-rtcpSRHeader AudioRtpSession::getRtcpSR()
+rtcpSRHeader
+AudioRtpSession::getRtcpSR()
 {
-    if(socketPair_)
+    if (socketPair_)
         return socketPair_->getLastRtcpSR();
 
     return {};
@@ -574,7 +567,7 @@ AudioRtpSession::attachLocalRecorder(const MediaStream& ms)
 void
 AudioRtpSession::initRecorder()
 {
-    std::lock_guard<std::recursive_mutex> lock(mutex_);    
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
 
     if (!recorder_)
         return;

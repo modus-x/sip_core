@@ -312,7 +312,6 @@ transaction_request_cb(pjsip_rx_data* rdata)
         peerNumber = sip_utils::stripSipUriPrefix(std::string_view(tmp, length));
     }
 
-
     auto inviteBody = std::string("");
 
     inviteBody = std::string(rdata->msg_info.msg_buf, rdata->msg_info.len);
@@ -598,11 +597,13 @@ transaction_request_cb(pjsip_rx_data* rdata)
 
     if (account->isDND()) {
         auto it = extraHeaders.find("X-CallType");
-        if (it != extraHeaders.end() && it->second == "ACD")
-        {
+        if (it != extraHeaders.end() && it->second == "ACD") {
             const pj_str_t message = CONST_PJ_STR(
                 "ACD call is declined because user is in DND / away state");
-            if (pjsip_inv_end_session(call->inviteSession_.get(), PJSIP_SC_DECLINE, &message, &tdata)) {
+            if (pjsip_inv_end_session(call->inviteSession_.get(),
+                                      PJSIP_SC_DECLINE,
+                                      &message,
+                                      &tdata)) {
                 SIP_CORE_ERR("Could not create answer DECLINE");
                 return PJ_FALSE;
             }
@@ -651,10 +652,9 @@ transaction_request_cb(pjsip_rx_data* rdata)
     return PJ_FALSE;
 }
 
-static void
-tp_state_callback(pjsip_transport* tp,
-                  pjsip_transport_state state,
-                  const pjsip_transport_state_info* info);
+static void tp_state_callback(pjsip_transport* tp,
+                              pjsip_transport_state state,
+                              const pjsip_transport_state_info* info);
 
 static pjsip_tp_state_callback previous_tp_state_callback {nullptr};
 
@@ -1029,7 +1029,8 @@ invite_session_state_changed_cb(pjsip_inv_session* inv, pjsip_event* ev)
                                                              "invite-failure-route-retry");
                     }
 
-                    sipAccount->newOutgoingCall(sipCall->getPeerNumber(), sipCall->currentMediaList());
+                    sipAccount->newOutgoingCall(sipCall->getPeerNumber(),
+                                                sipCall->currentMediaList());
 
                     // SIP_CORE_WARN(
                     //     "[call:%s] INVITE failed with code %d, performing switch and restart",
@@ -1174,7 +1175,14 @@ sdp_create_offer_cb(pjsip_inv_session* inv, pjmedia_sdp_session** p_offer)
         SIP_CORE_DBG("[call %s] Media %s", call->getCallId().c_str(), media.toString(true).c_str());
     }
 
+    if (!call->prepareLocalMediaReservations(mediaList)) {
+        return;
+    }
+
     const bool created = sdp.createOffer(mediaList);
+    if (!created) {
+        call->clearPendingLocalReservations();
+    }
 
     if (created and p_offer != nullptr)
         *p_offer = sdp.getLocalSdpSession();
@@ -1354,20 +1362,21 @@ handleMediaControl(SIPCall& call, pjsip_msg_body* body)
                 }
                 return true;
             }
-        // } else if (body_msg.find(VOICE_ACTIVITY) != std::string_view::npos) {
-        //     static const std::regex REC_REGEX("voice_activity=([0-1])");
-        //     std::svmatch matched_pattern;
-        //     std::regex_search(body_msg, matched_pattern, REC_REGEX);
+            // } else if (body_msg.find(VOICE_ACTIVITY) != std::string_view::npos) {
+            //     static const std::regex REC_REGEX("voice_activity=([0-1])");
+            //     std::svmatch matched_pattern;
+            //     std::regex_search(body_msg, matched_pattern, REC_REGEX);
 
-        //     if (matched_pattern.ready() && !matched_pattern.empty() && matched_pattern[1].matched) {
-        //         try {
-        //             bool state = std::stoi(matched_pattern[1]);
-        //             call.peerVoice(state);
-        //         } catch (const std::exception& e) {
-        //             SIP_CORE_WARN("Error parsing state remote voice: %s", e.what());
-        //         }
-        //         return true;
-        //     }
+            //     if (matched_pattern.ready() && !matched_pattern.empty() &&
+            //     matched_pattern[1].matched) {
+            //         try {
+            //             bool state = std::stoi(matched_pattern[1]);
+            //             call.peerVoice(state);
+            //         } catch (const std::exception& e) {
+            //             SIP_CORE_WARN("Error parsing state remote voice: %s", e.what());
+            //         }
+            //         return true;
+            //     }
         }
     }
 
@@ -1686,8 +1695,7 @@ SIPVoIPLink::findLocalAddressFromTransport(std::shared_ptr<SipTransport> transpo
                                            std::string& addr,
                                            pj_uint16_t& port) const
 {
-    auto transportType
-        = transport ? transport->getPjSipTransportType() : PJSIP_TRANSPORT_UDP;
+    auto transportType = transport ? transport->getPjSipTransportType() : PJSIP_TRANSPORT_UDP;
 
     // Initialize the sip port with the default SIP port
     port = pjsip_transport_get_default_port_for_type(transportType);

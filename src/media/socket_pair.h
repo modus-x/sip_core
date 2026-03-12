@@ -46,10 +46,52 @@ using socklen_t = int;
 #include <vector>
 #include <condition_variable>
 #include <functional>
+#include <utility>
 
 namespace sip_core {
 
 class SRTPProtoContext;
+
+class ReservedSocketPair
+{
+public:
+    ReservedSocketPair() = default;
+    ReservedSocketPair(uint16_t family,
+                       int rtpHandle,
+                       int rtcpHandle,
+                       uint16_t rtpPort,
+                       uint16_t rtcpPort) noexcept;
+    ~ReservedSocketPair();
+
+    ReservedSocketPair(const ReservedSocketPair&) = delete;
+    ReservedSocketPair& operator=(const ReservedSocketPair&) = delete;
+    ReservedSocketPair(ReservedSocketPair&& other) noexcept;
+    ReservedSocketPair& operator=(ReservedSocketPair&& other) noexcept;
+
+    explicit operator bool() const noexcept { return valid(); }
+    bool valid() const noexcept;
+    void reset() noexcept;
+
+    uint16_t family() const noexcept { return family_; }
+    uint16_t rtpPort() const noexcept { return rtpPort_; }
+    uint16_t rtcpPort() const noexcept { return rtcpPort_; }
+
+private:
+    friend class SocketPair;
+
+    int releaseRtpHandle() noexcept;
+    int releaseRtcpHandle() noexcept;
+
+    uint16_t family_ {AF_UNSPEC};
+    int rtpHandle_ {-1};
+    int rtcpHandle_ {-1};
+    uint16_t rtpPort_ {0};
+    uint16_t rtcpPort_ {0};
+};
+
+ReservedSocketPair reserveSocketPairInRange(uint16_t family,
+                                            const std::pair<uint16_t, uint16_t>& range,
+                                            const char* mediaKind);
 
 typedef struct
 {
@@ -131,7 +173,7 @@ typedef struct
 class SocketPair
 {
 public:
-    SocketPair(const char* uri, int localPort);
+    SocketPair(const char* uri, ReservedSocketPair&& reserved);
     ~SocketPair();
 
     void interrupt();
@@ -145,7 +187,7 @@ public:
 
     MediaIOHandle* createIOContext(const uint16_t mtu);
 
-    void openSockets(const char* uri, int localPort);
+    void openSockets(const char* uri, ReservedSocketPair&& reserved);
     void closeSockets();
 
     /*

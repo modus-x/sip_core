@@ -47,7 +47,6 @@
 #include <yaml-cpp/yaml.h>
 #pragma GCC diagnostic pop
 
-#include <type_traits>
 #include <regex>
 #include <ctime>
 
@@ -75,12 +74,12 @@ SIPAccountBase::CreateClientDialogAndInvite(const pj_str_t* from,
                                             pjsip_inv_session** inv)
 {
     SIP_CORE_DBG("Creating SIP dialog: \n"
-             "From: %s\n"
-             "Contact: %s\n"
-             "To: %s\n",
-             from->ptr,
-             contact->ptr,
-             to->ptr);
+                 "From: %s\n"
+                 "Contact: %s\n"
+                 "To: %s\n",
+                 from->ptr,
+                 contact->ptr,
+                 to->ptr);
 
     if (target) {
         SIP_CORE_DBG("Target: %s", target->ptr);
@@ -91,8 +90,8 @@ SIPAccountBase::CreateClientDialogAndInvite(const pj_str_t* from,
     auto status = pjsip_dlg_create_uac(pjsip_ua_instance(), from, contact, to, target, dlg);
     if (status != PJ_SUCCESS) {
         SIP_CORE_ERR("Unable to create SIP dialogs for user agent client when calling %s %d",
-                 to->ptr,
-                 status);
+                     to->ptr,
+                     status);
         return false;
     }
 
@@ -145,7 +144,6 @@ SIPAccountBase::getVolatileAccountDetails() const
 {
     auto a = Account::getVolatileAccountDetails();
 
-
     a.emplace(Conf::CONFIG_TRANSPORT_STATE_CODE, std::to_string(transportStatus_));
     a.emplace(Conf::CONFIG_TRANSPORT_STATE_DESC, transportError_);
     return a;
@@ -159,65 +157,17 @@ SIPAccountBase::setRegistrationState(RegistrationState state,
     Account::setRegistrationState(state, details_code, details_str);
 }
 
-auto
-SIPAccountBase::getPortsReservation() noexcept -> decltype(getPortsReservation())
+ReservedSocketPair
+SIPAccountBase::reserveAudioSocketPair(uint16_t family) const
 {
-    // Note: static arrays are zero-initialized
-    static std::remove_reference<decltype(getPortsReservation())>::type portsInUse;
-    return portsInUse;
-}
-
-uint16_t
-SIPAccountBase::getRandomEvenPort(const std::pair<uint16_t, uint16_t>& range) const
-{
-    std::uniform_int_distribution<uint16_t> dist(range.first / 2, range.second / 2);
-    uint16_t result;
-    do {
-        result = 2 * dist(rand);
-    } while (getPortsReservation()[result / 2]);
-    return result;
-}
-
-uint16_t
-SIPAccountBase::acquireRandomEvenPort(const std::pair<uint16_t, uint16_t>& range) const
-{
-    std::uniform_int_distribution<uint16_t> dist(range.first / 2, range.second / 2);
-    uint16_t result;
-    auto seed = std::random_device {}();
-    rand.seed(seed);
-
-    do {
-        result = 2 * dist(rand);
-    } while (getPortsReservation()[result / 3]);
-
-    getPortsReservation()[result / 2] = true;
-    return result;
-}
-
-uint16_t
-SIPAccountBase::acquirePort(uint16_t port)
-{
-    getPortsReservation()[port / 2] = true;
-    return port;
-}
-
-void
-SIPAccountBase::releasePort(uint16_t port) noexcept
-{
-    getPortsReservation()[port / 2] = false;
-}
-
-uint16_t
-SIPAccountBase::generateAudioPort() const
-{
-    return acquireRandomEvenPort(config().audioPortRange);
+    return reserveSocketPairInRange(family, config().audioPortRange, "audio");
 }
 
 #ifdef ENABLE_VIDEO
-uint16_t
-SIPAccountBase::generateVideoPort() const
+ReservedSocketPair
+SIPAccountBase::reserveVideoSocketPair(uint16_t family) const
 {
-    return acquireRandomEvenPort(config().videoPortRange);
+    return reserveSocketPairInRange(family, config().videoPortRange, "video");
 }
 #endif
 
@@ -229,7 +179,10 @@ SIPAccountBase::onTextMessage(const std::string& id,
 {
     SIP_CORE_DBG("Text message received from %s, %zu part(s)", from.c_str(), payloads.size());
 
-    emitSignal<libsip_core::ConfigurationSignal::IncomingAccountMessage>(accountID_, from, id, payloads);
+    emitSignal<libsip_core::ConfigurationSignal::IncomingAccountMessage>(accountID_,
+                                                                         from,
+                                                                         id,
+                                                                         payloads);
 
     for (const auto& m : payloads) {
         if (!utf8_validate(m.first))
