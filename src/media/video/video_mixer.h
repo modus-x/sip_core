@@ -65,6 +65,7 @@ enum class Layout { GRID, ONE_BIG_WITH_SMALL, ONE_BIG };
 class VideoMixer : public VideoGenerator, public VideoFramePassiveReader
 {
     using VideoToStream = std::map<Observable<std::shared_ptr<MediaFrame>>*, StreamInfo>;
+
 public:
     struct Parameters
     {
@@ -141,16 +142,16 @@ public:
 
     void setVideoLayout(Layout newLayout);
 
-    Layout getVideoLayout() 
+    Layout getVideoLayout()
     {
         std::shared_lock lk(rwMutex_);
-        return currentLayout_; 
+        return currentLayout_;
     }
 
-    void setOnSourcesUpdated(OnSourcesUpdatedCb&& cb) 
+    void setOnSourcesUpdated(OnSourcesUpdatedCb&& cb)
     {
         std::unique_lock lk(rwMutex_);
-        onSourcesUpdated_ = std::move(cb); 
+        onSourcesUpdated_ = std::move(cb);
     }
 
     MediaStream getStream(const std::string& name) const;
@@ -212,17 +213,18 @@ private:
     void calc_position(std::unique_ptr<VideoMixerSource>& source,
                        const std::shared_ptr<VideoFrame>& input,
                        int index,
-                       bool isActive);
+                       bool isActive,
+                       const std::string& callId = {});
 
     gripRect calc_position_rel(std::unique_ptr<VideoMixerSource>& source,
-                       const std::shared_ptr<VideoFrame>& input,
-                       int index,
-                       bool isActive);
-    
+                               const std::shared_ptr<VideoFrame>& input,
+                               int index,
+                               bool isActive);
+
     gripRect calc_position_fixed(std::unique_ptr<VideoMixerSource>& source,
-                       const std::shared_ptr<VideoFrame>& input,
-                       int index,
-                       bool isActive);
+                                 const std::shared_ptr<VideoFrame>& input,
+                                 int index,
+                                 bool isActive);
 
     bool initBorderFilter(MediaFilter& filter,
                           std::string inputName,
@@ -240,7 +242,8 @@ private:
                                        bool state,
                                        std::chrono::steady_clock::time_point now,
                                        bool& layoutChanged);
-    void removeStaleVoiceStatesLocked(const std::map<std::string, bool>& states, bool& layoutChanged);
+    void removeStaleVoiceStatesLocked(const std::map<std::string, bool>& states,
+                                      bool& layoutChanged);
     bool expireVoiceHoldsLocked(std::chrono::steady_clock::time_point now);
     static int clampVoiceInactiveHoldMs(int holdMs);
 
@@ -252,7 +255,8 @@ private:
                        const std::shared_ptr<VideoFrame> frame,
                        int& i,
                        const std::string& streamId,
-                       bool isVoiceActive);
+                       bool isVoiceActive,
+                       const std::string& callId = {});
 
     // Process any pending observer detaches in a safe context
     void processPendingDetaches();
@@ -260,7 +264,8 @@ private:
     // Enqueue an observable to be detached from sources_ without blocking
     void enqueueDetach(Observable<std::shared_ptr<MediaFrame>>* ob);
 
-    std::string getCallDisplayName(const std::unique_ptr<VideoMixer::VideoMixerSource>& source);
+    std::string getCallDisplayName(const std::unique_ptr<VideoMixer::VideoMixerSource>& source,
+                                   const std::string& fallbackCallId = {});
 
     const std::string id_;
     int width_ = 0;

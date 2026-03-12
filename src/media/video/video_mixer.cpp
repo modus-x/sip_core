@@ -35,6 +35,7 @@
 #include "connectivity/sip_utils.h"
 
 #include <cmath>
+#include <algorithm>
 #include <atomic>
 #include <unistd.h>
 #include <mutex>
@@ -47,6 +48,64 @@ static constexpr auto MIN_LINE_ZOOM
 
 namespace sip_core {
 namespace video {
+
+namespace {
+std::string
+normalizeDisplayName(std::string name)
+{
+    if (name.empty())
+        return "unknown";
+
+    auto found = name.find('@');
+    if (found != std::string_view::npos)
+        name = name.substr(0, found);
+
+    found = name.find("<sip:");
+    if (found != std::string_view::npos)
+        name = name.substr(found + 5);
+
+    found = name.find('>');
+    if (found != std::string_view::npos)
+        name = name.substr(0, found);
+
+    if (name.empty())
+        return "unknown";
+
+    return name;
+}
+
+std::string
+escapeDrawtext(std::string_view text)
+{
+    std::string escaped;
+    escaped.reserve(text.size() * 2);
+
+    for (char c : text) {
+        switch (c) {
+        case '\\':
+        case '\'':
+        case ':':
+        case ',':
+        case '[':
+        case ']':
+        case ';':
+        case '%':
+            escaped.push_back('\\');
+            escaped.push_back(c);
+            break;
+        case '\n':
+        case '\r':
+            escaped.push_back(' ');
+            break;
+        default:
+            escaped.push_back(c);
+            break;
+        }
+    }
+
+    return escaped;
+}
+} // namespace
 
 struct VideoMixer::VideoMixerSource
 {
@@ -294,7 +353,8 @@ VideoMixer::setVoiceInactiveHoldMs(int holdMs)
         }
 
         auto displayIt = voiceActivityDisplay_.find(streamId);
-        const bool displayState = displayIt != voiceActivityDisplay_.end() ? displayIt->second : false;
+        const bool displayState = displayIt != voiceActivityDisplay_.end() ? displayIt->second
+                                                                           : false;
         if (!displayState) {
             voiceInactiveDeadlines_.erase(streamId);
             continue;
@@ -305,7 +365,8 @@ VideoMixer::setVoiceInactiveHoldMs(int holdMs)
             voiceInactiveDeadlines_.erase(streamId);
             layoutChanged = true;
         } else {
-            voiceInactiveDeadlines_[streamId] = now + std::chrono::milliseconds(voiceInactiveHoldMs_);
+            voiceInactiveDeadlines_[streamId] = now
+                                                + std::chrono::milliseconds(voiceInactiveHoldMs_);
         }
     }
 
@@ -403,7 +464,8 @@ VideoMixer::applyVoiceActivityStateLocked(const std::string& streamId,
     auto rawIt = voiceActivityRaw_.find(streamId);
     const bool previousRaw = rawIt != voiceActivityRaw_.end() ? rawIt->second : false;
     auto displayIt = voiceActivityDisplay_.find(streamId);
-    const bool previousDisplay = displayIt != voiceActivityDisplay_.end() ? displayIt->second : false;
+    const bool previousDisplay = displayIt != voiceActivityDisplay_.end() ? displayIt->second
+                                                                          : false;
 
     if (rawIt == voiceActivityRaw_.end() && !state)
         return;
@@ -444,7 +506,8 @@ VideoMixer::applyVoiceActivityStateLocked(const std::string& streamId,
 }
 
 void
-VideoMixer::removeStaleVoiceStatesLocked(const std::map<std::string, bool>& states, bool& layoutChanged)
+VideoMixer::removeStaleVoiceStatesLocked(const std::map<std::string, bool>& states,
+                                         bool& layoutChanged)
 {
     for (auto it = voiceActivityRaw_.begin(); it != voiceActivityRaw_.end();) {
         if (states.find(it->first) != states.end()) {
@@ -607,35 +670,29 @@ VideoMixer::enqueueDetach(Observable<std::shared_ptr<MediaFrame>>* ob)
 }
 
 std::string
-VideoMixer::getCallDisplayName(const std::unique_ptr<VideoMixer::VideoMixerSource>& source)
+VideoMixer::getCallDisplayName(const std::unique_ptr<VideoMixer::VideoMixerSource>& source,
+                               const std::string& fallbackCallId)
 {
-    std::string name;
-    std::string callId;
-    {
+    std::string callId = fallbackCallId;
+
+    if (callId.empty() && source && source->source) {
         std::lock_guard<std::mutex> lk(videoToStreamInfoMtx_);
         auto it = videoToStreamInfo_.find(source->source);
         if (it != videoToStreamInfo_.end())
             callId = it->second.callId;
     }
-    if (auto call = Manager::instance().getCallFromCallID(callId)) {
-        name = call->getPeerDisplayName();
-        if (name.empty()) {
-            name = call->getPeerNumber();
-        }
-        if (name.empty()) {
-            return name = "unknown";
-        }
-        auto found = name.find('@');
-        if (found != std::string_view::npos)
-            name = name.substr(0, found);
 
-        found = name.find("<sip:");
-        if (found != std::string_view::npos)
-            name = name.substr(found + 5);
-    } else
+    if (callId.empty())
         return "host";
 
-    return name;
+    if (auto call = Manager::instance().getCallFromCallID(callId)) {
+        auto name = call->getPeerDisplayName();
+        if (name.empty())
+            name = call->getPeerNumber();
+        return normalizeDisplayName(name);
+    }
+
+    return "unknown";
 }
 
 void
@@ -703,7 +760,7 @@ VideoMixer::process()
         std::shared_lock lock(rwMutex_);
 
         // does current frame is SUCCESSFULLY rendered?
-        bool layoutRendered = audioOnlySources_.size() != 0 && sources_.size() == 0;
+        bool layoutRendered = false;
 
         // collection of patricipants, both audio & video
         std::vector<SourceInfo> sourcesInfo;
@@ -720,6 +777,31 @@ VideoMixer::process()
         int layoutUpdatesGenerated = 0;
         bool layoutInvalidated = false;
 
+        std::shared_ptr<VideoFrame> audioOnlyFrame;
+        if (!audioOnlySources_.empty()) {
+            int frameW = std::max(2, width_);
+            int frameH = std::max(2, height_);
+            if (grid_aspect_ > 0.) {
+                const auto currentAspect = static_cast<double>(frameW)
+                                           / static_cast<double>(frameH);
+                if (currentAspect > grid_aspect_) {
+                    frameW = std::max(2, static_cast<int>(std::round(frameH * grid_aspect_)));
+                } else {
+                    frameH = std::max(2, static_cast<int>(std::round(frameW / grid_aspect_)));
+                }
+            }
+            if (frameW % 2 != 0)
+                frameW -= 1;
+            if (frameH % 2 != 0)
+                frameH -= 1;
+            frameW = std::max(2, frameW);
+            frameH = std::max(2, frameH);
+
+            audioOnlyFrame = std::make_shared<VideoFrame>();
+            audioOnlyFrame->reserve(format_, frameW, frameH);
+            libav_utils::fillWithBlack(audioOnlyFrame->pointer());
+        }
+
         int i = 0;
         if (!activeStream_.empty())
             i++; // reserve 0 index place for active stream
@@ -730,9 +812,6 @@ VideoMixer::process()
             if (!loop_.isRunning())
                 return;
 
-            std::shared_ptr<VideoFrame> audioFrame = std::make_shared<VideoFrame>();
-            audioFrame->reserve(format_, 640, 480);
-
             auto audioSource = std::make_unique<VideoMixer::VideoMixerSource>();
             audioSource->hasVideo = false;
 
@@ -741,9 +820,19 @@ VideoMixer::process()
                 itVA != voiceActivitySnapshot.end())
                 voiceActive = itVA->second;
 
-            // calc pos, but DO NOT render anything
-            if (needsUpdate)
-                processSource(audioSource, audioFrame, i, streamId, voiceActive);
+            if (!audioOnlyFrame || !audioOnlyFrame->pointer()) {
+                SIP_CORE_WARN("[mixer:%s] No placeholder frame for audio-only source %s",
+                              id_.c_str(),
+                              streamId.c_str());
+                i++;
+                continue;
+            }
+
+            // Audio-only source geometry is computed each frame because we instantiate temporary
+            // sources for placeholders.
+            processSource(audioSource, audioOnlyFrame, i, streamId, voiceActive, callId);
+            auto frameRendered = render_frame(output, audioOnlyFrame, audioSource, needsUpdate);
+            layoutRendered |= frameRendered;
 
             sourcesInfo.emplace_back(SourceInfo {{},
                                                  audioSource->x.load(),
@@ -807,7 +896,7 @@ VideoMixer::process()
             }
 
             if (needsUpdate)
-                processSource(x, input, i, sinfo.streamId, voiceActive);
+                processSource(x, input, i, sinfo.streamId, voiceActive, sinfo.callId);
 
             bool frameRendered = false;
             if (input->height() and input->width()) {
@@ -857,7 +946,8 @@ VideoMixer::processSource(std::unique_ptr<VideoMixer::VideoMixerSource>& source,
                           const std::shared_ptr<VideoFrame> frame,
                           int& i,
                           const std::string& streamId,
-                          bool isVoiceActive)
+                          bool isVoiceActive,
+                          const std::string& callId)
 {
     // set "wantedIndex" to current index of video source, for GRID layout
     auto wantedIndex = i;
@@ -881,7 +971,7 @@ VideoMixer::processSource(std::unique_ptr<VideoMixer::VideoMixerSource>& source,
         }
     }
 
-    calc_position(source, frame, wantedIndex, isVoiceActive);
+    calc_position(source, frame, wantedIndex, isVoiceActive, callId);
 }
 
 bool
@@ -946,7 +1036,8 @@ void
 VideoMixer::calc_position(std::unique_ptr<VideoMixerSource>& source,
                           const std::shared_ptr<VideoFrame>& input,
                           int index,
-                          bool isActive)
+                          bool isActive,
+                          const std::string& callId)
 {
     if (!width_ or !height_)
         return;
@@ -977,7 +1068,7 @@ VideoMixer::calc_position(std::unique_ptr<VideoMixerSource>& source,
     source->y.store(frameH_off + padding_ + border_size_);
 
     // Update border filter
-    std::string display = getCallDisplayName(source);
+    std::string display = getCallDisplayName(source, callId);
     auto tryInitBorderFilter = [&](bool withText) {
         auto filter = std::make_unique<MediaFilter>();
         if (!initBorderFilter(*filter,
@@ -1208,9 +1299,9 @@ VideoMixer::initBorderFilter(MediaFilter& filter,
        << ":t=" << border_size_;
 
     if (withText) {
-        const int text_height = height / 15;
+        const int text_height = std::max(12, height / 15);
         constexpr int text_padding = 10;
-        ss << ",drawtext=text='" << inputName << "'"
+        ss << ",drawtext=text='" << escapeDrawtext(inputName) << "'"
            << ":fontcolor=white:fontsize=" << text_height << ":x=" << x << "+(" << width
            << "-text_w)/2"
            << ":y=" << y << "+" << height - text_padding << "-text_h";
