@@ -144,6 +144,7 @@ private:
     void notifyCaptureStarted();
     void notifyCaptureStopped(bool force = false);
     void notifySetupFailed(bool stopCapture = true);
+    void emitDeviceOpenError(const std::string& failedInput);
 
     void clearOptions();
 

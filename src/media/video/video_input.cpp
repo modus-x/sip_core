@@ -174,6 +174,17 @@ VideoInput::notifySetupFailed(bool stopCapture)
 }
 
 void
+VideoInput::emitDeviceOpenError(const std::string& failedInput)
+{
+    const auto& input = failedInput.empty() ? currentResource_ : failedInput;
+    if (input.empty())
+        return;
+
+    emitSignal<libsip_core::ConfigurationSignal::DeviceOpenError>(
+        "Failed to open video input: " + input, true);
+}
+
+void
 VideoInput::startLoop()
 {
     if (videoManagedByClient()) {
@@ -471,6 +482,7 @@ VideoInput::createDecoder()
                                                                            ? decOpts_.input
                                                                            : decOpts_.unique_id);
             }
+            emitDeviceOpenError(decOpts_.input);
             notifySetupFailed();
             return;
         }
@@ -485,6 +497,7 @@ VideoInput::createDecoder()
                 sip_core::getVideoDeviceMonitor().removeDeviceViaInput(decOpts_.unique_id.empty()
                                                                            ? decOpts_.input
                                                                            : decOpts_.unique_id);
+                emitDeviceOpenError(decOpts_.input);
                 notifySetupFailed();
                 return;
             }
@@ -507,6 +520,7 @@ VideoInput::createDecoder()
                                                                                ? decOpts_.input
                                                                                : decOpts_.unique_id);
                 }
+                emitDeviceOpenError(decOpts_.input);
                 notifySetupFailed();
                 return;
             }
@@ -520,6 +534,7 @@ VideoInput::createDecoder()
                 SIP_CORE_ERR("Device \"%s\" busy for too long, giving up", decOpts_.input.c_str());
                 foundDecOpts(decOpts_);
                 clearStartupDeadline();
+                emitDeviceOpenError(decOpts_.input);
                 notifySetupFailed();
                 return;
             }
@@ -559,6 +574,8 @@ VideoInput::createDecoder()
                                                                        ? decOpts_.input
                                                                        : decOpts_.unique_id);
         }
+        if (abortReason != StartupAbortReason::StopRequested && !isStopped_)
+            emitDeviceOpenError(decOpts_.input);
         notifySetupFailed();
         return;
     }
@@ -568,6 +585,7 @@ VideoInput::createDecoder()
     if (ret == MediaDemuxer::Status::ReadError) {
         SIP_CORE_INFO() << "Decoder error";
         foundDecOpts(decOpts_);
+        emitDeviceOpenError(decOpts_.input);
         notifySetupFailed();
         return;
     }
