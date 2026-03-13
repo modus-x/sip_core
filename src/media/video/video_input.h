@@ -123,7 +123,7 @@ private:
     // full MRL (camera:// + suffix)
     std::string currentResource_;
     std::atomic<bool> switchPending_ = {false};
-    std::mutex switchMutex_;
+    std::atomic_bool switchInProgress_ {false};
     std::atomic_bool isStopped_ = {false};
     std::atomic<int64_t> startupDeadlineUs_ {0};
     enum class StartupAbortReason : uint8_t { None, StopRequested, Timeout };

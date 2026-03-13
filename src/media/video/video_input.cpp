@@ -634,7 +634,8 @@ VideoInput::stopInput()
 void
 VideoInput::startInput()
 {
-    if (decOpts_.input.empty() && !currentResource_.empty() && !switchPending_.load()) {
+    if (decOpts_.input.empty() && !currentResource_.empty() && !switchPending_.load()
+        && !switchInProgress_.load()) {
         // Restart using the last known resource when options were cleared.
         switchInput(currentResource_);
         return;
@@ -1125,7 +1126,7 @@ VideoInput::initFile(std::string path)
 void
 VideoInput::restart()
 {
-    if (loop_.isStopping()) {
+    if (loop_.isStopping() && !switchInProgress_.load() && !currentResource_.empty()) {
         switchInput(currentResource_);
     }
 }
@@ -1133,9 +1134,14 @@ VideoInput::restart()
 std::shared_future<DeviceParams>
 VideoInput::switchInput(const std::string& resource)
 {
-    std::lock_guard<std::mutex> switchLock(switchMutex_);
     const auto normalizedResource = normalizeVideoSwitchSource(resource);
     SIP_CORE_DBG("MRL: '%s'", normalizedResource.c_str());
+
+    bool expected = false;
+    if (!switchInProgress_.compare_exchange_strong(expected, true)) {
+        SIP_CORE_ERR("Video switch already requested");
+        return {};
+    }
 
     decOptsFound_ = false;
 
@@ -1151,6 +1157,7 @@ VideoInput::switchInput(const std::string& resource)
         futureDecOpts_ = foundDecOpts_.get_future().share();
         stopInput();
         clearOptions();
+        switchInProgress_.store(false);
         return futureDecOpts_;
     }
 
@@ -1158,20 +1165,18 @@ VideoInput::switchInput(const std::string& resource)
     static const std::string sep = libsip_core::Media::VideoProtocolPrefix::SEPARATOR;
 
     const auto pos = normalizedResource.find(sep);
-    if (pos == std::string::npos)
-        return {};
-
-    const auto prefix = normalizedResource.substr(0, pos);
-    if ((pos + sep.size()) >= normalizedResource.size())
-        return {};
-
-    const auto suffix = normalizedResource.substr(pos + sep.size());
-
-    // Reject overlapping requests while the next source is still starting.
-    if (switchPending_.load()) {
-        SIP_CORE_ERR("Video switch already requested");
+    if (pos == std::string::npos) {
+        switchInProgress_.store(false);
         return {};
     }
+
+    const auto prefix = normalizedResource.substr(0, pos);
+    if ((pos + sep.size()) >= normalizedResource.size()) {
+        switchInProgress_.store(false);
+        return {};
+    }
+
+    const auto suffix = normalizedResource.substr(pos + sep.size());
 
     const auto previousResource = currentResource_;
     const auto previousDecOpts = decOpts_;
@@ -1194,6 +1199,7 @@ VideoInput::switchInput(const std::string& resource)
             foundDecOpts(DeviceParams {});
             futureDecOpts_ = foundDecOpts_.get_future().share();
             notifySetupFailed(false);
+            switchInProgress_.store(false);
             return futureDecOpts_;
         }
     } else if (prefix == libsip_core::Media::VideoProtocolPrefix::DISPLAY) {
@@ -1219,6 +1225,7 @@ VideoInput::switchInput(const std::string& resource)
         decOpts_ = previousDecOpts;
         emulateRate_ = previousEmulateRate;
         switchPending_ = false;
+        switchInProgress_.store(false);
         return {};
     }
 
@@ -1249,6 +1256,7 @@ VideoInput::switchInput(const std::string& resource)
     futureDecOpts_ = foundDecOpts_.get_future().share();
 
     startInput();
+    switchInProgress_.store(false);
 
     return futureDecOpts_;
 }
