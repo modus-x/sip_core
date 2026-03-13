@@ -31,6 +31,7 @@
 #include "call.h"
 #include "media_codec.h" // for MediaType enum
 #include "connectivity/sip_utils.h"
+#include "sip_core/media_const.h"
 #include "sip/sdp.h"
 
 #include "media/rtp_session.h"
@@ -119,7 +120,7 @@ public:
     bool attendedTransfer(const std::string& to) override;
     bool onhold(OnReadyCb&& cb) override;
     bool offhold(OnReadyCb&& cb) override;
-    void switchInput(const std::string& resource = {}) override;
+    bool switchInput(const std::string& resource = {}) override;
     void peerHungup() override;
     void carryingDTMFdigits(const std::string& dtmfEvents,
                             double duration,
@@ -296,7 +297,8 @@ public:
     /**
      * Announce to the client that medias are successfully negotiated
      */
-    void reportMediaNegotiationStatus();
+    void reportMediaNegotiationStatus(
+        const std::string& event = libsip_core::Media::MediaNegotiationStatusEvents::NEGOTIATION_SUCCESS);
 
     void setInitialServiceRoute(const std::string& serviceRoute)
     {

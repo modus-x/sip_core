@@ -35,6 +35,7 @@
 #include "call.h"
 #include "video/video_input.h"
 #include "video/video_mixer.h"
+#include "video/video_source_utils.h"
 #endif
 
 #include "call_factory.h"
@@ -332,11 +333,11 @@ Conference::setLocalHostDefaultMediaSource(bool addVideo, const std::string& sou
 }
 
 void
-Conference::reportMediaNegotiationStatus()
+Conference::reportMediaNegotiationStatus(const std::string& event)
 {
     emitSignal<libsip_core::CallSignal::MediaNegotiationStatus>(
         getConfId(),
-        libsip_core::Media::MediaNegotiationStatusEvents::NEGOTIATION_SUCCESS,
+        event,
         currentMediaList());
 }
 
@@ -1064,11 +1065,18 @@ Conference::getAccountId() const
     return {};
 }
 
-void
+bool
 Conference::switchInput(const std::string& input)
 {
 #ifdef ENABLE_VIDEO
     SIP_CORE_DEBUG("[Conf:{:s}] Setting video input to {:s}", id_, input);
+    if (!video::isValidVideoSwitchSource(
+            input,
+            Manager::instance().getVideoManager().videoDeviceMonitor.getDeviceList())) {
+        reportMediaNegotiationStatus(libsip_core::Media::MediaNegotiationStatusEvents::NEGOTIATION_FAIL);
+        return false;
+    }
+
     std::vector<MediaAttribute> newSources;
     auto firstVideo = true;
     // Rewrite hostSources (remove all except one video input)
@@ -1086,8 +1094,10 @@ Conference::switchInput(const std::string& input)
     }
 
     // Done if the video is disabled
-    if (not isVideoEnabled())
-        return;
+    if (not isVideoEnabled()) {
+        reportMediaNegotiationStatus(libsip_core::Media::MediaNegotiationStatusEvents::NEGOTIATION_FAIL);
+        return false;
+    }
 
     if (auto mixer = videoMixer_) {
         mixer->switchInputs({input});
@@ -1099,7 +1109,9 @@ Conference::switchInput(const std::string& input)
     }
 
     reportMediaNegotiationStatus();
+    return true;
 #endif
+    return false;
 }
 
 bool

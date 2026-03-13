@@ -378,7 +378,7 @@ public:
     virtual void createSinks(ConfInfo& infos) = 0;
 #endif
 
-    virtual void switchInput(const std::string& = {}) {};
+    virtual bool switchInput(const std::string& = {}) { return false; };
 
     /**
      * mute/unmute a media of a call

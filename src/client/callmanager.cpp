@@ -507,11 +507,9 @@ switchInput(const std::string& accountId, const std::string& callId, const std::
 {
     if (const auto account = sip_core::Manager::instance().getAccount(accountId)) {
         if (auto conf = account->getConference(callId)) {
-            conf->switchInput(resource);
-            return true;
+            return conf->switchInput(resource);
         } else if (auto call = account->getCall(callId)) {
-            call->switchInput(resource);
-            return true;
+            return call->switchInput(resource);
         }
     }
     return false;

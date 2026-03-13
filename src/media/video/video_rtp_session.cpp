@@ -168,7 +168,6 @@ VideoRtpSession::~VideoRtpSession()
 
     // Stop muted frame thread if running
     sendMutedFrames_.store(false);
-    mutedFrameThread_.join();
 
     deinitRecorder();
 
@@ -212,7 +211,7 @@ VideoRtpSession::setRequestKeyFrameCallback(std::function<void(void)> cb)
 void
 VideoRtpSession::startSender()
 {
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    std::unique_lock<std::recursive_mutex> lock(mutex_);
 
     SIP_CORE_DBG("VideoRtpSession [%p] Start video RTP sender: input [%s] - muted [%s]",
                  this,
@@ -343,8 +342,13 @@ VideoRtpSession::startSender()
         last_REMB_dec_ = clock::now();
         if (autoQuality and not rtcpCheckerThread_.isRunning())
             rtcpCheckerThread_.start();
-        else if (not autoQuality and rtcpCheckerThread_.isRunning())
+        else if (not autoQuality and rtcpCheckerThread_.isRunning()) {
+            // Release lock before joining to avoid deadlock:
+            // processRtcpChecker() -> restartSender() acquires mutex_.
+            lock.unlock();
             rtcpCheckerThread_.join();
+            lock.lock();
+        }
     }
 }
 
@@ -568,11 +572,10 @@ VideoRtpSession::start()
 void
 VideoRtpSession::stop()
 {
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    std::unique_lock<std::recursive_mutex> lock(mutex_);
 
-    // Stop muted frame sending
+    // Signal threads to stop while holding the lock
     sendMutedFrames_.store(false);
-    mutedFrameThread_.join();
 
     stopSender();
     stopReceiver();
@@ -580,7 +583,12 @@ VideoRtpSession::stop()
     if (socketPair_)
         socketPair_->interrupt();
 
+    // Release lock before joining to avoid deadlock:
+    // processMutedFrame() and processRtcpChecker() acquire mutex_.
+    lock.unlock();
+    mutedFrameThread_.join();
     rtcpCheckerThread_.join();
+    lock.lock();
 
     // reset default video quality if exist
     if (videoBitrateInfo_.videoQualityCurrent != SystemCodecInfo::DEFAULT_NO_QUALITY)
@@ -596,7 +604,7 @@ VideoRtpSession::stop()
 void
 VideoRtpSession::setMuted(bool mute, Direction dir)
 {
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    std::unique_lock<std::recursive_mutex> lock(mutex_);
 
     // Sender
     if (dir == Direction::SEND) {
@@ -665,7 +673,11 @@ VideoRtpSession::setMuted(bool mute, Direction dir)
         } else {
             // Stop sending muted frames
             sendMutedFrames_.store(false);
+            // Release lock before joining to avoid deadlock:
+            // processMutedFrame() acquires mutex_.
+            lock.unlock();
             mutedFrameThread_.join();
+            lock.lock();
             cancelKeepAliveTimer();
         }
 

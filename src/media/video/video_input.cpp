@@ -66,7 +66,7 @@ namespace video {
 
 static constexpr unsigned default_grab_width = 640;
 static constexpr unsigned default_grab_height = 480;
-static constexpr auto kLinuxCameraStartupTimeout = std::chrono::seconds(10);
+static constexpr auto kCameraStartupTimeout = std::chrono::seconds(10);
 
 static int64_t
 steadyClockNowUs() noexcept
@@ -137,6 +137,39 @@ VideoInput::VideoInput(VideoInputMode inputMode, const std::string& id_)
 VideoInput::~VideoInput()
 {
     stopInput();
+}
+
+void
+VideoInput::notifyCaptureStarted()
+{
+    if (decOpts_.input.empty()) {
+        captureStartPending_.store(false);
+        return;
+    }
+
+    captureStartPending_.store(false);
+    if (!captureStarted_.exchange(true))
+        emitSignal<libsip_core::VideoSignal::StartCapture>(decOpts_.input);
+}
+
+void
+VideoInput::notifyCaptureStopped(bool force)
+{
+    const auto input = decOpts_.input;
+    const bool pending = captureStartPending_.exchange(false);
+    const bool started = captureStarted_.exchange(false);
+
+    if ((force || pending || started) && !input.empty())
+        emitSignal<libsip_core::VideoSignal::StopCapture>(input);
+}
+
+void
+VideoInput::notifySetupFailed(bool stopCapture)
+{
+    if (stopCapture)
+        notifyCaptureStopped(true);
+    if (onFailedSetup_)
+        onFailedSetup_(MEDIA_VIDEO);
 }
 
 void
@@ -254,6 +287,7 @@ void
 VideoInput::cleanup()
 {
     deleteDecoder(); // do it first to let a chance to last frame to be displayed
+    notifyCaptureStopped();
     stopSink();
     SIP_CORE_DBG("VideoInput closed");
 }
@@ -273,6 +307,9 @@ VideoInput::captureFrame()
             if (!sip_core::getVideoDeviceMonitor().deviceExists(decOpts_.unique_id)) {
                 SIP_CORE_WARN("Device \"%s\" disconnected during capture, stopping",
                               decOpts_.unique_id.c_str());
+                sip_core::getVideoDeviceMonitor().removeDeviceViaInput(decOpts_.unique_id.empty()
+                                                                           ? decOpts_.input
+                                                                           : decOpts_.unique_id);
                 return false;
             }
         }
@@ -285,6 +322,9 @@ VideoInput::captureFrame()
             if (!sip_core::getVideoDeviceMonitor().deviceExists(decOpts_.unique_id)) {
                 SIP_CORE_WARN("Device \"%s\" disconnected (read error), stopping",
                               decOpts_.unique_id.c_str());
+                sip_core::getVideoDeviceMonitor().removeDeviceViaInput(decOpts_.unique_id.empty()
+                                                                           ? decOpts_.input
+                                                                           : decOpts_.unique_id);
                 return false;
             }
         }
@@ -399,9 +439,9 @@ VideoInput::createDecoder()
         [](void* data) -> int { return static_cast<VideoInput*>(data)->shouldInterruptDecoderIo(); },
         this);
 
-    const bool useStartupTimeout = (decOpts_.format == "video4linux2");
+    const bool useStartupTimeout = (decOpts_.format == "video4linux2" || decOpts_.format == "dshow");
     if (useStartupTimeout) {
-        setStartupDeadline(std::chrono::steady_clock::now() + kLinuxCameraStartupTimeout);
+        setStartupDeadline(std::chrono::steady_clock::now() + kCameraStartupTimeout);
     }
 
     bool ready = false, restartSink = false;
@@ -421,10 +461,16 @@ VideoInput::createDecoder()
                          decOpts_.input.c_str(),
                          static_cast<long long>(
                              std::chrono::duration_cast<std::chrono::milliseconds>(
-                                 kLinuxCameraStartupTimeout)
+                                 kCameraStartupTimeout)
                                  .count()));
             foundDecOpts(decOpts_);
             clearStartupDeadline();
+            if (decOpts_.format == "video4linux2" || decOpts_.format == "dshow") {
+                sip_core::getVideoDeviceMonitor().removeDeviceViaInput(decOpts_.unique_id.empty()
+                                                                           ? decOpts_.input
+                                                                           : decOpts_.unique_id);
+            }
+            notifySetupFailed();
             return;
         }
 
@@ -435,6 +481,10 @@ VideoInput::createDecoder()
                               decOpts_.unique_id.c_str());
                 foundDecOpts(decOpts_);
                 clearStartupDeadline();
+                sip_core::getVideoDeviceMonitor().removeDeviceViaInput(decOpts_.unique_id.empty()
+                                                                           ? decOpts_.input
+                                                                           : decOpts_.unique_id);
+                notifySetupFailed();
                 return;
             }
         }
@@ -451,6 +501,12 @@ VideoInput::createDecoder()
             } else {
                 foundDecOpts(decOpts_);
                 clearStartupDeadline();
+                if (decOpts_.format == "video4linux2" || decOpts_.format == "dshow") {
+                    sip_core::getVideoDeviceMonitor().removeDeviceViaInput(decOpts_.unique_id.empty()
+                                                                               ? decOpts_.input
+                                                                               : decOpts_.unique_id);
+                }
+                notifySetupFailed();
                 return;
             }
         } else if (-ret == EBUSY) {
@@ -463,6 +519,7 @@ VideoInput::createDecoder()
                 SIP_CORE_ERR("Device \"%s\" busy for too long, giving up", decOpts_.input.c_str());
                 foundDecOpts(decOpts_);
                 clearStartupDeadline();
+                notifySetupFailed();
                 return;
             }
         }
@@ -472,6 +529,7 @@ VideoInput::createDecoder()
     if (isStopped_) {
         startupAbortReason_.store(StartupAbortReason::StopRequested);
         clearStartupDeadline();
+        notifyCaptureStopped();
         return;
     }
 
@@ -495,6 +553,12 @@ VideoInput::createDecoder()
         }
         foundDecOpts(decOpts_);
         clearStartupDeadline();
+        if (decOpts_.format == "video4linux2" || decOpts_.format == "dshow") {
+            sip_core::getVideoDeviceMonitor().removeDeviceViaInput(decOpts_.unique_id.empty()
+                                                                       ? decOpts_.input
+                                                                       : decOpts_.unique_id);
+        }
+        notifySetupFailed();
         return;
     }
     clearStartupDeadline();
@@ -502,6 +566,8 @@ VideoInput::createDecoder()
     auto ret = decoder->decode(); // Populate AVCodecContext fields
     if (ret == MediaDemuxer::Status::ReadError) {
         SIP_CORE_INFO() << "Decoder error";
+        foundDecOpts(decOpts_);
+        notifySetupFailed();
         return;
     }
 
@@ -521,15 +587,15 @@ VideoInput::createDecoder()
                  decOpts_.height,
                  decOpts_.framerate.real(),
                  decOpts_.pixel_format.c_str());
-    if (onSuccessfulSetup_)
-        onSuccessfulSetup_(MEDIA_VIDEO, 0);
-
     decoder_ = std::move(decoder);
 
     foundDecOpts(decOpts_);
 
     /* Signal the client about readable sink */
     sink_->setFrameSize(decoder_->getWidth(), decoder_->getHeight());
+    if (onSuccessfulSetup_)
+        onSuccessfulSetup_(MEDIA_VIDEO, 0);
+    notifyCaptureStarted();
 
     decoder_->setContextCallback([this]() {
         if (recorderCallback_)
@@ -549,7 +615,7 @@ VideoInput::deleteDecoder()
 void
 VideoInput::stopInput()
 {
-    emitSignal<libsip_core::VideoSignal::StopCapture>(decOpts_.input);
+    notifyCaptureStopped();
 
     isStopped_ = true;
     startupAbortReason_.store(StartupAbortReason::StopRequested);
@@ -574,10 +640,11 @@ VideoInput::startInput()
     }
 
     isStopped_ = false;
+    captureStartPending_.store(!decOpts_.input.empty());
 
     startLoop();
-
-    emitSignal<libsip_core::VideoSignal::StartCapture>(decOpts_.input);
+    if (videoManagedByClient())
+        notifyCaptureStarted();
 }
 
 void
@@ -585,6 +652,7 @@ VideoInput::clearOptions()
 {
     decOpts_ = {};
     emulateRate_ = false;
+    captureStartPending_.store(false);
 }
 
 bool
@@ -637,6 +705,10 @@ bool
 VideoInput::initCamera(const std::string& device)
 {
     decOpts_ = sip_core::getVideoDeviceMonitor().getDeviceParams(device);
+    if (decOpts_.input.empty()) {
+        SIP_CORE_WARN("No video device parameters found for \"%s\"", device.c_str());
+        return false;
+    }
 #if defined(_WIN32) && defined(USE_DSHOW_SCREEN_CAPTURE)
     if (decOpts_.name == "screen-capture-recorder") {
         // screen-capture-recorder plugin can appear
@@ -1062,7 +1134,6 @@ VideoInput::switchInput(const std::string& resource)
 {
     SIP_CORE_DBG("MRL: '%s'", resource.c_str());
 
-    currentResource_ = resource;
     decOptsFound_ = false;
 
     // FUTURE of promise can be listened!
@@ -1071,11 +1142,12 @@ VideoInput::switchInput(const std::string& resource)
 
     // Switch off video input?
     if (resource.empty()) {
-        clearOptions();
+        currentResource_ = resource;
         // some default params
         foundDecOpts(DeviceParams {});
         futureDecOpts_ = foundDecOpts_.get_future().share();
         stopInput();
+        clearOptions();
         return futureDecOpts_;
     }
 
@@ -1098,17 +1170,31 @@ VideoInput::switchInput(const std::string& resource)
         return {};
     }
 
-    if (!isStopped_) {
-        stopInput();
-        sink_ = Manager::instance().createSinkClient(resource);
-    }
+    const auto previousResource = currentResource_;
+    const auto previousDecOpts = decOpts_;
+    const auto previousEmulateRate = emulateRate_;
+
+    currentResource_ = resource;
 
     bool ready = false;
+    bool recognized = false;
 
     if (prefix == libsip_core::Media::VideoProtocolPrefix::CAMERA) {
+        recognized = true;
         /* Video4Linux2 */
         ready = initCamera(suffix);
+        if (!ready) {
+            currentResource_ = previousResource;
+            decOpts_ = previousDecOpts;
+            emulateRate_ = previousEmulateRate;
+            switchPending_ = false;
+            foundDecOpts(DeviceParams {});
+            futureDecOpts_ = foundDecOpts_.get_future().share();
+            notifySetupFailed(false);
+            return futureDecOpts_;
+        }
     } else if (prefix == libsip_core::Media::VideoProtocolPrefix::DISPLAY) {
+        recognized = true;
         /* X11 display name */
 #ifdef __APPLE__
         ready = initAVFoundation(suffix);
@@ -1120,9 +1206,34 @@ VideoInput::switchInput(const std::string& resource)
         ready = initX11(suffix);
 #endif
     } else if (prefix == libsip_core::Media::VideoProtocolPrefix::FILE) {
+        recognized = true;
         /* Pathname */
         ready = initFile(suffix);
     }
+
+    if (!recognized) {
+        currentResource_ = previousResource;
+        decOpts_ = previousDecOpts;
+        emulateRate_ = previousEmulateRate;
+        switchPending_ = false;
+        return {};
+    }
+
+    const auto nextDecOpts = decOpts_;
+    const auto nextEmulateRate = emulateRate_;
+
+    currentResource_ = previousResource;
+    decOpts_ = previousDecOpts;
+    emulateRate_ = previousEmulateRate;
+
+    if (!isStopped_) {
+        stopInput();
+        sink_ = Manager::instance().createSinkClient(resource);
+    }
+
+    currentResource_ = resource;
+    decOpts_ = nextDecOpts;
+    emulateRate_ = nextEmulateRate;
 
     if (ready) {
         foundDecOpts(decOpts_);

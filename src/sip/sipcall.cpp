@@ -45,6 +45,8 @@
 #ifdef ENABLE_VIDEO
 
 #include "client/videomanager.h"
+#include "media/video/video_input.h"
+#include "media/video/video_source_utils.h"
 #include "video/video_rtp_session.h"
 #include "sip_core/videomanager_interface.h"
 #include <chrono>
@@ -58,6 +60,7 @@
 
 #include "errno.h"
 
+#include <atomic>
 #include <fmt/ranges.h>
 
 #include "tracepoint.h"
@@ -74,6 +77,12 @@ getVideoSettings()
 {
     const auto& videomon = sip_core::getVideoDeviceMonitor();
     return videomon.getDeviceParams(videomon.getDefaultDevice());
+}
+
+static bool
+isValidVideoSwitchSource(const std::string& source)
+{
+    return video::isValidVideoSwitchSource(source, sip_core::getVideoDeviceMonitor().getDeviceList());
 }
 
 #endif
@@ -1461,16 +1470,26 @@ SIPCall::internalOffHold(const std::function<void()>& sdp_cb)
 }
 
 // switch or reload media input on the fly
-void
+bool
 SIPCall::switchInput(const std::string& source)
 {
 #ifdef ENABLE_VIDEO
     SIP_CORE_DBG("[call:%s] Set selected source to %s", getCallId().c_str(), source.c_str());
 
-    if (source == "") {
+    if (!isValidVideoSwitchSource(source)) {
+        SIP_CORE_WARN("[call:%s] Rejecting unavailable video source '%s'",
+                      getCallId().c_str(),
+                      source.c_str());
+        reportMediaNegotiationStatus(libsip_core::Media::MediaNegotiationStatusEvents::NEGOTIATION_FAIL);
+        return false;
+    }
+
+    if (source.empty()) {
         auto currentMediaList = getMediaAttributeList();
         for (const auto& videoRtp : getRtpSessionList(MediaType::MEDIA_VIDEO)) {
-            std::static_pointer_cast<video::VideoRtpSession>(videoRtp)->getVideoLocal()->stopInput();
+            auto input = std::static_pointer_cast<video::VideoRtpSession>(videoRtp)->getVideoLocal();
+            if (input)
+                input->stopInput();
         }
         for (auto& media : currentMediaList) {
             if (media.type_ == MediaType::MEDIA_VIDEO) {
@@ -1478,7 +1497,11 @@ SIPCall::switchInput(const std::string& source)
                 media.muted_ = true;
             }
         }
-        updateAllMediaStreams(currentMediaList, false);
+        if (!updateAllMediaStreams(currentMediaList, false)) {
+            reportMediaNegotiationStatus(libsip_core::Media::MediaNegotiationStatusEvents::NEGOTIATION_FAIL);
+            return false;
+        }
+        reportMediaNegotiationStatus();
 
     } else {
         auto currentMediaList = getMediaAttributeList();
@@ -1488,16 +1511,64 @@ SIPCall::switchInput(const std::string& source)
                 media.muted_ = false;
             }
         }
-        updateAllMediaStreams(currentMediaList, false);
+        if (!updateAllMediaStreams(currentMediaList, false)) {
+            reportMediaNegotiationStatus(libsip_core::Media::MediaNegotiationStatusEvents::NEGOTIATION_FAIL);
+            return false;
+        }
 
+        std::vector<std::shared_ptr<video::VideoInput>> inputsToSwitch;
         for (const auto& videoRtp : getRtpSessionList(MediaType::MEDIA_VIDEO)) {
-            std::static_pointer_cast<video::VideoRtpSession>(videoRtp)->getVideoLocal()->switchInput(
-                source);
+            auto input = std::static_pointer_cast<video::VideoRtpSession>(videoRtp)->getVideoLocal();
+            if (input)
+                inputsToSwitch.emplace_back(std::move(input));
+        }
+
+        if (inputsToSwitch.empty()) {
+            reportMediaNegotiationStatus();
+        } else {
+            auto remainingInputs = std::make_shared<std::atomic_size_t>(inputsToSwitch.size());
+            auto switchFinished = std::make_shared<std::atomic_bool>(false);
+
+            for (auto& input : inputsToSwitch) {
+                std::weak_ptr<video::VideoInput> inputWeak = input;
+                input->setSuccessfulSetupCb([callWeak = weak(),
+                                             inputWeak,
+                                             remainingInputs,
+                                             switchFinished](MediaType, bool) {
+                    if (auto localInput = inputWeak.lock()) {
+                        localInput->setSuccessfulSetupCb({});
+                        localInput->setFailedSetupCb({});
+                    }
+
+                    if (switchFinished->load())
+                        return;
+
+                    if (remainingInputs->fetch_sub(1) == 1) {
+                        bool expected = false;
+                        if (switchFinished->compare_exchange_strong(expected, true))
+                            if (auto call = callWeak.lock())
+                                call->reportMediaNegotiationStatus();
+                    }
+                });
+                input->setFailedSetupCb([callWeak = weak(), inputWeak, switchFinished](MediaType) {
+                    if (auto localInput = inputWeak.lock()) {
+                        localInput->setSuccessfulSetupCb({});
+                        localInput->setFailedSetupCb({});
+                    }
+
+                    bool expected = false;
+                    if (switchFinished->compare_exchange_strong(expected, true))
+                        if (auto call = callWeak.lock())
+                            call->reportMediaNegotiationStatus(
+                                libsip_core::Media::MediaNegotiationStatusEvents::NEGOTIATION_FAIL);
+                });
+                input->switchInput(source);
+            }
         }
     }
-
-    reportMediaNegotiationStatus();
+    return true;
 #endif
+    return false;
 }
 
 void
@@ -2646,14 +2717,11 @@ SIPCall::onMediaNegotiationComplete()
 }
 
 void
-SIPCall::reportMediaNegotiationStatus()
+SIPCall::reportMediaNegotiationStatus(const std::string& event)
 {
     // Notify using the parent Id if it's a subcall.
     auto callId = isSubcall() ? parent_->getCallId() : getCallId();
-    emitSignal<libsip_core::CallSignal::MediaNegotiationStatus>(
-        callId,
-        libsip_core::Media::MediaNegotiationStatusEvents::NEGOTIATION_SUCCESS,
-        currentMediaList());
+    emitSignal<libsip_core::CallSignal::MediaNegotiationStatus>(callId, event, currentMediaList());
     auto previousState = isAudioOnly_;
     auto newState = !hasVideo();
 

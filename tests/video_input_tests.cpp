@@ -1,4 +1,5 @@
 #include "media/video/video_input.h"
+#include "media/video/video_source_utils.h"
 #include "media/media_filter.h"
 #include "sip/sdp.h"
 
@@ -158,6 +159,95 @@ test_video_input_switching()
 }
 
 void
+test_video_source_validation_helpers()
+{
+    const std::vector<std::string> devices {"video=cam0", "video=cam01"};
+
+    expect_true(containsExactDeviceId(devices, "video=cam0"),
+                "containsExactDeviceId should match exact ids");
+    expect_true(!containsExactDeviceId(devices, "video=cam"),
+                "containsExactDeviceId must not match partial ids");
+    expect_true(chooseDefaultDeviceId("video=cam0", devices) == "video=cam0",
+                "chooseDefaultDeviceId should preserve a valid default");
+    expect_true(chooseDefaultDeviceId("video=missing", devices) == "video=cam0",
+                "chooseDefaultDeviceId should fall back to the first physical device");
+    expect_true(chooseDefaultDeviceId("video=missing", {}).empty(),
+                "chooseDefaultDeviceId should return empty when no physical devices remain");
+
+    expect_true(isValidVideoSwitchSource("", devices),
+                "Empty source should be accepted for local video disable");
+    expect_true(isValidVideoSwitchSource("display://Desktop", devices),
+                "Display capture source should be accepted");
+    expect_true(isValidVideoSwitchSource("file://clip.mp4", devices),
+                "File source should be accepted");
+    expect_true(isValidVideoSwitchSource("camera://video=cam0", devices),
+                "Known camera source should be accepted");
+    expect_true(!isValidVideoSwitchSource("camera://", devices),
+                "Camera source without device id must be rejected");
+    expect_true(!isValidVideoSwitchSource("camera://video=cam", devices),
+                "Camera source must use exact id matching");
+    expect_true(!isValidVideoSwitchSource("camera://video=missing", devices),
+                "Unknown camera source must be rejected");
+}
+
+void
+test_invalid_camera_switch_fails_fast()
+{
+    VideoInput input(VideoInputMode::ManagedByDaemon, "");
+    auto futureParams = input.switchInput("camera://video=missing");
+
+    expect_true(futureParams.valid(), "Invalid camera switch should still return a future");
+    expect_true(wait_for_condition(
+                    [&]() {
+                        return futureParams.wait_for(std::chrono::milliseconds(0))
+                               == std::future_status::ready;
+                    },
+                    std::chrono::milliseconds(250)),
+                "Invalid camera switch should resolve without hanging");
+
+    auto params = futureParams.get();
+    expect_true(params.input.empty(), "Invalid camera switch should resolve to empty device params");
+    input.stopInput();
+}
+
+void
+test_invalid_camera_switch_preserves_current_input()
+{
+    auto filePath = asset_path("test_16x12.mp4");
+    VideoInput input(VideoInputMode::ManagedByDaemon, "");
+
+    auto initialFuture = input.switchInput("file://" + filePath);
+    expect_true(initialFuture.valid(), "Initial file switch should return a valid future");
+    expect_true(wait_for_condition(
+                    [&]() { return input.getWidth() == 16 && input.getHeight() == 12; },
+                    kOpenTimeout),
+                "VideoInput should open the initial source before invalid switch");
+
+    auto failedFuture = input.switchInput("camera://video=missing");
+    expect_true(failedFuture.valid(), "Rejected camera switch should still return a future");
+    expect_true(wait_for_condition(
+                    [&]() {
+                        return failedFuture.wait_for(std::chrono::milliseconds(0))
+                               == std::future_status::ready;
+                    },
+                    std::chrono::milliseconds(250)),
+                "Rejected camera switch should resolve quickly");
+
+    auto failedParams = failedFuture.get();
+    expect_true(failedParams.input.empty(), "Rejected camera switch should resolve to empty params");
+    expect_true(input.getName() == "file://" + filePath,
+                "Rejected camera switch must keep the previous source resource");
+    expect_true(input.getConfig().input == filePath,
+                "Rejected camera switch must keep the previous device configuration");
+    expect_true(wait_for_condition(
+                    [&]() { return input.getWidth() == 16 && input.getHeight() == 12; },
+                    std::chrono::milliseconds(250)),
+                "Rejected camera switch must leave the current video input running");
+
+    input.stopInput();
+}
+
+void
 test_sdp_mute_mapping()
 {
     const std::string recvOnlySdp = "v=0\r\n"
@@ -241,6 +331,9 @@ main()
     test_audio_filter_compatibility();
     test_video_input_mute_restart();
     test_video_input_switching();
+    test_video_source_validation_helpers();
+    test_invalid_camera_switch_fails_fast();
+    test_invalid_camera_switch_preserves_current_input();
     test_sdp_mute_mapping();
 
     std::cout << "All video input tests passed.\n";

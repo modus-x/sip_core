@@ -36,6 +36,7 @@
 #include "audio/audio_input.h"
 #include "conference_protocol.h"
 #include "media_attribute.h"
+#include "sip_core/media_const.h"
 
 #include <json/json.h>
 
@@ -348,7 +349,7 @@ public:
      */
     bool toggleRecording() override;
 
-    void switchInput(const std::string& input);
+    bool switchInput(const std::string& input);
     void setActiveParticipant(const std::string& participant_id);
     void setActiveStream(const std::string& streamId, bool state);
     void setLayout(int layout);
@@ -406,7 +407,8 @@ public:
     /**
      * Announce to the client that medias are successfully negotiated
      */
-    void reportMediaNegotiationStatus();
+    void reportMediaNegotiationStatus(
+        const std::string& event = libsip_core::Media::MediaNegotiationStatusEvents::NEGOTIATION_SUCCESS);
 
     /**
      * Retrieve current medias list

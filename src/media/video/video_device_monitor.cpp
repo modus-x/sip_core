@@ -36,6 +36,7 @@
 #include "config/yamlparser.h"
 #include "logger.h"
 #include "video_device_monitor.h"
+#include "video_source_utils.h"
 
 namespace sip_core {
 namespace video {
@@ -45,6 +46,24 @@ constexpr const char* const VideoDeviceMonitor::CONFIG_LABEL;
 using std::map;
 using std::string;
 using std::vector;
+
+vector<string>
+VideoDeviceMonitor::getPhysicalDeviceIdsUnlocked() const
+{
+    vector<string> ids;
+    ids.reserve(devices_.size());
+    for (const auto& dev : devices_) {
+        if (dev.name != DEVICE_DESKTOP)
+            ids.emplace_back(dev.getDeviceId());
+    }
+    return ids;
+}
+
+void
+VideoDeviceMonitor::refreshDefaultDeviceUnlocked()
+{
+    defaultDevice_ = chooseDefaultDeviceId(defaultDevice_, getPhysicalDeviceIdsUnlocked());
+}
 
 vector<string>
 VideoDeviceMonitor::getDeviceList() const
@@ -101,6 +120,8 @@ string
 VideoDeviceMonitor::getDefaultDevice() const
 {
     std::lock_guard<std::mutex> l(lock_);
+    if (defaultDevice_.empty())
+        return {};
     const auto it = findDeviceById(defaultDevice_);
     if (it == std::end(devices_) || it->getDeviceId() == DEVICE_DESKTOP)
         return {};
@@ -111,14 +132,14 @@ std::string
 VideoDeviceMonitor::getMRLForDefaultDevice() const
 {
     std::lock_guard<std::mutex> l(lock_);
+    if (defaultDevice_.empty())
+        return {};
     const auto it = findDeviceById(defaultDevice_);
-    // do not return nothing for desktop
     if (it == std::end(devices_) || it->getDeviceId() == DEVICE_DESKTOP)
         return {};
 
-
     static const std::string sep = libsip_core::Media::VideoProtocolPrefix::SEPARATOR;
-    
+
     return libsip_core::Media::VideoProtocolPrefix::CAMERA + sep + it->getDeviceId();
 }
 
@@ -126,6 +147,8 @@ bool
 VideoDeviceMonitor::setDefaultDevice(const std::string& id)
 {
     std::lock_guard<std::mutex> l(lock_);
+    if (id.empty())
+        return false;
     const auto itDev = findDeviceById(id);
     if (itDev != devices_.end()) {
         if (defaultDevice_ == itDev->getDeviceId())
@@ -204,6 +227,8 @@ VideoDeviceMonitor::addDevice(const string& id,
 {
     try {
         std::lock_guard<std::mutex> l(lock_);
+        if (id.empty())
+            return false;
         if (findDeviceById(id) != devices_.end())
             return false;
 
@@ -229,6 +254,7 @@ VideoDeviceMonitor::addDevice(const string& id,
             defaultDevice_ = dev.getDeviceId();
 
         devices_.emplace_back(std::move(dev));
+        refreshDefaultDeviceUnlocked();
     } catch (const std::exception& e) {
         SIP_CORE_ERR("Failed to add device %s: %s", id.c_str(), e.what());
         return false;
@@ -242,28 +268,79 @@ VideoDeviceMonitor::removeDevice(const string& id)
 {
     {
         std::lock_guard<std::mutex> l(lock_);
+        if (id.empty())
+            return;
         const auto it = findDeviceById(id);
         if (it == devices_.end())
             return;
 
         devices_.erase(it);
-        if (defaultDevice_.find(id) != std::string::npos) {
-            defaultDevice_.clear();
-            for (const auto& dev : devices_)
-                if (dev.name != DEVICE_DESKTOP) {
-                    defaultDevice_ = dev.getDeviceId();
-                    break;
-                }
-        }
+        refreshDefaultDeviceUnlocked();
     }
     notify();
+}
+
+void
+VideoDeviceMonitor::removeDeviceViaInput(const string& path)
+{
+    string idToRemove;
+    {
+        std::lock_guard<std::mutex> l(lock_);
+        if (path.empty())
+            return;
+
+        if (const auto it = findDeviceById(path); it != devices_.cend()) {
+            idToRemove = it->getDeviceId();
+        } else {
+            const auto prefIt = std::find_if(preferences_.cbegin(),
+                                             preferences_.cend(),
+                                             [&path](const auto& pref) {
+                                                 return pref.unique_id == path || pref.input == path;
+                                             });
+            if (prefIt == preferences_.cend())
+                return;
+            idToRemove = prefIt->unique_id;
+        }
+    }
+
+    removeDevice(idToRemove);
+}
+
+void
+VideoDeviceMonitor::reconcileDevices(const std::vector<std::string>& deviceIds)
+{
+    vector<string> idsToRemove;
+    vector<string> idsToAdd;
+
+    {
+        std::lock_guard<std::mutex> l(lock_);
+        const auto currentDeviceIds = getPhysicalDeviceIdsUnlocked();
+
+        for (const auto& id : currentDeviceIds) {
+            if (!containsExactDeviceId(deviceIds, id))
+                idsToRemove.emplace_back(id);
+        }
+
+        for (const auto& id : deviceIds) {
+            if (!id.empty() && !containsExactDeviceId(currentDeviceIds, id))
+                idsToAdd.emplace_back(id);
+        }
+    }
+
+    for (const auto& id : idsToRemove)
+        removeDevice(id);
+
+    for (const auto& id : idsToAdd)
+        addDevice(id);
 }
 
 vector<VideoDevice>::iterator
 VideoDeviceMonitor::findDeviceById(const string& id)
 {
+    if (id.empty())
+        return devices_.end();
     for (auto it = devices_.begin(); it != devices_.end(); ++it)
-        if (it->getDeviceId().find(id) != std::string::npos)
+        if (it->getDeviceId() == id)
             return it;
     return devices_.end();
 }
@@ -271,8 +348,10 @@ VideoDeviceMonitor::findDeviceById(const string& id)
 vector<VideoDevice>::const_iterator
 VideoDeviceMonitor::findDeviceById(const string& id) const
 {
+    if (id.empty())
+        return devices_.end();
     for (auto it = devices_.cbegin(); it != devices_.cend(); ++it)
-        if (it->getDeviceId().find(id) != std::string::npos)
+        if (it->getDeviceId() == id)
             return it;
     return devices_.end();
 }
@@ -280,8 +359,10 @@ VideoDeviceMonitor::findDeviceById(const string& id) const
 vector<VideoSettings>::iterator
 VideoDeviceMonitor::findPreferencesById(const string& id)
 {
+    if (id.empty())
+        return preferences_.end();
     for (auto it = preferences_.begin(); it != preferences_.end(); ++it)
-        if (it->unique_id.find(id) != std::string::npos)
+        if (it->unique_id == id)
             return it;
     return preferences_.end();
 }
@@ -327,11 +408,7 @@ VideoDeviceMonitor::unserialize(const YAML::Node& in)
         defaultDevice_ = devIter->getDeviceId();
     } else {
         defaultDevice_.clear();
-        for (const auto& dev : devices_)
-            if (dev.name != DEVICE_DESKTOP) {
-                defaultDevice_ = dev.getDeviceId();
-                break;
-            }
+        refreshDefaultDeviceUnlocked();
     }
 }
 

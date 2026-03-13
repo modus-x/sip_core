@@ -104,6 +104,7 @@ public:
     {
         onSuccessfulSetup_ = cb;
     }
+    void setFailedSetupCb(const std::function<void(MediaType)>& cb) { onFailedSetup_ = cb; }
 
     /**
      * Restart stopped video input
@@ -133,10 +134,15 @@ private:
     bool emulateRate_ = false;
 
     std::atomic_bool decOptsFound_ {false};
+    std::atomic_bool captureStarted_ {false};
+    std::atomic_bool captureStartPending_ {false};
 
     // set value to promise. you can listen for another thread for foundDecOpts_, which it returned
     // from switchInput
     void foundDecOpts(const DeviceParams& params);
+    void notifyCaptureStarted();
+    void notifyCaptureStopped(bool force = false);
+    void notifySetupFailed(bool stopCapture = true);
 
     void clearOptions();
 
@@ -184,6 +190,7 @@ private:
     std::atomic_bool paused_ {true};
 
     std::function<void(MediaType, bool)> onSuccessfulSetup_;
+    std::function<void(MediaType)> onFailedSetup_;
     std::function<void(const MediaStream& ms)> recorderCallback_;
 };
 
