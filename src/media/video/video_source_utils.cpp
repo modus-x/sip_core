@@ -7,6 +7,7 @@
 namespace {
 
 constexpr std::string_view kSeparator = libsip_core::Media::VideoProtocolPrefix::SEPARATOR;
+constexpr std::string_view kDesktopAlias = "desktop";
 
 } // namespace
 
@@ -37,19 +38,38 @@ chooseDefaultDeviceId(std::string_view currentDefault,
     return {};
 }
 
+std::string
+normalizeVideoSwitchSource(std::string_view source)
+{
+    if (source.empty())
+        return {};
+
+    const auto pos = source.find(kSeparator);
+    if (pos == std::string_view::npos)
+        return std::string(source);
+
+    const auto prefix = source.substr(0, pos);
+    if (prefix != kDesktopAlias)
+        return std::string(source);
+
+    return std::string(libsip_core::Media::VideoProtocolPrefix::DISPLAY) + std::string(kSeparator)
+           + std::string(source.substr(pos + kSeparator.size()));
+}
+
 bool
 isValidVideoSwitchSource(std::string_view source,
                          const std::vector<std::string>& availableCameraIds)
 {
-    if (source.empty())
+    const auto normalized = normalizeVideoSwitchSource(source);
+    if (normalized.empty())
         return true;
 
-    const auto pos = source.find(kSeparator);
+    const auto pos = normalized.find(kSeparator);
     if (pos == std::string_view::npos)
         return false;
 
-    const auto prefix = source.substr(0, pos);
-    const auto suffix = source.substr(pos + kSeparator.size());
+    const auto prefix = std::string_view(normalized).substr(0, pos);
+    const auto suffix = std::string_view(normalized).substr(pos + kSeparator.size());
     if (suffix.empty())
         return false;
 

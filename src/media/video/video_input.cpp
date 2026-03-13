@@ -34,6 +34,7 @@
 #include "sinkclient.h"
 #include "logger.h"
 #include "media/media_buffer.h"
+#include "video_source_utils.h"
 
 #include <libavformat/avio.h>
 
@@ -1132,7 +1133,8 @@ VideoInput::restart()
 std::shared_future<DeviceParams>
 VideoInput::switchInput(const std::string& resource)
 {
-    SIP_CORE_DBG("MRL: '%s'", resource.c_str());
+    const auto normalizedResource = normalizeVideoSwitchSource(resource);
+    SIP_CORE_DBG("MRL: '%s'", normalizedResource.c_str());
 
     decOptsFound_ = false;
 
@@ -1141,8 +1143,8 @@ VideoInput::switchInput(const std::string& resource)
     foundDecOpts_.swap(p);
 
     // Switch off video input?
-    if (resource.empty()) {
-        currentResource_ = resource;
+    if (normalizedResource.empty()) {
+        currentResource_ = normalizedResource;
         // some default params
         foundDecOpts(DeviceParams {});
         futureDecOpts_ = foundDecOpts_.get_future().share();
@@ -1154,15 +1156,15 @@ VideoInput::switchInput(const std::string& resource)
     // Supported MRL schemes
     static const std::string sep = libsip_core::Media::VideoProtocolPrefix::SEPARATOR;
 
-    const auto pos = resource.find(sep);
+    const auto pos = normalizedResource.find(sep);
     if (pos == std::string::npos)
         return {};
 
-    const auto prefix = resource.substr(0, pos);
-    if ((pos + sep.size()) >= resource.size())
+    const auto prefix = normalizedResource.substr(0, pos);
+    if ((pos + sep.size()) >= normalizedResource.size())
         return {};
 
-    const auto suffix = resource.substr(pos + sep.size());
+    const auto suffix = normalizedResource.substr(pos + sep.size());
 
     // if already is true -> skip
     if (switchPending_.exchange(true)) {
@@ -1174,7 +1176,7 @@ VideoInput::switchInput(const std::string& resource)
     const auto previousDecOpts = decOpts_;
     const auto previousEmulateRate = emulateRate_;
 
-    currentResource_ = resource;
+    currentResource_ = normalizedResource;
 
     bool ready = false;
     bool recognized = false;
@@ -1228,10 +1230,10 @@ VideoInput::switchInput(const std::string& resource)
 
     if (!isStopped_) {
         stopInput();
-        sink_ = Manager::instance().createSinkClient(resource);
+        sink_ = Manager::instance().createSinkClient(normalizedResource);
     }
 
-    currentResource_ = resource;
+    currentResource_ = normalizedResource;
     decOpts_ = nextDecOpts;
     emulateRate_ = nextEmulateRate;
 

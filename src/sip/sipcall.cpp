@@ -1474,17 +1474,20 @@ bool
 SIPCall::switchInput(const std::string& source)
 {
 #ifdef ENABLE_VIDEO
-    SIP_CORE_DBG("[call:%s] Set selected source to %s", getCallId().c_str(), source.c_str());
+    const auto normalizedSource = video::normalizeVideoSwitchSource(source);
+    SIP_CORE_DBG("[call:%s] Set selected source to %s",
+                 getCallId().c_str(),
+                 normalizedSource.c_str());
 
-    if (!isValidVideoSwitchSource(source)) {
+    if (!isValidVideoSwitchSource(normalizedSource)) {
         SIP_CORE_WARN("[call:%s] Rejecting unavailable video source '%s'",
                       getCallId().c_str(),
-                      source.c_str());
+                      normalizedSource.c_str());
         reportMediaNegotiationStatus(libsip_core::Media::MediaNegotiationStatusEvents::NEGOTIATION_FAIL);
         return false;
     }
 
-    if (source.empty()) {
+    if (normalizedSource.empty()) {
         auto currentMediaList = getMediaAttributeList();
         for (const auto& videoRtp : getRtpSessionList(MediaType::MEDIA_VIDEO)) {
             auto input = std::static_pointer_cast<video::VideoRtpSession>(videoRtp)->getVideoLocal();
@@ -1493,7 +1496,7 @@ SIPCall::switchInput(const std::string& source)
         }
         for (auto& media : currentMediaList) {
             if (media.type_ == MediaType::MEDIA_VIDEO) {
-                media.sourceUri_ = source;
+                media.sourceUri_ = normalizedSource;
                 media.muted_ = true;
             }
         }
@@ -1507,7 +1510,7 @@ SIPCall::switchInput(const std::string& source)
         auto currentMediaList = getMediaAttributeList();
         for (auto& media : currentMediaList) {
             if (media.type_ == MediaType::MEDIA_VIDEO) {
-                media.sourceUri_ = source;
+                media.sourceUri_ = normalizedSource;
                 media.muted_ = false;
             }
         }
@@ -1562,7 +1565,7 @@ SIPCall::switchInput(const std::string& source)
                             call->reportMediaNegotiationStatus(
                                 libsip_core::Media::MediaNegotiationStatusEvents::NEGOTIATION_FAIL);
                 });
-                input->switchInput(source);
+                input->switchInput(normalizedSource);
             }
         }
     }

@@ -178,10 +178,14 @@ test_video_source_validation_helpers()
                 "Empty source should be accepted for local video disable");
     expect_true(isValidVideoSwitchSource("display://Desktop", devices),
                 "Display capture source should be accepted");
+    expect_true(isValidVideoSwitchSource("desktop://Desktop", devices),
+                "Desktop alias source should be accepted");
     expect_true(isValidVideoSwitchSource("file://clip.mp4", devices),
                 "File source should be accepted");
     expect_true(isValidVideoSwitchSource("camera://video=cam0", devices),
                 "Known camera source should be accepted");
+    expect_true(normalizeVideoSwitchSource("desktop://Desktop") == "display://Desktop",
+                "Desktop alias should normalize to display prefix");
     expect_true(!isValidVideoSwitchSource("camera://", devices),
                 "Camera source without device id must be rejected");
     expect_true(!isValidVideoSwitchSource("camera://video=cam", devices),

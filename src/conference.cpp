@@ -1069,9 +1069,10 @@ bool
 Conference::switchInput(const std::string& input)
 {
 #ifdef ENABLE_VIDEO
-    SIP_CORE_DEBUG("[Conf:{:s}] Setting video input to {:s}", id_, input);
+    const auto normalizedInput = video::normalizeVideoSwitchSource(input);
+    SIP_CORE_DEBUG("[Conf:{:s}] Setting video input to {:s}", id_, normalizedInput);
     if (!video::isValidVideoSwitchSource(
-            input,
+            normalizedInput,
             Manager::instance().getVideoManager().videoDeviceMonitor.getDeviceList())) {
         reportMediaNegotiationStatus(libsip_core::Media::MediaNegotiationStatusEvents::NEGOTIATION_FAIL);
         return false;
@@ -1085,7 +1086,7 @@ Conference::switchInput(const std::string& input)
         if (source.type_ == MediaType::MEDIA_VIDEO) {
             if (firstVideo) {
                 firstVideo = false;
-                source.sourceUri_ = input;
+                source.sourceUri_ = normalizedInput;
                 newSources.emplace_back(source);
             }
         } else {
@@ -1100,7 +1101,7 @@ Conference::switchInput(const std::string& input)
     }
 
     if (auto mixer = videoMixer_) {
-        mixer->switchInputs({input});
+        mixer->switchInputs({normalizedInput});
 
         // if local video was not muted, start / restart video input again
         if (!isMediaSourceMuted(MediaType::MEDIA_VIDEO)) {

@@ -12,6 +12,8 @@ bool containsExactDeviceId(const std::vector<std::string>& deviceIds, std::strin
 std::string chooseDefaultDeviceId(std::string_view currentDefault,
                                   const std::vector<std::string>& physicalDeviceIds);
 
+std::string normalizeVideoSwitchSource(std::string_view source);
+
 bool isValidVideoSwitchSource(std::string_view source,
                               const std::vector<std::string>& availableCameraIds);
 
