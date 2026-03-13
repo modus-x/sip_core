@@ -1133,6 +1133,7 @@ VideoInput::restart()
 std::shared_future<DeviceParams>
 VideoInput::switchInput(const std::string& resource)
 {
+    std::lock_guard<std::mutex> switchLock(switchMutex_);
     const auto normalizedResource = normalizeVideoSwitchSource(resource);
     SIP_CORE_DBG("MRL: '%s'", normalizedResource.c_str());
 
@@ -1166,8 +1167,8 @@ VideoInput::switchInput(const std::string& resource)
 
     const auto suffix = normalizedResource.substr(pos + sep.size());
 
-    // if already is true -> skip
-    if (switchPending_.exchange(true)) {
+    // Reject overlapping requests while the next source is still starting.
+    if (switchPending_.load()) {
         SIP_CORE_ERR("Video switch already requested");
         return {};
     }
@@ -1224,8 +1225,9 @@ VideoInput::switchInput(const std::string& resource)
     const auto nextDecOpts = decOpts_;
     const auto nextEmulateRate = emulateRate_;
 
-    // Keep the requested resource visible during shutdown. Restart paths can
-    // observe currentResource_ while stopInput() tears down the previous source.
+    // The running loop must not consume the next switch request while we are
+    // shutting it down, otherwise it can reopen the previous source.
+    switchPending_.store(false);
     currentResource_ = normalizedResource;
     decOpts_ = previousDecOpts;
     emulateRate_ = previousEmulateRate;
@@ -1238,6 +1240,7 @@ VideoInput::switchInput(const std::string& resource)
     currentResource_ = normalizedResource;
     decOpts_ = nextDecOpts;
     emulateRate_ = nextEmulateRate;
+    switchPending_.store(true);
 
     if (ready) {
         foundDecOpts(decOpts_);
