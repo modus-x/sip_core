@@ -152,8 +152,26 @@ test_video_input_switching()
         = wait_for_condition([&]() { return input.getWidth() == 32 && input.getHeight() == 24; },
                              kOpenTimeout);
     expect_true(openedB, "VideoInput should switch to second device");
+    expect_true(input.getName() == "file://" + filePathB,
+                "VideoInput should keep the switched resource as current");
     expect_true(input.getConfig().input == filePathB,
                 "VideoInput should report the second device path");
+
+    input.stopInput();
+
+    bool stopped
+        = wait_for_condition([&]() { return input.getWidth() == 0 && input.getHeight() == 0; },
+                             kStopTimeout);
+    expect_true(stopped, "VideoInput should stop after switching to the second device");
+
+    input.startInput();
+
+    bool restartedB
+        = wait_for_condition([&]() { return input.getWidth() == 32 && input.getHeight() == 24; },
+                             kOpenTimeout);
+    expect_true(restartedB, "VideoInput should restart using the switched resource");
+    expect_true(input.getConfig().input == filePathB,
+                "VideoInput restart should not fall back to the previous resource");
 
     input.stopInput();
 }

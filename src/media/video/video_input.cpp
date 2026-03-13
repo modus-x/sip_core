@@ -1224,7 +1224,9 @@ VideoInput::switchInput(const std::string& resource)
     const auto nextDecOpts = decOpts_;
     const auto nextEmulateRate = emulateRate_;
 
-    currentResource_ = previousResource;
+    // Keep the requested resource visible during shutdown. Restart paths can
+    // observe currentResource_ while stopInput() tears down the previous source.
+    currentResource_ = normalizedResource;
     decOpts_ = previousDecOpts;
     emulateRate_ = previousEmulateRate;
 
