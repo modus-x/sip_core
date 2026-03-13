@@ -670,7 +670,8 @@ Conference::addParticipant(const std::string& participant_id)
         if (videoMixer_ && participantWasAudioOnly) {
             videoMixer_->addAudioOnlySource(call->getCallId(),
                                             sip_utils::streamId(call->getCallId(),
-                                                                sip_utils::DEFAULT_AUDIO_STREAMID));
+                                                                sip_utils::DEFAULT_AUDIO_STREAMID),
+                                            call->getPeerNumber());
         }
         call->enterConference(shared_from_this());
         // Continue the recording for the conference if one participant was recording

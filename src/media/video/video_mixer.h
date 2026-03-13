@@ -62,9 +62,18 @@ using OnSourcesUpdatedCb = std::function<void(std::vector<SourceInfo>&&)>;
 
 enum class Layout { GRID, ONE_BIG_WITH_SMALL, ONE_BIG };
 
+struct AudioOnlySource
+{
+    std::string callId;
+    std::string streamId;
+    std::string overlayLabel;
+};
+
 class VideoMixer : public VideoGenerator, public VideoFramePassiveReader
 {
     using VideoToStream = std::map<Observable<std::shared_ptr<MediaFrame>>*, StreamInfo>;
+    using AudioOnlySourceKey = std::pair<std::string, std::string>;
+    using AudioOnlySources = std::map<AudioOnlySourceKey, AudioOnlySource>;
 
 public:
     struct Parameters
@@ -167,10 +176,20 @@ public:
 
     std::shared_ptr<SinkClient>& getSink() { return sink_; }
 
-    void addAudioOnlySource(const std::string& callId, const std::string& streamId)
+    void addAudioOnlySource(const std::string& callId,
+                            const std::string& streamId,
+                            const std::string& overlayLabel = {})
     {
         std::unique_lock lock(rwMutex_);
-        audioOnlySources_.insert({callId, streamId});
+        auto key = AudioOnlySourceKey {callId, streamId};
+        auto [it, inserted] = audioOnlySources_.try_emplace(
+            key, AudioOnlySource {callId, streamId, overlayLabel});
+        if (!inserted) {
+            it->second.callId = callId;
+            it->second.streamId = streamId;
+            if (!overlayLabel.empty())
+                it->second.overlayLabel = overlayLabel;
+        }
         updateLayout();
     }
 
@@ -310,9 +329,7 @@ private:
     std::map<std::string, std::chrono::steady_clock::time_point> voiceInactiveDeadlines_;
     int voiceInactiveHoldMs_ {500};
 
-    // pair callId -> streamId
-    // in case of local participant, it will be empty
-    std::set<std::pair<std::string, std::string>> audioOnlySources_;
+    AudioOnlySources audioOnlySources_;
     std::string activeStream_ {};
 
     std::atomic_int layoutUpdated_ {0};

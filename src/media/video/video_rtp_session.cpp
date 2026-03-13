@@ -57,6 +57,18 @@ constexpr auto DELAY_AFTER_REMB_DEC = std::chrono::milliseconds(500);
 constexpr auto NO_DEVICE_WIDTH = 640;
 constexpr auto NO_DEVICE_HEIGHT = 480;
 
+static std::string
+getAudioOnlyOverlayLabel(const std::string& callId)
+{
+    if (callId.empty())
+        return {};
+
+    if (auto call = Manager::instance().getCallFromCallID(callId))
+        return call->getPeerNumber();
+
+    return {};
+}
+
 static void
 keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
 {
@@ -448,7 +460,9 @@ VideoRtpSession::startReceiver()
             auto audioId_ = streamId_;
             string_replace(audioId_, "video", "audio");
             auto activeStream = videoMixer_->verifyActive(streamId_);
-            videoMixer_->addAudioOnlySource(callId_, audioId_);
+            videoMixer_->addAudioOnlySource(callId_,
+                                            audioId_,
+                                            getAudioOnlyOverlayLabel(callId_));
             receiveThread_->detach(videoMixer_.get());
             if (activeStream)
                 videoMixer_->setActiveStream(audioId_);
@@ -470,7 +484,7 @@ VideoRtpSession::stopReceiver()
         auto activeStream = videoMixer_->verifyActive(streamId_);
         auto audioId = streamId_;
         string_replace(audioId, "video", "audio");
-        videoMixer_->addAudioOnlySource(callId_, audioId);
+        videoMixer_->addAudioOnlySource(callId_, audioId, getAudioOnlyOverlayLabel(callId_));
         receiveThread_->detach(videoMixer_.get());
         if (activeStream)
             videoMixer_->setActiveStream(audioId);

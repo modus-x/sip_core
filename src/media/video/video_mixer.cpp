@@ -110,6 +110,7 @@ escapeDrawtext(std::string_view text)
 struct VideoMixer::VideoMixerSource
 {
     Observable<std::shared_ptr<MediaFrame>>* source {nullptr};
+    std::string overlayLabel;
     int rotation {0};
     std::unique_ptr<MediaFilter> transposeFilter {nullptr};
     std::unique_ptr<MediaFilter> bordersFilter {nullptr};
@@ -673,6 +674,9 @@ std::string
 VideoMixer::getCallDisplayName(const std::unique_ptr<VideoMixer::VideoMixerSource>& source,
                                const std::string& fallbackCallId)
 {
+    if (source && !source->overlayLabel.empty())
+        return normalizeDisplayName(source->overlayLabel);
+
     std::string callId = fallbackCallId;
 
     if (callId.empty() && source && source->source) {
@@ -807,30 +811,36 @@ VideoMixer::process()
             i++; // reserve 0 index place for active stream
 
         // first, iterate and draw audioOnlySources_
-        for (auto& [callId, streamId] : audioOnlySources_) {
+        for (auto& [_, audioOnlySource] : audioOnlySources_) {
             /* thread stop pending? */
             if (!loop_.isRunning())
                 return;
 
             auto audioSource = std::make_unique<VideoMixer::VideoMixerSource>();
             audioSource->hasVideo = false;
+            audioSource->overlayLabel = audioOnlySource.overlayLabel;
 
             bool voiceActive = false;
-            if (auto itVA = voiceActivitySnapshot.find(streamId);
+            if (auto itVA = voiceActivitySnapshot.find(audioOnlySource.streamId);
                 itVA != voiceActivitySnapshot.end())
                 voiceActive = itVA->second;
 
             if (!audioOnlyFrame || !audioOnlyFrame->pointer()) {
                 SIP_CORE_WARN("[mixer:%s] No placeholder frame for audio-only source %s",
                               id_.c_str(),
-                              streamId.c_str());
+                              audioOnlySource.streamId.c_str());
                 i++;
                 continue;
             }
 
             // Audio-only source geometry is computed each frame because we instantiate temporary
             // sources for placeholders.
-            processSource(audioSource, audioOnlyFrame, i, streamId, voiceActive, callId);
+            processSource(audioSource,
+                          audioOnlyFrame,
+                          i,
+                          audioOnlySource.streamId,
+                          voiceActive,
+                          audioOnlySource.callId);
             auto frameRendered = render_frame(output, audioOnlyFrame, audioSource, needsUpdate);
             layoutRendered |= frameRendered;
 
@@ -840,8 +850,8 @@ VideoMixer::process()
                                                  audioSource->w,
                                                  audioSource->h,
                                                  audioSource->hasVideo,
-                                                 callId,
-                                                 streamId});
+                                                 audioOnlySource.callId,
+                                                 audioOnlySource.streamId});
             i++;
         }
 
