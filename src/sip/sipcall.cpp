@@ -1526,8 +1526,43 @@ SIPCall::switchInput(const std::string& source)
                 inputsToSwitch.emplace_back(std::move(input));
         }
 
+        static const std::string sep = libsip_core::Media::VideoProtocolPrefix::SEPARATOR;
+        const bool isCameraSource
+            = normalizedSource.compare(
+                  0,
+                  std::char_traits<char>::length(libsip_core::Media::VideoProtocolPrefix::CAMERA)
+                      + sep.size(),
+                  std::string(libsip_core::Media::VideoProtocolPrefix::CAMERA) + sep)
+              == 0;
+
         if (inputsToSwitch.empty()) {
             reportMediaNegotiationStatus();
+        } else if (!isCameraSource) {
+            reportMediaNegotiationStatus();
+
+            auto switchFinished = std::make_shared<std::atomic_bool>(false);
+            for (auto& input : inputsToSwitch) {
+                std::weak_ptr<video::VideoInput> inputWeak = input;
+                input->setSuccessfulSetupCb([inputWeak](MediaType, bool) {
+                    if (auto localInput = inputWeak.lock()) {
+                        localInput->setSuccessfulSetupCb({});
+                        localInput->setFailedSetupCb({});
+                    }
+                });
+                input->setFailedSetupCb([callWeak = weak(), inputWeak, switchFinished](MediaType) {
+                    if (auto localInput = inputWeak.lock()) {
+                        localInput->setSuccessfulSetupCb({});
+                        localInput->setFailedSetupCb({});
+                    }
+
+                    bool expected = false;
+                    if (switchFinished->compare_exchange_strong(expected, true))
+                        if (auto call = callWeak.lock())
+                            call->reportMediaNegotiationStatus(
+                                libsip_core::Media::MediaNegotiationStatusEvents::NEGOTIATION_FAIL);
+                });
+                input->switchInput(normalizedSource);
+            }
         } else {
             auto remainingInputs = std::make_shared<std::atomic_size_t>(inputsToSwitch.size());
             auto switchFinished = std::make_shared<std::atomic_bool>(false);
