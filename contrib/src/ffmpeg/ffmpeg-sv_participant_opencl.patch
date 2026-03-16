@@ -175,7 +175,7 @@ diff --git a/libavfilter/vf_sv_participant_opencl.c b/libavfilter/vf_sv_particip
 new file mode 100644
 --- /dev/null
 +++ b/libavfilter/vf_sv_participant_opencl.c
-@@ -0,0 +1,593 @@
+@@ -0,0 +1,594 @@
 +/*
 + * This file is part of FFmpeg.
 + *
@@ -198,6 +198,7 @@ new file mode 100644
 +#include "libavutil/opt.h"
 +#include "libavutil/pixdesc.h"
 +#include "libavutil/eval.h"
++#include <libavutil/mem.h>
 +
 +#if CONFIG_LIBFONTCONFIG
 +#include <fontconfig/fontconfig.h>
