@@ -660,8 +660,6 @@ if(MSVC)
       debug
       ${DEPS_DEBUG}/lib/swscale.lib
       debug
-      ${DEPS_DEBUG}/bcg729.lib
-      debug
       ${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/pjproject/pjsip/lib/pjsip-core-x86_64-x64-vc15-Debug.lib
       debug
       ${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/pjproject/pjsip/lib/pjsip-simple-x86_64-x64-vc15-Debug.lib
@@ -683,8 +681,6 @@ if(MSVC)
       ${DEPS_RELEASE}/lib/avutil.lib
       optimized
       ${DEPS_RELEASE}/lib/swscale.lib
-      optimized
-      ${DEPS_RELEASE}/bcg729.lib
       optimized
       ${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/pjproject/pjsip/lib/pjsip-core-x86_64-x64-vc15-Release.lib
       optimized
@@ -745,7 +741,7 @@ else()
 	    pkg_search_module(zlib_${TARGET} REQUIRED IMPORTED_TARGET zlib)
 	    pkg_search_module(fontconfig_${TARGET} REQUIRED IMPORTED_TARGET fontconfig)
 	    pkg_search_module(harfbuzz_${TARGET} REQUIRED IMPORTED_TARGET harfbuzz)
-	    pkg_search_module(bcg729_${TARGET} REQUIRED IMPORTED_TARGET bcg729)
+	    pkg_search_module(libbcg729_${TARGET} REQUIRED IMPORTED_TARGET libbcg729)
 
     # LD_FLAGS are broken on Apple, erase them
     if(APPLE)
@@ -787,7 +783,7 @@ else()
 	             PkgConfig::zlib_${TARGET}
 	             PkgConfig::fontconfig_${TARGET}
 	             PkgConfig::harfbuzz_${TARGET}
-	             PkgConfig::bcg729_${TARGET}
+	             PkgConfig::libbcg729_${TARGET}
 	      # for passing video frames to external libraries
 	      PUBLIC PkgConfig::avutil_${TARGET})
 

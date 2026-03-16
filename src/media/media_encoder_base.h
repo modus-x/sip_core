@@ -54,6 +54,7 @@
  class MediaEncoderBase
  {
  public:
+     virtual ~MediaEncoderBase() = default;
      virtual void openOutput(const std::string& filename, const std::string& format = "") = 0;
      virtual void setMetadata(const std::string& title, const std::string& description) = 0;
  

@@ -70,6 +70,7 @@ enum class DecodeStatus {
 class MediaDecoderBase
 {
 public:
+    virtual ~MediaDecoderBase() = default;
     virtual void emulateRate() = 0;
 
     virtual int openInput(const DeviceParams&) = 0;
