@@ -87,6 +87,8 @@ public:
     void stop() override;
 
     void setMuted(bool mute, Direction dir = Direction::SEND) override;
+    void enterLocalHoldBlackout(bool startSessionIfNeeded = false);
+    void leaveLocalHoldBlackout();
 
     void cancelKeepAliveTimer();
 
@@ -190,8 +192,13 @@ private:
     InterruptedThreadLoop mutedFrameThread_;
     void processMutedFrame();
     void ensureMutedKeepAliveLocked();
+    void sendHoldBlackPrerollLocked();
+    bool isDisplayCaptureSource() const;
     std::atomic<bool> sendMutedFrames_ {false};
     std::atomic<bool> localMuted_ {false};
+    bool localHoldBlackoutActive_ {false};
+    bool holdBlackoutPrerollPending_ {false};
+    bool displaySuspendedForHold_ {false};
 
     std::function<void(int)> changeOrientationCallback_;
 

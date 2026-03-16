@@ -631,12 +631,14 @@ VideoInput::deleteDecoder()
     decoder_.reset();
 }
 
+#ifndef VIDEO_CLIENT_INPUT
 void
 VideoInput::stopInput()
 {
     notifyCaptureStopped();
 
     isStopped_ = true;
+    suspendedForHold_.store(false);
     startupAbortReason_.store(StartupAbortReason::StopRequested);
     if (videoManagedByClient()) {
         capturing_ = false;
@@ -652,6 +654,7 @@ VideoInput::stopInput()
 void
 VideoInput::startInput()
 {
+    suspendedForHold_.store(false);
     if (decOpts_.input.empty() && !currentResource_.empty() && !switchPending_.load()
         && !switchInProgress_.load()) {
         // Restart using the last known resource when options were cleared.
@@ -666,6 +669,57 @@ VideoInput::startInput()
     if (videoManagedByClient())
         notifyCaptureStarted();
 }
+
+void
+VideoInput::suspendForHold()
+{
+    if (videoManagedByClient()) {
+        capturing_ = false;
+        suspendedForHold_.store(true);
+        clearStartupDeadline();
+        return;
+    }
+
+    if (!loop_.isRunning() && !decoder_) {
+        suspendedForHold_.store(true);
+        return;
+    }
+
+    notifyCaptureStopped();
+    isStopped_ = true;
+    startupAbortReason_.store(StartupAbortReason::StopRequested);
+    loop_.join();
+    clearStartupDeadline();
+    captureStartPending_.store(false);
+    suspendedForHold_.store(true);
+}
+
+void
+VideoInput::resumeAfterHold()
+{
+    if (!suspendedForHold_.exchange(false)) {
+        return;
+    }
+
+    if (videoManagedByClient()) {
+        capturing_ = !decOpts_.input.empty();
+        if (capturing_)
+            notifyCaptureStarted();
+        return;
+    }
+
+    if (decOpts_.input.empty()) {
+        SIP_CORE_WARN("VideoInput resume requested without preserved input");
+        return;
+    }
+
+    isStopped_ = false;
+    startupAbortReason_.store(StartupAbortReason::None);
+    switchPending_.store(true);
+    captureStartPending_.store(true);
+    startLoop();
+}
+#endif
 
 void
 VideoInput::clearOptions()

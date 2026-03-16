@@ -329,6 +329,7 @@ private:
     void setupNegotiatedMedia();
     void startEarlyMediaLocked();
     void promoteEarlyMediaToActiveLocked();
+    void applyLocalHoldAudioKeepalive(bool enable, bool startSessionsIfNeeded);
 #ifdef ENABLE_VIDEO
     void applyLocalHoldVideoBlackout(bool enable, bool startSessionsIfNeeded);
 #endif

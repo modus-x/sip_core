@@ -67,6 +67,8 @@ public:
     void startEarlyMedia();
     void stopEarlyMedia();
     void promoteEarlyMediaToActive();
+    void startHoldKeepalive();
+    void stopHoldKeepalive(bool restartSender = false);
 
     std::shared_ptr<AudioInput>& getAudioLocal() { return audioInput_; }
     std::unique_ptr<AudioReceiveThread>& getAudioReceive() { return receiveThread_; }
@@ -99,6 +101,7 @@ private:
     bool muteState_ {false};
     bool receiverActive_ {true};
     bool earlyMediaMode_ {false};
+    bool holdKeepaliveMode_ {false};
     unsigned packetLoss_ {10};
     DeviceParams localAudioParams_;
 

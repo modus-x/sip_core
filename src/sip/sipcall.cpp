@@ -1387,19 +1387,27 @@ SIPCall::hold()
         return false;
     }
 
-    stopAllMedia();
-
     for (auto& stream : rtpStreams_) {
         stream.mediaAttribute_->onHold_ = true;
     }
 
+    applyLocalHoldAudioKeepalive(true, false);
+
 #ifdef ENABLE_VIDEO
     // Keep outbound video decodable during local hold even if re-INVITE is not forwarded.
-    applyLocalHoldVideoBlackout(true, true);
+    applyLocalHoldVideoBlackout(true, false);
 #endif
 
     if (SIPSessionReinvite() != PJ_SUCCESS) {
         SIP_CORE_WARN("[call:%s] Reinvite failed", getCallId().c_str());
+        for (auto& stream : rtpStreams_) {
+            stream.mediaAttribute_->onHold_ = false;
+        }
+        applyLocalHoldAudioKeepalive(false, true);
+#ifdef ENABLE_VIDEO
+        applyLocalHoldVideoBlackout(false, false);
+#endif
+        setState(CallState::ACTIVE);
         return false;
     }
 
@@ -1455,6 +1463,7 @@ SIPCall::internalOffHold(const std::function<void()>& sdp_cb)
         for (auto& stream : rtpStreams_) {
             stream.mediaAttribute_->onHold_ = false;
         }
+        applyLocalHoldAudioKeepalive(false, true);
 #ifdef ENABLE_VIDEO
         // Restore normal local/remote mute handling before negotiating hold-off.
         applyLocalHoldVideoBlackout(false, false);
@@ -2202,12 +2211,13 @@ SIPCall::startAllMedia()
         }
     }
 
-#ifdef ENABLE_VIDEO
     if (getState() == CallState::HOLD) {
+        applyLocalHoldAudioKeepalive(true, true);
+#ifdef ENABLE_VIDEO
         // Keep audio stopped on local hold, but continue sending black video frames.
         applyLocalHoldVideoBlackout(true, true);
-    }
 #endif
+    }
 
     // Media is restarted, we can process the last holding request.
     if (remainingRequest_ != Request::NoRequest) {
@@ -2237,6 +2247,37 @@ SIPCall::startAllMedia()
     }
 }
 
+void
+SIPCall::applyLocalHoldAudioKeepalive(bool enable, bool startSessionsIfNeeded)
+{
+    for (auto& stream : rtpStreams_) {
+        if (!stream.rtpSession_ || !stream.mediaAttribute_
+            || stream.mediaAttribute_->type_ != MediaType::MEDIA_AUDIO) {
+            continue;
+        }
+
+        auto audioRtp = std::dynamic_pointer_cast<AudioRtpSession>(stream.rtpSession_);
+        if (!audioRtp) {
+            continue;
+        }
+
+        if (enable) {
+            SIP_CORE_DBG("[call:%s] [%s] enabling hold audio keepalive",
+                         getCallId().c_str(),
+                         stream.mediaAttribute_->label_.c_str());
+            audioRtp->setMuted(true, RtpSession::Direction::RECV);
+            audioRtp->startHoldKeepalive();
+            continue;
+        }
+
+        SIP_CORE_DBG("[call:%s] [%s] disabling hold audio keepalive",
+                     getCallId().c_str(),
+                     stream.mediaAttribute_->label_.c_str());
+        audioRtp->stopHoldKeepalive(startSessionsIfNeeded);
+        audioRtp->setMuted(peerMuted_, RtpSession::Direction::RECV);
+    }
+}
+
 #ifdef ENABLE_VIDEO
 void
 SIPCall::applyLocalHoldVideoBlackout(bool enable, bool startSessionsIfNeeded)
@@ -2256,11 +2297,8 @@ SIPCall::applyLocalHoldVideoBlackout(bool enable, bool startSessionsIfNeeded)
             SIP_CORE_DBG("[call:%s] [%s] enabling hold video blackout",
                          getCallId().c_str(),
                          stream.mediaAttribute_->label_.c_str());
-            videoRtp->setMuted(true, RtpSession::Direction::SEND);
             videoRtp->setMuted(true, RtpSession::Direction::RECV);
-            if (startSessionsIfNeeded) {
-                videoRtp->start();
-            }
+            videoRtp->enterLocalHoldBlackout(startSessionsIfNeeded);
             continue;
         }
 
@@ -2272,6 +2310,7 @@ SIPCall::applyLocalHoldVideoBlackout(bool enable, bool startSessionsIfNeeded)
                      stream.mediaAttribute_->label_.c_str(),
                      localMuted ? "true" : "false",
                      remoteMuted ? "true" : "false");
+        videoRtp->leaveLocalHoldBlackout();
         videoRtp->setMuted(localMuted, RtpSession::Direction::SEND);
         videoRtp->setMuted(remoteMuted, RtpSession::Direction::RECV);
     }

@@ -98,6 +98,8 @@ public:
 #else
     void stopInput();
     void startInput();
+    void suspendForHold();
+    void resumeAfterHold();
 #endif
 
     void setSuccessfulSetupCb(const std::function<void(MediaType, bool)>& cb)
@@ -137,6 +139,7 @@ private:
     std::atomic_bool decOptsFound_ {false};
     std::atomic_bool captureStarted_ {false};
     std::atomic_bool captureStartPending_ {false};
+    std::atomic_bool suspendedForHold_ {false};
 
     // set value to promise. you can listen for another thread for foundDecOpts_, which it returned
     // from switchInput

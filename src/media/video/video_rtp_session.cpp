@@ -35,6 +35,7 @@
 #include "congestion_control.h"
 
 #include "account_const.h"
+#include "sip_core/media_const.h"
 
 #include <sstream>
 #include <map>
@@ -53,6 +54,8 @@ constexpr auto DELAY_AFTER_RESTART = std::chrono::milliseconds(1000);
 constexpr auto EXPIRY_TIME_RTCP = std::chrono::seconds(2);
 constexpr auto DELAY_AFTER_REMB_INC = std::chrono::seconds(1);
 constexpr auto DELAY_AFTER_REMB_DEC = std::chrono::milliseconds(500);
+constexpr auto HOLD_BLACKOUT_PREROLL_INTERVAL = std::chrono::milliseconds(40);
+constexpr int HOLD_BLACKOUT_PREROLL_FRAMES = 3;
 
 constexpr auto NO_DEVICE_WIDTH = 640;
 constexpr auto NO_DEVICE_HEIGHT = 480;
@@ -340,6 +343,9 @@ VideoRtpSession::startSender()
             if (!localMuted_.load()) {
                 attachVideoInput();
             } else {
+                if (localHoldBlackoutActive_ && holdBlackoutPrerollPending_) {
+                    sendHoldBlackPrerollLocked();
+                }
                 // Stream restart after negotiation can leave muted keepalive stopped.
                 // Re-ensure decodable muted RTP traffic once sender is available.
                 ensureMutedKeepAliveLocked();
@@ -612,7 +618,37 @@ VideoRtpSession::stop()
     storeVideoBitrateInfo();
 
     socketPair_.reset();
-    videoLocal_.reset();
+    if (!localHoldBlackoutActive_) {
+        videoLocal_.reset();
+        displaySuspendedForHold_ = false;
+    }
+}
+
+void
+VideoRtpSession::enterLocalHoldBlackout(bool startSessionIfNeeded)
+{
+    {
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
+        localHoldBlackoutActive_ = true;
+        holdBlackoutPrerollPending_ = true;
+    }
+
+    setMuted(true, Direction::SEND);
+
+    if (startSessionIfNeeded) {
+        start();
+    }
+}
+
+void
+VideoRtpSession::leaveLocalHoldBlackout()
+{
+    std::unique_lock<std::recursive_mutex> lock(mutex_);
+    localHoldBlackoutActive_ = false;
+    holdBlackoutPrerollPending_ = false;
+    sendMutedFrames_.store(false);
+    lock.unlock();
+    mutedFrameThread_.join();
 }
 
 void
@@ -626,6 +662,9 @@ VideoRtpSession::setMuted(bool mute, Direction dir)
             SIP_CORE_DBG("[%p] Local already %s", this, mute ? "muted" : "un-muted");
             if (mute) {
                 // Sender may have been restarted while muted; ensure keepalive is active.
+                if (localHoldBlackoutActive_ && holdBlackoutPrerollPending_ && sender_) {
+                    sendHoldBlackPrerollLocked();
+                }
                 ensureMutedKeepAliveLocked();
             }
             return;
@@ -640,10 +679,19 @@ VideoRtpSession::setMuted(bool mute, Direction dir)
         if (!conference_) {
             if (mute) {
                 if (videoLocal_) {
-                    // Detach and stop video input to turn off camera/display capture
                     detachVideoInput();
-                    videoLocal_->stopInput();
-                    SIP_CORE_DBG("[%p] Video input stopped (muted)", this);
+                    if (localHoldBlackoutActive_ && holdBlackoutPrerollPending_ && sender_) {
+                        sendHoldBlackPrerollLocked();
+                    }
+
+                    if (localHoldBlackoutActive_ && isDisplayCaptureSource()) {
+                        videoLocal_->suspendForHold();
+                        displaySuspendedForHold_ = true;
+                        SIP_CORE_DBG("[%p] Display input suspended for local hold blackout", this);
+                    } else {
+                        videoLocal_->stopInput();
+                        SIP_CORE_DBG("[%p] Video input stopped (muted)", this);
+                    }
                 }
             } else {
                 if (!videoLocal_) {
@@ -654,8 +702,13 @@ VideoRtpSession::setMuted(bool mute, Direction dir)
                     }
                 }
                 if (videoLocal_) {
-                    // Restart video input and reattach
-                    videoLocal_->startInput();
+                    const bool resumingSuspendedDisplay = displaySuspendedForHold_;
+                    if (displaySuspendedForHold_) {
+                        videoLocal_->resumeAfterHold();
+                        displaySuspendedForHold_ = false;
+                    } else {
+                        videoLocal_->startInput();
+                    }
                     auto newParams = videoLocal_->getParams();
                     try {
                         if (newParams.valid()
@@ -673,6 +726,9 @@ VideoRtpSession::setMuted(bool mute, Direction dir)
                     }
                     if (sender_) {
                         attachVideoInput();
+                        if (resumingSuspendedDisplay) {
+                            sender_->forceKeyFrame();
+                        }
                     }
                     SIP_CORE_DBG("[%p] Video input started (unmuted)", this);
                 }
@@ -744,16 +800,45 @@ VideoRtpSession::ensureMutedKeepAliveLocked()
 
     sendMutedFrames_.store(true);
     if (!mutedFrameThread_.isRunning()) {
-        // Send one decodable frame immediately to accelerate NAT hole punching.
-        // SIP hold-blackout path also relies on this muted-frame sender.
-        sender_->sendBlackFrame(localVideoParams_.width > 0 ? localVideoParams_.width
-                                                            : NO_DEVICE_WIDTH,
-                                localVideoParams_.height > 0 ? localVideoParams_.height
-                                                             : NO_DEVICE_HEIGHT);
+        if (!(localHoldBlackoutActive_ && !holdBlackoutPrerollPending_)) {
+            // Send one decodable frame immediately to accelerate NAT hole punching.
+            sender_->sendBlackFrame(localVideoParams_.width > 0 ? localVideoParams_.width
+                                                                : NO_DEVICE_WIDTH,
+                                    localVideoParams_.height > 0 ? localVideoParams_.height
+                                                                 : NO_DEVICE_HEIGHT);
+        }
         mutedFrameThread_.start();
         SIP_CORE_DBG("[%p] Started muted frame thread", this);
     }
 #endif
+}
+
+void
+VideoRtpSession::sendHoldBlackPrerollLocked()
+{
+    if (!sender_) {
+        return;
+    }
+
+    for (int frame = 0; frame < HOLD_BLACKOUT_PREROLL_FRAMES; ++frame) {
+        sender_->sendBlackFrame(localVideoParams_.width > 0 ? localVideoParams_.width
+                                                            : NO_DEVICE_WIDTH,
+                                localVideoParams_.height > 0 ? localVideoParams_.height
+                                                             : NO_DEVICE_HEIGHT);
+        if (frame + 1 < HOLD_BLACKOUT_PREROLL_FRAMES) {
+            std::this_thread::sleep_for(HOLD_BLACKOUT_PREROLL_INTERVAL);
+        }
+    }
+
+    holdBlackoutPrerollPending_ = false;
+}
+
+bool
+VideoRtpSession::isDisplayCaptureSource() const
+{
+    constexpr auto sep = libsip_core::Media::VideoProtocolPrefix::SEPARATOR;
+    const auto prefix = std::string(libsip_core::Media::VideoProtocolPrefix::DISPLAY) + sep;
+    return input_.rfind(prefix, 0) == 0;
 }
 
 void

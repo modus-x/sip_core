@@ -140,7 +140,7 @@ AudioRtpSession::startNatPunchingLocked()
 void
 AudioRtpSession::stopNatPunchingLocked()
 {
-    if (natPunchThread_.isRunning()) {
+    if (!earlyMediaMode_ && !holdKeepaliveMode_ && natPunchThread_.isRunning()) {
         natPunchThread_.join();
     }
 }
@@ -150,7 +150,7 @@ AudioRtpSession::processNatPunch()
 {
     {
         std::unique_lock<std::recursive_mutex> lock(mutex_, std::try_to_lock);
-        if (lock.owns_lock() && earlyMediaMode_ && sender_) {
+        if (lock.owns_lock() && (earlyMediaMode_ || holdKeepaliveMode_) && sender_) {
             sender_->natPing();
         }
     }
@@ -200,6 +200,66 @@ AudioRtpSession::promoteEarlyMediaToActive()
     earlyMediaMode_ = false;
     stopNatPunchingLocked();
     startSender();
+}
+
+void
+AudioRtpSession::startHoldKeepalive()
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+
+    if (!send_.enabled) {
+        return;
+    }
+
+    try {
+        ensureSocketPairLocked();
+    } catch (const std::runtime_error& e) {
+        SIP_CORE_ERR("Socket creation failed: %s", e.what());
+        return;
+    }
+
+    holdKeepaliveMode_ = true;
+
+    if (audioInput_) {
+        audioInput_->detach(sender_.get());
+        audioInput_.reset();
+    }
+
+    if (!sender_) {
+        socketPair_->stopSendOp();
+        try {
+            sender_.reset();
+            socketPair_->stopSendOp(false);
+            sender_.reset(new AudioSender(getRemoteRtpUri(), send_, *socketPair_, initSeqVal_, mtu_));
+        } catch (const MediaEncoderException& e) {
+            SIP_CORE_ERR("%s", e.what());
+            send_.enabled = false;
+            return;
+        }
+    }
+
+    startNatPunchingLocked();
+}
+
+void
+AudioRtpSession::stopHoldKeepalive(bool restartSender)
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+
+    holdKeepaliveMode_ = false;
+    stopNatPunchingLocked();
+
+    if (restartSender && send_.enabled && !send_.onHold) {
+        if (!socketPair_) {
+            try {
+                ensureSocketPairLocked();
+            } catch (const std::runtime_error& e) {
+                SIP_CORE_ERR("Socket creation failed: %s", e.what());
+                return;
+            }
+        }
+        startSender();
+    }
 }
 
 void
@@ -337,6 +397,7 @@ AudioRtpSession::start()
     }
 
     earlyMediaMode_ = false;
+    holdKeepaliveMode_ = false;
     stopNatPunchingLocked();
 
     try {
@@ -357,6 +418,7 @@ AudioRtpSession::stop()
 
     SIP_CORE_DBG("[%p] Stopping receiver", this);
     earlyMediaMode_ = false;
+    holdKeepaliveMode_ = false;
     stopNatPunchingLocked();
 
     if (socketPair_)
