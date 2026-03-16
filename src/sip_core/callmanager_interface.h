@@ -119,6 +119,9 @@ LIBSIP_CORE_PUBLIC bool joinConference(const std::string& accountId,
 LIBSIP_CORE_PUBLIC bool hangUpConference(const std::string& accountId, const std::string& confId);
 LIBSIP_CORE_PUBLIC bool holdConference(const std::string& accountId, const std::string& confId);
 LIBSIP_CORE_PUBLIC bool unholdConference(const std::string& accountId, const std::string& confId);
+LIBSIP_CORE_PUBLIC bool muteConferenceLocalPlayback(const std::string& accountId,
+                                                    const std::string& confId,
+                                                    bool mute);
 LIBSIP_CORE_PUBLIC std::vector<std::string> getConferenceList(const std::string& accountId);
 LIBSIP_CORE_PUBLIC std::vector<std::string> getParticipantList(const std::string& accountId,
                                                                const std::string& confId);

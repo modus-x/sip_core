@@ -316,6 +316,26 @@ unholdConference(const std::string& accountId, const std::string& confId)
     return sip_core::Manager::instance().unHoldConference(accountId, confId);
 }
 
+bool
+muteConferenceLocalPlayback(const std::string& accountId, const std::string& confId, bool mute)
+{
+    if (const auto account = sip_core::Manager::instance().getAccount(accountId)) {
+        if (auto conf = account->getConference(confId)) {
+            conf->muteLocalPlayback(mute);
+            return true;
+        }
+
+        if (auto call = account->getCall(confId)) {
+            if (auto conf = call->getConference()) {
+                conf->muteLocalPlayback(mute);
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
 std::map<std::string, std::string>
 getConferenceDetails(const std::string& accountId, const std::string& confId)
 {

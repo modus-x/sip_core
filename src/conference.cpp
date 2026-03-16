@@ -901,7 +901,7 @@ Conference::attachLocalParticipant()
         auto& rbPool = Manager::instance().getRingBufferPool();
         for (const auto& participant : getParticipantList()) {
             if (auto call = Manager::instance().getCallFromCallID(participant)) {
-                if (isMuted(call->getCallId()))
+                if (localPlaybackMuted_ || isMuted(call->getCallId()))
                     rbPool.bindHalfDuplexOut(participant, RingBufferPool::DEFAULT_ID);
                 else
                     rbPool.bindCallID(participant, RingBufferPool::DEFAULT_ID);
@@ -987,7 +987,9 @@ Conference::bindParticipant(const std::string& participant_id)
     // Bind local participant to other participants only if the
     // local is attached to the conference.
     if (getState() == State::ACTIVE_ATTACHED) {
-        if (isMediaSourceMuted(MediaType::MEDIA_AUDIO))
+        if (localPlaybackMuted_)
+            rbPool.bindHalfDuplexOut(participant_id, RingBufferPool::DEFAULT_ID);
+        else if (isMediaSourceMuted(MediaType::MEDIA_AUDIO))
             rbPool.bindHalfDuplexOut(RingBufferPool::DEFAULT_ID, participant_id);
         else
             rbPool.bindCallID(participant_id, RingBufferPool::DEFAULT_ID);
@@ -1013,7 +1015,10 @@ Conference::bindHost()
         if (auto call = Manager::instance().getCallFromCallID(item)) {
             if (isMuted(call->getCallId()))
                 continue;
-            rbPool.bindCallID(item, RingBufferPool::DEFAULT_ID);
+            if (localPlaybackMuted_)
+                rbPool.bindHalfDuplexOut(item, RingBufferPool::DEFAULT_ID);
+            else
+                rbPool.bindCallID(item, RingBufferPool::DEFAULT_ID);
             rbPool.flush(RingBufferPool::DEFAULT_ID);
         }
     }
@@ -1606,6 +1611,43 @@ Conference::muteCall(const std::string& callId, bool state)
         bindParticipant(callId);
         updateMuted();
     }
+}
+
+void
+Conference::muteLocalPlayback(bool muted)
+{
+    if (localPlaybackMuted_ == muted) {
+        SIP_CORE_DEBUG("Local conference playback already %s for %s",
+                       muted ? "muted" : "un-muted",
+                       id_.c_str());
+        return;
+    }
+
+    SIP_CORE_INFO("Set local conference playback to %s for %s",
+                  muted ? "muted" : "un-muted",
+                  id_.c_str());
+    localPlaybackMuted_ = muted;
+
+    if (getState() != State::ACTIVE_ATTACHED)
+        return;
+
+    auto& rbPool = Manager::instance().getRingBufferPool();
+    const bool hostAudioMuted = isMediaSourceMuted(MediaType::MEDIA_AUDIO);
+
+    for (const auto& participantId : getParticipantList()) {
+        if (muted) {
+            rbPool.unBindHalfDuplexOut(RingBufferPool::DEFAULT_ID, participantId);
+        } else if (!isMuted(participantId)) {
+            if (hostAudioMuted)
+                rbPool.bindHalfDuplexOut(RingBufferPool::DEFAULT_ID, participantId);
+            else
+                rbPool.bindCallID(participantId, RingBufferPool::DEFAULT_ID);
+        }
+
+        rbPool.flush(participantId);
+    }
+
+    rbPool.flush(RingBufferPool::DEFAULT_ID);
 }
 
 void

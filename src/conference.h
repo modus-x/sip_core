@@ -381,6 +381,7 @@ public:
 
     void muteParticipant(const std::string& uri, const bool& state);
     void muteLocalHost(bool is_muted, const std::string& mediaType);
+    void muteLocalPlayback(bool muted);
     // bool isRemoteParticipant(const std::string& uri);
     void mergeConfInfo(ConfInfo& newInfo, const std::string& peerURI);
 
@@ -474,6 +475,7 @@ private:
     std::set<std::string, std::less<>> moderators_ {};
     std::set<std::string, std::less<>> participantsMuted_ {};
     std::set<std::string, std::less<>> handsRaised_;
+    bool localPlaybackMuted_ {false};
 
     bool attachHost_;
 
