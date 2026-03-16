@@ -196,6 +196,7 @@ struct AccountAudioCodecInfo : AccountCodecInfo
     /* account custom values */
     AudioFormat audioformat {AudioFormat::NONE()};
     bool isPCMG722() const;
+    bool isG729() const;
 };
 
 struct AccountVideoCodecInfo : AccountCodecInfo
@@ -303,5 +304,8 @@ struct MediaDescription
 
     /** Crypto parameters */
     CryptoAttribute crypto {};
+
+    /** g.729 specific */
+    bool annex_b { true };
 };
 } // namespace sip_core

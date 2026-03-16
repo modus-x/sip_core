@@ -141,19 +141,19 @@ MediaPlayer::process()
 
     const auto ret = demuxer_->demuxe();
     switch (ret) {
-    case MediaDemuxer::Status::Success:
-    case MediaDemuxer::Status::FallBack:
+    case DecodeStatus::Success:
+    case DecodeStatus::FallBack:
         break;
-    case MediaDemuxer::Status::EndOfFile:
+    case DecodeStatus::EndOfFile:
         demuxer_->updateCurrentState(MediaDemuxer::CurrentState::Finished);
         break;
-    case MediaDemuxer::Status::ReadError:
+    case DecodeStatus::ReadError:
         SIP_CORE_ERR() << "Failed to decode frame";
         break;
-    case MediaDemuxer::Status::ReadBufferOverflow:
+    case DecodeStatus::ReadBufferOverflow:
         readBufferOverflow_ = true;
         break;
-    case MediaDemuxer::Status::RestartRequired:
+    case DecodeStatus::RestartRequired:
     default:
         break;
     }

@@ -69,20 +69,24 @@ MediaDemuxer()
 }
 
 const char*
-MediaDemuxer::getStatusStr(Status status)
+MediaDemuxer::getStatusStr(DecodeStatus status)
 {
     switch (status) {
-    case Status::Success:
+    case DecodeStatus::Success:
         return "Success";
-    case Status::EndOfFile:
+    case DecodeStatus::FrameFinished:
+        return "Frame finished";
+    case DecodeStatus::EndOfFile:
         return "End of file";
-    case Status::ReadBufferOverflow:
+    case DecodeStatus::ReadBufferOverflow:
         return "Read overflow";
-    case Status::ReadError:
+    case DecodeStatus::ReadError:
         return "Read error";
-    case Status::FallBack:
+    case DecodeStatus::DecodeError:
+        return "Decode error";
+    case DecodeStatus::FallBack:
         return "Fallback";
-    case Status::RestartRequired:
+    case DecodeStatus::RestartRequired:
         return "Restart required";
     default:
         return "Undefined";
@@ -352,7 +356,7 @@ MediaDemuxer::pushFrameFrom(
     cb(*packet.get());
 }
 
-MediaDemuxer::Status
+DecodeStatus
 MediaDemuxer::demuxe()
 {
     auto packet = std::unique_ptr<AVPacket, std::function<void(AVPacket*)>>(av_packet_alloc(),
@@ -364,17 +368,17 @@ MediaDemuxer::demuxe()
 
     int ret = av_read_frame(inputCtx_, packet.get());
     if (ret == AVERROR(EAGAIN)) {
-        return Status::Success;
+        return DecodeStatus::Success;
     } else if (ret == AVERROR_EOF) {
-        return Status::EndOfFile;
+        return DecodeStatus::EndOfFile;
     } else if (ret < 0) {
         SIP_CORE_ERR("Couldn't read frame: %s\n", libav_utils::getError(ret).c_str());
-        return Status::ReadError;
+        return DecodeStatus::ReadError;
     }
 
     auto streamIndex = packet->stream_index;
     if (static_cast<unsigned>(streamIndex) >= streams_.size() || streamIndex < 0) {
-        return Status::Success;
+        return DecodeStatus::Success;
     }
 
     AVStream* stream = inputCtx_->streams[streamIndex];
@@ -382,16 +386,16 @@ MediaDemuxer::demuxe()
         std::lock_guard<std::mutex> lk {videoBufferMutex_};
         videoBuffer_.push(std::move(packet));
         if (videoBuffer_.size() >= 90) {
-            return Status::ReadBufferOverflow;
+            return DecodeStatus::ReadBufferOverflow;
         }
     } else {
         std::lock_guard<std::mutex> lk {audioBufferMutex_};
         audioBuffer_.push(std::move(packet));
         if (audioBuffer_.size() >= 300) {
-            return Status::ReadBufferOverflow;
+            return DecodeStatus::ReadBufferOverflow;
         }
     }
-    return Status::Success;
+    return DecodeStatus::Success;
 }
 
 void
@@ -400,7 +404,7 @@ MediaDemuxer::setIOContext(MediaIOHandle* ioctx)
     inputCtx_->pb = ioctx->getContext();
 }
 
-MediaDemuxer::Status
+DecodeStatus
 MediaDemuxer::decode()
 {
     if (inputParams_.format == "x11grab") {
@@ -410,7 +414,7 @@ MediaDemuxer::decode()
             baseWidth_ = codecpar->width;
             inputParams_.height = ((baseHeight_ >> 3) << 3);
             inputParams_.width = ((baseWidth_ >> 3) << 3);
-            return Status::RestartRequired;
+            return DecodeStatus::RestartRequired;
         }
     }
 
@@ -428,19 +432,19 @@ MediaDemuxer::decode()
          never happen.
          */
         if (inputParams_.framerate.numerator() == 0)
-            return Status::Success;
+            return DecodeStatus::Success;
         rational<double> frameTime = 1e6 / inputParams_.framerate;
         int64_t timeToSleep = lastReadPacketTime_ - av_gettime_relative()
                               + frameTime.real<int64_t>();
         if (timeToSleep <= 0) {
-            return Status::Success;
+            return DecodeStatus::Success;
         }
         std::this_thread::sleep_for(std::chrono::microseconds(timeToSleep));
-        return Status::Success;
+        return DecodeStatus::Success;
     } else if (ret == AVERROR_EOF) {
-        return Status::EndOfFile;
+        return DecodeStatus::EndOfFile;
     } else if (ret == AVERROR(EACCES)) {
-        return Status::RestartRequired;
+        return DecodeStatus::RestartRequired;
     } else if (ret < 0) {
         auto media = inputCtx_->streams[0]->codecpar->codec_type;
         const auto type = media == AVMediaType::AVMEDIA_TYPE_AUDIO
@@ -449,12 +453,12 @@ MediaDemuxer::decode()
         SIP_CORE_ERR("Couldn't read [%s] frame: %s\n",
                      type,
                      libav_utils::getError(ret).c_str());
-        return Status::ReadError;
+        return DecodeStatus::ReadError;
     }
 
     auto streamIndex = packet->stream_index;
     if (static_cast<unsigned>(streamIndex) >= streams_.size() || streamIndex < 0) {
-        return Status::Success;
+        return DecodeStatus::Success;
     }
 
     lastReadPacketTime_ = av_gettime_relative();
@@ -463,9 +467,9 @@ MediaDemuxer::decode()
     if (cb) {
         DecodeStatus ret = cb(*packet.get());
         if (ret == DecodeStatus::FallBack)
-            return Status::FallBack;
+            return DecodeStatus::FallBack;
     }
-    return Status::Success;
+    return DecodeStatus::Success;
 }
 
 MediaDecoder::
@@ -847,14 +851,14 @@ MediaDecoder::setSeekTime(int64_t time)
     seekTime_ = time;
 }
 
-MediaDemuxer::Status
+DecodeStatus
 MediaDecoder::decode()
 {
     auto ret = demuxer_->decode();
-    if (ret == MediaDemuxer::Status::RestartRequired) {
+    if (ret == DecodeStatus::RestartRequired) {
         avcodec_flush_buffers(decoderCtx_);
         setupStream();
-        ret = MediaDemuxer::Status::EndOfFile;
+        ret = DecodeStatus::EndOfFile;
     }
     return ret;
 }

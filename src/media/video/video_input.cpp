@@ -218,10 +218,10 @@ VideoInput::captureFrame()
         return false;
 
     switch (decoder_->decode()) {
-    case MediaDemuxer::Status::EndOfFile:
+    case DecodeStatus::EndOfFile:
         createDecoder();
         return static_cast<bool>(decoder_);
-    case MediaDemuxer::Status::ReadError:
+    case DecodeStatus::ReadError:
         SIP_CORE_ERR() << "Failed to decode frame";
         // try again to decode
         return true;
@@ -377,7 +377,7 @@ VideoInput::createDecoder()
     }
 
     auto ret = decoder->decode(); // Populate AVCodecContext fields
-    if (ret == MediaDemuxer::Status::ReadError) {
+    if (ret == DecodeStatus::ReadError) {
         SIP_CORE_INFO() << "Decoder error";
         return;
     }

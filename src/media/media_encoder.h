@@ -21,42 +21,9 @@
 
  #pragma once
 
- #ifdef HAVE_CONFIG_H
- #include "config.h"
- #endif
- 
- #include "audio/audio_sender.h"
- 
- #ifdef ENABLE_VIDEO
- #include "video/video_base.h"
- #include "video/video_scaler.h"
- #endif
- 
- #include "noncopyable.h"
- #include "media_buffer.h"
- #include "media_codec.h"
- #include "media_stream.h"
- 
- #include <map>
- #include <memory>
- #include <string>
- #include <vector>
- 
- #ifdef RQM
- #include <fstream>
- #endif
- 
- extern "C" {
- struct AVCodecContext;
- struct AVFormatContext;
- struct AVDictionary;
- struct AVCodec;
- }
+ #include "media_encoder_base.h"
  
  namespace sip_core {
- 
- struct MediaDescription;
- struct AccountCodecInfo;
  
  #ifdef RING_ACCEL
  namespace video {
@@ -64,80 +31,70 @@
  }
  #endif
  
- class MediaEncoderException : public std::runtime_error
- {
- public:
-     MediaEncoderException(const char* msg)
-         : std::runtime_error(msg)
-     {}
- };
- 
- class MediaEncoder
+ class MediaEncoder final : public MediaEncoderBase
  {
  public:
      MediaEncoder();
      ~MediaEncoder();
  
-     void openOutput(const std::string& filename, const std::string& format = "");
-     void setMetadata(const std::string& title, const std::string& description);
+     void openOutput(const std::string& filename, const std::string& format = "") override;
+     void setMetadata(const std::string& title, const std::string& description) override;
  
      // set media stream parameters (video width, height, audio sample rate, etc)
-     void setOptions(const MediaStream& opts);
+     void setOptions(const MediaStream& opts) override;
  
      // set media description parameters (payload type, video mode)
-     void setOptions(const MediaDescription& args);
+     void setOptions(const MediaDescription& args) override;
  
      // add steam to context with some predefined codec info
  
-     int addStream(const SystemCodecInfo& codec);
-     void setIOContext(AVIOContext* ioctx) { ioCtx_ = ioctx; }
-     void resetStreams(int width, int height);
+     int addStream(const SystemCodecInfo& codec) override;
+     void setIOContext(AVIOContext* ioctx) override { ioCtx_ = ioctx; }
+     void resetStreams(int width, int height) override;
  
-     void encodeAndSendDtmf(dtmf* data);
- 
-     bool send(AVPacket& packet, int streamIdx = -1, bool dummy = false);
+     bool send(AVPacket& packet, int streamIdx = -1, bool dummy = false) override;
  
      // send raw data
-     bool sendBuffer(uint8_t* buf1, unsigned int len, unsigned int samples, int flags);
+     bool sendBuffer(uint8_t* buf1, unsigned int len, unsigned int samples, int flags) override;
  
  #ifdef ENABLE_VIDEO
-     int encode(const std::shared_ptr<VideoFrame>& input, bool is_keyframe, int64_t frame_number);
+     int encode(const std::shared_ptr<VideoFrame>& input, bool is_keyframe, int64_t frame_number) override;
  #endif // ENABLE_VIDEO
  
-     int encodeAudio(AudioFrame& frame);
+     int encodeAudio(AudioFrame& frame) override;
  
      // frame should be ready to be sent to the encoder at this point
-     int encode(AVFrame* frame, int streamIdx);
+     int encode(AVFrame* frame, int streamIdx) override;
  
-     int flush();
-     std::string print_sdp();
+     int flush() override;
+     std::string print_sdp() override;
  
      /* getWidth and getHeight return size of the encoded frame.
       * Values have meaning only after openLiveOutput call.
       */
-     int getWidth() const { return videoOpts_.width; };
-     int getHeight() const { return videoOpts_.height; };
+     int getWidth() const override { return videoOpts_.width; };
+     int getHeight() const override { return videoOpts_.height; };
  
-     void setInitSeqVal(uint16_t seqVal);
-     uint16_t getLastSeqValue();
+     void setInitSeqVal(uint16_t seqVal) override;
+     uint16_t getLastSeqValue() override;
  
-     const std::string& getAudioCodec() const { return audioCodec_; }
-     const std::string& getVideoCodec() const { return videoCodec_; }
+     const std::string& getAudioCodec() const override { return audioCodec_; }
+     const std::string& getVideoCodec() const override { return videoCodec_; }
  
-     int setBitrate(uint64_t br);
-     int setPacketLoss(uint64_t pl);
+     int setBitrate(uint64_t br) override;
+     int setPacketLoss(uint64_t pl) override;
  
  #ifdef RING_ACCEL
-     void enableAccel(bool enableAccel);
+     void enableAccel(bool enableAccel) override;
  #endif
  
      static std::string testH265Accel();
  
-     unsigned getStreamCount() const;
-     MediaStream getStream(const std::string& name, int streamIdx = -1) const;
-     void sendDummyPacket();
+     unsigned getStreamCount() const override;
+     MediaStream getStream(const std::string& name, int streamIdx = -1) const override;
+     void sendDummyPacket() override;
  
-     void setSource(const std::string& source) { source_ = source; }
+     void setSource(const std::string& source) override { source_ = source; }
  
  private:
      NON_COPYABLE(MediaEncoder);

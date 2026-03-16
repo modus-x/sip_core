@@ -422,7 +422,8 @@ target_compile_definitions(
     $<$<OR:$<BOOL:${LINUX}>,$<BOOL:${MSVC}>,$<BOOL:${ANDROID}>>:HAVE_WEBRTC_AP>
     $<$<OR:$<BOOL:${LINUX}>,$<BOOL:${MSVC}>,$<BOOL:${ANDROID}>>:HAVE_SPEEXDSP>
     # Building shared library
-    SIP_CORE_EXPORTS)
+    SIP_CORE_EXPORTS
+    BCG729_STATIC)
 
 if(IOS)
   target_compile_definitions(${PROJECT_NAME} PUBLIC TARGET_OS_IOS)
@@ -603,6 +604,8 @@ if(MSVC)
             ${DEPS_RELEASE}/webrtc-audio-processing.lib
             optimized
             ${DEPS_RELEASE}/portaudio_static_x64.lib
+            optimized
+            ${DEPS_RELEASE}/bcg729.lib
             debug
             ${DEPS_DEBUG}/lib/avcodec.lib
             debug
@@ -643,6 +646,8 @@ if(MSVC)
             ${DEPS_DEBUG}/webrtc-audio-processing.lib
             debug
             ${DEPS_DEBUG}/portaudio_static_x64.lib
+            debug
+            ${DEPS_DEBUG}/bcg729.lib
             # this is for dependencies to work with frames emmitted by our
             # library
     PUBLIC
@@ -654,6 +659,8 @@ if(MSVC)
       ${DEPS_DEBUG}/lib/avutil.lib
       debug
       ${DEPS_DEBUG}/lib/swscale.lib
+      debug
+      ${DEPS_DEBUG}/bcg729.lib
       debug
       ${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/pjproject/pjsip/lib/pjsip-core-x86_64-x64-vc15-Debug.lib
       debug
@@ -676,6 +683,8 @@ if(MSVC)
       ${DEPS_RELEASE}/lib/avutil.lib
       optimized
       ${DEPS_RELEASE}/lib/swscale.lib
+      optimized
+      ${DEPS_RELEASE}/bcg729.lib
       optimized
       ${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/pjproject/pjsip/lib/pjsip-core-x86_64-x64-vc15-Release.lib
       optimized
@@ -736,6 +745,7 @@ else()
 	    pkg_search_module(zlib_${TARGET} REQUIRED IMPORTED_TARGET zlib)
 	    pkg_search_module(fontconfig_${TARGET} REQUIRED IMPORTED_TARGET fontconfig)
 	    pkg_search_module(harfbuzz_${TARGET} REQUIRED IMPORTED_TARGET harfbuzz)
+	    pkg_search_module(bcg729_${TARGET} REQUIRED IMPORTED_TARGET bcg729)
 
     # LD_FLAGS are broken on Apple, erase them
     if(APPLE)
@@ -777,6 +787,7 @@ else()
 	             PkgConfig::zlib_${TARGET}
 	             PkgConfig::fontconfig_${TARGET}
 	             PkgConfig::harfbuzz_${TARGET}
+	             PkgConfig::bcg729_${TARGET}
 	      # for passing video frames to external libraries
 	      PUBLIC PkgConfig::avutil_${TARGET})
 

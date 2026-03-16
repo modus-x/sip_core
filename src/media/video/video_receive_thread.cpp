@@ -243,14 +243,14 @@ VideoReceiveThread::decodeFrame()
         }
     }
     auto status = videoDecoder_->decode();
-    if (status == MediaDemuxer::Status::EndOfFile) {
+    if (status == DecodeStatus::EndOfFile) {
         SIP_CORE_DBG("[{:p}] End of file", fmt::ptr(this));
         loop_.stop();
-    } else if (status == MediaDemuxer::Status::ReadError) {
+    } else if (status == DecodeStatus::ReadError) {
         SIP_CORE_ERROR("[{:p}] Decoding error: %d",
                        fmt::ptr(this),
                        MediaDemuxer::getStatusStr(status));
-    } else if (status == MediaDemuxer::Status::FallBack) {
+    } else if (status == DecodeStatus::FallBack) {
         SIP_CORE_DBG("[{:p}] fallback", fmt::ptr(this));
         if (keyFrameRequestCallback_)
             keyFrameRequestCallback_();

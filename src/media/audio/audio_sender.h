@@ -23,6 +23,7 @@
 #include "audiobuffer.h"
 #include "media_buffer.h"
 #include "media_codec.h"
+#include "media_encoder_base.h"
 #include "noncopyable.h"
 #include "observer.h"
 #include "socket_pair.h"
@@ -42,6 +43,7 @@ namespace sip_core {
         bool firstSent;
     };
 
+    class MediaEncoderBase;
     class AudioInput;
     class MediaEncoder;
     class MediaIOHandle;
@@ -90,7 +92,7 @@ namespace sip_core {
 
         std::string dest_;
         MediaDescription args_;
-        std::unique_ptr<MediaEncoder> audioEncoder_;
+        std::unique_ptr<MediaEncoderBase> audioEncoder_;
         std::unique_ptr<MediaIOHandle> muxContext_;
 
         uint64_t sent_samples = 0;
