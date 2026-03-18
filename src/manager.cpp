@@ -1913,7 +1913,7 @@ Manager::peerAnsweredCall(Call& call)
     SIP_CORE_DBG("[call:%s] Peer answered", callId.c_str());
 
     // The if statement is useful only if we sent two calls at the same time.
-    if (isCurrentCall(call))
+    if (isCurrentCall(call) || call.isConferenceParticipant())
         stopTone();
 
     addAudio(call);
@@ -1937,8 +1937,7 @@ Manager::peerRingingCall(Call& call)
 {
     SIP_CORE_DBG("[call:%s] Peer ringing!!!", call.getCallId().c_str());
 
-    if (!hasCurrentCall())
-        ringback();
+    ringback();
 }
 
 // THREAD=VoIP Call=Outgoing/Ingoing
