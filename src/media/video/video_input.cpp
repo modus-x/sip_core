@@ -312,7 +312,7 @@ VideoInput::captureFrame()
         return false;
 
     switch (decoder_->decode()) {
-    case MediaDemuxer::Status::EndOfFile:
+    case DecodeStatus::EndOfFile:
         // Before attempting to recreate decoder, check if device is still available
         // For camera devices, verify the device hasn't been disconnected
         if (decOpts_.format == "video4linux2" || decOpts_.format == "dshow") {
@@ -327,7 +327,7 @@ VideoInput::captureFrame()
         }
         createDecoder();
         return static_cast<bool>(decoder_);
-    case MediaDemuxer::Status::ReadError:
+    case DecodeStatus::ReadError:
         SIP_CORE_ERR() << "Failed to decode frame";
         // For repeated read errors, check if device still exists
         if (decOpts_.format == "video4linux2" || decOpts_.format == "dshow") {
@@ -582,7 +582,7 @@ VideoInput::createDecoder()
     clearStartupDeadline();
 
     auto ret = decoder->decode(); // Populate AVCodecContext fields
-    if (ret == MediaDemuxer::Status::ReadError) {
+    if (ret == DecodeStatus::ReadError) {
         SIP_CORE_INFO() << "Decoder error";
         foundDecOpts(decOpts_);
         emitDeviceOpenError(decOpts_.input);

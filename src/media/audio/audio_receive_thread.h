@@ -28,6 +28,7 @@
 #include "observer.h"
 #include "socket_pair.h"
 #include "threadloop.h"
+#include "media_decoder_base.h"
 
 #include <functional>
 #include <cstdint>
@@ -101,7 +102,7 @@ private:
     DeviceParams args_;
 
     std::istringstream stream_;
-    std::unique_ptr<MediaDecoder> audioDecoder_;
+    std::unique_ptr<MediaDecoderBase> audioDecoder_;
     std::unique_ptr<MediaIOHandle> sdpContext_;
     std::unique_ptr<MediaIOHandle> demuxContext_;
 

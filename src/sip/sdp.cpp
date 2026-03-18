@@ -284,7 +284,8 @@ Sdp::addMediaDescription(const MediaAttribute& mediaAttr)
             }
             // G722 requires G722/8000 media description even though it's @ 16000 Hz
             // See http://tools.ietf.org/html/rfc3551#section-4.5.2
-            if (accountAudioCodec->isPCMG722())
+            // G729 also has fixed 8000 Hz rate
+            if (accountAudioCodec->isPCMG722() || accountAudioCodec->isG729())
                 rtpmap.clock_rate = 8000;
             else
                 rtpmap.clock_rate = accountAudioCodec->audioformat.sample_rate;
@@ -309,6 +310,21 @@ Sdp::addMediaDescription(const MediaAttribute& mediaAttr)
         pjmedia_sdp_attr* attr;
         pjmedia_sdp_rtpmap_to_attr(memPool_.get(), &rtpmap, &attr);
         med->attr[med->attr_count++] = attr;
+        
+        if (type == MediaType::MEDIA_AUDIO) {
+            auto accountAudioCodec = std::static_pointer_cast<AccountAudioCodecInfo>(
+                audio_codec_list_[i]);
+            
+            if (accountAudioCodec->isG729()) {
+                // first try to negotiate with annexb enabled
+                auto value = fmt::format("fmtp:{} annexb=yes", payload);
+                med->attr[med->attr_count++] = pjmedia_sdp_attr_create(memPool_.get(),
+                                                                        value.c_str(),
+                                                                        NULL);
+            }
+        }
+        
+    
 
 #ifdef ENABLE_VIDEO
         if (enc_name == "H264") {
@@ -752,6 +768,7 @@ Sdp::getMediaDescriptions(const pjmedia_sdp_session* session, bool remote) const
     static constexpr pj_str_t STR_FMTP {sip_utils::CONST_PJ_STR("fmtp")};
     static constexpr pj_str_t PCMA_PAYLOAD {sip_utils::CONST_PJ_STR("8")};
     static constexpr pj_str_t PCMU_PAYLOAD {sip_utils::CONST_PJ_STR("0")};
+    static constexpr pj_str_t G729_PAYLOAD {sip_utils::CONST_PJ_STR("18")};
 
     std::vector<MediaDescription> ret;
     for (unsigned i = 0; i < session->media_count; i++) {
@@ -842,6 +859,28 @@ Sdp::getMediaDescriptions(const pjmedia_sdp_session* session, bool remote) const
                         SIP_CORE_INFO("Found codec for %s", media->desc.fmt[j].ptr);
                         break;
                     }
+                }
+
+                if (!pj_strcmp(&media->desc.fmt[j], &G729_PAYLOAD)) {
+                    SIP_CORE_WARN("Found that payload %s can be G729 8000", media->desc.fmt[j].ptr);
+                    descr.codec = findCodecBySpec("G729", 8000);
+
+                    // for now, just keep the first codec only
+                    descr.enabled = true;
+                    descr.payload_type = 18;
+                    descr.rtp_clockrate = 8000;
+                    pjmedia_sdp_attr *attr = pjmedia_sdp_media_find_attr2(media, "fmtp", &media->desc.fmt[j]);
+                    if(attr) {
+                        pjmedia_sdp_fmtp fmtp;
+                        pjmedia_sdp_attr_get_fmtp(attr, &fmtp);
+                        if(!pj_strcmp2(&fmtp.fmt_param, "annexb=no")) {
+                            SIP_CORE_INFO("G.729 Annex B is not supported by the receiver. Disabling it.");
+                            descr.annex_b = false;
+                        }   
+                    }
+                    
+                    SIP_CORE_INFO("Found codec for %s", media->desc.fmt[j].ptr);
+                    break;
                 }
 
                 continue;

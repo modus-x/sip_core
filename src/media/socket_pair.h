@@ -229,6 +229,8 @@ public:
     void setRtpDelayCallback(std::function<void(int, int)> cb);
 
     int writeData(const uint8_t* buf, int buf_size);
+    int readData(uint8_t* buf, int buf_size);
+    int readDataNoBlock(uint8_t* buf, int buf_size);
 
     uint16_t lastSeqValOut();
 

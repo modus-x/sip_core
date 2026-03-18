@@ -131,6 +131,21 @@ SystemCodecContainer::initCodecConfig()
     };
     // setActiveH265();
     checkInstalledCodecs();
+
+    // skip ffmpeg checks for this codec
+    // we use bcg729 library for this
+    availableCodecList_.emplace_back(
+        std::make_shared<SystemAudioCodecInfo>(AV_CODEC_ID_G729,
+                                               AV_CODEC_ID_G729,
+                                               "G.729",
+                                               "G729",
+                                               "bcg729",
+                                               CODEC_ENCODER_DECODER,
+                                               64,
+                                               8000,
+                                               1,
+                                               18)
+    );
 }
 
 bool

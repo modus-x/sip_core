@@ -104,23 +104,7 @@ CallController::incomingCallWithMedia(
 
 #ifdef ENABLE_VIDEO
         if (incomingWithVideo) {
-            if (m_isVideoEnabled) {
-                m_mediaVideo["ENABLED"] = "true";
-                m_mediaVideo["MUTED"] = "false";
-                answerMediaList.push_back(m_mediaVideo);
-            }
-            else {
-                m_mediaVideo["ENABLED"] = "true";
-                m_mediaVideo["MUTED"] = "true";
-                answerMediaList.push_back(m_mediaVideo);
-            }
-        }
-        else {
-            if (m_isVideoEnabled) {
-                m_mediaVideo["ENABLED"] = "true";
-                m_mediaVideo["MUTED"] = "false";
-                answerMediaList.push_back(m_mediaVideo);
-            }
+            answerMediaList.push_back(m_mediaVideo);
         }
 #elif
         if (incomingWithVideo) {
@@ -135,8 +119,11 @@ CallController::incomingCallWithMedia(
 
         std::this_thread::sleep_for(1s);
 
-        if (libsip_core::acceptWithMedia(accountId, callId, answerMediaList))
+        if (libsip_core::acceptWithMedia(accountId, callId, answerMediaList)) {
             m_activeCalls[callId] = callId;
+        } else {
+            std::cout << "Incoming call form user: " << from << ".\nError while accepting call..." << std::endl;
+        }
     } else {
         std::cout << "Incoming call form user: " << from << ".\nDenied..." << std::endl;
         libsip_core::refuse(accountId, callId);
@@ -161,7 +148,37 @@ void CallController::mediaChangeRequest(
     std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
     std::cout << "mediaChangeRequest event for call - " << callId << std::endl;
 
-    libsip_core::answerMediaChangeRequest(accountId, callId, remoteMediaList);
+    std::vector<std::map<std::string, std::string>> answerMediaList;
+
+    answerMediaList.push_back(m_mediaAudio);
+
+    bool incomingWithVideo = false;
+    for (auto media : remoteMediaList) {
+        auto type = media.find("MEDIA_TYPE");
+        if (type != media.end()) {
+            if (type->second == "MEDIA_TYPE_VIDEO") {
+                incomingWithVideo = true;
+                break;
+            }
+        }
+    }
+
+#ifdef ENABLE_VIDEO
+    if (incomingWithVideo) {
+        answerMediaList.push_back(m_mediaVideo);
+    }
+#elif
+    if (incomingWithVideo) {
+        libsip_core::MediaMap videoMedia = {
+            { "MEDIA_TYPE", "MEDIA_TYPE_VIDEO"},
+            { "MUTED", "true" },
+            { "ENABLED", "false" },
+            { "LABEL", "video_0" }};
+        answerMediaList.push_back(videoMedia);
+    }
+#endif
+
+    libsip_core::answerMediaChangeRequest(accountId, callId, answerMediaList);
 }
 
 void

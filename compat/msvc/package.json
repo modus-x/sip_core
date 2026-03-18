@@ -11,7 +11,8 @@
         "jsoncpp",
         "fmt",
         "webrtc-audio-processing",
-        "zlib"
+        "zlib",
+        "bcg729"
     ],
     "use_cmake": true
 }

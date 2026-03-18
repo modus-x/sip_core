@@ -28,6 +28,7 @@
 #include "media_recorder.h"
 #include "ringbuffer.h"
 #include "ringbufferpool.h"
+#include "g729_decoder.h"
 
 #include <memory>
 
@@ -61,8 +62,7 @@ AudioReceiveThread::setup()
     if(sip_core::Manager::instance().audioPreference.getVadEnabled())
         createAudioProcessor();
 
-    std::lock_guard lk(mutex_);
-    audioDecoder_.reset(new MediaDecoder([this](std::shared_ptr<MediaFrame>&& frame) mutable {
+    auto observer = [this](std::shared_ptr<MediaFrame>&& frame) mutable {
         if (!muteState_) {
             bool processed = false;
             {
@@ -84,12 +84,7 @@ AudioReceiveThread::setup()
 
             ringbuffer_->put(std::static_pointer_cast<AudioFrame>(frame));
         }
-    }));
-    audioDecoder_->setContextCallback([this]() {
-        if (recorderCallback_)
-            recorderCallback_(getInfo());
-    });
-    audioDecoder_->setInterruptCallback(interruptCb, this);
+    };
 
     // custom_io so the SDP demuxer will not open any UDP connections
     args_.input = SDP_FILENAME;
@@ -101,10 +96,30 @@ AudioReceiveThread::setup()
         return false;
     }
 
-    audioDecoder_->setIOContext(sdpContext_.get());
-    if (audioDecoder_->openInput(args_)) {
-        SIP_CORE_ERR("Could not open input \"%s\"", SDP_FILENAME);
+    std::lock_guard lk(mutex_);
+    
+    constexpr int G729_RTP_FMT = 18;
+    // TODO: get_rtp_packet_type consumes the first RTP packet (one frame lost at call start)
+    auto rtp_type = MediaDecoderBase::get_rtp_packet_type(demuxContext_.get(), 5000);
+    if (rtp_type < 0) {
+        SIP_CORE_ERR("Failed to test audio rtp packets");
         return false;
+    }
+    else if (rtp_type == G729_RTP_FMT) {
+        audioDecoder_.reset(new g729MediaDecoder(observer));
+        if (audioDecoder_->openInput(args_)) {
+            SIP_CORE_ERR("Could not open input \"%s\"", SDP_FILENAME);
+            return false;
+        }
+    }
+    else {
+        audioDecoder_.reset(new MediaDecoder(observer));
+
+        audioDecoder_->setIOContext(sdpContext_.get());
+        if (audioDecoder_->openInput(args_)) {
+            SIP_CORE_ERR("Could not open input \"%s\"", SDP_FILENAME);
+            return false;
+        }
     }
 
     // Now replace our custom AVIOContext with one that will read packets
@@ -113,6 +128,12 @@ AudioReceiveThread::setup()
         SIP_CORE_ERR("decoder IO startup failed");
         return false;
     }
+
+    audioDecoder_->setContextCallback([this]() {
+        if (recorderCallback_)
+            recorderCallback_(getInfo());
+    });
+    audioDecoder_->setInterruptCallback(interruptCb, this);
 
     ringbuffer_ = Manager::instance().getRingBufferPool().getRingBuffer(id_);
     Manager::instance().getRingBufferPool().bindHalfDuplexOut(RingBufferPool::DEFAULT_ID, id_);

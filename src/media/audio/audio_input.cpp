@@ -200,18 +200,18 @@ AudioInput::readFromFile()
         return;
     const auto ret = decoder_->decode();
     switch (ret) {
-    case MediaDemuxer::Status::Success:
+    case DecodeStatus::Success:
         break;
-    case MediaDemuxer::Status::EndOfFile:
+    case DecodeStatus::EndOfFile:
         createDecoder();
         break;
-    case MediaDemuxer::Status::ReadError:
+    case DecodeStatus::ReadError:
         SIP_CORE_ERR() << "Failed to decode frame";
         break;
-    case MediaDemuxer::Status::ReadBufferOverflow:
+    case DecodeStatus::ReadBufferOverflow:
         SIP_CORE_ERR() << "Read buffer overflow detected";
         break;
-    case MediaDemuxer::Status::FallBack:
+    case DecodeStatus::FallBack:
         break;
     }
 }

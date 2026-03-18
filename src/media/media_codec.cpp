@@ -207,6 +207,12 @@ AccountAudioCodecInfo::isPCMG722() const
     return systemCodecInfo.avcodecId == AV_CODEC_ID_ADPCM_G722;
 }
 
+bool
+AccountAudioCodecInfo::isG729() const
+{
+    return systemCodecInfo.avcodecId == AV_CODEC_ID_G729;
+}
+
 AccountVideoCodecInfo::AccountVideoCodecInfo(const SystemVideoCodecInfo& sysCodecInfo)
     : AccountCodecInfo(sysCodecInfo)
     , frameRate(sysCodecInfo.frameRate)

@@ -19,11 +19,7 @@
  */
 #pragma once
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
-
-#include "rational.h"
+#include "media_decoder_base.h"
 #include "observer.h"
 
 #ifdef ENABLE_VIDEO
@@ -31,16 +27,13 @@
 #include "video/video_scaler.h"
 #endif // ENABLE_VIDEO
 
+#include "audio/audiobuffer.h"
+#include "noncopyable.h"
+
 #ifdef RING_ACCEL
 #include "video/accel.h"
 #endif
 #include "logger.h"
-
-#include "audio/audiobuffer.h"
-
-#include "media_device.h"
-#include "media_stream.h"
-#include "noncopyable.h"
 
 #include <map>
 #include <string>
@@ -48,42 +41,7 @@
 #include <chrono>
 #include <queue>
 
-extern "C" {
-struct AVCodecContext;
-struct AVStream;
-struct AVDictionary;
-struct AVFormatContext;
-struct AVCodec;
-enum AVMediaType;
-}
-
-namespace libsip_core {
-class AudioFrame;
-}
-
 namespace sip_core {
-
-using namespace std::chrono;
-
-using AudioFrame = libsip_core::AudioFrame;
-#ifdef ENABLE_VIDEO
-using VideoFrame = libsip_core::VideoFrame;
-#endif
-struct AudioFormat;
-class RingBuffer;
-class Resampler;
-class MediaIOHandle;
-class MediaDecoder;
-
-enum class DecodeStatus {
-    Success,
-    FrameFinished,
-    EndOfFile,
-    ReadError,
-    DecodeError,
-    RestartRequired,
-    FallBack
-};
 
 class MediaDemuxer
 {
@@ -91,16 +49,7 @@ public:
     MediaDemuxer();
     ~MediaDemuxer();
 
-    enum class Status {
-        Success,
-        EndOfFile,
-        ReadBufferOverflow,
-        ReadError,
-        FallBack,
-        RestartRequired
-    };
-
-    static const char* getStatusStr(Status status);
+    static const char* getStatusStr(DecodeStatus status);
 
     enum class CurrentState { Demuxing, Finished };
     using StreamCallback = std::function<DecodeStatus(AVPacket&)>;
@@ -136,8 +85,8 @@ public:
         return inputCtx_->streams[stream];
     }
 
-    Status decode();
-    Status demuxe();
+    DecodeStatus decode();
+    DecodeStatus demuxe();
 
     int64_t getDuration() const;
     bool seekFrame(int stream_index, int64_t timestamp);
@@ -178,7 +127,7 @@ private:
     int baseHeight_ {};
 };
 
-class MediaDecoder
+class MediaDecoder final : public MediaDecoderBase
 {
 public:
     MediaDecoder();
@@ -191,52 +140,52 @@ public:
     {}
     ~MediaDecoder();
 
-    void emulateRate() { emulateRate_ = true; }
+    void emulateRate() override { emulateRate_ = true; }
 
     /// just forward to demuxer
-    int openInput(const DeviceParams&);
+    int openInput(const DeviceParams&) override;
     /// just forward to demuxer
-    void setInterruptCallback(int (*cb)(void*), void* opaque);
+    void setInterruptCallback(int (*cb)(void*), void* opaque) override;
     /// just forward to demuxer
-    void setIOContext(MediaIOHandle* ioctx);
-    void enableLateFrameDrop(std::chrono::microseconds threshold);
+    void setIOContext(MediaIOHandle* ioctx) override;
+    void enableLateFrameDrop(std::chrono::microseconds threshold) override;
 
-    int setup(AVMediaType type);
-    int setupAudio() { return setup(AVMEDIA_TYPE_AUDIO); }
-    int setupVideo() { return setup(AVMEDIA_TYPE_VIDEO); }
+    int setup(AVMediaType type) override;
+    int setupAudio() override { return setup(AVMEDIA_TYPE_AUDIO); }
+    int setupVideo() override { return setup(AVMEDIA_TYPE_VIDEO); }
 
-    // forward to demuxer. at the end, if stream was setup correctly, MediaDecoder's decode ,ethod
+    // forward to demuxer. at the end, if stream was setup correctly, MediaDecoder's decode method
     // will be called
-    MediaDemuxer::Status decode();
+    DecodeStatus decode() override;
 
-    DecodeStatus flush();
+    DecodeStatus flush() override;
 
-    int getWidth() const;
-    int getHeight() const;
-    std::string getDecoderName() const;
+    int getWidth() const override;
+    int getHeight() const override;
+    std::string getDecoderName() const override;
 
-    rational<double> getFps() const;
-    AVPixelFormat getPixelFormat() const;
+    rational<double> getFps() const override;
+    AVPixelFormat getPixelFormat() const override;
 
-    void updateStartTime(int64_t startTime);
+    void updateStartTime(int64_t startTime) override;
 
-    void emitFrame(bool isAudio);
-    void flushBuffers();
-    void setSeekTime(int64_t time);
+    void emitFrame(bool isAudio) override;
+    void flushBuffers() override;
+    void setSeekTime(int64_t time) override;
 #ifdef RING_ACCEL
-    void enableAccel(bool enableAccel);
+    void enableAccel(bool enableAccel) override;
 #endif
 
-    MediaStream getStream(std::string name = "") const;
+    MediaStream getStream(std::string name = "") const override;
 
-    void setResolutionChangedCallback(std::function<void(int, int)> cb)
+    void setResolutionChangedCallback(std::function<void(int, int)> cb) override
     {
         resolutionChangedCallback_ = std::move(cb);
     }
 
-    void setFEC(bool enable) { fecEnabled_ = enable; }
+    void setFEC(bool enable) override { fecEnabled_ = enable; }
 
-    void setContextCallback(const std::function<void()>& cb)
+    void setContextCallback(const std::function<void()>& cb) override
     {
         firstDecode_.exchange(true);
         contextCallback_ = cb;

@@ -11,13 +11,6 @@
 #define PATH_MAX MAX_PATH
 #endif
 
-// Get list of input devices
-// auto inputs = sip_core::Manager::instance().getAudioInputDeviceList();
-// Get list of output devices
-// auto outputs = sip_core::Manager::instance().getAudioOutputDeviceList();
-// sip_core::Manager::instance().setAudioDevice(1, sip_core::AudioDeviceType::CAPTURE);
-// sip_core::Manager::instance().setAudioDevice(1, sip_core::AudioDeviceType::PLAYBACK);
-
 CallController::CallController(const std::string& accountId)
     : m_mtxEvents()
 #ifdef ENABLE_VIDEO
@@ -25,25 +18,7 @@ CallController::CallController(const std::string& accountId)
     , m_mediaVideo {{"MEDIA_TYPE", "MEDIA_TYPE_VIDEO"},
                     {"ENABLED", "true"},
                     {"MUTED", "false"},
-                    //{ "SOURCE", "display://desktop source:0" }, //640x480
-                    // { "SOURCE",
-                    // R"(camera://video=@device_sw_{860BB310-5D01-11D0-BD3B-00A0C911CE86}\{4EA69364-2C8A-4AE6-A561-56E4B5044439})"
-                    // }, // desktop
-                    // { "SOURCE",
-                    // R"(camera://video=@device_pnp_\\?\usb#vid_1bcf&pid_2284&mi_00#6&2e99a59a&0&0000#{65e8773d-8f56-11d0-a3b9-00a0c9223196}\global)"
-                    // }, // 4k 
-                    // { "SOURCE",
-                    // R"(camera://video=@device_pnp_\\?\usb#vid_09da&pid_2695&mi_00#6&26daa0e0&0&0000#{65e8773d-8f56-11d0-a3b9-00a0c9223196}\global)"
-                    // }, // aux 
-                    { "SOURCE",
-                    R"(camera://video=@device_pnp_\\?\usb#vid_04f2&pid_b76f&mi_00#6&330c68f9&0&0000#{65e8773d-8f56-11d0-a3b9-00a0c9223196}\global)"
-                    }, // front
-                    // { "SOURCE",
-                    // R"(camera://video=@device_pnp_\\?\usb#vid_046d&pid_0825&mi_00#7&1e2afdec&0&0000#{65e8773d-8f56-11d0-a3b9-00a0c9223196}\global)"
-                    // }, // logitech 1
-                    // { "SOURCE",
-                    // R"(camera://video=@device_pnp_\\?\usb#vid_046d&pid_0825&mi_00#7&d2462&0&0000#{65e8773d-8f56-11d0-a3b9-00a0c9223196}\global)"
-                    // }, // logitech 2
+                    { "SOURCE", "display://desktop source:0" }, //640x480
                     {"LABEL", "video_0"}}
 #endif
     , m_mediaAudio {{"MEDIA_TYPE", "MEDIA_TYPE_AUDIO"},
@@ -544,6 +519,14 @@ CallController::toggleVideo()
 {
 #ifdef ENABLE_VIDEO
     m_isVideoEnabled = !m_isVideoEnabled;
+    if (m_isVideoEnabled) {
+        m_mediaVideo["ENABLED"] = "true";
+        m_mediaVideo["MUTED"] = "false";
+    }
+    else {
+        m_mediaVideo["ENABLED"] = "true";
+        m_mediaVideo["MUTED"] = "true";
+    }
 
     std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
     if (hasActiveCall()) {
@@ -552,10 +535,6 @@ CallController::toggleVideo()
         mediaList.push_back(m_mediaAudio);
         // if (m_isVideoEnabled) 
         //     mediaList.push_back(m_mediaVideo);
-        if (m_isVideoEnabled) 
-            m_mediaVideo["ENABLED"] = "true";
-        else 
-            m_mediaVideo["ENABLED"] = "false";
         mediaList.push_back(m_mediaVideo);
         
         libsip_core::requestMediaChange(m_accountId, getActiveCall(), mediaList);
