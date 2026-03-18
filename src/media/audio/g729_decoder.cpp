@@ -44,8 +44,12 @@ g729MediaDecoder::openInput(const DeviceParams& p)
     std::lock_guard<std::mutex> lock(mut_);
     context_ = initBcg729DecoderChannel();
 
-    if (!context_)
+    if (!context_) {
         SIP_CORE_ERR() << "Can not create G.729 decoder context";
+        return -1;
+    }
+
+    return 0;
 }
 
 void
@@ -194,7 +198,6 @@ g729MediaDecoder::setSeekTime(int64_t time)
     seekTime_ = time;
 }
 
-#ifdef ENABLE_VIDEO
 #ifdef RING_ACCEL
 void
 g729MediaDecoder::enableAccel(bool enableAccel)
@@ -202,7 +205,6 @@ g729MediaDecoder::enableAccel(bool enableAccel)
     return;
 }
 #endif
-#endif // ENABLE_VIDEO
 
 MediaStream
 g729MediaDecoder::getStream(std::string name) const
@@ -235,11 +237,11 @@ g729MediaDecoder::readRtp(uint8_t* buf, int buf_size, std::vector<G729RtpPayload
     if(buf_size < 14)
         return -1;
 
-    if((buf[0] >> 6) != 2 && 
-       buf[1] & 0x7f != 18)
+    if((buf[0] >> 6) != 2 ||
+       (buf[1] & 0x7f) != 18)
         return -1;
 
-    bool has_padding = buf[0] & 0x20 == 0x20;
+    bool has_padding = (buf[0] & 0x20) == 0x20;
     if(has_padding) 
         buf_size -= buf[buf_size - 1];
     
@@ -281,12 +283,9 @@ g729MediaDecoder::readRtp(uint8_t* buf, int buf_size, std::vector<G729RtpPayload
                     ((uint32_t)buf[10] << 8)  |
                                buf[11];
 
-    auto mismatch = seq_val - lastFrameSeq_ - 1;
+    int mismatch = static_cast<int>(seq_val) - static_cast<int>(lastFrameSeq_) - 1;
     if(mismatch < 0)
         return 0;
-
-    if(mismatch != 0)
-        int f = 1231;
 
     packets.reserve(packets.size() + payload_size / 10);
 

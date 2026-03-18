@@ -93,6 +93,7 @@ AudioReceiveThread::setup()
     std::lock_guard lk(mutex_);
     
     constexpr int G729_RTP_FMT = 18;
+    // TODO: get_rtp_packet_type consumes the first RTP packet (one frame lost at call start)
     auto rtp_type = MediaDecoderBase::get_rtp_packet_type(demuxContext_.get(), 5000);
     if (rtp_type < 0) {
         SIP_CORE_ERR("Failed to test audio rtp packets");

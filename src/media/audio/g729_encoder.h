@@ -66,7 +66,7 @@
      void enableAccel(bool enableAccel) override;
      #endif
  
-     const std::string& getAudioCodec() const override { return "G.729"; }
+     const std::string& getAudioCodec() const override { static const std::string codec{"G.729"}; return codec; }
      const std::string& getVideoCodec() const override { return empty_string; }
  
      int setBitrate(uint64_t br) override;

@@ -38,6 +38,8 @@ namespace sip_core {
 
     g729MediaEncoder::~g729MediaEncoder()
     {
+        free(buffer_);
+
         if (context_)
             closeBcg729EncoderChannel(context_);
 
@@ -236,11 +238,11 @@ namespace sip_core {
     void
     g729MediaEncoder::sendDummyPacket()
     {
-        AVPacket pkt;
-        av_init_packet(&pkt);
-        pkt.data = nullptr;
-        pkt.size = 0;
-        send(pkt, -1, true);
+        AVPacket* pkt = av_packet_alloc();
+        if (!pkt)
+            return;
+        send(*pkt, -1, true);
+        av_packet_free(&pkt);
     }
 
     int
