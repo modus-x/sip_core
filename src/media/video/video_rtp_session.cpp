@@ -212,8 +212,6 @@ VideoRtpSession::natPing()
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     SIP_CORE_DEBUG("VideoRtpSession Sending keep-alive BLACK rtp packet to session {:s}",
                    getRemoteRtpUri());
-
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (sender_) {
         sender_->sendBlackFrame(NO_DEVICE_WIDTH, NO_DEVICE_HEIGHT);
     }

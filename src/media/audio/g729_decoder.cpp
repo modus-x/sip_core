@@ -1,5 +1,7 @@
 #include "g729_decoder.h"
 
+#include <thread>
+
 namespace sip_core {
 
 #define S16_PACKET_SIZE 80
