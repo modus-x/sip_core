@@ -36,8 +36,8 @@
 namespace sip_core {
 
 static constexpr auto MS_PER_PACKET = std::chrono::milliseconds(20);
-// After ~1 second (50 frames * 20ms) of no audio, consider the device broken
-static constexpr unsigned int BROKEN_DEVICE_THRESHOLD = 50;
+// After ~5 seconds (250 frames * 20ms) of no audio, consider the device broken
+static constexpr unsigned int BROKEN_DEVICE_THRESHOLD = 250;
 
 AudioInput::AudioInput(const std::string& id)
     : id_(id)
