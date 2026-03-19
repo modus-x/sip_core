@@ -779,8 +779,10 @@ Sdp::getMediaDescriptions(const pjmedia_sdp_session* session, bool remote) const
             descr.type = MEDIA_AUDIO;
         else if (!pj_stricmp2(&media->desc.media, "video"))
             descr.type = MEDIA_VIDEO;
-        else
+        else {
+            ret.pop_back();
             continue;
+        }
 
         descr.enabled = media->desc.port;
         if (!descr.enabled)
@@ -973,6 +975,7 @@ Sdp::getMediaAttributeListFromSdp(const pjmedia_sdp_session* sdpSession,
             SIP_CORE_WARN("Media#%u only 'audio' and 'video' types are supported!", idx);
             // Disable the media. No need to parse the attributes.
             mediaAttr.enabled_ = false;
+            mediaList.pop_back();
             continue;
         }
 

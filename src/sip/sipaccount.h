@@ -498,6 +498,7 @@ public:
     bool hasRunningTransportForConnectivityChange() const;
     bool shouldHandleConnectivityChange() const;
     void handleConnectivityChangedForced(const char* reason);
+    void reinviteActiveCalls();
 
     std::string getUserUri() const override;
 

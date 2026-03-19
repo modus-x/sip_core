@@ -90,8 +90,9 @@
      MediaStream opts_;
      bool annexB_;
 
-     uint32_t timestamp_ = 0;
-     uint32_t ssrc_ = 0;
+    uint32_t timestamp_ = 0;
+    uint32_t dtmfTimestamp_ = 0;
+    uint32_t ssrc_ = 0;
      uint16_t seq_val_ = 0;
      uint64_t packet_loss_ = 0;
      

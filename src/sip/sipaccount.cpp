@@ -1861,6 +1861,7 @@ SIPAccount::recoverTransport(const std::string& reason, pj_status_t status)
                      accountID_.c_str());
         setRegistrationState(RegistrationState::ERROR_GENERIC, PJSIP_SC_TSX_TRANSPORT_ERROR);
         schedulePendingConnectivityRecovery();
+        scheduleReregistration();
         return;
     }
 
@@ -1868,6 +1869,7 @@ SIPAccount::recoverTransport(const std::string& reason, pj_status_t status)
                   "re-registration",
                   accountID_.c_str());
     doRegister();
+    reinviteActiveCalls();
     schedulePendingConnectivityRecovery();
 }
 
@@ -2564,16 +2566,23 @@ SIPAccount::shouldHandleConnectivityChange() const
                                        || hasTransport;
     const bool hasRunningTransport = hasRunningTransportForConnectivityChange();
     const bool pendingRecovery = transportRecoveryPending_.load();
-    const bool eligible = !shuttingDown && usable && hasRegistrationIntent && hasRunningTransport;
+    const bool inRecoverableErrorState =
+        regState == RegistrationState::ERROR_GENERIC
+        || regState == RegistrationState::ERROR_HOST
+        || regState == RegistrationState::ERROR_SERVICE_UNAVAILABLE;
+    const bool eligible = !shuttingDown && usable && hasRegistrationIntent
+                          && (hasRunningTransport || inRecoverableErrorState);
 
     SIP_CORE_DBG("Connectivity eligibility for account %s: eligible=%d, state=%s, bRegister=%d, "
-                 "transportPresent=%d, runningTransport=%d, recoveryPending=%d, transportState=%d",
+                 "transportPresent=%d, runningTransport=%d, recoverableError=%d, "
+                 "recoveryPending=%d, transportState=%d",
                  accountID_.c_str(),
                  eligible ? 1 : 0,
                  Account::mapStateNumberToString(regState).c_str(),
                  bRegister_ ? 1 : 0,
                  hasTransport ? 1 : 0,
                  hasRunningTransport ? 1 : 0,
+                 inRecoverableErrorState ? 1 : 0,
                  pendingRecovery ? 1 : 0,
                  static_cast<int>(transportStatus_));
 
@@ -2608,6 +2617,52 @@ SIPAccount::handleConnectivityChangedForced(const char* reason)
     scheduleRecoveryInternal(reason ? reason : "connectivity-changed",
                              PJSIP_SC_TSX_TRANSPORT_ERROR,
                              false);
+}
+
+void
+SIPAccount::reinviteActiveCalls()
+{
+    auto callIds = getCallList();
+    if (callIds.empty())
+        return;
+
+    SIP_CORE_WARN("Sending re-INVITE for %zu active call(s) on account %s after connectivity change",
+                  callIds.size(),
+                  accountID_.c_str());
+
+    auto contactHdr = getContactHeader();
+
+    for (const auto& id : callIds) {
+        auto call = getCall(id);
+        if (!call)
+            continue;
+
+        auto sipCall = std::dynamic_pointer_cast<SIPCall>(call);
+        if (!sipCall)
+            continue;
+
+        const auto callState = sipCall->getState();
+        const auto connState = sipCall->getConnectionState();
+
+        if (connState != Call::ConnectionState::CONNECTED
+            || (callState != Call::CallState::ACTIVE && callState != Call::CallState::HOLD)) {
+            SIP_CORE_DBG("[call:%s] Skipping re-INVITE: state=%s is not eligible",
+                         id.c_str(),
+                         sipCall->getStateStr().c_str());
+            continue;
+        }
+
+        SIP_CORE_WARN("[call:%s] Updating transport and sending re-INVITE after connectivity change",
+                      id.c_str());
+
+        sipCall->setSipTransport(transport_, contactHdr);
+
+        if (sipCall->reinviteOnConnectivityChange() != PJ_SUCCESS) {
+            SIP_CORE_ERR("[call:%s] Re-INVITE failed after connectivity change, hanging up",
+                         id.c_str());
+            sipCall->hangup(0);
+        }
+    }
 }
 
 void
@@ -3582,7 +3637,7 @@ SIPAccount::autoReregTimerCb()
     /* Start re-registration */
     ++auto_rereg_.attempt_cnt;
     try {
-        sendRegister();
+        doRegister();
     } catch (const VoipLinkException& e) {
         SIP_CORE_ERR("Exception during SIP registration: %s", e.what());
         scheduleReregistration();

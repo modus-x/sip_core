@@ -116,9 +116,46 @@ namespace sip_core {
     bool
     g729MediaEncoder::sendBuffer(uint8_t* buf1, unsigned int len, unsigned int samples, int flags)
     {
-        // todo: implement dtmf without ffmpeg.
-        // in any case this code gives very poor dtmf quality
-        return false;
+        if (!sp_ || len != 4)
+            return false;
+
+        constexpr uint8_t TELEPHONE_EVENT_PT = 101;
+        constexpr int DTMF_PKT_SIZE = RTP_HEADER_SIZE + 4;
+
+        uint8_t pkt[DTMF_PKT_SIZE];
+
+        // If "new timestamp" flag is set, capture event start timestamp
+        if (flags & 64)
+            dtmfTimestamp_ = timestamp_;
+
+        // RTP header
+        pkt[0]  = 2 << 6;  // V=2, P=0, X=0, CC=0
+        pkt[1]  = TELEPHONE_EVENT_PT;
+        if (flags & 128)    // marker bit
+            pkt[1] |= 0x80;
+        pkt[2]  = (uint8_t)(seq_val_ >> 8);
+        pkt[3]  = (uint8_t)(seq_val_);
+        pkt[4]  = (uint8_t)(dtmfTimestamp_ >> 24);
+        pkt[5]  = (uint8_t)(dtmfTimestamp_ >> 16);
+        pkt[6]  = (uint8_t)(dtmfTimestamp_ >> 8);
+        pkt[7]  = (uint8_t)(dtmfTimestamp_);
+        pkt[8]  = (uint8_t)(ssrc_ >> 24);
+        pkt[9]  = (uint8_t)(ssrc_ >> 16);
+        pkt[10] = (uint8_t)(ssrc_ >> 8);
+        pkt[11] = (uint8_t)(ssrc_);
+
+        // DTMF payload (4 bytes: event, volume, duration_hi, duration_lo)
+        memcpy(&pkt[RTP_HEADER_SIZE], buf1, 4);
+
+        seq_val_++;
+        timestamp_ += samples;
+
+        int ret;
+        do {
+            ret = sp_->writeData(pkt, DTMF_PKT_SIZE);
+        } while (ret < 0 && errno == EAGAIN);
+
+        return ret >= 0;
     }
 
     #ifdef ENABLE_VIDEO

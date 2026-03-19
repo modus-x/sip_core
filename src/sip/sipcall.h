@@ -247,6 +247,12 @@ public:
 
     std::shared_ptr<SipTransport> getTransport() { return sipTransport_; }
 
+    /**
+     * Send a re-INVITE to refresh the media path after a connectivity change.
+     * @return PJ_SUCCESS on success, or an error code on failure.
+     */
+    int reinviteOnConnectivityChange();
+
     void sendSIPInfo(std::string_view body, std::string_view subtype);
 
     void requestKeyframe(int streamIdx = -1);

@@ -597,6 +597,12 @@ SIPCall::SIPSessionReinvite()
     return SIPSessionReinvite(mediaList);
 }
 
+int
+SIPCall::reinviteOnConnectivityChange()
+{
+    return SIPSessionReinvite();
+}
+
 void
 SIPCall::sendSIPInfo(std::string_view body, std::string_view subtype)
 {
@@ -1586,7 +1592,7 @@ SIPCall::carryingDTMFdigits(const std::string& dtmfEvents, double duration, unsi
 
     // this is handled at SIP layer
     if (dtmfType == SIPINFO_STR) {
-        int duration = Manager::instance().voipPreferences.getPulseLength();
+        int durationMs = (duration > 0) ? static_cast<int>(duration * 1000.0) : Manager::instance().voipPreferences.getPulseLength();
 
         for (auto code : dtmfEvents) {
             char dtmf_body[1000];
@@ -1597,13 +1603,13 @@ SIPCall::carryingDTMFdigits(const std::string& dtmfEvents, double duration, unsi
                 ret = snprintf(dtmf_body,
                                sizeof dtmf_body - 1,
                                "Signal=16\r\nDuration=%d\r\n",
-                               duration);
+                               durationMs);
             } else {
                 ret = snprintf(dtmf_body,
                                sizeof dtmf_body - 1,
                                "Signal=%c\r\nDuration=%d\r\n",
                                code,
-                               duration);
+                               durationMs);
             }
 
             try {
@@ -2009,8 +2015,8 @@ SIPCall::initMediaStreams(const std::vector<MediaAttribute>& mediaAttrList)
     for (size_t idx = 0; idx < mediaAttrList.size(); idx++) {
         auto const& mediaAttr = mediaAttrList.at(idx);
         if (mediaAttr.type_ != MEDIA_AUDIO && mediaAttr.type_ != MEDIA_VIDEO) {
-            SIP_CORE_ERR("[call:%s] Unexpected media type %u", getCallId().c_str(), mediaAttr.type_);
-            assert(false);
+            SIP_CORE_WARN("[call:%s] Skipping unsupported media type %u", getCallId().c_str(), mediaAttr.type_);
+            continue;
         }
 
         addMediaStream(mediaAttr);

@@ -180,7 +180,7 @@ LIBSIP_CORE_PUBLIC bool isInitialized();
 
 LIBSIP_CORE_PUBLIC std::string getRecordPath();
 LIBSIP_CORE_PUBLIC std::string getHomePath();
-LIBSIP_CORE_PUBLIC void setRecordPath(const std::string& recPath);
+LIBSIP_CORE_PUBLIC bool setRecordPath(const std::string& recPath);
 LIBSIP_CORE_PUBLIC bool getIsAlwaysRecording();
 LIBSIP_CORE_PUBLIC void setIsAlwaysRecording(bool rec);
 LIBSIP_CORE_PUBLIC bool getRecordPreview();

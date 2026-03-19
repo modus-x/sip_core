@@ -577,10 +577,13 @@ getHomePath()
     return sip_core::Manager::instance().getHomePath();
 }
 
-void
+bool
 setRecordPath(const std::string& recPath)
 {
-    sip_core::Manager::instance().audioPreference.setRecordPath(recPath);
+    bool result = sip_core::Manager::instance().audioPreference.setRecordPath(recPath);
+    if (result)
+        sip_core::Manager::instance().saveConfig();
+    return result;
 }
 
 bool
@@ -867,10 +870,10 @@ connectivityChanged()
 
     if (eligibleSipAccounts.empty()) {
         if (shouldLogConnectivitySkipWarn()) {
-            SIP_CORE_WARN("Connectivity changed ignored: no SIP accounts with running transports");
+            SIP_CORE_WARN("Connectivity changed ignored: no eligible SIP accounts");
         } else {
-            SIP_CORE_DBG("Connectivity changed ignored: no eligible SIP accounts with running "
-                         "transports");
+            SIP_CORE_DBG("Connectivity changed ignored: no eligible SIP accounts (no running "
+                         "transports or recoverable error state)");
         }
         return;
     }

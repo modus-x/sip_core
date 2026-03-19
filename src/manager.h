@@ -498,6 +498,19 @@ public:
     void startAudio();
 
     /**
+     * Called when audio devices are added/removed.
+     * Notifies active calls and conferences to recover their audio pipelines.
+     */
+    void onAudioDevicesChanged();
+
+    /**
+     * Called when video devices are added/removed.
+     * Notifies active calls and conferences to recover their video pipelines.
+     */
+    void onVideoDevicesChanged();
+
+
+    /**
      * Get list of supported audio output device
      * @return std::vector<std::string> A list of the audio devices supporting playback
      */

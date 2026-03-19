@@ -137,7 +137,7 @@ MediaAttribute::mediaTypeToString(MediaType type)
         return libsip_core::Media::MediaAttributeValue::AUDIO;
     if (type == MediaType::MEDIA_VIDEO)
         return libsip_core::Media::MediaAttributeValue::VIDEO;
-    return nullptr;
+    return "";
 }
 
 bool

@@ -294,7 +294,7 @@ else
 ZCAT ?= $(error Gunzip client (zcat) not found!)
 endif
 
-ifeq ($(shell sha512sum --version >/dev/null 2>&1 || echo FAIL),)
+ifeq ($(shell sha512sum --help 2>&1 | grep -q '\-\-check' || echo FAIL),)
 SHA512SUM = sha512sum --check
 else ifeq ($(shell shasum --version >/dev/null 2>&1 || echo FAIL),)
 SHA512SUM = shasum -a 512 --check
