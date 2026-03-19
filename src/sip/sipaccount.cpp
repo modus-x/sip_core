@@ -2677,7 +2677,48 @@ SIPAccount::reinviteActiveCalls()
 
         if (connState != Call::ConnectionState::CONNECTED
             || (callState != Call::CallState::ACTIVE && callState != Call::CallState::HOLD)) {
-            // Fix 5: Mark for deferred re-INVITE when call reaches eligible state
+
+            // Outgoing calls still in setup (TRYING/PROGRESSING/RINGING): the original
+            // INVITE was sent on the old transport with the old Via address. The 200 OK
+            // from the callee will be routed to that (now dead) address and never arrive.
+            // There is no SIP mechanism to rebind an in-flight client INVITE transaction,
+            // so we must CANCEL the call and re-dial on the new transport.
+            if (sipCall->getCallType() == Call::CallType::OUTGOING
+                && connState != Call::ConnectionState::CONNECTED) {
+                SIP_CORE_WARN("[call:%s] Outgoing call in setup phase (%s) during connectivity "
+                              "change — cancelling and scheduling re-dial",
+                              id.c_str(),
+                              sipCall->getStateStr().c_str());
+
+                auto peerNumber = sipCall->getPeerNumber();
+                auto mediaList = sipCall->currentMediaList();
+
+                // Best-effort CANCEL on old transport + cleanup
+                sipCall->hangup(0);
+
+                // Re-dial on the new transport after a short delay
+                std::weak_ptr<SIPAccount> wAcc
+                    = std::dynamic_pointer_cast<SIPAccount>(shared_from_this());
+                Manager::instance().scheduleTaskIn(
+                    [wAcc, peerNumber, mediaList] {
+                        auto acc = wAcc.lock();
+                        if (!acc || !acc->isUsable() || acc->isShuttingDown_.load())
+                            return;
+
+                        SIP_CORE_WARN("Re-dialing %s after connectivity change",
+                                      peerNumber.c_str());
+                        try {
+                            acc->newOutgoingCall(peerNumber, mediaList);
+                        } catch (const std::exception& e) {
+                            SIP_CORE_ERR("Failed to re-dial after connectivity change: %s",
+                                         e.what());
+                        }
+                    },
+                    std::chrono::milliseconds(500));
+                continue;
+            }
+
+            // Fix 5: Non-outgoing calls (e.g. incoming ringing) — defer re-INVITE
             SIP_CORE_WARN("[call:%s] Not in re-invitable state (%s), deferring connectivity "
                           "re-INVITE",
                           id.c_str(),
