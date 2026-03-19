@@ -499,6 +499,7 @@ public:
     bool shouldHandleConnectivityChange() const;
     void handleConnectivityChangedForced(const char* reason);
     void reinviteActiveCalls();
+    void scheduleConnectivityReinviteRetry(const std::shared_ptr<SIPCall>& sipCall);
 
     std::string getUserUri() const override;
 
@@ -594,6 +595,18 @@ public:
     std::atomic<bool> transportRecoveryPending_ {false};
     std::atomic<bool> connectivityRecoveryRequested_ {false};
     std::atomic<bool> isShuttingDown_ {false};
+
+    /**
+     * When true, reinviteActiveCalls() will be called from onRegister()
+     * after successful registration, instead of immediately from recoverTransport().
+     */
+    std::atomic<bool> pendingReinviteAfterRegister_ {false};
+
+    /**
+     * Flag indicating that connectivity recovery is in progress.
+     * Transport-dependent operations should be skipped or deferred.
+     */
+    std::atomic<bool> connectivityRecoveryInProgress_ {false};
     std::atomic<bool> mainRouteFastProbeEnabled_ {false};
     std::atomic<bool> activeNoRouteFastProbeEnabled_ {false};
     std::atomic<int64_t> lastTransportRecoveryMs_ {0};

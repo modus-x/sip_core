@@ -597,10 +597,91 @@ SIPCall::SIPSessionReinvite()
     return SIPSessionReinvite(mediaList);
 }
 
+void
+SIPCall::resetConnectivityReinviteState()
+{
+    connectivityReinviteRetryCount_ = 0;
+    pendingConnectivityReinvite_.store(false);
+}
+
+bool
+SIPCall::updateDialogTransport()
+{
+    std::lock_guard<std::recursive_mutex> lk {callMutex_};
+    if (!inviteSession_ || !inviteSession_->dlg || !sipTransport_) {
+        SIP_CORE_WARN("[call:%s] Cannot update dialog transport: missing session or transport",
+                      getCallId().c_str());
+        return false;
+    }
+
+    auto tp_sel = SIPVoIPLink::getTransportSelector(sipTransport_);
+    if (tp_sel.type == PJSIP_TPSELECTOR_NONE) {
+        SIP_CORE_WARN("[call:%s] Cannot update dialog transport: transport selector is NONE",
+                      getCallId().c_str());
+        return false;
+    }
+
+    auto status = pjsip_dlg_set_transport(inviteSession_->dlg, &tp_sel);
+    if (status != PJ_SUCCESS) {
+        SIP_CORE_ERR("[call:%s] Failed to update dialog transport (pjsip: %s)",
+                     getCallId().c_str(),
+                     sip_utils::sip_strerror(status).c_str());
+        return false;
+    }
+
+    SIP_CORE_DBG("[call:%s] Dialog transport updated for connectivity change",
+                 getCallId().c_str());
+    return true;
+}
+
+void
+SIPCall::tryDeferredConnectivityReinvite()
+{
+    if (!pendingConnectivityReinvite_.load())
+        return;
+
+    // Only attempt if call is in a re-invitable state
+    if (getConnectionState() != ConnectionState::CONNECTED
+        || (getState() != CallState::ACTIVE && getState() != CallState::HOLD)) {
+        return;
+    }
+
+    SIP_CORE_WARN("[call:%s] Executing deferred connectivity re-INVITE", getCallId().c_str());
+    pendingConnectivityReinvite_.store(false);
+    reinviteOnConnectivityChange();
+}
+
 int
 SIPCall::reinviteOnConnectivityChange()
 {
-    return SIPSessionReinvite();
+    std::lock_guard<std::recursive_mutex> lk {callMutex_};
+
+    if (!inviteSession_) {
+        SIP_CORE_WARN("[call:%s] No invite session, cannot re-INVITE for connectivity change",
+                      getCallId().c_str());
+        return !PJ_SUCCESS;
+    }
+
+    // If a transaction is pending, defer the re-INVITE
+    if (inviteSession_->invite_tsx) {
+        SIP_CORE_WARN("[call:%s] INVITE transaction pending, deferring connectivity re-INVITE",
+                      getCallId().c_str());
+        pendingConnectivityReinvite_.store(true);
+        return PJ_EPENDING;
+    }
+
+    // Update the PJSIP dialog transport binding before sending
+    if (!updateDialogTransport()) {
+        SIP_CORE_ERR("[call:%s] Failed to update dialog transport, re-INVITE may fail",
+                     getCallId().c_str());
+        // Continue anyway — the re-INVITE might still succeed for UDP
+    }
+
+    auto result = SIPSessionReinvite();
+    if (result == PJ_SUCCESS) {
+        resetConnectivityReinviteState();
+    }
+    return result;
 }
 
 void
@@ -2775,6 +2856,9 @@ SIPCall::onMediaNegotiationComplete()
     }
 
     reportMediaNegotiationStatus();
+
+    // Check if a connectivity re-INVITE was deferred due to a pending transaction
+    tryDeferredConnectivityReinvite();
 }
 
 void

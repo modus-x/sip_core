@@ -249,9 +249,40 @@ public:
 
     /**
      * Send a re-INVITE to refresh the media path after a connectivity change.
-     * @return PJ_SUCCESS on success, or an error code on failure.
+     * Updates the dialog transport binding before sending.
+     * @return PJ_SUCCESS on success, PJ_EPENDING if deferred, or an error code on failure.
      */
     int reinviteOnConnectivityChange();
+
+    /**
+     * Update the PJSIP dialog's transport selector to match the current
+     * call-level transport. Must be called before sending a re-INVITE
+     * after a connectivity change so PJSIP routes through the new transport.
+     */
+    bool updateDialogTransport();
+
+    /**
+     * Flag indicating a connectivity re-INVITE is pending (transaction was
+     * in-flight or call was not yet in a re-invitable state).
+     */
+    std::atomic<bool> pendingConnectivityReinvite_ {false};
+
+    /**
+     * Number of re-INVITE retry attempts after connectivity change failure.
+     */
+    uint8_t connectivityReinviteRetryCount_ {0};
+    static constexpr uint8_t MAX_CONNECTIVITY_REINVITE_RETRIES = 3;
+
+    /**
+     * Reset connectivity reinvite state (call on new connectivity change or success).
+     */
+    void resetConnectivityReinviteState();
+
+    /**
+     * Try to execute a deferred connectivity re-INVITE if one is pending.
+     * Called from onMediaNegotiationComplete and state change listeners.
+     */
+    void tryDeferredConnectivityReinvite();
 
     void sendSIPInfo(std::string_view body, std::string_view subtype);
 

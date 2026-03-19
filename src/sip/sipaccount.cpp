@@ -433,6 +433,22 @@ keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
         return;
     }
 
+    // Skip keep-alive during connectivity recovery — transport may be stale
+    if (acc->connectivityRecoveryInProgress_.load()) {
+        SIP_CORE_DBG("KA: skipping keep-alive during connectivity recovery for %s",
+                     contactHeader.c_str());
+        // Reschedule so we resume once recovery is done
+        uint32_t seconds = acc->getActiveKeepAliveIntervalSec();
+        if (seconds > 0) {
+            delay.sec = seconds;
+            delay.msec = 0;
+            status = pjsip_endpt_schedule_timer(acc->getVoipLink().getEndpoint(), te, &delay);
+            if (status == PJ_SUCCESS)
+                te->id = PJ_TRUE;
+        }
+        return;
+    }
+
     auto transportType = acc->getTransportType();
     const bool isUdp = transportType == PJSIP_TRANSPORT_UDP;
     const bool isTcp = transportType == PJSIP_TRANSPORT_TCP;
@@ -645,6 +661,8 @@ SIPAccount::~SIPAccount() noexcept
     isShuttingDown_.store(true);
     transportRecoveryPending_.store(false);
     connectivityRecoveryRequested_.store(false);
+    pendingReinviteAfterRegister_.store(false);
+    connectivityRecoveryInProgress_.store(false);
 
     cancelKeepAliveTimer();
     cancelMainRouteKeepAliveTimer();
@@ -1831,10 +1849,14 @@ SIPAccount::recoverTransport(const std::string& reason, pj_status_t status)
         }
     };
 
-    if (isShuttingDown_.load() || !isUsable())
+    if (isShuttingDown_.load() || !isUsable()) {
+        connectivityRecoveryInProgress_.store(false);
         return;
-    if (!link_.sipTransportBroker || !link_.getEndpoint())
+    }
+    if (!link_.sipTransportBroker || !link_.getEndpoint()) {
+        connectivityRecoveryInProgress_.store(false);
         return;
+    }
 
     SIP_CORE_WARN("Recovering %s transport for account %s after '%s' (%d: %s)",
                   config().transport == libsip_core::TransportType::TCP ? "TCP" : "SIP",
@@ -1859,6 +1881,8 @@ SIPAccount::recoverTransport(const std::string& reason, pj_status_t status)
     if (!switchTransportInternal(config().transport, false, false, nullptr)) {
         SIP_CORE_ERR("Transport recreation failed during recovery for account %s",
                      accountID_.c_str());
+        connectivityRecoveryInProgress_.store(false);
+        pendingReinviteAfterRegister_.store(false);
         setRegistrationState(RegistrationState::ERROR_GENERIC, PJSIP_SC_TSX_TRANSPORT_ERROR);
         schedulePendingConnectivityRecovery();
         scheduleReregistration();
@@ -1868,8 +1892,11 @@ SIPAccount::recoverTransport(const std::string& reason, pj_status_t status)
     SIP_CORE_WARN("Transport recreation succeeded during recovery for account %s, triggering "
                   "re-registration",
                   accountID_.c_str());
+
+    // Defer reinvite until registration completes (onRegister 200 OK)
+    pendingReinviteAfterRegister_.store(true);
     doRegister();
-    reinviteActiveCalls();
+    connectivityRecoveryInProgress_.store(false);
     schedulePendingConnectivityRecovery();
 }
 
@@ -2606,6 +2633,7 @@ SIPAccount::handleConnectivityChangedForced(const char* reason)
     }
 
     connectivityRecoveryRequested_.store(true);
+    connectivityRecoveryInProgress_.store(true);
     markTransportRebindRequired(reason ? reason : "connectivity-changed");
     cancelAutoReregistrationTimer();
     resetAutoRegistration();
@@ -2641,14 +2669,38 @@ SIPAccount::reinviteActiveCalls()
         if (!sipCall)
             continue;
 
+        // Reset retry state for a fresh connectivity change cycle
+        sipCall->resetConnectivityReinviteState();
+
         const auto callState = sipCall->getState();
         const auto connState = sipCall->getConnectionState();
 
         if (connState != Call::ConnectionState::CONNECTED
             || (callState != Call::CallState::ACTIVE && callState != Call::CallState::HOLD)) {
-            SIP_CORE_DBG("[call:%s] Skipping re-INVITE: state=%s is not eligible",
-                         id.c_str(),
-                         sipCall->getStateStr().c_str());
+            // Fix 5: Mark for deferred re-INVITE when call reaches eligible state
+            SIP_CORE_WARN("[call:%s] Not in re-invitable state (%s), deferring connectivity "
+                          "re-INVITE",
+                          id.c_str(),
+                          sipCall->getStateStr().c_str());
+            sipCall->pendingConnectivityReinvite_.store(true);
+            sipCall->setSipTransport(transport_, contactHdr);
+
+            // Register a state listener to trigger reinvite when call becomes eligible
+            std::weak_ptr<SIPCall> wCall = sipCall;
+            call->addStateListener(
+                [wCall](Call::CallState cs, Call::ConnectionState cn, int) -> bool {
+                    if (cn == Call::ConnectionState::CONNECTED
+                        && (cs == Call::CallState::ACTIVE || cs == Call::CallState::HOLD)) {
+                        if (auto c = wCall.lock()) {
+                            c->tryDeferredConnectivityReinvite();
+                        }
+                        return false; // remove listener after triggering
+                    }
+                    // Remove listener if call is over
+                    if (cs == Call::CallState::OVER || cn == Call::ConnectionState::DISCONNECTED)
+                        return false;
+                    return true; // keep listening
+                });
             continue;
         }
 
@@ -2657,12 +2709,62 @@ SIPAccount::reinviteActiveCalls()
 
         sipCall->setSipTransport(transport_, contactHdr);
 
-        if (sipCall->reinviteOnConnectivityChange() != PJ_SUCCESS) {
-            SIP_CORE_ERR("[call:%s] Re-INVITE failed after connectivity change, hanging up",
-                         id.c_str());
-            sipCall->hangup(0);
+        auto result = sipCall->reinviteOnConnectivityChange();
+        if (result == PJ_EPENDING) {
+            // Transaction was pending, deferred re-INVITE is already scheduled
+            SIP_CORE_DBG("[call:%s] Re-INVITE deferred (pending transaction)", id.c_str());
+        } else if (result != PJ_SUCCESS) {
+            // Fix 4: Retry with backoff instead of immediate hangup
+            scheduleConnectivityReinviteRetry(sipCall);
         }
     }
+}
+
+void
+SIPAccount::scheduleConnectivityReinviteRetry(const std::shared_ptr<SIPCall>& sipCall)
+{
+    auto& retryCount = sipCall->connectivityReinviteRetryCount_;
+    if (retryCount >= SIPCall::MAX_CONNECTIVITY_REINVITE_RETRIES) {
+        SIP_CORE_ERR("[call:%s] Re-INVITE failed after %u retries, hanging up",
+                     sipCall->getCallId().c_str(),
+                     retryCount);
+        sipCall->hangup(0);
+        return;
+    }
+
+    retryCount++;
+    const auto delayMs = std::chrono::milliseconds(1000 * (1 << (retryCount - 1))); // 1s, 2s, 4s
+
+    SIP_CORE_WARN("[call:%s] Re-INVITE failed, scheduling retry %u/%u in %lld ms",
+                  sipCall->getCallId().c_str(),
+                  retryCount,
+                  SIPCall::MAX_CONNECTIVITY_REINVITE_RETRIES,
+                  static_cast<long long>(delayMs.count()));
+
+    std::weak_ptr<SIPCall> wCall = sipCall;
+    std::weak_ptr<SIPAccount> wAcc = std::dynamic_pointer_cast<SIPAccount>(shared_from_this());
+    Manager::instance().scheduleTaskIn(
+        [wCall, wAcc] {
+            auto acc = wAcc.lock();
+            auto call = wCall.lock();
+            if (!acc || !call)
+                return;
+            if (call->getConnectionState() == Call::ConnectionState::DISCONNECTED
+                || call->getState() == Call::CallState::OVER)
+                return;
+
+            SIP_CORE_WARN("[call:%s] Retrying connectivity re-INVITE (attempt %u)",
+                          call->getCallId().c_str(),
+                          call->connectivityReinviteRetryCount_);
+
+            auto result = call->reinviteOnConnectivityChange();
+            if (result == PJ_EPENDING) {
+                // Will be retried when transaction completes
+            } else if (result != PJ_SUCCESS) {
+                acc->scheduleConnectivityReinviteRetry(call);
+            }
+        },
+        delayMs);
 }
 
 void
@@ -2941,6 +3043,14 @@ SIPAccount::onRegister(pjsip_regc_cbparam* param)
                 // only now set timer
                 registerKeepAliveTimer();
                 startBackupKeepAliveAfterRegister();
+
+                // If a connectivity recovery deferred the reinvite, execute it now
+                if (pendingReinviteAfterRegister_.exchange(false)) {
+                    SIP_CORE_WARN("Registration succeeded after connectivity recovery for "
+                                  "account %s, now re-inviting active calls",
+                                  accountID_.c_str());
+                    reinviteActiveCalls();
+                }
             }
         }
     }
