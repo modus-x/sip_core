@@ -36,6 +36,8 @@
 namespace sip_core {
 
 static constexpr auto MS_PER_PACKET = std::chrono::milliseconds(20);
+// After ~1 second (50 frames * 20ms) of no audio, consider the device broken
+static constexpr unsigned int BROKEN_DEVICE_THRESHOLD = 50;
 
 AudioInput::AudioInput(const std::string& id)
     : id_(id)
@@ -131,8 +133,6 @@ AudioInput::readFromDevice()
     // and we should send silence to keep the RTP stream alive
     if (not audioFrame) {
         consecutiveEmptyFrames_++;
-        // After ~1 second (50 frames * 20ms) of no audio, consider device broken
-        constexpr unsigned int BROKEN_DEVICE_THRESHOLD = 50;
         if (consecutiveEmptyFrames_ == BROKEN_DEVICE_THRESHOLD) {
             SIP_CORE_WARN("Audio Input: no data for %u consecutive frames, "
                          "device may be broken - sending silence to keep RTP alive",
@@ -143,10 +143,11 @@ AudioInput::readFromDevice()
         }
     } else {
         // Reset counter when we get valid audio
-        if (consecutiveEmptyFrames_ >= 50) {
+        if (consecutiveEmptyFrames_ >= BROKEN_DEVICE_THRESHOLD) {
             SIP_CORE_INFO("Audio Input: device recovered, received audio data again");
-            // A capture device came back — clear forceMuteNoDevice_ so the
-            // user's mute preference takes effect again.
+            // Reset BEFORE re-checking so updateMuteStateForDeviceAvailability
+            // correctly clears forceMuteNoDevice_.
+            consecutiveEmptyFrames_ = 0;
             updateMuteStateForDeviceAvailability();
         }
         consecutiveEmptyFrames_ = 0;
@@ -484,9 +485,14 @@ AudioInput::updateMuteStateForDeviceAvailability()
         hasCaptureDevice = !driver->getCaptureDeviceList().empty();
     }
 
-    const bool newForceMute = !hasCaptureDevice;
+    const bool deviceBroken = hasCaptureDevice
+                              && consecutiveEmptyFrames_ >= BROKEN_DEVICE_THRESHOLD;
+    const bool newForceMute = !hasCaptureDevice || deviceBroken;
     if (newForceMute && !forceMuteNoDevice_) {
-        SIP_CORE_WARN("Audio Input forcing mute: no capture devices detected");
+        if (deviceBroken)
+            SIP_CORE_WARN("Audio Input forcing mute: capture device present but not producing audio");
+        else
+            SIP_CORE_WARN("Audio Input forcing mute: no capture devices detected");
     } else if (!newForceMute && forceMuteNoDevice_) {
         SIP_CORE_INFO("Audio Input capture device detected; manual mute control restored");
     }
