@@ -169,6 +169,12 @@ private:
     AudioDeviceID inputDeviceID_ {0};
     AudioDeviceID playbackDeviceID_ {0};
 
+    /** Stored device names for name-based re-selection after hot-plug.
+     *  On restart, we first try to find the device by name (stable across
+     *  index shifts) before falling back to the preference index. */
+    std::string captureDeviceName_;
+    std::string playbackDeviceName_;
+
     std::vector<AudioDevice> getDeviceList(bool getCapture) const;
 };
 

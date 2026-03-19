@@ -170,8 +170,8 @@ AudioInput::readFromDevice()
         audioFrame = std::make_shared<AudioFrame>(bufferPool.getInternalAudioFormat(), frameSize_);
         libav_utils::fillWithSilence(audioFrame->pointer());
         audioFrame->has_voice = false;
-    } else if (muteState_) {
-        // User is muted but we got a frame - fill it with silence
+    } else if (muteState_ || forceMuteNoDevice_) {
+        // Muted (user or force-mute) but we got a frame - fill it with silence
         libav_utils::fillWithSilence(audioFrame->pointer());
         audioFrame->has_voice = false;
     }
@@ -249,7 +249,7 @@ AudioInput::configureFilePlayback(const std::string& path,
     devOpts_.name = path;
     auto decoder
         = std::make_unique<MediaDecoder>(demuxer, index, [this](std::shared_ptr<MediaFrame>&& frame) {
-              if (muteState_) {
+              if (muteState_ || forceMuteNoDevice_) {
                   libav_utils::fillWithSilence(frame->pointer());
                   return;
               }
@@ -450,11 +450,6 @@ AudioInput::setFormat(const AudioFormat& fmt)
 void
 AudioInput::setMuted(bool isMuted)
 {
-    updateMuteStateForDeviceAvailability();
-    if (forceMuteNoDevice_ && !isMuted) {
-        SIP_CORE_WARN("Audio Input unmute ignored: no capture devices available");
-        return;
-    }
     muteState_ = isMuted;
     SIP_CORE_WARN("Audio Input muted [%s]", muteState_ ? "YES" : "NO");
 }
@@ -498,9 +493,6 @@ AudioInput::updateMuteStateForDeviceAvailability()
     }
 
     forceMuteNoDevice_ = newForceMute;
-    if (forceMuteNoDevice_) {
-        muteState_ = true;
-    }
 }
 
 } // namespace sip_core

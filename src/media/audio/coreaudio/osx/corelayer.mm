@@ -162,19 +162,45 @@ CoreLayer::initAudioLayerIO(AudioDeviceType stream)
     if (stream == AudioDeviceType::CAPTURE || stream == AudioDeviceType::ALL) {
         auto captureList = getDeviceList(true);
         bool useFallbackDevice = true;
-        // try to set the device selected by the user. Otherwise, the default device will be set
-        // automatically.
-        if (indexIn_ < captureList.size()) {
-            inputDeviceID_ = captureList[indexIn_].id_;
 
+        // First, try to find the previously active device by name.
+        // This handles hot-plug scenarios where indices shift but the
+        // device name remains stable (matches PulseAudio/PortAudio behaviour).
+        if (!captureDeviceName_.empty()) {
+            for (size_t i = 0; i < captureList.size(); ++i) {
+                if (captureList[i].name_ == captureDeviceName_) {
+                    inputDeviceID_ = captureList[i].id_;
+                    auto error = AudioUnitSetProperty(ioUnit_,
+                                                      kAudioOutputUnitProperty_CurrentDevice,
+                                                      kAudioUnitScope_Global,
+                                                      inputBus,
+                                                      &inputDeviceID_,
+                                                      size);
+                    if (error == kAudioServicesNoError) {
+                        useFallbackDevice = false;
+                        SIP_CORE_DBG("Capture device re-selected by name: %s",
+                                     captureDeviceName_.c_str());
+                    }
+                    break;
+                }
+            }
+        }
+
+        // Fall back to index-based selection (first launch or name not found).
+        if (useFallbackDevice && indexIn_ < captureList.size()) {
+            inputDeviceID_ = captureList[indexIn_].id_;
             auto error = AudioUnitSetProperty(ioUnit_,
                                               kAudioOutputUnitProperty_CurrentDevice,
                                               kAudioUnitScope_Global,
                                               inputBus,
                                               &inputDeviceID_,
                                               size);
-            useFallbackDevice = error != kAudioServicesNoError;
+            if (error == kAudioServicesNoError) {
+                useFallbackDevice = false;
+                captureDeviceName_ = captureList[indexIn_].name_;
+            }
         }
+
         // get a fallback capture device id so we could listen when the device disconnect.
         if (useFallbackDevice) {
             const AudioObjectPropertyAddress inputInfo = {kAudioHardwarePropertyDefaultInputDevice,
@@ -198,7 +224,30 @@ CoreLayer::initAudioLayerIO(AudioDeviceType stream)
         auto playbackList = getDeviceList(false);
         auto index = stream == AudioDeviceType::RINGTONE ? indexRing_ : indexOut_;
         bool useFallbackDevice = true;
-        if (index < playbackList.size()) {
+
+        // First, try to find the previously active device by name.
+        if (!playbackDeviceName_.empty() && stream != AudioDeviceType::RINGTONE) {
+            for (size_t i = 0; i < playbackList.size(); ++i) {
+                if (playbackList[i].name_ == playbackDeviceName_) {
+                    playbackDeviceID_ = playbackList[i].id_;
+                    auto error = AudioUnitSetProperty(ioUnit_,
+                                                      kAudioOutputUnitProperty_CurrentDevice,
+                                                      kAudioUnitScope_Global,
+                                                      outputBus,
+                                                      &playbackDeviceID_,
+                                                      size);
+                    if (error == kAudioServicesNoError) {
+                        useFallbackDevice = false;
+                        SIP_CORE_DBG("Playback device re-selected by name: %s",
+                                     playbackDeviceName_.c_str());
+                    }
+                    break;
+                }
+            }
+        }
+
+        // Fall back to index-based selection.
+        if (useFallbackDevice && index < playbackList.size()) {
             playbackDeviceID_ = playbackList[index].id_;
             auto error = AudioUnitSetProperty(ioUnit_,
                                               kAudioOutputUnitProperty_CurrentDevice,
@@ -206,8 +255,13 @@ CoreLayer::initAudioLayerIO(AudioDeviceType stream)
                                               outputBus,
                                               &playbackDeviceID_,
                                               size);
-            useFallbackDevice = error != kAudioServicesNoError;
+            if (error == kAudioServicesNoError) {
+                useFallbackDevice = false;
+                if (stream != AudioDeviceType::RINGTONE)
+                    playbackDeviceName_ = playbackList[index].name_;
+            }
         }
+
         // get fallback output device id.
         if (useFallbackDevice) {
             const AudioObjectPropertyAddress outputInfo = {kAudioHardwarePropertyDefaultOutputDevice,
