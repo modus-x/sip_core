@@ -158,8 +158,6 @@ CoreLayer::initAudioLayerIO(AudioDeviceType stream)
         return;
     }
 
-    AudioDeviceID inputDeviceID;
-    AudioDeviceID playbackDeviceID;
     UInt32 size = sizeof(AudioDeviceID);
     if (stream == AudioDeviceType::CAPTURE || stream == AudioDeviceType::ALL) {
         auto captureList = getDeviceList(true);
@@ -167,13 +165,13 @@ CoreLayer::initAudioLayerIO(AudioDeviceType stream)
         // try to set the device selected by the user. Otherwise, the default device will be set
         // automatically.
         if (indexIn_ < captureList.size()) {
-            inputDeviceID = captureList[indexIn_].id_;
+            inputDeviceID_ = captureList[indexIn_].id_;
 
             auto error = AudioUnitSetProperty(ioUnit_,
                                               kAudioOutputUnitProperty_CurrentDevice,
                                               kAudioUnitScope_Global,
                                               inputBus,
-                                              &inputDeviceID,
+                                              &inputDeviceID_,
                                               size);
             useFallbackDevice = error != kAudioServicesNoError;
         }
@@ -187,7 +185,7 @@ CoreLayer::initAudioLayerIO(AudioDeviceType stream)
                                                      0,
                                                      NULL,
                                                      &size,
-                                                     &inputDeviceID);
+                                                     &inputDeviceID_);
             if (status != kAudioServicesNoError) {
                 SIP_CORE_ERR() << "failed to set audio input device";
                 return;
@@ -201,12 +199,12 @@ CoreLayer::initAudioLayerIO(AudioDeviceType stream)
         auto index = stream == AudioDeviceType::RINGTONE ? indexRing_ : indexOut_;
         bool useFallbackDevice = true;
         if (index < playbackList.size()) {
-            playbackDeviceID = playbackList[index].id_;
+            playbackDeviceID_ = playbackList[index].id_;
             auto error = AudioUnitSetProperty(ioUnit_,
                                               kAudioOutputUnitProperty_CurrentDevice,
                                               kAudioUnitScope_Global,
                                               outputBus,
-                                              &playbackDeviceID,
+                                              &playbackDeviceID_,
                                               size);
             useFallbackDevice = error != kAudioServicesNoError;
         }
@@ -220,7 +218,7 @@ CoreLayer::initAudioLayerIO(AudioDeviceType stream)
                                                      0,
                                                      NULL,
                                                      &size,
-                                                     &playbackDeviceID);
+                                                     &playbackDeviceID_);
             if (status != kAudioServicesNoError) {
                 SIP_CORE_ERR() << "failed to set audio output device";
                 return;
@@ -232,8 +230,8 @@ CoreLayer::initAudioLayerIO(AudioDeviceType stream)
     const AudioObjectPropertyAddress aliveAddress = {kAudioDevicePropertyDeviceIsAlive,
                                                      kAudioObjectPropertyScopeGlobal,
                                                      kAudioObjectPropertyElementMaster};
-    AudioObjectAddPropertyListener(playbackDeviceID, &aliveAddress, &deviceIsAliveCallback, this);
-    AudioObjectAddPropertyListener(inputDeviceID, &aliveAddress, &deviceIsAliveCallback, this);
+    AudioObjectAddPropertyListener(playbackDeviceID_, &aliveAddress, &deviceIsAliveCallback, this);
+    AudioObjectAddPropertyListener(inputDeviceID_, &aliveAddress, &deviceIsAliveCallback, this);
 
     // add listener to detect when devices changed
     const AudioObjectPropertyAddress changedAddress = {kAudioHardwarePropertyDevices,
@@ -355,11 +353,18 @@ CoreLayer::initAudioLayerIO(AudioDeviceType stream)
 void
 CoreLayer::startStream(AudioDeviceType stream)
 {
+    // Set the guard BEFORE dispatch so that any devicesChangedCallback firing
+    // on the system thread (e.g. from VoiceProcessingIO creating its internal
+    // VPAUAggregateAudioDevice) is suppressed during the restart window.
+    restartingAudio_ = true;
+
     dispatch_async(audioConfigurationQueueMacOS(), ^{
         SIP_CORE_DBG("START STREAM");
 
-        if (status_ != Status::Idle)
+        if (status_ != Status::Idle) {
+            restartingAudio_ = false;
             return;
+        }
         status_ = Status::Started;
 
         initAudioLayerIO(stream);
@@ -370,15 +375,35 @@ CoreLayer::startStream(AudioDeviceType stream)
             status_ = Status::Idle;
             destroyAudioLayer();
         }
+
+        restartingAudio_ = false;
     });
 }
 
 void
 CoreLayer::destroyAudioLayer()
 {
+    // Remove property listeners to prevent callbacks during/after teardown
+    // and to avoid listener accumulation across restart cycles.
+    const AudioObjectPropertyAddress aliveAddress = {kAudioDevicePropertyDeviceIsAlive,
+                                                     kAudioObjectPropertyScopeGlobal,
+                                                     kAudioObjectPropertyElementMaster};
+    if (playbackDeviceID_)
+        AudioObjectRemovePropertyListener(playbackDeviceID_, &aliveAddress, &deviceIsAliveCallback, this);
+    if (inputDeviceID_)
+        AudioObjectRemovePropertyListener(inputDeviceID_, &aliveAddress, &deviceIsAliveCallback, this);
+
+    const AudioObjectPropertyAddress changedAddress = {kAudioHardwarePropertyDevices,
+                                                       kAudioObjectPropertyScopeGlobal,
+                                                       kAudioObjectPropertyElementMaster};
+    AudioObjectRemovePropertyListener(kAudioObjectSystemObject, &changedAddress, &devicesChangedCallback, this);
+
     AudioOutputUnitStop(ioUnit_);
     AudioUnitUninitialize(ioUnit_);
     AudioComponentInstanceDispose(ioUnit_);
+
+    inputDeviceID_ = 0;
+    playbackDeviceID_ = 0;
 }
 
 void
@@ -404,10 +429,13 @@ CoreLayer::deviceIsAliveCallback(AudioObjectID inObjectID,
                                  const AudioObjectPropertyAddress inAddresses[],
                                  void* inRefCon)
 {
-    if (static_cast<CoreLayer*>(inRefCon)->status_ != Status::Started)
+    auto* self = static_cast<CoreLayer*>(inRefCon);
+    if (self->status_ != Status::Started)
         return kAudioServicesNoError;
-    static_cast<CoreLayer*>(inRefCon)->stopStream();
-    static_cast<CoreLayer*>(inRefCon)->startStream();
+    if (self->restartingAudio_.load())
+        return kAudioServicesNoError;
+    self->stopStream();
+    self->startStream();
     return kAudioServicesNoError;
 }
 
@@ -417,13 +445,18 @@ CoreLayer::devicesChangedCallback(AudioObjectID inObjectID,
                                   const AudioObjectPropertyAddress inAddresses[],
                                   void* inRefCon)
 {
-    if (static_cast<CoreLayer*>(inRefCon)->status_ != Status::Started)
+    auto* self = static_cast<CoreLayer*>(inRefCon);
+    if (self->status_ != Status::Started)
+        return kAudioServicesNoError;
+    // Skip if we are already in the middle of a restart — VoiceProcessingIO
+    // creates/destroys a VPAUAggregateAudioDevice which fires this callback.
+    if (self->restartingAudio_.load())
         return kAudioServicesNoError;
     // Restart the audio stream so the AudioUnit reinitializes with the
     // current set of devices (a new mic/speaker may have been plugged in).
-    static_cast<CoreLayer*>(inRefCon)->stopStream();
-    static_cast<CoreLayer*>(inRefCon)->startStream();
-    static_cast<CoreLayer*>(inRefCon)->devicesChanged();
+    self->stopStream();
+    self->startStream();
+    self->devicesChanged();
     return kAudioServicesNoError;
 }
 

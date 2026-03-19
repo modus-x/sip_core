@@ -23,6 +23,7 @@
 
 #include "audio/audiolayer.h"
 #include <AudioToolbox/AudioToolbox.h>
+#include <atomic>
 
 #define checkErr(err) \
     if (err) { \
@@ -159,6 +160,14 @@ private:
     UInt32 inChannelsPerFrame_;
     Float64 outSampleRate_;
     UInt32 outChannelsPerFrame_;
+
+    /** Guard flag to prevent infinite restart loop caused by VoiceProcessingIO
+     *  creating/destroying its internal VPAUAggregateAudioDevice. */
+    std::atomic<bool> restartingAudio_ {false};
+
+    /** Stored device IDs so we can remove property listeners in destroyAudioLayer. */
+    AudioDeviceID inputDeviceID_ {0};
+    AudioDeviceID playbackDeviceID_ {0};
 
     std::vector<AudioDevice> getDeviceList(bool getCapture) const;
 };

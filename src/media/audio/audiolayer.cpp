@@ -87,6 +87,11 @@ void
 AudioLayer::devicesChanged()
 {
     emitSignal<libsip_core::AudioSignal::DeviceEvent>();
+#ifdef ENABLE_VIDEO
+    // Also emit VideoSignal::DeviceEvent so the Dart side (which only listens
+    // to video device events) is notified about audio device changes too.
+    emitSignal<libsip_core::VideoSignal::DeviceEvent>();
+#endif
     // Restart audio senders for active calls so they pick up the new device
     runOnMainThread([]() { Manager::instance().onAudioDevicesChanged(); });
 }
