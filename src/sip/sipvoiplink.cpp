@@ -596,24 +596,21 @@ transaction_request_cb(pjsip_rx_data* rdata)
     }
 
     if (account->isDND()) {
-        auto it = extraHeaders.find("X-CallType");
-        if (it != extraHeaders.end() && it->second == "ACD") {
-            const pj_str_t message = CONST_PJ_STR(
-                "ACD call is declined because user is in DND / away state");
-            if (pjsip_inv_end_session(call->inviteSession_.get(),
-                                      PJSIP_SC_DECLINE,
-                                      &message,
-                                      &tdata)) {
-                SIP_CORE_ERR("Could not create answer DECLINE");
-                return PJ_FALSE;
-            }
-
-            if (pjsip_inv_send_msg(call->inviteSession_.get(), tdata) != PJ_SUCCESS) {
-                SIP_CORE_ERR("Could not send msg DECLINE");
-            }
-
+        const pj_str_t message = CONST_PJ_STR(
+            "Call was declined because user is in DND state");
+        if (pjsip_inv_end_session(call->inviteSession_.get(),
+                                    PJSIP_SC_DECLINE,
+                                    &message,
+                                    &tdata)) {
+            SIP_CORE_ERR("Could not create answer DECLINE");
             return PJ_FALSE;
         }
+
+        if (pjsip_inv_send_msg(call->inviteSession_.get(), tdata) != PJ_SUCCESS) {
+            SIP_CORE_ERR("Could not send msg DECLINE");
+        }
+
+        return PJ_FALSE;
     }
 
     call->setState(Call::ConnectionState::TRYING);
