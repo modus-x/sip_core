@@ -2611,18 +2611,27 @@ SIPCall::updateAllMediaStreams(const std::vector<MediaAttribute>& mediaAttrList,
             // Media does not exist, add a new one.
             auto normalizedAttr = newAttr;
             if (normalizedAttr.type_ == MediaType::MEDIA_VIDEO) {
-                if (!normalizedAttr.muted_) {
+                // When in a conference, the conference manages the mute state
+                // through the mixer. Do not override the requested state.
+                if (conf_.lock()) {
+                    SIP_CORE_DBG(
+                        "[call:%s] New video stream [%s] added in conference context, "
+                        "keeping muted=%s as requested",
+                        getCallId().c_str(),
+                        normalizedAttr.label_.c_str(),
+                        normalizedAttr.muted_ ? "true" : "false");
+                } else if (!normalizedAttr.muted_) {
                     SIP_CORE_DBG(
                         "[call:%s] New negotiated video stream [%s] forced muted by default policy",
                         getCallId().c_str(),
                         normalizedAttr.label_.c_str());
+                    normalizedAttr.muted_ = true;
                 } else {
                     SIP_CORE_DBG("[call:%s] New negotiated video stream [%s] is kept muted "
                                  "(default policy)",
                                  getCallId().c_str(),
                                  normalizedAttr.label_.c_str());
                 }
-                normalizedAttr.muted_ = true;
             }
             addMediaStream(normalizedAttr);
             auto& stream = rtpStreams_.back();
@@ -3247,8 +3256,22 @@ SIPCall::exitConference()
 #ifdef ENABLE_VIDEO
     for (const auto& videoRtp : getRtpSessionList(MediaType::MEDIA_VIDEO))
         std::static_pointer_cast<video::VideoRtpSession>(videoRtp)->exitConference();
+
+    // After exiting the conference, the local video input is reattached and
+    // actively sending. Synchronize the media attribute muted_ flag to
+    // reflect the actual state and notify the UI.
+    for (auto& stream : rtpStreams_) {
+        if (stream.mediaAttribute_ && stream.mediaAttribute_->type_ == MediaType::MEDIA_VIDEO
+            && stream.mediaAttribute_->muted_) {
+            stream.mediaAttribute_->muted_ = false;
+            if (stream.rtpSession_)
+                stream.rtpSession_->setMuted(false);
+            emitSignal<libsip_core::CallSignal::VideoMuted>(getCallId(), false);
+        }
+    }
 #endif
     conf_.reset();
+    reportMediaNegotiationStatus();
 }
 
 void

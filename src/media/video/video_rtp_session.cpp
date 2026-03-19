@@ -991,6 +991,10 @@ VideoRtpSession::exitConference()
         if (receiveThread_) {
             auto activeStream = videoMixer_->verifyActive(streamId_);
             videoMixer_->detachVideo(receiveThread_.get());
+            // Re-enable direct sink since we are leaving the conference.
+            // The receive thread may have been created with useSink_=false
+            // if a re-INVITE occurred while in the conference.
+            receiveThread_->setUseSink(true);
             receiveThread_->startSink();
             if (activeStream)
                 videoMixer_->setActiveStream(streamId_);
