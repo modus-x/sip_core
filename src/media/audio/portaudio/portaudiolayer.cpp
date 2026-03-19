@@ -876,8 +876,10 @@ openStreamDevice(PaStream**      stream,
     params.device = device;
     params.channelCount = is_out ? device_info->maxOutputChannels
                                  : device_info->maxInputChannels;
-    params.suggestedLatency = is_out ? device_info->defaultLowOutputLatency
-                                     : device_info->defaultLowInputLatency;
+    // Use high-latency setting to avoid buffer underruns on RDP/virtual audio devices.
+    // defaultLowLatency is too aggressive for redirected audio (RDP, VDI, etc.).
+    params.suggestedLatency = is_out ? device_info->defaultHighOutputLatency
+                                     : device_info->defaultHighInputLatency;
     params.hostApiSpecificStreamInfo = nullptr;
 
     // Try each combination until one works
@@ -892,11 +894,16 @@ openStreamDevice(PaStream**      stream,
             SIP_CORE_INFO() << "PortAudioLayer: Is format supported (input): " << supportErr;
         }
 
+        // Use a fixed 20ms frame size aligned with the ring buffer granularity.
+        // paFramesPerBufferUnspecified can cause variable/tiny callback sizes
+        // on RDP virtual audio devices, leading to timing issues.
+        unsigned long framesPerBuffer = static_cast<unsigned long>(rate / 50.0);
+
         PaError err = Pa_OpenStream(stream,
                                     is_out ? nullptr         : &params,
                                     is_out ? &params         : nullptr,
                                     rate,
-                                    paFramesPerBufferUnspecified,
+                                    framesPerBuffer,
                                     paNoFlag,
                                     callback,
                                     user_data);
@@ -935,22 +942,25 @@ openFullDuplexStream(PaStream** stream,
     inputParams.device = inputDeviceIndex;
     inputParams.channelCount = input_device_info->maxInputChannels;
     inputParams.sampleFormat = paInt16;
-    inputParams.suggestedLatency = input_device_info->defaultLowInputLatency;
+    inputParams.suggestedLatency = input_device_info->defaultHighInputLatency;
     inputParams.hostApiSpecificStreamInfo = nullptr;
 
     PaStreamParameters outputParams;
     outputParams.device = ouputDeviceIndex;
     outputParams.channelCount = output_device_info->maxOutputChannels;
     outputParams.sampleFormat = paInt16;
-    outputParams.suggestedLatency = output_device_info->defaultLowOutputLatency;
+    outputParams.suggestedLatency = output_device_info->defaultHighOutputLatency;
     outputParams.hostApiSpecificStreamInfo = nullptr;
+
+    double sampleRate = std::min(input_device_info->defaultSampleRate,
+                                 output_device_info->defaultSampleRate);
+    unsigned long framesPerBuffer = static_cast<unsigned long>(sampleRate / 50.0);
 
     auto err = Pa_OpenStream(stream,
                              &inputParams,
                              &outputParams,
-                             std::min(input_device_info->defaultSampleRate,
-                                      input_device_info->defaultSampleRate),
-                             paFramesPerBufferUnspecified,
+                             sampleRate,
+                             framesPerBuffer,
                              paNoFlag,
                              callback,
                              user_data);
@@ -1180,7 +1190,12 @@ PortAudioLayer::PortAudioLayerImpl::paOutputCallback(PortAudioLayer& parent,
     // unused arguments
     (void) inputBuffer;
     (void) timeInfo;
-    (void) statusFlags;
+
+    // Log PortAudio status flags to detect buffer underruns/overruns
+    if (statusFlags & paOutputUnderflow)
+        SIP_CORE_WARN("[PortAudio Output CB] OUTPUT UNDERFLOW detected");
+    if (statusFlags & paOutputOverflow)
+        SIP_CORE_WARN("[PortAudio Output CB] OUTPUT OVERFLOW detected");
 
     // Log callback invocation periodically (every ~1000 calls to avoid spam)
     static unsigned long callCount = 0;
@@ -1222,7 +1237,12 @@ PortAudioLayer::PortAudioLayerImpl::paInputCallback(PortAudioLayer& parent,
     // unused arguments
     (void) outputBuffer;
     (void) timeInfo;
-    (void) statusFlags;
+
+    // Log PortAudio status flags to detect buffer underruns/overruns
+    if (statusFlags & paInputUnderflow)
+        SIP_CORE_WARN("[PortAudio Input CB] INPUT UNDERFLOW detected");
+    if (statusFlags & paInputOverflow)
+        SIP_CORE_WARN("[PortAudio Input CB] INPUT OVERFLOW detected");
 
     if (framesPerBuffer == 0) {
         SIP_CORE_WARN("[PortAudio Input CB] No frames for input (framesPerBuffer=0).");

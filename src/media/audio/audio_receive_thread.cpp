@@ -280,6 +280,8 @@ AudioReceiveThread::setRecorderCallback(
 MediaStream
 AudioReceiveThread::getInfo() const
 {
+    if (!audioDecoder_)
+        return {};
     return audioDecoder_->getStream("a:remote");
 }
 

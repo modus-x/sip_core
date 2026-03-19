@@ -347,41 +347,82 @@ AudioLayer::getToPlay(AudioFormat format, size_t writableSamples)
     else
         playbackQueue_->setFrameSize(writableSamples);
 
-    std::shared_ptr<AudioFrame> playbackBuf {};
-    while (!(playbackBuf = playbackQueue_->dequeue())) {
+    // Phase 1: Enqueue available data into the playback queue.
+    // This is separated from dequeueing so that pre-buffering can
+    // accumulate samples without consuming them.
+    bool hasDataSource = true;
+    while (hasDataSource) {
         std::shared_ptr<AudioFrame> resampled;
 
         if (auto urgentSamples = urgentRingBuffer_.get(RingBufferPool::DEFAULT_ID)) {
             bufferPool.discard(1, RingBufferPool::DEFAULT_ID);
             resampled = resampler_->resample(std::move(urgentSamples), format);
+            // Urgent audio (DTMF tones etc.) bypasses pre-buffering
+            prebuffering_ = false;
         } else if (auto toneToPlay = Manager::instance().getTelephoneTone()) {
             resampled = resampler_->resample(toneToPlay->getNext(), format);
+            prebuffering_ = false;
         } else if (auto buf = bufferPool.getData(RingBufferPool::DEFAULT_ID)) {
             resampled = resampler_->resample(std::move(buf), format);
         } else {
-            std::lock_guard<std::mutex> lock(audioProcessorMutex);
-            if (audioProcessor) {
+            // No data available — if we were playing, re-enter pre-buffering
+            // mode so the next burst of data is smoothed out.
+            if (!prebuffering_) {
+                prebuffering_ = true;
+            }
+            // Use try_lock to avoid blocking the real-time audio callback.
+            // If the lock is contended, just skip the audio processor this time.
+            std::unique_lock<std::mutex> lock(audioProcessorMutex, std::try_to_lock);
+            if (lock.owns_lock() && audioProcessor) {
                 auto silence = std::make_shared<AudioFrame>(format, writableSamples);
                 libav_utils::fillWithSilence(silence->pointer());
                 audioProcessor->putPlayback(silence);
             }
+            hasDataSource = false;
             break;
         }
 
         if (resampled) {
-            std::lock_guard<std::mutex> lock(audioProcessorMutex);
+            // Use try_lock to avoid blocking the real-time audio callback.
+            std::unique_lock<std::mutex> lock(audioProcessorMutex, std::try_to_lock);
 
 #if defined(_WIN32) || defined(__linux__)
             adjustVolume(resampled, true);
 #endif
 
-            if (audioProcessor) {
+            if (lock.owns_lock() && audioProcessor) {
                 audioProcessor->putPlayback(resampled);
             }
             playbackQueue_->enqueue(std::move(resampled));
-        } else
+        } else {
+            hasDataSource = false;
+        }
+
+        // Don't spin: only enqueue one frame per callback during normal playback.
+        // During pre-buffering we also only get one frame per callback from the
+        // ring buffer, so the accumulation happens across successive callbacks.
+        if (!prebuffering_)
             break;
     }
+
+    // Phase 2: Pre-buffering check — accumulate enough samples before starting
+    // output to absorb timing jitter (important for RDP/VDI virtual audio devices).
+    // We check sample count BEFORE dequeuing to avoid consuming frames prematurely.
+    if (prebuffering_) {
+        int available = playbackQueue_->samples();
+        int threshold = static_cast<int>(PREBUFFER_FRAME_COUNT * writableSamples);
+        if (available >= threshold) {
+            // Threshold reached — exit pre-buffering and start playing.
+            prebuffering_ = false;
+        } else {
+            // Still accumulating — return null so the callback outputs silence.
+            return {};
+        }
+    }
+
+    // Phase 3: Dequeue one frame for output. If the queue doesn't have enough
+    // samples yet, return null (silence will be output).
+    auto playbackBuf = playbackQueue_->dequeue();
 
     sip_core_tracepoint(audio_layer_get_to_play_end);
 

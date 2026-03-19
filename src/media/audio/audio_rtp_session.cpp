@@ -453,7 +453,7 @@ AudioRtpSession::setMuted(bool muted, Direction dir)
     } else {
         if (receiveThread_) {
             auto ms = receiveThread_->getInfo();
-            if (recorder_) {
+            if (recorder_ && !ms.name.empty()) {
                 if (muted) {
                     if (auto ob = recorder_->getStream(ms.name)) {
                         receiveThread_->detach(ob);
@@ -649,9 +649,11 @@ AudioRtpSession::deinitRecorder()
         return;
     if (receiveThread_) {
         auto ms = receiveThread_->getInfo();
-        if (auto ob = recorder_->getStream(ms.name)) {
-            receiveThread_->detach(ob);
-            recorder_->removeStream(ms);
+        if (!ms.name.empty()) {
+            if (auto ob = recorder_->getStream(ms.name)) {
+                receiveThread_->detach(ob);
+                recorder_->removeStream(ms);
+            }
         }
     }
     if (audioInput_) {

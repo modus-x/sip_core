@@ -277,6 +277,14 @@ protected:
     std::unique_ptr<AudioFrameResizer> playbackQueue_;
 
     /**
+     * Pre-buffering state for playback jitter absorption.
+     * Accumulates a few frames before starting playback to avoid
+     * glitches caused by timing jitter (especially over RDP/VDI).
+     */
+    static constexpr unsigned PREBUFFER_FRAME_COUNT = 3; // ~60ms at 20ms/frame
+    bool prebuffering_ {true};
+
+    /**
      * Whether or not the audio layer's playback stream is started
      */
     std::atomic<Status> status_ {Status::Idle};
