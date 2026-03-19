@@ -140,6 +140,7 @@ public:
      */
     std::shared_ptr<AudioLayer> getAudioDriver();
 
+
     inline std::unique_ptr<AudioDeviceGuard> startAudioStream(AudioDeviceType stream)
     {
         return std::make_unique<AudioDeviceGuard>(*this, stream);

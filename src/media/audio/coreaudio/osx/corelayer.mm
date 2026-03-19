@@ -419,6 +419,10 @@ CoreLayer::devicesChangedCallback(AudioObjectID inObjectID,
 {
     if (static_cast<CoreLayer*>(inRefCon)->status_ != Status::Started)
         return kAudioServicesNoError;
+    // Restart the audio stream so the AudioUnit reinitializes with the
+    // current set of devices (a new mic/speaker may have been plugged in).
+    static_cast<CoreLayer*>(inRefCon)->stopStream();
+    static_cast<CoreLayer*>(inRefCon)->startStream();
     static_cast<CoreLayer*>(inRefCon)->devicesChanged();
     return kAudioServicesNoError;
 }

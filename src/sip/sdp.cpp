@@ -780,6 +780,11 @@ Sdp::getMediaDescriptions(const pjmedia_sdp_session* session, bool remote) const
         else if (!pj_stricmp2(&media->desc.media, "video"))
             descr.type = MEDIA_VIDEO;
         else {
+            SIP_CORE_WARN("Skipping unsupported media type '%.*s' (transport: '%.*s') in SDP",
+                          (int) media->desc.media.slen,
+                          media->desc.media.ptr,
+                          (int) media->desc.transport.slen,
+                          media->desc.transport.ptr);
             ret.pop_back();
             continue;
         }
@@ -972,7 +977,12 @@ Sdp::getMediaAttributeListFromSdp(const pjmedia_sdp_session* sdpSession,
         else if (!pj_stricmp2(&media->desc.media, "video"))
             mediaAttr.type_ = MediaType::MEDIA_VIDEO;
         else {
-            SIP_CORE_WARN("Media#%u only 'audio' and 'video' types are supported!", idx);
+            SIP_CORE_WARN("Media#%u: skipping unsupported type '%.*s' (transport: '%.*s')",
+                          idx,
+                          (int) media->desc.media.slen,
+                          media->desc.media.ptr,
+                          (int) media->desc.transport.slen,
+                          media->desc.transport.ptr);
             // Disable the media. No need to parse the attributes.
             mediaAttr.enabled_ = false;
             mediaList.pop_back();

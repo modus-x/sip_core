@@ -137,11 +137,17 @@ AudioInput::readFromDevice()
             SIP_CORE_WARN("Audio Input: no data for %u consecutive frames, "
                          "device may be broken - sending silence to keep RTP alive",
                          BROKEN_DEVICE_THRESHOLD);
+            // Re-check whether the capture device is still present so we
+            // correctly enter forceMuteNoDevice_ state and can recover later.
+            updateMuteStateForDeviceAvailability();
         }
     } else {
         // Reset counter when we get valid audio
         if (consecutiveEmptyFrames_ >= 50) {
             SIP_CORE_INFO("Audio Input: device recovered, received audio data again");
+            // A capture device came back — clear forceMuteNoDevice_ so the
+            // user's mute preference takes effect again.
+            updateMuteStateForDeviceAvailability();
         }
         consecutiveEmptyFrames_ = 0;
     }

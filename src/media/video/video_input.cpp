@@ -319,6 +319,7 @@ VideoInput::captureFrame()
             if (!sip_core::getVideoDeviceMonitor().deviceExists(decOpts_.unique_id)) {
                 SIP_CORE_WARN("Device \"%s\" disconnected during capture, stopping",
                               decOpts_.unique_id.c_str());
+                stoppedByDeviceDisconnect_.store(true);
                 sip_core::getVideoDeviceMonitor().removeDeviceViaInput(decOpts_.unique_id.empty()
                                                                            ? decOpts_.input
                                                                            : decOpts_.unique_id);
@@ -334,6 +335,7 @@ VideoInput::captureFrame()
             if (!sip_core::getVideoDeviceMonitor().deviceExists(decOpts_.unique_id)) {
                 SIP_CORE_WARN("Device \"%s\" disconnected (read error), stopping",
                               decOpts_.unique_id.c_str());
+                stoppedByDeviceDisconnect_.store(true);
                 sip_core::getVideoDeviceMonitor().removeDeviceViaInput(decOpts_.unique_id.empty()
                                                                            ? decOpts_.input
                                                                            : decOpts_.unique_id);
@@ -1198,7 +1200,9 @@ VideoInput::initFile(std::string path)
 void
 VideoInput::restart()
 {
-    if (loop_.isStopping() && !switchInProgress_.load() && !currentResource_.empty()) {
+    if ((loop_.isStopping() || stoppedByDeviceDisconnect_.load())
+        && !switchInProgress_.load() && !currentResource_.empty()) {
+        stoppedByDeviceDisconnect_.store(false);
         switchInput(currentResource_);
     }
 }

@@ -332,7 +332,7 @@ private:
 
     mutable std::mutex transportMtx_ {};
 
-    void setupNegotiatedMedia();
+    bool setupNegotiatedMedia();
     void startEarlyMediaLocked();
     void promoteEarlyMediaToActiveLocked();
     void applyLocalHoldAudioKeepalive(bool enable, bool startSessionsIfNeeded);

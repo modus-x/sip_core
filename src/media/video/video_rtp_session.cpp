@@ -288,8 +288,21 @@ VideoRtpSession::startSender()
         }
 
         if (localVideoParams_.width == 0 or localVideoParams_.height == 0) {
-            localVideoParams_.width = NO_DEVICE_WIDTH;
-            localVideoParams_.height = NO_DEVICE_HEIGHT;
+            // Try to get real device params if a camera is now available
+            auto defaultDev = sip_core::getVideoDeviceMonitor().getDefaultDevice();
+            if (!defaultDev.empty()) {
+                auto devParams = sip_core::getVideoDeviceMonitor().getDeviceParams(defaultDev);
+                if (devParams.width > 0 && devParams.height > 0) {
+                    localVideoParams_ = devParams;
+                    SIP_CORE_DBG("VideoRtpSession [%p] Refreshed localVideoParams from device: %dx%d",
+                                 this, devParams.width, devParams.height);
+                }
+            }
+            // Final fallback if still zero
+            if (localVideoParams_.width == 0 or localVideoParams_.height == 0) {
+                localVideoParams_.width = NO_DEVICE_WIDTH;
+                localVideoParams_.height = NO_DEVICE_HEIGHT;
+            }
         }
 
         // be sure to not send any packets before saving last RTP seq value

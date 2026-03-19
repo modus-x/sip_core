@@ -1265,7 +1265,17 @@ sdp_media_update_cb(pjsip_inv_session* inv, pj_status_t status)
         Sdp::printSession(remoteSDP, "Remote active session:", sdp.getSdpDirection());
     }
 
-    call->onMediaNegotiationComplete();
+    // Wrap in try-catch: C++ exceptions must not propagate through PJSIP C callbacks
+    // (undefined behavior). This can happen e.g. when the remote SDP contains only
+    // unsupported media types (T.38 fax) and downstream code throws.
+    try {
+        call->onMediaNegotiationComplete();
+    } catch (const std::exception& e) {
+        SIP_CORE_ERR("[call:%s] Exception in media negotiation complete: %s",
+                     call->getCallId().c_str(),
+                     e.what());
+        call->hangup(PJSIP_SC_UNSUPPORTED_MEDIA_TYPE);
+    }
 }
 
 static void

@@ -260,6 +260,10 @@ VideoDeviceMonitor::addDevice(const string& id,
         return false;
     }
     notify();
+    // Restart video inputs that were stopped by device disconnect
+    if (Manager::initialized) {
+        runOnMainThread([]() { Manager::instance().onVideoDevicesChanged(); });
+    }
     return true;
 }
 

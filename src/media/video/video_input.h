@@ -115,6 +115,11 @@ public:
      */
     void restart();
 
+    /**
+     * Whether this input was stopped because the capture device was disconnected.
+     */
+    bool wasStoppedByDeviceDisconnect() const { return stoppedByDeviceDisconnect_.load(); }
+
     std::shared_future<DeviceParams> switchInput(const std::string& resource);
 
 private:
@@ -140,6 +145,7 @@ private:
     std::atomic_bool captureStarted_ {false};
     std::atomic_bool captureStartPending_ {false};
     std::atomic_bool suspendedForHold_ {false};
+    std::atomic_bool stoppedByDeviceDisconnect_ {false};
 
     // set value to promise. you can listen for another thread for foundDecOpts_, which it returned
     // from switchInput

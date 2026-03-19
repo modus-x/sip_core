@@ -1800,7 +1800,11 @@ SIPCall::onEarlyMediaProgress183()
         return;
     }
 
-    setupNegotiatedMedia();
+    if (!setupNegotiatedMedia()) {
+        SIP_CORE_WARN("[call:%s] No usable media in 183 early media, ignoring",
+                      getCallId().c_str());
+        return;
+    }
     stopAllMedia();
     updateRemoteMedia();
     startEarlyMediaLocked();
@@ -2065,19 +2069,27 @@ SIPCall::isCaptureDeviceMuted(const MediaType& mediaType) const
     return iter == rtpStreams_.end();
 }
 
-void
+bool
 SIPCall::setupNegotiatedMedia()
 {
     SIP_CORE_DBG("[call:%s] updating negotiated media", getCallId().c_str());
 
     if (not sipTransport_ or not sdp_) {
         SIP_CORE_ERR("[call:%s] the call is in invalid state", getCallId().c_str());
-        return;
+        return false;
     }
 
     auto slots = sdp_->getMediaSlots();
+    if (slots.empty()) {
+        SIP_CORE_WARN("[call:%s] No usable media slots after negotiation (peer may have offered "
+                      "only unsupported media types such as T.38 fax)",
+                      getCallId().c_str());
+        return false;
+    }
+
     bool peer_holding {true};
     int streamIdx = -1;
+    bool anyConfigured = false;
 
     for (const auto& slot : slots) {
         streamIdx++;
@@ -2165,6 +2177,7 @@ SIPCall::setupNegotiatedMedia()
         peer_holding &= remote.onHold;
 
         configureRtpSession(rtpStream.rtpSession_, rtpStream.mediaAttribute_, local, remote);
+        anyConfigured = true;
     }
 
     if (pendingAudioSocketPair_) {
@@ -2185,6 +2198,8 @@ SIPCall::setupNegotiatedMedia()
         peerHolding_ = peer_holding;
         emitSignal<libsip_core::CallSignal::PeerHold>(getCallId(), peerHolding_);
     }
+
+    return anyConfigured;
 }
 
 void
@@ -2207,7 +2222,19 @@ SIPCall::startAllMedia()
 
     for (auto iter = rtpStreams_.begin(); iter != rtpStreams_.end(); iter++) {
         if (not iter->mediaAttribute_) {
-            throw std::runtime_error("Missing media attribute");
+            SIP_CORE_ERR("[call:%s] Missing media attribute for RTP stream, skipping",
+                         getCallId().c_str());
+            continue;
+        }
+
+        // Skip streams that have no reserved socket pair and were never configured.
+        // This can happen when SDP negotiation produced no usable media (e.g. T.38 fax).
+        if (not iter->rtpSession_->hasReservedSocketPair()
+            and not iter->mediaAttribute_->enabled_) {
+            SIP_CORE_WARN("[call:%s] RTP stream [%s] has no transport and is disabled, skipping",
+                          getCallId().c_str(),
+                          iter->mediaAttribute_->label_.c_str());
+            continue;
         }
 
         // Not restarting media loop on hold as it's a huge waste of CPU ressources
@@ -2698,7 +2725,16 @@ SIPCall::onMediaNegotiationComplete()
 
     // Update the negotiated media.
     if (mediaRestartRequired_) {
-        setupNegotiatedMedia();
+        bool hasUsableMedia = setupNegotiatedMedia();
+
+        if (!hasUsableMedia) {
+            SIP_CORE_ERR("[call:%s] No usable media after negotiation, ending call",
+                         getCallId().c_str());
+            stopAllMedia();
+            hangup(PJSIP_SC_UNSUPPORTED_MEDIA_TYPE);
+            return;
+        }
+
         // No ICE, start media now.
         SIP_CORE_WARN("[call:%s] ICE media disabled, using default media ports",
                       getCallId().c_str());
@@ -2872,8 +2908,10 @@ SIPCall::onReceiveReinvite(const pjmedia_sdp_session* offer, pjsip_rx_data* rdat
     // cf. pjmedia_sdp_neg_modify_local_offer2 for more details.
     auto const& mediaAttrList = Sdp::getMediaAttributeListFromSdp(offer, true);
     if (mediaAttrList.empty()) {
-        SIP_CORE_WARN("[call:%s] Media list is empty, ignoring", getCallId().c_str());
-        return res;
+        SIP_CORE_WARN("[call:%s] Re-invite media list is empty (peer may have offered only "
+                      "unsupported media types such as T.38 fax). Rejecting re-invite.",
+                      getCallId().c_str());
+        return !PJ_SUCCESS;
     }
 
     pjsip_tx_data* tdata = nullptr;

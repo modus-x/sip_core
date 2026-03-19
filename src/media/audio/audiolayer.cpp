@@ -87,6 +87,8 @@ void
 AudioLayer::devicesChanged()
 {
     emitSignal<libsip_core::AudioSignal::DeviceEvent>();
+    // Restart audio senders for active calls so they pick up the new device
+    runOnMainThread([]() { Manager::instance().onAudioDevicesChanged(); });
 }
 
 void

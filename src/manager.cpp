@@ -3082,6 +3082,53 @@ Manager::getAudioDriver()
     return pimpl_->audiodriver_;
 }
 
+void
+Manager::onAudioDevicesChanged()
+{
+    SIP_CORE_DBG("Audio devices changed, restarting media senders for active calls");
+    for (const auto& call : callFactory.getAllCalls()) {
+        if (call->isSubcall())
+            continue;
+        if (call->getConnectionState() != Call::ConnectionState::CONNECTED)
+            continue;
+        if (call->getState() != Call::CallState::ACTIVE)
+            continue;
+        call->restartMediaSender();
+    }
+}
+
+#ifdef ENABLE_VIDEO
+void
+Manager::onVideoDevicesChanged()
+{
+    SIP_CORE_DBG("Video devices changed, checking for video inputs to restart");
+    for (const auto& call : callFactory.getAllCalls()) {
+        if (call->isSubcall())
+            continue;
+        if (call->getConnectionState() != Call::ConnectionState::CONNECTED)
+            continue;
+        if (call->getState() != Call::CallState::ACTIVE)
+            continue;
+
+        auto* sipCall = dynamic_cast<SIPCall*>(call.get());
+        if (!sipCall)
+            continue;
+
+        for (const auto& rtpSession : sipCall->getRtpSessionList(MediaType::MEDIA_VIDEO)) {
+            auto videoRtp = std::dynamic_pointer_cast<video::VideoRtpSession>(rtpSession);
+            if (!videoRtp)
+                continue;
+            auto& videoLocal = videoRtp->getVideoLocal();
+            if (videoLocal && videoLocal->wasStoppedByDeviceDisconnect()) {
+                SIP_CORE_DBG("Restarting video input for call %s", call->getCallId().c_str());
+                videoLocal->restart();
+                videoRtp->restartSender();
+            }
+        }
+    }
+}
+#endif
+
 std::shared_ptr<Call>
 Manager::newOutgoingCall(std::string_view toUrl,
                          const std::string& accountId,
