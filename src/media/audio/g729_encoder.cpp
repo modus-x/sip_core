@@ -289,7 +289,19 @@ namespace sip_core {
         uint8_t length = 0;
         bcg729Encoder(context_, packet, output, &length);
 
-        if(length == 0 || (length != G729_PACKET_SIZE && length != G729_VAD_SIZE))
+        // Always advance the timestamp to avoid drift
+        timestamp_ += 80;
+
+        if (length == 0) {
+            // VAD/Annex B suppressed this frame (silence detected).
+            // Send a no-payload RTP packet to keep the stream alive.
+            send(buffer_, RTP_HEADER_SIZE);
+            seq_val_++;
+            packet_in_rtp_idx = 0;
+            return 0;
+        }
+
+        if (length != G729_PACKET_SIZE && length != G729_VAD_SIZE)
             return -1;
 
         memcpy(&buffer_[RTP_HEADER_SIZE + (packet_in_rtp_idx * G729_PACKET_SIZE)] , output, length);
@@ -300,9 +312,6 @@ namespace sip_core {
             packet_in_rtp_idx = 0;
         }
         else packet_in_rtp_idx++;
-
-        // update info for new packet
-        timestamp_ += 80;
 
         return 0;
     }

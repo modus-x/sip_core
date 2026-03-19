@@ -158,8 +158,8 @@ AudioInput::readFromDevice()
     // 2. No capture device available (forceMuteNoDevice_ == true)
     // 3. Device appears broken (many consecutive empty frames)
     // This ensures RTP packets are always sent to prevent server kicking us
-    bool shouldSendSilence = muteState_ || forceMuteNoDevice_ || 
-                             (not audioFrame && consecutiveEmptyFrames_ >= 50);
+    bool shouldSendSilence = muteState_ || forceMuteNoDevice_ ||
+                             (not audioFrame && consecutiveEmptyFrames_ >= BROKEN_DEVICE_THRESHOLD);
 
     if (not audioFrame) {
         if (!shouldSendSilence) {
