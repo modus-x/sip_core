@@ -3555,8 +3555,16 @@ SIPCall::peerRecording(bool state)
         emitSignal<libsip_core::CallSignal::RemoteRecordingChanged>(id, getPeerNumber(), false);
     }
     peerRecording_ = state;
-    if (auto conf = conf_.lock())
-        conf->updateRecording();
+    // Defer conference update to main thread to avoid deadlock:
+    // peerRecording() may be called from a PJSIP callback or while callMutex_
+    // is held, and updateRecording() -> sendConferenceInfos() -> sendTextMessage()
+    // would try to re-acquire callMutex_, creating a lock cycle.
+    if (auto confWeak = conf_; !confWeak.expired()) {
+        runOnMainThread([confWeak]() {
+            if (auto conf = confWeak.lock())
+                conf->updateRecording();
+        });
+    }
 }
 
 void
@@ -3578,8 +3586,17 @@ SIPCall::peerMuted(bool muted, int streamIdx)
     }
 
     peerMuted_ = muted;
-    if (auto conf = conf_.lock())
-        conf->updateMuted();
+    // Defer conference update to main thread to avoid deadlock:
+    // peerMuted() may be called from a PJSIP callback or while callMutex_
+    // is held, and updateMuted() -> sendConferenceInfos() -> sendTextMessage()
+    // would try to re-acquire callMutex_, creating a lock cycle.
+    // peerMuted_ is already set above, so updateMuted() will read the correct value.
+    if (auto confWeak = conf_; !confWeak.expired()) {
+        runOnMainThread([confWeak]() {
+            if (auto conf = confWeak.lock())
+                conf->updateMuted();
+        });
+    }
 
     emitSignal<libsip_core::CallSignal::PeerMuted>(getCallId(), peerMuted_);
 }

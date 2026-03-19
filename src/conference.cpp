@@ -1702,16 +1702,55 @@ Conference::updateRecording()
 void
 Conference::updateMuted()
 {
+    // Collect mute state from call objects OUTSIDE confInfoMutex_ to avoid
+    // deadlocks with callMutex_ (getCallWith/isPeerMuted may interact with
+    // call-level locks that are also acquired by sendConferenceInfos path).
+    struct MuteState {
+        std::string uri;   // stripped, without '@'
+        std::string device;
+        std::string callId;
+        bool audioModeratorMuted {false};
+        bool audioLocalMuted {false};
+    };
+    std::vector<MuteState> callStates;
+
+    // Step 1: snapshot URI/device pairs under the lock (cheap, no call access)
+    {
+        std::lock_guard<std::mutex> lk(confInfoMutex_);
+        for (const auto& info : confInfo_) {
+            if (!info.uri.empty()) {
+                callStates.push_back(
+                    {std::string(string_remove_suffix(info.uri, '@')), info.device, {}, false, false});
+            }
+        }
+    }
+
+    // Step 2: query call objects outside the lock
+    for (auto& st : callStates) {
+        if (auto call = getCallWith(st.uri, st.device)) {
+            st.callId = call->getCallId();
+            st.audioModeratorMuted = isMuted(st.callId);
+            st.audioLocalMuted = call->isPeerMuted();
+        }
+    }
+
+    // Step 3: apply collected data back under the lock
     {
         std::lock_guard<std::mutex> lk(confInfoMutex_);
         for (auto& info : confInfo_) {
             if (info.uri.empty()) {
                 info.audioModeratorMuted = isMuted("host"sv);
                 info.audioLocalMuted = isMediaSourceMuted(MediaType::MEDIA_AUDIO);
-            } else if (auto call = getCallWith(std::string(string_remove_suffix(info.uri, '@')),
-                                               info.device)) {
-                info.audioModeratorMuted = isMuted(call->getCallId());
-                info.audioLocalMuted = call->isPeerMuted();
+            } else {
+                auto stripped = std::string(string_remove_suffix(info.uri, '@'));
+                auto it = std::find_if(callStates.begin(), callStates.end(),
+                    [&](const MuteState& s) {
+                        return s.uri == stripped && s.device == info.device;
+                    });
+                if (it != callStates.end() && !it->callId.empty()) {
+                    info.audioModeratorMuted = it->audioModeratorMuted;
+                    info.audioLocalMuted = it->audioLocalMuted;
+                }
             }
         }
     }
