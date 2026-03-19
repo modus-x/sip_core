@@ -9,7 +9,7 @@
     "with_env" : "",
     "custom_scripts": {
         "pre_build": [
-            "mkdir msvc & cd msvc & cmake .. -G %CMAKE_GENERATOR% -DENABLE_SHARED=NO -DENABLE_TESTS=NO -DENABLE_STATIC=YES"
+            "mkdir msvc & cd msvc & cmake .. -G %CMAKE_GENERATOR% -DENABLE_SHARED=NO -DENABLE_TESTS=NO -DENABLE_STATIC=YES -DCMAKE_POLICY_VERSION_MINIMUM=3.5"
         ],
         "build": [],
         "post_build": ["if not exist \"%INSTALL_PREFIX%\\include\\bcg729\" mkdir \"%INSTALL_PREFIX%\\include\\bcg729\" & cd include/bcg729 & xcopy /S /Y *.h \"%INSTALL_PREFIX%\\include\\bcg729\""]
