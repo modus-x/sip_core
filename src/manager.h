@@ -842,6 +842,12 @@ public:
     void unregisterAccounts();
 
     /**
+     * Fire-and-forget unregister for all SIP accounts (used during shutdown).
+     * Sends UNREGISTER without waiting for server response.
+     */
+    void unregisterAccountsImmediate();
+
+    /**
      * Create a new outgoing call
      * @param toUrl Destination address
      * @param accountId local account

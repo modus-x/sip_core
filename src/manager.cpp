@@ -310,6 +310,7 @@ struct Manager::ManagerPimpl
     std::unique_ptr<RingBufferPool> ringbufferpool_;
 
     std::atomic_bool finished_ {false};
+    std::atomic_bool shuttingDown_ {false};
 
     /* Sink ID mapping */
     std::map<std::string, std::weak_ptr<video::SinkClient>> sinkMap_;
@@ -691,12 +692,13 @@ Manager::setRingtoneEnabled(const std::string& accountId, bool enabled)
     }
 }
 
-// Signal handler function
+// Signal handler function — must be async-signal-safe.
+// std::exit() is NOT safe here (runs atexit handlers / static dtors while
+// potentially holding PJSIP locks).  _exit() is async-signal-safe.
 static void
 signalHandler(int signum)
 {
-    std::cout << "Signal " << signum << " received. Terminating..." << std::endl;
-    std::exit(signum);
+    _exit(signum);
 }
 
 static void
@@ -776,7 +778,13 @@ Manager::init(const std::string& config_file, const std::optional<std::string>& 
         }
     }
 
-    atexit(beforeExit);
+    // Register atexit handler only once — repeated init/finish cycles must not
+    // stack duplicate handlers.
+    static bool atexitRegistered = false;
+    if (!atexitRegistered) {
+        atexit(beforeExit);
+        atexitRegistered = true;
+    }
 
     // Register the signal handler for common termination signals
     if (signal(SIGINT, signalHandler) == SIG_ERR) {
@@ -802,33 +810,42 @@ Manager::finish() noexcept
     try {
         SIP_CORE_DBG("Finishing started");
 
-        // Forbid call creation
-        // callFactory.forbid();
+        // 1. Set global shutdown flag
+        pimpl_->shuttingDown_ = true;
 
-        // Hangup all remaining active calls
+        // 2. Mark all SIP accounts as shutting down and cancel their timers.
+        //    This disables transport recovery, reregistration, keepalive, and
+        //    route-switching guards that are already scattered through SIPAccount.
+        for (const auto& account : getAllAccounts<SIPAccount>()) {
+            account->isShuttingDown_.store(true);
+            account->cancelKeepAliveTimer();
+            account->cancelMainRouteKeepAliveTimer();
+            account->cancelBackupRouteKeepAliveTimer();
+        }
+
+        // 3. Hangup all remaining active calls
         SIP_CORE_DBG("Hangup %zu remaining call(s)", callFactory.callCount());
         for (const auto& call : callFactory.getAllCalls())
             hangupCall(call->getAccountId(), call->getCallId());
         callFactory.clear();
 
-        SIP_CORE_DBG("Unregistering accounts started");
-        // Disconnect accounts, close link stacks and free allocated ressources
-        unregisterAccounts();
-        SIP_CORE_DBG("Unregistering accounts completed");
+        // 4. Fire-and-forget UNREGISTER for every account.
+        //    Each account sends the SIP UNREGISTER packet, then immediately
+        //    destroys its regc (callback suppressed via pjsip_regc_destroy2).
+        SIP_CORE_DBG("Fire-and-forget unregister for all accounts");
+        unregisterAccountsImmediate();
 
-        SIP_CORE_DBG("Resetting audio layer started");
-        {
-            std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
-            pimpl_->audiodriver_.reset();
-        }
-        SIP_CORE_DBG("Resetting audio layer completed");
+        // 5. Destroy all accounts (triggers ~SIPAccount final cleanup)
+        accountFactory.clear();
 
-        // Flush remaining tasks (free lambda' with capture)
+        // 6. Stop the scheduler — no more callbacks will be dispatched after
+        //    this, and all SIP accounts are already destroyed.
         pimpl_->scheduler_.stop();
 
-        // NOTE: sipLink_->shutdown() is needed because this will perform
-        // sipTransportBroker->shutdown(); which will call Manager::instance().sipVoIPLink()
-        // so the pointer MUST NOT be resetted at this point
+        // 7. Shut down SIP stack: stop event loop, destroy transports, endpoint.
+        //    NOTE: sipLink_->shutdown() calls sipTransportBroker->shutdown()
+        //    which accesses Manager::instance().sipVoIPLink(), so the pointer
+        //    MUST NOT be reset before shutdown() returns.
         if (pimpl_->sipLink_) {
             SIP_CORE_DBG("Shutting down sip voiplink");
             pimpl_->sipLink_->shutdown();
@@ -836,10 +853,13 @@ Manager::finish() noexcept
             pimpl_->sipLink_.reset();
         }
 
-        accountFactory.clear();
+        // 8. Audio layer — no SIP dependencies, safe to tear down last.
+        {
+            std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
+            pimpl_->audiodriver_.reset();
+        }
 
         SIP_CORE_DBG("pj_shutdown");
-
         pj_shutdown();
 
         SIP_CORE_DBG("Finishing completed");
@@ -848,6 +868,7 @@ Manager::finish() noexcept
         SIP_CORE_ERR("%s", err.what());
     }
 
+    pimpl_->shuttingDown_ = false;
     pimpl_->finished_ = true;
     initialized = false;
 }
@@ -919,6 +940,16 @@ Manager::unregisterAccounts()
     for (const auto& account : getAllAccounts()) {
         if (account->isEnabled()) {
             account->doUnregister();
+        }
+    }
+}
+
+void
+Manager::unregisterAccountsImmediate()
+{
+    for (const auto& account : getAllAccounts<SIPAccount>()) {
+        if (account->isEnabled()) {
+            account->doUnregisterFireAndForget();
         }
     }
 }

@@ -160,6 +160,12 @@ public:
      */
     void sendUnregister();
 
+    /**
+     * Fire-and-forget unregistration for use during shutdown.
+     * Sends UNREGISTER and immediately destroys regc (callback suppressed).
+     */
+    void doUnregisterFireAndForget();
+
     const pjsip_cred_info* getCredInfo() const { return cred_.data(); }
 
     /**

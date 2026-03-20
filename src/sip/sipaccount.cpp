@@ -642,6 +642,12 @@ registration_cb(pjsip_regc_cbparam* param)
         return;
     }
 
+    // Guard: skip callback if the account is shutting down.
+    if (account->isShuttingDown_.load()) {
+        SIP_CORE_DBG("Ignoring registration callback for shutting-down account");
+        return;
+    }
+
     account->onRegister(param);
 }
 
@@ -2557,6 +2563,51 @@ SIPAccount::doUnregister(std::function<void(bool)> released_cb)
 }
 
 void
+SIPAccount::doUnregisterFireAndForget()
+{
+    std::lock_guard<std::recursive_mutex> lock(configurationMutex_);
+
+    cancelKeepAliveTimer();
+    cancelMainRouteKeepAliveTimer();
+    cancelBackupRouteKeepAliveTimer();
+    cancelAutoReregistrationTimer();
+    resetAutoRegistration();
+
+    // If not registered, just clean up regc and mark unregistered.
+    if (!isRegistered()) {
+        destroyRegistrationInfo();
+        setRegistrationState(RegistrationState::UNREGISTERED);
+        return;
+    }
+
+    bRegister_ = false;
+    pjsip_regc* regc = getRegistrationInfo();
+    if (!regc) {
+        setRegistrationState(RegistrationState::UNREGISTERED);
+        return;
+    }
+
+    // Send UNREGISTER, then immediately destroy regc.
+    // pjsip_regc_destroy2(regc, PJ_TRUE) defers internal cleanup until the
+    // final response but suppresses the callback — the packet IS still sent.
+    try {
+        pjsip_tx_data* tdata = nullptr;
+        if (pjsip_regc_unregister(regc, &tdata) == PJ_SUCCESS) {
+            const pjsip_tpselector tp_sel = getTransportSelector();
+            pjsip_regc_set_transport(regc, &tp_sel);
+            pjsip_regc_send(regc, tdata);
+        }
+    } catch (...) {
+        SIP_CORE_WARN("Fire-and-forget unregister send failed for account %s",
+                      accountID_.c_str());
+    }
+
+    // Always destroy regc — suppresses any future callback.
+    destroyRegistrationInfo();
+    setRegistrationState(RegistrationState::UNREGISTERED);
+}
+
+void
 SIPAccount::connectivityChanged()
 {
     handleConnectivityChangedForced("connectivity-changed");
@@ -2934,6 +2985,11 @@ SIPAccount::setUpTransmissionData(pjsip_tx_data* tdata, const IpAddr& ip)
 void
 SIPAccount::onRegister(pjsip_regc_cbparam* param)
 {
+    if (isShuttingDown_.load()) {
+        SIP_CORE_DBG("Ignoring onRegister for shutting-down account %s", accountID_.c_str());
+        return;
+    }
+
     if (param->regc != getRegistrationInfo())
         return;
 
