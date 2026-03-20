@@ -13,7 +13,8 @@
         "opus"
     ],
     "patches": [
-        "windows-configure.patch"
+        "windows-configure.patch",
+		"rtp_dtmf.patch"
     ],
     "win_patches": [
     ],
