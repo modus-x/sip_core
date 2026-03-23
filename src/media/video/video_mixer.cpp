@@ -794,9 +794,6 @@ VideoMixer::process()
     {
         std::shared_lock lock(rwMutex_);
 
-        // does current frame is SUCCESSFULLY rendered?
-        bool layoutRendered = false;
-
         // collection of patricipants, both audio & video
         std::vector<SourceInfo> sourcesInfo;
         sourcesInfo.reserve(sources_.size() + audioOnlySources_.size());
@@ -872,8 +869,7 @@ VideoMixer::process()
                           audioOnlySource.streamId,
                           voiceActive,
                           audioOnlySource.callId);
-            auto frameRendered = render_frame(output, audioOnlyFrame, audioSource, needsUpdate);
-            layoutRendered |= frameRendered;
+            render_frame(output, audioOnlyFrame, audioSource, needsUpdate);
 
             sourcesInfo.emplace_back(SourceInfo {{},
                                                  audioSource->x.load(),
@@ -942,9 +938,9 @@ VideoMixer::process()
             bool frameRendered = false;
             if (x->w > 0 and x->h > 0 and input->height() and input->width()) {
                 frameRendered = render_frame(output, input, x, needsUpdate);
-                layoutRendered |= frameRendered;
-            } else if (input->height() == 0 or input->width() == 0)
+            } else if (input->height() == 0 or input->width() == 0) {
                 SIP_CORE_WARN("[mixer:%s] Nothing to render for %p", id_.c_str(), x->source);
+            }
 
             if (frameRendered != x->hasVideo) {
                 x->hasVideo = frameRendered;
@@ -963,7 +959,7 @@ VideoMixer::process()
             ++i;
         }
 
-        if (needsUpdate && layoutRendered && !layoutInvalidated) {
+        if (needsUpdate && !layoutInvalidated) {
             const int totalUpdatesToConsume = pendingLayoutUpdates + layoutUpdatesGenerated;
             if (totalUpdatesToConsume > 0)
                 consumeLayoutUpdates(totalUpdatesToConsume, "layout processed");
@@ -999,11 +995,15 @@ VideoMixer::processSource(std::unique_ptr<VideoMixer::VideoMixerSource>& source,
             wantedIndex = 0;
             i--; // negilate i++ further
         } else {
+            // Hidden in ONE_BIG: zero out geometry and skip calc_position
+            // entirely so it cannot overwrite w/h back to non-zero values.
             source->x.store(0);
             source->y.store(0);
             source->w = 0;
             source->h = 0;
             source->hasVideo = false;
+            source->bordersFilter.reset();
+            return;
         }
     } else {
         if (currentLayout_ == Layout::ONE_BIG_WITH_SMALL && sourceIsActive) {
