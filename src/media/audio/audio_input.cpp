@@ -181,7 +181,11 @@ AudioInput::readFromDevice()
         audioFrame = resampler_->resample(std::move(audioFrame), format_);
     resizer_->enqueue(std::move(audioFrame));
 
-    if (recorderCallback_ && settingMS_.exchange(false)) {
+    // Only attempt the callback; do NOT consume settingMS_ here.
+    // The flag is cleared by clearPendingRecorderAttach() once
+    // attachLocalRecorder() actually succeeds (acquires mutex_).
+    // This lets us retry on the next frame if try_to_lock failed.
+    if (recorderCallback_ && settingMS_.load()) {
         recorderCallback_(MediaStream("a:local", format_, sent_samples));
     }
 

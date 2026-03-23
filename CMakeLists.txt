@@ -845,6 +845,10 @@ if(BUILD_TESTING)
   add_executable(socket_pair_reservation_tests tests/socket_pair_reservation_tests.cpp)
   target_link_libraries(socket_pair_reservation_tests PRIVATE ${PROJECT_NAME})
   add_test(NAME socket_pair_reservation_tests COMMAND socket_pair_reservation_tests)
+
+  add_executable(media_recorder_tests tests/media_recorder_tests.cpp)
+  target_link_libraries(media_recorder_tests PRIVATE ${PROJECT_NAME})
+  add_test(NAME media_recorder_tests COMMAND media_recorder_tests)
 endif()
 
 # install

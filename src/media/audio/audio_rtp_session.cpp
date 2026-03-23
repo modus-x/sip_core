@@ -619,10 +619,12 @@ AudioRtpSession::attachLocalRecorder(const MediaStream& ms)
     if (!lock.owns_lock() || !recorder_ || !audioInput_)
         return;
 
-    if (audioInput_) {
-        if (auto ob = recorder_->addStream(ms)) {
-            audioInput_->attach(ob);
-        }
+    // We have the lock — clear the retry flag so readFromDevice() stops
+    // calling us on every frame.
+    audioInput_->clearPendingRecorderAttach();
+
+    if (auto ob = recorder_->addStream(ms)) {
+        audioInput_->attach(ob);
     }
 }
 

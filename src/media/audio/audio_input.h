@@ -73,6 +73,13 @@ public:
 
     void setRecorderCallback(const std::function<void(const MediaStream& ms)>& cb);
 
+    /**
+     * Clear the pending recorder-attach flag.
+     * Called by attachLocalRecorder() after successfully attaching, so that
+     * readFromDevice() stops retrying the callback on every frame.
+     */
+    void clearPendingRecorderAttach() { settingMS_.store(false); }
+
 private:
     void readFromDevice();
     void readFromFile();

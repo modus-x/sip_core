@@ -3528,18 +3528,14 @@ SIPCall::rtpSetupSuccess()
 
     readyToRecord_ = true; // We're ready to record whenever a stream is ready
 
-    auto previousState = isAudioOnly_;
-    auto newState = !hasVideo();
-
-    if (previousState != newState && Call::isRecording()) {
-        deinitRecorder();
-        toggleRecording();
-        pendingRecord_ = true;
-    }
-    isAudioOnly_ = newState;
-
-    if (pendingRecord_ && readyToRecord_)
-        toggleRecording();
+    // NOTE: recording is NOT started here.  This callback fires from inside
+    // AudioRtpSession::startSender() which still holds AudioRtpSession::mutex_.
+    // Starting the recorder at this point would cause attachLocalRecorder()'s
+    // try_to_lock to fail, leaving the local audio observer unattached and
+    // producing a 0-duration file.  Instead we rely on:
+    //   - reportMediaNegotiationStatus() (runs after startAllMedia() returns)
+    //   - Manager::answerCall() / peerAnsweredCall() for auto-recording
+    // Both run when mutex_ is no longer held, so recorder attachment succeeds.
 }
 
 void

@@ -660,7 +660,7 @@ MediaRecorder::setupAudioOutput()
                && pair.second->info.name.find("mixer") != std::string::npos;
     });
     if (it != streams_.end())
-        local = it->second->info;
+        mixer = it->second->info;
 
     // resample to common audio format, so any player can play the file
     audioFilter_.reset(new MediaFilter);
