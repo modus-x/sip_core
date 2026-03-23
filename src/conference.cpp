@@ -267,6 +267,7 @@ Conference::~Conference()
         //     call->peerRecording(true);
     });
     if (videoMixer_) {
+        std::lock_guard<std::mutex> lk(sinksMtx_);
         auto& sink = videoMixer_->getSink();
         for (auto it = confSinksMap_.begin(); it != confSinksMap_.end();) {
             sink->detach(it->second.get());
@@ -769,6 +770,9 @@ Conference::setLayout(int layout)
         confInfo_.layout = layout;
     }
     videoMixer_->setVideoLayout(static_cast<video::Layout>(layout));
+    // Push metadata immediately so remote peers receive the layout change
+    // even before mixer coordinates are refreshed asynchronously.
+    sendConferenceInfos();
 #endif
 }
 

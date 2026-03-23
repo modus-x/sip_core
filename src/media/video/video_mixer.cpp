@@ -689,6 +689,16 @@ VideoMixer::getCallDisplayName(const std::unique_ptr<VideoMixer::VideoMixerSourc
     if (callId.empty())
         return "host";
 
+    // Use the per-frame display-name cache populated in process() before
+    // rwMutex_ was acquired.  This avoids calling Manager::getCallFromCallID()
+    // while holding rwMutex_ shared, which could deadlock with Conference
+    // threads that hold call/Manager locks and need rwMutex_ exclusive.
+    auto cacheIt = displayNameCache_.find(callId);
+    if (cacheIt != displayNameCache_.end())
+        return cacheIt->second;
+
+    // Fallback for calls not yet in the cache (e.g. just joined this frame).
+    // This path is rarely taken and will self-correct next frame.
     if (auto call = Manager::instance().getCallFromCallID(callId)) {
         auto name = call->getPeerDisplayName();
         if (name.empty())
@@ -759,6 +769,27 @@ VideoMixer::process()
 
     // fill with black to make the background black
     libav_utils::fillWithBlack(output.pointer());
+
+    // Populate display-name cache *before* taking rwMutex_ to avoid calling
+    // Manager::getCallFromCallID() under the shared lock (deadlock hazard).
+#if !CONFERENCE_METADATA
+    {
+        auto streamInfoCopy = getVideoToStreamInfo();
+        displayNameCache_.clear();
+        for (const auto& [obs, info] : streamInfoCopy) {
+            if (info.callId.empty() || displayNameCache_.count(info.callId))
+                continue;
+            if (auto call = Manager::instance().getCallFromCallID(info.callId)) {
+                auto name = call->getPeerDisplayName();
+                if (name.empty())
+                    name = call->getPeerNumber();
+                displayNameCache_[info.callId] = normalizeDisplayName(name);
+            } else {
+                displayNameCache_[info.callId] = "unknown";
+            }
+        }
+    }
+#endif
 
     {
         std::shared_lock lock(rwMutex_);
@@ -909,10 +940,10 @@ VideoMixer::process()
                 processSource(x, input, i, sinfo.streamId, voiceActive, sinfo.callId);
 
             bool frameRendered = false;
-            if (input->height() and input->width()) {
+            if (x->w > 0 and x->h > 0 and input->height() and input->width()) {
                 frameRendered = render_frame(output, input, x, needsUpdate);
                 layoutRendered |= frameRendered;
-            } else
+            } else if (input->height() == 0 or input->width() == 0)
                 SIP_CORE_WARN("[mixer:%s] Nothing to render for %p", id_.c_str(), x->source);
 
             if (frameRendered != x->hasVideo) {
@@ -1078,7 +1109,14 @@ VideoMixer::calc_position(std::unique_ptr<VideoMixerSource>& source,
     source->y.store(frameH_off + padding_ + border_size_);
 
     // Update border filter
+#if CONFERENCE_METADATA
+    // Text overlays are disabled when CONFERENCE_METADATA is on, so the display
+    // name is unused.  Skip the Manager call that would otherwise be made under
+    // rwMutex_ (deadlock hazard, see plan Fix D).
+    std::string display;
+#else
     std::string display = getCallDisplayName(source, callId);
+#endif
     auto tryInitBorderFilter = [&](bool withText) {
         auto filter = std::make_unique<MediaFilter>();
         if (!initBorderFilter(*filter,

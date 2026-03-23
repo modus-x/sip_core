@@ -33,6 +33,7 @@
 #include <chrono>
 #include <memory>
 #include <shared_mutex>
+#include <unordered_map>
 #include <vector>
 #include <tuple>
 
@@ -337,6 +338,11 @@ private:
 
     int64_t startTime_;
     int64_t lastTimestamp_;
+
+    // Display-name cache populated once per frame in process() *before* rwMutex_
+    // to avoid calling Manager::getCallFromCallID() under the shared lock.
+    // Keyed by callId. Only accessed from the mixer thread.
+    std::unordered_map<std::string, std::string> displayNameCache_;
 };
 
 } // namespace video

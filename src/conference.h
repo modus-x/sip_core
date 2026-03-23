@@ -163,7 +163,7 @@ struct ConfInfo : public std::vector<ParticipantInfo>
 
     friend bool operator==(const ConfInfo& c1, const ConfInfo& c2)
     {
-        if (c1.h != c2.h or c1.w != c2.w)
+        if (c1.h != c2.h or c1.w != c2.w or c1.layout != c2.layout)
             return false;
         if (c1.size() != c2.size())
             return false;
