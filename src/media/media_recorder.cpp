@@ -401,17 +401,18 @@ MediaRecorder::onFrame(const std::string& name, const std::shared_ptr<MediaFrame
 
         std::lock_guard<std::mutex> lk(mutexFilterAudio_);
         audioFilter_->feedInput(clone->pointer(), name);
-        auto audioFilterOutput = audioFilter_->readOutput();
-        std::unique_ptr<MediaFrame> filteredFrame;
-        if (audioFilterOutput) {
-            outputAudioFilter_->feedInput(audioFilterOutput->pointer(), "input");
-            filteredFrame = outputAudioFilter_->readOutput();
-        }
 
-        if (filteredFrame) {
-            std::lock_guard<std::mutex> lk(mutexFrameBuff_);
-            frameBuff_.emplace_back(std::move(filteredFrame));
-            cv_.notify_one();
+        // Drain all available frames from the primary filter, then from
+        // the output filter.  With asetnsamples the output filter may
+        // buffer small inputs and produce zero or multiple 960-sample
+        // frames per feedInput call.
+        while (auto audioFilterOutput = audioFilter_->readOutput()) {
+            outputAudioFilter_->feedInput(audioFilterOutput->pointer(), "input");
+            while (auto filteredFrame = outputAudioFilter_->readOutput()) {
+                std::lock_guard<std::mutex> lk2(mutexFrameBuff_);
+                frameBuff_.emplace_back(std::move(filteredFrame));
+                cv_.notify_one();
+            }
         }
     }
 }
@@ -723,6 +724,13 @@ MediaRecorder::setupAudioOutput()
     if (ret < 0) {
         SIP_CORE_ERR() << "Failed to initialize output audio filter. Graph: " << outputAudioFilterDesc;
     }
+
+    // Tell the buffersink to output frames of exactly 960 samples (20 ms at
+    // 48 kHz).  This is required by the Opus encoder.  Without it, codecs with
+    // different native frame sizes (e.g. PCMA/PCMU at 8 kHz / 160 samples)
+    // produce resampled frames the encoder rejects.
+    if (ret >= 0)
+        outputAudioFilter_->setOutputFrameSize(960);
 
     return;
 }

@@ -113,6 +113,14 @@ public:
      */
     void flush();
 
+    /**
+     * @brief For audio filters: request that readOutput() returns frames of
+     *        exactly @frameSize samples.  The buffersink will buffer internally
+     *        until enough samples are available.  Must be called after
+     *        initialize().
+     */
+    void setOutputFrameSize(unsigned frameSize);
+
 private:
     NON_COPYABLE(MediaFilter);
 
