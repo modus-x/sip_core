@@ -835,12 +835,18 @@ Manager::finish() noexcept
         SIP_CORE_DBG("Fire-and-forget unregister for all accounts");
         unregisterAccountsImmediate();
 
-        // 5. Destroy all accounts (triggers ~SIPAccount final cleanup)
-        accountFactory.clear();
-
-        // 6. Stop the scheduler — no more callbacks will be dispatched after
-        //    this, and all SIP accounts are already destroyed.
+        // 5. Stop the scheduler — prevents new callbacks from being dispatched
+        //    while we tear down the SIP stack.
         pimpl_->scheduler_.stop();
+
+        // 6. Detach transports from all accounts so that no account holds a
+        //    shared_ptr<SipTransport> when the PJSIP endpoint is destroyed.
+        //    Without this, ~SIPAccount would release the last transport
+        //    reference AFTER pjsip_endpt_destroy, causing use-after-free.
+        SIP_CORE_DBG("Detaching transports from all accounts");
+        for (const auto& account : getAllAccounts<SIPAccount>()) {
+            account->setTransport();
+        }
 
         // 7. Shut down SIP stack: stop event loop, destroy transports, endpoint.
         //    NOTE: sipLink_->shutdown() calls sipTransportBroker->shutdown()
@@ -853,7 +859,12 @@ Manager::finish() noexcept
             pimpl_->sipLink_.reset();
         }
 
-        // 8. Audio layer — no SIP dependencies, safe to tear down last.
+        // 8. Destroy all accounts (triggers ~SIPAccount final cleanup).
+        //    Safe now: event loop is stopped, scheduler is stopped, transports
+        //    detached, no PJSIP callbacks can fire during account destruction.
+        accountFactory.clear();
+
+        // 9. Audio layer — no SIP dependencies, safe to tear down last.
         {
             std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
             pimpl_->audiodriver_.reset();

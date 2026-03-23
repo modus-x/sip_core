@@ -1985,18 +1985,6 @@ SIPAccount::setTransport(const std::shared_ptr<SipTransport>& t)
         return true;
 
     const auto listenerId = reinterpret_cast<uintptr_t>(this);
-    const auto stateListener = [w = weak()](pjsip_transport_state state,
-                                            const pjsip_transport_state_info* info) {
-        const bool hasInfo = info != nullptr;
-        const auto status = hasInfo ? info->status : PJ_SUCCESS;
-        runOnMainThread([w, state, status, hasInfo] {
-            if (auto account = w.lock()) {
-                pjsip_transport_state_info infoCopy {};
-                infoCopy.status = status;
-                account->onTransportStateChanged(state, hasInfo ? &infoCopy : nullptr);
-            }
-        });
-    };
 
     const auto updateLocalBindingSnapshot = [&] {
         const auto binding = currentLocalBinding();
@@ -2030,9 +2018,24 @@ SIPAccount::setTransport(const std::shared_ptr<SipTransport>& t)
         }
     };
 
+    // attachTransport only runs when transport is non-null, so weak() / shared_from_this()
+    // is safe here — we are guaranteed to be owned by a live shared_ptr.
     const auto attachTransport = [&](const std::shared_ptr<SipTransport>& transport) {
         if (!transport)
             return true;
+
+        const auto stateListener = [w = weak()](pjsip_transport_state state,
+                                                const pjsip_transport_state_info* info) {
+            const bool hasInfo = info != nullptr;
+            const auto status = hasInfo ? info->status : PJ_SUCCESS;
+            runOnMainThread([w, state, status, hasInfo] {
+                if (auto account = w.lock()) {
+                    pjsip_transport_state_info infoCopy {};
+                    infoCopy.status = status;
+                    account->onTransportStateChanged(state, hasInfo ? &infoCopy : nullptr);
+                }
+            });
+        };
 
         transport->addStateListener(listenerId, stateListener);
         if (!initContactAddress()) {

@@ -57,7 +57,7 @@ getLastErrorText(                   // converts "Lasr Error" code into text
     }
     else {
         pTemp[strlen(pTemp)-2]='\0'; //remove cr and newline character
-        sprintf(pBuf,"%0.*s (0x%x)",bufSize-16,pTemp,GetLastError());
+        snprintf(pBuf,bufSize,"%0.*s (0x%x)",bufSize-16,pTemp,GetLastError());
         LocalFree((HLOCAL)pTemp);
     }
     return(pBuf);
@@ -123,6 +123,6 @@ void syslog(int level, const char* format, ...)
 #ifndef RING_UWP
     loghdl = RegisterEventSource(NULL, ident);
 #endif
-    sprintf(tmp, (logopt & WINLOG_PID) ? "%s[%d]" : "%s", ident, getpid());
+    snprintf(tmp, sizeof(tmp), (logopt & WINLOG_PID) ? "%s[%d]" : "%s", ident, getpid());
     loghdr = _strdup(tmp);  /* save header for later */
 }
