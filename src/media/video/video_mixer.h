@@ -112,7 +112,7 @@ public:
      * @note previous inputs will be stopped, new inputs won't be automatically turned on.
      * until these inputs are not attached, black frames will be sent
      */
-    void switchInputs(const std::vector<std::string>& inputs);
+    void switchInputs(const std::vector<std::string>& inputs, bool muted = false);
 
     /**
      * Stop all inputs
@@ -305,6 +305,9 @@ private:
     std::chrono::time_point<std::chrono::steady_clock> nextProcess_;
     std::mutex localInputsMtx_;
     std::vector<std::shared_ptr<VideoInput>> localInputs_ {};
+    /// When true, sources created by attached() start in muted state.
+    /// Set by switchInputs(muted=true) around the startInputs() call.
+    std::atomic<bool> nextLocalSourceMuted_ {false};
     void stopInput(const std::shared_ptr<VideoFrameActiveWriter>& input);
 
     VideoScaler scaler_;
@@ -332,6 +335,11 @@ private:
 
     AudioOnlySources audioOnlySources_;
     std::string activeStream_ {};
+
+    // Stable source ordering: maps streamId -> first-seen insertion index.
+    // Survives detach/reattach cycles so grid positions stay consistent.
+    std::unordered_map<std::string, int> stableOrder_;
+    int nextStableIndex_ {0};
 
     std::atomic_int layoutUpdated_ {0};
     OnSourcesUpdatedCb onSourcesUpdated_ {};

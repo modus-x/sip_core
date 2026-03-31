@@ -926,6 +926,15 @@ Conference::attachLocalParticipant()
             }
 
             videoMixer_->switchInputs(videoInputs);
+
+            const auto hostStreamId = sip_utils::streamId("", sip_utils::DEFAULT_VIDEO_STREAMID);
+            if (videoInputs.empty()) {
+                // Host has no video — add placeholder so it appears in the layout
+                videoMixer_->addAudioOnlySource("", hostStreamId);
+            } else {
+                // Host has video — remove stale audio-only placeholder if any
+                videoMixer_->removeAudioOnlySource("", hostStreamId);
+            }
         }
 #endif
     } else {
@@ -1111,12 +1120,10 @@ Conference::switchInput(const std::string& input)
     }
 
     if (auto mixer = videoMixer_) {
-        mixer->switchInputs({normalizedInput});
-
-        // if local video was not muted, start / restart video input again
-        if (!isMediaSourceMuted(MediaType::MEDIA_VIDEO)) {
-            mixer->startInputs();
-        }
+        // Pass the current mute state so that switchInputs creates
+        // new source entries already muted — zero frame leak.
+        mixer->switchInputs({normalizedInput},
+                            isMediaSourceMuted(MediaType::MEDIA_VIDEO));
     }
 
     reportMediaNegotiationStatus();

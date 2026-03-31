@@ -33,6 +33,7 @@
 #include "accel.h"
 #endif
 #include "connectivity/sip_utils.h"
+#include "video_source_utils.h"
 
 #include <cmath>
 #include <algorithm>
@@ -124,13 +125,6 @@ struct VideoMixer::VideoMixerSource
             libav_utils::fillWithBlack(black_frame->pointer());
             render_frame = black_frame;
         } else {
-            if (render_frame) {
-                if (render_frame->width() != other.width()
-                    or render_frame->height() != other.height()) {
-                    w = 0;
-                    h = 0;
-                }
-            }
             auto newFrame = std::make_shared<VideoFrame>();
             newFrame->copyFrom(other);
             render_frame = newFrame;
@@ -154,6 +148,7 @@ struct VideoMixer::VideoMixerSource
     bool isBig {false};
     bool geometryPending {false};
     bool hasVideo {true};
+    int stableIndex {0};
     std::atomic<bool> muted {false};
 
 private:
@@ -194,7 +189,7 @@ VideoMixer::~VideoMixer()
 
 // let the caller control when inputs are actually attached to video mixer
 void
-VideoMixer::switchInputs(const std::vector<std::string>& inputs)
+VideoMixer::switchInputs(const std::vector<std::string>& inputs, bool muted)
 {
     std::vector<std::shared_ptr<VideoInput>> oldInputs;
     {
@@ -208,9 +203,18 @@ VideoMixer::switchInputs(const std::vector<std::string>& inputs)
     newInputs.reserve(inputs.size());
     for (const auto& input : inputs) {
         auto videoInput = getVideoInput(input);
-        // Note, video can be a previously stopped device (eg. restart a screen sharing)
-        // in this case, the videoInput will be found and must be restarted
-        videoInput->restart();
+        auto normalizedInput = normalizeVideoSwitchSource(input);
+        if (videoInput->getName() != normalizedInput) {
+            // The global getVideoInput cache may return a VideoInput whose
+            // actual capture source was changed by SIPCall::switchInput
+            // (e.g. camera→display during a 1:1 call).  Force it back to
+            // the requested source.
+            videoInput->switchInput(normalizedInput);
+        } else {
+            // Note, video can be a previously stopped device (eg. restart
+            // a screen sharing) — in this case it must be restarted.
+            videoInput->restart();
+        }
         auto it = std::find(oldInputs.cbegin(), oldInputs.cend(), videoInput);
         if (it != oldInputs.cend())
             videoInput->detach(this);
@@ -230,8 +234,14 @@ VideoMixer::switchInputs(const std::vector<std::string>& inputs)
         localInputs_ = std::move(newInputs);
     }
 
+    // Set the mute flag BEFORE attaching so that attached() creates
+    // sources already in the correct muted state — no frame leak.
+    nextLocalSourceMuted_.store(muted);
+
     // Re-attach videoInput to mix
     startInputs();
+
+    nextLocalSourceMuted_.store(false);
 }
 
 void
@@ -620,11 +630,48 @@ VideoMixer::attached(Observable<std::shared_ptr<MediaFrame>>* ob)
 {
     std::unique_lock lock(rwMutex_);
 
+    // Look up the streamId for this source (populated by attachVideo() before
+    // calling frame->attach(this), so the mapping is guaranteed to exist).
+    std::string streamId;
+    {
+        std::lock_guard<std::mutex> lk(videoToStreamInfoMtx_);
+        auto it = videoToStreamInfo_.find(ob);
+        if (it != videoToStreamInfo_.end())
+            streamId = it->second.streamId;
+    }
+
     auto src = std::unique_ptr<VideoMixerSource>(new VideoMixerSource);
     src->render_frame = std::make_shared<VideoFrame>();
     src->source = ob;
-    SIP_CORE_DBG("Add new source [%p]", src.get());
-    sources_.emplace_back(std::move(src));
+    // Inherit the mute state set by switchInputs() so that sources
+    // created for muted local inputs never produce visible frames.
+    src->muted.store(nextLocalSourceMuted_.load());
+
+    // Assign a stable index: reuse the previous index for reattached sources
+    // so that grid positions survive detach/reattach cycles.
+    if (!streamId.empty()) {
+        auto orderIt = stableOrder_.find(streamId);
+        if (orderIt != stableOrder_.end()) {
+            src->stableIndex = orderIt->second;
+        } else {
+            src->stableIndex = nextStableIndex_++;
+            stableOrder_[streamId] = src->stableIndex;
+        }
+    } else {
+        src->stableIndex = nextStableIndex_++;
+    }
+
+    SIP_CORE_DBG("Add new source [%p] muted=%d stableIndex=%d",
+                 src.get(),
+                 src->muted.load(),
+                 src->stableIndex);
+
+    // Insert at the sorted position to maintain stable ordering.
+    auto pos = std::find_if(sources_.begin(), sources_.end(), [&](const auto& s) {
+        return s->stableIndex > src->stableIndex;
+    });
+    sources_.insert(pos, std::move(src));
+
     SIP_CORE_DEBUG("Total sources: {:d}", sources_.size());
     updateLayout("attached()");
 }
@@ -1463,12 +1510,19 @@ VideoMixer::setVideoLayout(Layout newLayout)
     if (currentLayout_ == Layout::GRID)
         activeStream_ = {};
 
-    // Force coordinate recalculation for all sources,
-    // this will trigger updateLayout()
+    // Force a clean single-frame recalculation for all sources.
+    // Reset cached frame dimensions so process() detects a geometry change,
+    // and pre-set hasVideo to the expected post-switch state to avoid
+    // multi-frame settling caused by layoutInvalidated.
+    const bool allVisible = (currentLayout_ != Layout::ONE_BIG);
     for (auto& source : sources_) {
         source->w = 0;
         source->h = 0;
         source->isBig = false;
+        source->lastLayoutFrameWidth = 0;
+        source->lastLayoutFrameHeight = 0;
+        source->lastLayoutOrientation = 0;
+        source->hasVideo = allVisible;
     }
 
     addLayoutUpdate("setVideoLayout");
