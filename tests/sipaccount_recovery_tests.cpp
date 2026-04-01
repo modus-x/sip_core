@@ -162,14 +162,39 @@ test_main_route_fast_probe_status_transitions()
 }
 
 void
-test_active_no_route_probe_interval_resolution()
+test_keepalive_topology_resolution()
+{
+    expect_true(SIPAccount::resolveKeepAliveTopology(false, false)
+                    == SIPAccount::KeepAliveTopology::NoRoute,
+                "no routes must resolve to no-route topology");
+    expect_true(SIPAccount::resolveKeepAliveTopology(true, false)
+                    == SIPAccount::KeepAliveTopology::ServiceRoute,
+                "single service route must resolve to service-route topology");
+    expect_true(SIPAccount::resolveKeepAliveTopology(true, true)
+                    == SIPAccount::KeepAliveTopology::ServiceRouteWithBackup,
+                "service route with backup must resolve to dual-route topology");
+}
+
+void
+test_keepalive_options_selection()
+{
+    expect_true(!SIPAccount::shouldUseOptionsForKeepAlive(KeepAliveType::Packet, true),
+                "UDP packet mode must not force SIP OPTIONS");
+    expect_true(SIPAccount::shouldUseOptionsForKeepAlive(KeepAliveType::Options, true),
+                "UDP OPTIONS mode must use SIP OPTIONS");
+    expect_true(SIPAccount::shouldUseOptionsForKeepAlive(KeepAliveType::Packet, false),
+                "non-UDP transport must use SIP OPTIONS even in packet mode");
+}
+
+void
+test_active_probe_interval_resolution()
 {
     expect_true(SIPAccount::resolveActiveKeepAliveIntervalSec(20, false, true) == 20,
-                "active no-route normal mode must use configured interval");
+                "active route normal mode must use configured interval");
     expect_true(SIPAccount::resolveActiveKeepAliveIntervalSec(20, true, true) == 1,
-                "active no-route fast mode must force 1-second interval");
-    expect_true(SIPAccount::resolveActiveKeepAliveIntervalSec(20, true, false) == 20,
-                "active route mode must ignore no-route fast flag");
+                "active route fast mode must force 1-second interval");
+    expect_true(SIPAccount::resolveActiveKeepAliveIntervalSec(20, true, false) == 1,
+                "fast probing must apply even when a service route is configured");
     expect_true(SIPAccount::resolveActiveKeepAliveIntervalSec(0, true, true) == 0,
                 "keepalive interval 0 must disable active probing");
 }
@@ -203,7 +228,9 @@ main()
     test_raw_keepalive_recovery_suppression_window();
     test_main_route_probe_interval_resolution();
     test_main_route_fast_probe_status_transitions();
-    test_active_no_route_probe_interval_resolution();
+    test_keepalive_topology_resolution();
+    test_keepalive_options_selection();
+    test_active_probe_interval_resolution();
     test_active_no_route_fast_probe_status_transitions();
 
     std::cout << "All SIP account recovery tests passed.\n";

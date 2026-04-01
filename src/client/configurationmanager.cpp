@@ -66,6 +66,7 @@ using sip_core::AudioDeviceType;
 
 namespace {
 constexpr int64_t CONNECTIVITY_SKIP_WARN_INTERVAL_MS = 5000;
+constexpr int64_t CONNECTIVITY_RESET_DEBOUNCE_MS = 200;
 
 bool
 shouldLogConnectivitySkipWarn()
@@ -78,6 +79,24 @@ shouldLogConnectivitySkipWarn()
     if (last > 0 && (now - last) < CONNECTIVITY_SKIP_WARN_INTERVAL_MS)
         return false;
     lastWarnMs.store(now);
+    return true;
+}
+
+/**
+ * Debounce rapid-fire connectivity change events.  Returns true if the caller
+ * should proceed; false if the call should be silently skipped.
+ */
+bool
+shouldProcessConnectivityChange()
+{
+    static std::atomic<int64_t> lastResetMs {0};
+    const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                         std::chrono::steady_clock::now().time_since_epoch())
+                         .count();
+    const auto last = lastResetMs.load();
+    if (last > 0 && (now - last) < CONNECTIVITY_RESET_DEBOUNCE_MS)
+        return false;
+    lastResetMs.store(now);
     return true;
 }
 } // namespace
@@ -834,6 +853,12 @@ setCredentials(const std::string& accountID,
 void
 connectivityChanged()
 {
+    if (!shouldProcessConnectivityChange()) {
+        SIP_CORE_DBG("Connectivity changed debounced (duplicate within %lld ms)",
+                     (long long) CONNECTIVITY_RESET_DEBOUNCE_MS);
+        return;
+    }
+
     SIP_CORE_WARN("received connectivity changed - trying to re-connect enabled accounts");
 
     auto& manager = sip_core::Manager::instance();

@@ -291,6 +291,14 @@ public:
     bool hasBackServiceRoute() const { return not config().backServiceRoute.empty(); }
 
     const IpAddr& getActualIpAddress() const;
+    enum class KeepAliveTopology {
+        NoRoute,
+        ServiceRoute,
+        ServiceRouteWithBackup,
+    };
+
+    static KeepAliveTopology resolveKeepAliveTopology(bool hasServiceRoute, bool hasBackServiceRoute);
+    static bool shouldUseOptionsForKeepAlive(KeepAliveType keepAliveType, bool isUdpTransport);
 
     /**
      * Get the currently active service route (main or backup)
@@ -311,7 +319,9 @@ public:
      * Switch back to main service route
      */
     void switchToMainRoute();
-    void switchRouteAndReregister(bool useBackup, const char* reason);
+    void switchRouteAndReregister(bool useBackup,
+                                  const char* reason,
+                                  bool skipMainRouteStartupProbe = false);
 
     bool isOptionsSuccess200(int statusCode) const;
     bool isTransportFailureFromOptions(int statusCode) const;
@@ -346,7 +356,7 @@ public:
     bool isHardOptionsFailure(int statusCode) const;
     void handleNoBackupOptionsRouteFailure(int statusCode);
     void handleUdpRawKeepAliveSendFailure(pj_status_t status);
-    void scheduleTransportRecovery(const char* reason, pj_status_t status);
+    bool scheduleTransportRecovery(const char* reason, pj_status_t status);
 
     virtual bool getSrtpFallback() const override { return config().srtpFallback; }
 
@@ -574,7 +584,7 @@ public:
      * Flag indicating if main route is available (last keep-alive succeeded)
      * Public to allow access from static keep-alive callback
      */
-    bool mainRouteAvailable_ {false};
+    std::atomic<bool> mainRouteAvailable_ {false};
 
     void setCredentials(const std::vector<SipAccountConfig::Credentials>& creds);
 
@@ -615,6 +625,8 @@ public:
     std::atomic<bool> connectivityRecoveryInProgress_ {false};
     std::atomic<bool> mainRouteFastProbeEnabled_ {false};
     std::atomic<bool> activeNoRouteFastProbeEnabled_ {false};
+    std::atomic<bool> startupMainRouteProbePending_ {false};
+    std::atomic<bool> skipMainRouteStartupProbeOnce_ {false};
     std::atomic<int64_t> lastTransportRecoveryMs_ {0};
     std::mutex optionsRecoveryMutex_;
     std::deque<int64_t> optionsRecoveryAttemptMs_;
@@ -629,6 +641,25 @@ private:
     // be updated (as the contact header)after the registration.
     bool initContactAddress();
     void updateContactHeader();
+public:
+    void emitRegistrationStateSignal(RegistrationState state, unsigned details_code);
+    void setRegistrationStateWithSignal(RegistrationState state,
+                                        unsigned details_code,
+                                        bool forceEmit);
+    bool updateActiveKeepAliveTargetFromActualIpAddress();
+    bool isOptionsKeepAliveMode() const;
+    KeepAliveTopology getKeepAliveTopology() const;
+    bool shouldRunStartupMainRouteProbe() const;
+    std::string getServerUriForTarget(const std::string& target) const;
+    std::string getActiveKeepAliveUri() const;
+    std::string getMainRouteKeepAliveUri() const;
+    std::string getBackupRouteKeepAliveUri() const;
+    void handleActiveRouteOptionsSuccess(int statusCode);
+    void handleActiveRouteOptionsFailure(int statusCode);
+    void reregisterCurrentRoute(const char* reason);
+    bool sendStartupMainRouteProbe();
+
+private:
 
     NON_COPYABLE(SIPAccount);
 
@@ -659,7 +690,7 @@ private:
                                  bool* changed = nullptr);
     void scheduleConnectivityRecovery(const char* reason);
     void recoverTransport(const std::string& reason, pj_status_t status);
-    void scheduleRecoveryInternal(const char* reason, pj_status_t status, bool debounced);
+    bool scheduleRecoveryInternal(const char* reason, pj_status_t status, bool debounced);
     bool shouldRecoverTransport(pjsip_transport_state state, pj_status_t status) const;
     bool isBenignTransportShutdown(pjsip_transport_state state, pj_status_t status) const;
     void markTransportRebindRequired(const char* reason);

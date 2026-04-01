@@ -368,19 +368,39 @@ SipTransportBroker::getUdpTransport(const IpAddr& ipAddress)
         return nullptr;
     }
 
-    std::lock_guard<std::mutex> const lock(transportMapMutex_);
-    if (isDestroying_)
-        return nullptr;
-
     const auto key = transportKey(ipAddress);
-    auto it = udpTransports_.find(key);
-    if (it != udpTransports_.end() && it->second) {
-        SIP_CORE_DBG("Reusing udp transport for %s", ipAddress.toString(true).c_str());
-        return it->second;
+
+    // Look up existing transport under the lock.
+    {
+        std::lock_guard<std::mutex> const lock(transportMapMutex_);
+        if (isDestroying_)
+            return nullptr;
+
+        auto it = udpTransports_.find(key);
+        if (it != udpTransports_.end() && it->second) {
+            SIP_CORE_DBG("Reusing udp transport for %s", ipAddress.toString(true).c_str());
+            return it->second;
+        }
     }
 
+    // Create outside the lock to avoid lock-ordering deadlock with PJSIP
+    // transport-manager mutex (acquired by pjsip_transport_shutdown callbacks).
     auto ret = createUdpTransport(ipAddress);
-    if (ret && ret->get()) {
+    if (!ret || !ret->get())
+        return nullptr;
+
+    // Re-acquire lock and insert, checking for a concurrent insertion.
+    {
+        std::lock_guard<std::mutex> const lock(transportMapMutex_);
+        if (isDestroying_)
+            return nullptr;
+
+        auto it = udpTransports_.find(key);
+        if (it != udpTransports_.end() && it->second) {
+            // Another thread already created one — use theirs.
+            return it->second;
+        }
+
         udpTransports_[key] = ret;
         udpTransportIndex_[ret->get()] = key;
     }
@@ -418,31 +438,51 @@ SipTransportBroker::getTcpTransport(const IpAddr& ipAddress)
         return nullptr;
     }
 
-    std::lock_guard<std::mutex> const lock(transportMapMutex_);
-    if (isDestroying_)
-        return nullptr;
-
     const auto key = transportKey(ipAddress);
-    auto it = tcpTransports_.find(key);
-    if (it != tcpTransports_.end() && it->second) {
-        if (it->second->get_factory()) {
-            SIP_CORE_DBG("Reusing tcp transport for %s", ipAddress.toString(true).c_str());
-            return it->second;
-        } else {
-            // Clean stale key and stale reverse index entries.
-            for (auto idxIt = tcpTransportIndex_.begin(); idxIt != tcpTransportIndex_.end();) {
-                if (idxIt->second == key) {
-                    idxIt = tcpTransportIndex_.erase(idxIt);
-                } else {
-                    ++idxIt;
+
+    // Look up existing transport under the lock.
+    {
+        std::lock_guard<std::mutex> const lock(transportMapMutex_);
+        if (isDestroying_)
+            return nullptr;
+
+        auto it = tcpTransports_.find(key);
+        if (it != tcpTransports_.end() && it->second) {
+            if (it->second->get_factory()) {
+                SIP_CORE_DBG("Reusing tcp transport for %s", ipAddress.toString(true).c_str());
+                return it->second;
+            } else {
+                // Clean stale key and stale reverse index entries.
+                for (auto idxIt = tcpTransportIndex_.begin(); idxIt != tcpTransportIndex_.end();) {
+                    if (idxIt->second == key) {
+                        idxIt = tcpTransportIndex_.erase(idxIt);
+                    } else {
+                        ++idxIt;
+                    }
                 }
+                tcpTransports_.erase(it);
             }
-            tcpTransports_.erase(it);
         }
     }
 
+    // Create outside the lock to avoid lock-ordering deadlock with PJSIP
+    // transport-manager mutex (acquired by pjsip_transport_shutdown callbacks).
     auto ret = createTcpTransport(ipAddress);
-    if (ret && ret->get_factory()) {
+    if (!ret || !ret->get_factory())
+        return nullptr;
+
+    // Re-acquire lock and insert, checking for a concurrent insertion.
+    {
+        std::lock_guard<std::mutex> const lock(transportMapMutex_);
+        if (isDestroying_)
+            return nullptr;
+
+        auto it = tcpTransports_.find(key);
+        if (it != tcpTransports_.end() && it->second && it->second->get_factory()) {
+            // Another thread already created one — use theirs.
+            return it->second;
+        }
+
         tcpTransports_[key] = ret;
         tcpTransportIndex_[ret->get_factory()] = key;
     }

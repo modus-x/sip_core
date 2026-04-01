@@ -638,7 +638,9 @@ Manager::setKeepAliveInterval(const std::string& accountId, int interval)
                                                    && sipAccount->isMainRouteFastProbeEnabled()
                                                    && interval > 0;
             const bool restoreActiveNoRouteFastProbe
-                = sipAccount->isNoRouteKeepAliveMode()
+                = SIPAccount::shouldUseOptionsForKeepAlive(
+                      sipAccount->config().keepAliveType,
+                      sipAccount->getTransportType() == PJSIP_TRANSPORT_UDP)
                   && sipAccount->isActiveNoRouteFastProbeEnabled() && interval > 0;
             sipAccount->editConfig(
                 [&](SipAccountConfig& config) { config.keepAliveInterval = interval; });
