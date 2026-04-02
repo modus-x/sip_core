@@ -56,6 +56,7 @@ public:
     void waitForCompletion(); // thread will stop itself
 
     bool isRunning() const noexcept;
+    bool isJoinable() const noexcept;
     bool isStopping() const noexcept { return state_ == ThreadState::STOPPING; }
     std::thread::id get_id() const noexcept { return threadId_; }
 
@@ -85,6 +86,7 @@ private:
     std::atomic<ThreadState> state_ {ThreadState::READY};
     std::thread::id threadId_;
     std::thread thread_;
+    mutable std::mutex threadMutex_;
 };
 
 class InterruptedThreadLoop : public ThreadLoop

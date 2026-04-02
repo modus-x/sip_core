@@ -34,6 +34,24 @@
 
 namespace sip_core {
 
+static void
+joinThread(std::thread& thread, const ThreadLoop* owner, const char* action)
+{
+    if (!thread.joinable()) {
+        return;
+    }
+
+    if (std::this_thread::get_id() == thread.get_id()) {
+        SIP_CORE_WARN("[threadloop:%p] %s called from worker thread; detaching to avoid deadlock",
+                      owner,
+                      action);
+        thread.detach();
+        return;
+    }
+
+    thread.join();
+}
+
 void
 ThreadLoop::mainloop(std::thread::id& tid,
                      const std::function<bool()> setup,
@@ -70,7 +88,7 @@ ThreadLoop::ThreadLoop(const std::function<bool()>& setup,
 
 ThreadLoop::~ThreadLoop()
 {
-    if (isRunning()) {
+    if (isJoinable()) {
         SIP_CORE_ERR("join() should be explicitly called in owner's destructor");
         join();
     }
@@ -79,6 +97,7 @@ ThreadLoop::~ThreadLoop()
 void
 ThreadLoop::start()
 {
+    std::lock_guard<std::mutex> lock(threadMutex_);
     const auto s = state_.load();
 
     if (s == ThreadState::RUNNING) {
@@ -89,7 +108,7 @@ ThreadLoop::start()
     // stop pending but not processed by thread yet?
     if (s == ThreadState::STOPPING and thread_.joinable()) {
         SIP_CORE_DBG("stop pending");
-        thread_.join();
+        joinThread(thread_, this, "start");
     }
 
     state_ = ThreadState::RUNNING;
@@ -111,16 +130,16 @@ ThreadLoop::stop()
 void
 ThreadLoop::join()
 {
+    std::lock_guard<std::mutex> lock(threadMutex_);
     stop();
-    if (thread_.joinable())
-        thread_.join();
+    joinThread(thread_, this, "join");
 }
 
 void
 ThreadLoop::waitForCompletion()
 {
-    if (thread_.joinable())
-        thread_.join();
+    std::lock_guard<std::mutex> lock(threadMutex_);
+    joinThread(thread_, this, "waitForCompletion");
 }
 
 void
@@ -136,8 +155,19 @@ ThreadLoop::isRunning() const noexcept
 #ifdef _WIN32
     return state_ == ThreadState::RUNNING;
 #else
-    return thread_.joinable() and state_ == ThreadState::RUNNING;
+    if (state_ != ThreadState::RUNNING)
+        return false;
+
+    std::lock_guard<std::mutex> lock(threadMutex_);
+    return thread_.joinable();
 #endif
+}
+
+bool
+ThreadLoop::isJoinable() const noexcept
+{
+    std::lock_guard<std::mutex> lock(threadMutex_);
+    return thread_.joinable();
 }
 
 void

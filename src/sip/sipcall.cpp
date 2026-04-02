@@ -2539,6 +2539,7 @@ SIPCall::updateMediaStream(const MediaAttribute& newMediaAttr, size_t streamIdx)
     assert(mediaAttr);
 
     bool notifyMute = false;
+    const bool notifyHold = newMediaAttr.onHold_ != mediaAttr->onHold_;
 
     if (newMediaAttr.muted_ == mediaAttr->muted_) {
         // Nothing to do. Already in the desired state.
@@ -2554,6 +2555,14 @@ SIPCall::updateMediaStream(const MediaAttribute& newMediaAttr, size_t streamIdx)
         SIP_CORE_DBG("[call:%s] %s [%s]",
                      getCallId().c_str(),
                      mediaAttr->muted_ ? "muting" : "un-muting",
+                     mediaAttr->label_.c_str());
+    }
+
+    if (notifyHold) {
+        mediaAttr->onHold_ = newMediaAttr.onHold_;
+        SIP_CORE_DBG("[call:%s] %s [%s]",
+                     getCallId().c_str(),
+                     mediaAttr->onHold_ ? "holding" : "resuming",
                      mediaAttr->label_.c_str());
     }
 
@@ -2673,6 +2682,10 @@ SIPCall::isReinviteRequired(const std::vector<MediaAttribute>& mediaAttrList)
             || // Always needs a re-invite when a new media is added.
                // newAttr.sourceUri_ != rtpStreams_[streamIdx].mediaAttribute_->sourceUri_ || //
                // Changing the video source currently does not work via reinvite :)
+            newAttr.onHold_
+                != rtpStreams_[streamIdx]
+                       .mediaAttribute_->onHold_ // Hold state changes alter SDP direction
+            ||
             newAttr.enabled_
                 != rtpStreams_[streamIdx]
                        .mediaAttribute_->enabled_ // Also check if 'enabled' has changed

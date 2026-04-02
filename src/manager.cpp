@@ -1555,10 +1555,6 @@ Manager::detachParticipant(const std::string& callId)
         return false;
     }
 
-    // Don't hold ringing calls when detaching them from conferences
-    if (call->getStateStr() != "RINGING")
-        onHoldCall(call->getAccountId(), callId);
-
     removeParticipant(*call);
     return true;
 }

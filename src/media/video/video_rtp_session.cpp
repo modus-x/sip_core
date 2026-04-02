@@ -614,9 +614,6 @@ VideoRtpSession::stop()
 {
     std::unique_lock<std::recursive_mutex> lock(mutex_);
 
-    // Signal threads to stop while holding the lock
-    sendMutedFrames_.store(false);
-
     stopSender();
     stopReceiver();
 
@@ -625,8 +622,8 @@ VideoRtpSession::stop()
 
     // Release lock before joining to avoid deadlock:
     // processMutedFrame() and processRtcpChecker() acquire mutex_.
+    stopMutedKeepAliveLocked(lock);
     lock.unlock();
-    mutedFrameThread_.join();
     rtcpCheckerThread_.join();
     lock.lock();
 
@@ -666,9 +663,7 @@ VideoRtpSession::leaveLocalHoldBlackout()
     std::unique_lock<std::recursive_mutex> lock(mutex_);
     localHoldBlackoutActive_ = false;
     holdBlackoutPrerollPending_ = false;
-    sendMutedFrames_.store(false);
-    lock.unlock();
-    mutedFrameThread_.join();
+    stopMutedKeepAliveLocked(lock);
 }
 
 void
@@ -762,12 +757,7 @@ VideoRtpSession::setMuted(bool mute, Direction dir)
             ensureMutedKeepAliveLocked();
         } else {
             // Stop sending muted frames
-            sendMutedFrames_.store(false);
-            // Release lock before joining to avoid deadlock:
-            // processMutedFrame() acquires mutex_.
-            lock.unlock();
-            mutedFrameThread_.join();
-            lock.lock();
+            stopMutedKeepAliveLocked(lock);
             cancelKeepAliveTimer();
         }
 
@@ -1235,7 +1225,7 @@ VideoRtpSession::processMutedFrame()
 void
 VideoRtpSession::stopMutedKeepAliveLocked(std::unique_lock<std::recursive_mutex>& lock)
 {
-    if (!sendMutedFrames_.exchange(false) && !mutedFrameThread_.isRunning()) {
+    if (!sendMutedFrames_.exchange(false) && !mutedFrameThread_.isJoinable()) {
         return;
     }
 
