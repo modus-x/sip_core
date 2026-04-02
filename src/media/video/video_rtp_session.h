@@ -191,6 +191,7 @@ private:
     // Thread for sending black frames when video is muted
     InterruptedThreadLoop mutedFrameThread_;
     void processMutedFrame();
+    void stopMutedKeepAliveLocked(std::unique_lock<std::recursive_mutex>& lock);
     void ensureMutedKeepAliveLocked();
     void sendHoldBlackPrerollLocked();
     bool isDisplayCaptureSource() const;

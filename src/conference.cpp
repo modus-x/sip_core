@@ -472,6 +472,13 @@ Conference::takeOverMediaSourceControl(const std::string& callId)
             }
         }
 
+        // The call may still be in HOLD when ManagerPimpl::bindCallToConference()
+        // invokes addParticipant() and only calls offHoldCall() afterwards.
+        // Clear the per-stream hold bit before requestMediaChange(), otherwise
+        // the conference takeover re-INVITE replays the stale hold state and
+        // advertises sendonly SDP for the newly added participant.
+        iter->onHold_ = false;
+
         // Un-mute media in the call. The mute/un-mute state will be handled
         // by the conference/mixer from now on.
         iter->muted_ = false;
@@ -612,7 +619,15 @@ Conference::handleMediaChangeRequest(const std::shared_ptr<Call>& call,
     // the local camera will be enabled, unless the video is disabled
     // in the account settings.
     call->answerMediaChangeRequest(newMediaList);
-    call->enterConference(shared_from_this());
+    // Only (re-)enter the conference if the call is not already in THIS
+    // conference.  When the call is already a member, the conference
+    // pipelines will be set up by VideoRtpSession::start() during SDP
+    // completion — calling enterConference() again would cause a
+    // redundant detach/reattach cycle that creates transient duplicate
+    // sources in the video mixer (the detach is deferred while the
+    // attach is immediate).
+    if (call->getConference().get() != this)
+        call->enterConference(shared_from_this());
 }
 
 void

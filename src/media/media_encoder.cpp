@@ -322,8 +322,7 @@ MediaEncoder::writeContainerToRtp(uint8_t* buf, int buf_size)
                      systemCodecInfo.codecType,
                      systemCodecInfo.name.c_str(),
                      systemCodecInfo.libName.c_str());
-
-        std::lock_guard<std::mutex> lk(encMutex_);
+        std::lock_guard<std::recursive_mutex> lk(encMutex_);
 
         if (!outputCtx_)
             throw MediaEncoderException("Cannot allocate stream");
@@ -574,6 +573,7 @@ MediaEncoder::writeContainerToRtp(uint8_t* buf, int buf_size)
                          bool is_keyframe,
                          int64_t frame_number)
     {
+        std::lock_guard<std::recursive_mutex> lk(encMutex_);
         auto width = (input->width() >> 3) << 3;
         auto height = (input->height() >> 3) << 3;
         if (initialized_ && (getWidth() != width || getHeight() != height)) {
@@ -634,6 +634,7 @@ MediaEncoder::writeContainerToRtp(uint8_t* buf, int buf_size)
     int
     MediaEncoder::encodeAudio(AudioFrame& frame)
     {
+        std::lock_guard<std::recursive_mutex> lk(encMutex_);
         if (!initialized_) {
             // Initialize on first video frame, or first audio frame if no video stream
             if (not videoOpts_.isValid())
@@ -650,6 +651,7 @@ MediaEncoder::writeContainerToRtp(uint8_t* buf, int buf_size)
     int
     MediaEncoder::encode(AVFrame* frame, int streamIdx)
     {
+        std::lock_guard<std::recursive_mutex> lk(encMutex_);
         if (!initialized_ && frame) {
             // Initialize on first video frame, or first audio frame if no video stream
             bool isVideo = (frame->width > 0 && frame->height > 0);
@@ -703,9 +705,7 @@ MediaEncoder::writeContainerToRtp(uint8_t* buf, int buf_size)
                 SIP_CORE_ERR() << "mp4_error:Failed to write frame: " << libav_utils::getError(ret);
             }
 #else
-                if (send(pkt, streamIdx)) {
-                    break;
-                }
+                send(pkt, streamIdx);
 #endif
             }
         }
@@ -717,6 +717,7 @@ MediaEncoder::writeContainerToRtp(uint8_t* buf, int buf_size)
     bool
     MediaEncoder::send(AVPacket& pkt, int streamIdx, bool dummy)
     {
+        std::lock_guard<std::recursive_mutex> lk(encMutex_);
         if (!initialized_) {
             // do not init stream because 
             if (!dummy) {
@@ -750,6 +751,7 @@ MediaEncoder::writeContainerToRtp(uint8_t* buf, int buf_size)
     int
     MediaEncoder::flush()
     {
+        std::lock_guard<std::recursive_mutex> lk(encMutex_);
         int ret = 0;
         for (size_t i = 0; i < outputCtx_->nb_streams; ++i) {
             if (encode(nullptr, i) < 0) {
@@ -1097,7 +1099,7 @@ MediaEncoder::enableAccel(bool enableAccel)
     int
     MediaEncoder::setBitrate(uint64_t br)
     {
-        std::lock_guard<std::mutex> lk(encMutex_);
+        std::lock_guard<std::recursive_mutex> lk(encMutex_);
         AVCodecContext* encoderCtx = getCurrentVideoAVCtx();
         if (not encoderCtx)
             return -1; // NOK
@@ -1131,7 +1133,7 @@ MediaEncoder::enableAccel(bool enableAccel)
     int
     MediaEncoder::setPacketLoss(uint64_t pl)
     {
-        std::lock_guard<std::mutex> lk(encMutex_);
+        std::lock_guard<std::recursive_mutex> lk(encMutex_);
         AVCodecContext* encoderCtx = getCurrentAudioAVCtx();
         if (not encoderCtx)
             return -1; // NOK
@@ -1616,6 +1618,7 @@ MediaEncoder::getHWFrameFromSWFrame(const VideoFrame& input)
     void
     MediaEncoder::resetStreams(int width, int height)
     {
+        std::lock_guard<std::recursive_mutex> lk(encMutex_);
         videoOpts_.width = width;
         videoOpts_.height = height;
 
@@ -1640,6 +1643,7 @@ MediaEncoder::getHWFrameFromSWFrame(const VideoFrame& input)
     bool
     MediaEncoder::sendBuffer(uint8_t* buf1, unsigned int len, unsigned int samples, int flags)
     {
+        std::lock_guard<std::recursive_mutex> lk(encMutex_);
         AVPacket pkt;
         av_init_packet(&pkt);
         pkt.data = buf1;

@@ -630,6 +630,29 @@ VideoMixer::attached(Observable<std::shared_ptr<MediaFrame>>* ob)
 {
     std::unique_lock lock(rwMutex_);
 
+    // Safety net: if a source for the same observable already exists (e.g. due
+    // to a redundant enterConference/detach-reattach cycle where the deferred
+    // detach has not yet been processed), remove the stale entry first so that
+    // we never hold two sources for the same participant.
+    for (auto it = sources_.begin(); it != sources_.end(); ++it) {
+        if ((*it)->source == ob) {
+            SIP_CORE_WARN("[mixer:%s] Removing stale duplicate source [%p] before re-attach",
+                          id_.c_str(),
+                          it->get());
+            sources_.erase(it);
+            break;
+        }
+    }
+
+    // Also drain any pending detach for the same observable so we don't
+    // accidentally remove the source we are about to insert.
+    {
+        std::lock_guard<std::mutex> ql(pendingDetachMtx_);
+        pendingDetaches_.erase(
+            std::remove(pendingDetaches_.begin(), pendingDetaches_.end(), ob),
+            pendingDetaches_.end());
+    }
+
     // Look up the streamId for this source (populated by attachVideo() before
     // calling frame->attach(this), so the mapping is guaranteed to exist).
     std::string streamId;
@@ -801,14 +824,25 @@ VideoMixer::process()
     if (delay.count() > 0)
         std::this_thread::sleep_for(delay);
 
+    // Snapshot mixer dimensions under the lock so that setParameters()
+    // on another thread cannot change them between allocation and rendering.
+    int frameWidth, frameHeight;
+    AVPixelFormat frameFormat;
+    {
+        std::shared_lock lock(rwMutex_);
+        frameWidth = width_;
+        frameHeight = height_;
+        frameFormat = format_;
+    }
+
     // Nothing to do.
-    if (width_ == 0 or height_ == 0) {
+    if (frameWidth == 0 or frameHeight == 0) {
         return;
     }
 
     VideoFrame& output = getNewFrame();
     try {
-        output.reserve(format_, width_, height_);
+        output.reserve(frameFormat, frameWidth, frameHeight);
     } catch (const std::bad_alloc& e) {
         SIP_CORE_ERR("[mixer:%s] VideoFrame::allocBuffer() failed", id_.c_str());
         return;
@@ -858,26 +892,26 @@ VideoMixer::process()
 
         std::shared_ptr<VideoFrame> audioOnlyFrame;
         if (!audioOnlySources_.empty()) {
-            int frameW = std::max(2, width_);
-            int frameH = std::max(2, height_);
+            int aoW = std::max(2, frameWidth);
+            int aoH = std::max(2, frameHeight);
             if (grid_aspect_ > 0.) {
-                const auto currentAspect = static_cast<double>(frameW)
-                                           / static_cast<double>(frameH);
+                const auto currentAspect = static_cast<double>(aoW)
+                                           / static_cast<double>(aoH);
                 if (currentAspect > grid_aspect_) {
-                    frameW = std::max(2, static_cast<int>(std::round(frameH * grid_aspect_)));
+                    aoW = std::max(2, static_cast<int>(std::round(aoH * grid_aspect_)));
                 } else {
-                    frameH = std::max(2, static_cast<int>(std::round(frameW / grid_aspect_)));
+                    aoH = std::max(2, static_cast<int>(std::round(aoW / grid_aspect_)));
                 }
             }
-            if (frameW % 2 != 0)
-                frameW -= 1;
-            if (frameH % 2 != 0)
-                frameH -= 1;
-            frameW = std::max(2, frameW);
-            frameH = std::max(2, frameH);
+            if (aoW % 2 != 0)
+                aoW -= 1;
+            if (aoH % 2 != 0)
+                aoH -= 1;
+            aoW = std::max(2, aoW);
+            aoH = std::max(2, aoH);
 
             audioOnlyFrame = std::make_shared<VideoFrame>();
-            audioOnlyFrame->reserve(format_, frameW, frameH);
+            audioOnlyFrame->reserve(frameFormat, aoW, aoH);
             libav_utils::fillWithBlack(audioOnlyFrame->pointer());
         }
 

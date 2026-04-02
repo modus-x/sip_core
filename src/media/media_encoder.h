@@ -22,6 +22,8 @@
  #pragma once
 
  #include "media_encoder_base.h"
+
+ #include <mutex>
  
  namespace sip_core {
  
@@ -167,7 +169,7 @@
      bool fileIO_ {false};
      unsigned int currentVideoCodecID_ {0};
      const AVCodec* outputCodec_ = nullptr;
-     std::mutex encMutex_;
+     std::recursive_mutex encMutex_;
      bool linkableHW_ {false};
      RateMode mode_ {RateMode::CBR};
      bool fecEnabled_ {true};

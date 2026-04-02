@@ -29,6 +29,7 @@
 #include <string>
 #include <memory>
 #include <atomic>
+#include <mutex>
 
 // Forward declarations
 namespace sip_core {
@@ -82,6 +83,7 @@ private:
     // encoder MUST be deleted before muxContext
     std::unique_ptr<MediaIOHandle> muxContext_ = nullptr;
     std::unique_ptr<MediaEncoder> videoEncoder_ = nullptr;
+    mutable std::mutex encoderMutex_ {};
 
     MediaStream stream_;
 

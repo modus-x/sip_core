@@ -386,11 +386,14 @@ VideoRtpSession::startSender()
 void
 VideoRtpSession::restartSender()
 {
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    std::unique_lock<std::recursive_mutex> lock(mutex_);
 
     // ensure that start has been called before restart
     if (not socketPair_)
         return;
+    if (conference_) {
+        stopMutedKeepAliveLocked(lock);
+    }
 
     startSender();
 
@@ -558,12 +561,13 @@ void
 VideoRtpSession::start()
 {
     SIP_CORE_WARN("VideoRtpSession [%p] Starting video rtp session", this);
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    std::unique_lock<std::recursive_mutex> lock(mutex_);
 
     // start only if local and remote sessions are active
     if (not send_.enabled or not receive_.enabled) {
         SIP_CORE_WARN("VideoRtpSession [%p] Video rtp session stopped, because send is not enabled",
                       this);
+        lock.unlock();
         stop();
         return;
     }
@@ -586,6 +590,9 @@ VideoRtpSession::start()
     } catch (const std::runtime_error& e) {
         SIP_CORE_ERR("VideoRtpSession [%p] Socket creation failed: %s", this, e.what());
         return;
+    }
+    if (conference_ && send_.enabled) {
+        stopMutedKeepAliveLocked(lock);
     }
 
     startSender();
@@ -952,7 +959,7 @@ VideoRtpSession::setupConferenceVideoPipeline(Conference& conference, Direction 
 void
 VideoRtpSession::enterConference(Conference& conference)
 {
-    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    std::unique_lock<std::recursive_mutex> lock(mutex_);
 
     exitConference();
 
@@ -961,11 +968,20 @@ VideoRtpSession::enterConference(Conference& conference)
     SIP_CORE_DBG("VideoRtpSession [%p] enterConference (conf: %s)",
                  this,
                  conference.getConfId().c_str());
+    const bool needsRestart = send_.enabled or receiveThread_;
 
-    if (send_.enabled or receiveThread_) {
+    if (send_.enabled) {
+        stopMutedKeepAliveLocked(lock);
+    }
+
+    lock.unlock();
+
+    if (needsRestart) {
         // Restart encoder with conference parameter ON in order to unlink HW encoder
         // from HW decoder.
         restartSender();
+
+        std::lock_guard<std::recursive_mutex> relock(mutex_);
         if (conference_) {
             setupConferenceVideoPipeline(conference, Direction::RECV);
         }
@@ -1214,6 +1230,18 @@ VideoRtpSession::processMutedFrame()
     }
 
     std::this_thread::sleep_for(frameInterval);
+}
+
+void
+VideoRtpSession::stopMutedKeepAliveLocked(std::unique_lock<std::recursive_mutex>& lock)
+{
+    if (!sendMutedFrames_.exchange(false) && !mutedFrameThread_.isRunning()) {
+        return;
+    }
+
+    lock.unlock();
+    mutedFrameThread_.join();
+    lock.lock();
 }
 
 void
