@@ -514,6 +514,12 @@ public:
     bool hasRunningTransportForConnectivityChange() const;
     bool shouldHandleConnectivityChange() const;
     void handleConnectivityChangedForced(const char* reason);
+    void prepareConnectivityRecovery(const char* reason);
+    void dispatchPreparedConnectivityRecovery(const char* reason);
+    bool isTransportRecoveryActive() const
+    {
+        return transportRecoveryPending_.load() || connectivityRecoveryInProgress_.load();
+    }
     void reinviteActiveCalls();
     void scheduleConnectivityReinviteRetry(const std::shared_ptr<SIPCall>& sipCall);
 
@@ -694,6 +700,7 @@ private:
     bool shouldRecoverTransport(pjsip_transport_state state, pj_status_t status) const;
     bool isBenignTransportShutdown(pjsip_transport_state state, pj_status_t status) const;
     void markTransportRebindRequired(const char* reason);
+    void prepareTransportReset(const char* reason, bool resetNetworkRuntimeState);
     void runPostRegisterRecoverySync();
     std::pair<std::string, pj_uint16_t> currentLocalBinding() const;
     void resetViaTransport();

@@ -201,6 +201,9 @@ SIPPresence::reportPresSubClientNotification(std::string_view uri, pjsip_pres_st
 void
 SIPPresence::subscribeClient(const std::string& uri, bool flag)
 {
+    auto* account = acc_;
+    const bool canAttemptNow = account && !account->isTransportRecoveryActive()
+                               && static_cast<bool>(account->getTransport());
     /* if an account has a server that doesn't support SUBSCRIBE, it's still possible
      * to subscribe to someone on another server */
     /*
@@ -218,6 +221,13 @@ SIPPresence::subscribeClient(const std::string& uri, bool flag)
             c->setDesired(flag);
             if (flag) {
                 c->refreshContact(acc_->getContactHeader());
+                if (!canAttemptNow) {
+                    SIP_CORE_WARN("Deferring presence subscription %.*s until account transport "
+                                  "recovery completes",
+                                  (int) c->getURI().size(),
+                                  c->getURI().data());
+                    return;
+                }
                 c->subscribe();
             } else {
                 c->unsubscribe();
@@ -235,11 +245,19 @@ SIPPresence::subscribeClient(const std::string& uri, bool flag)
         PresSubClient* c = new PresSubClient(uri, this);
         c->setDesired(true);
         c->refreshContact(acc_->getContactHeader());
+        addPresSubClient(c);
+        if (!canAttemptNow) {
+            SIP_CORE_WARN("Deferring new presence subscription %.*s until account transport "
+                          "recovery completes",
+                          (int) c->getURI().size(),
+                          c->getURI().data());
+            return;
+        }
         if (!(c->subscribe())) {
             SIP_CORE_WARN("Failed send subscribe.");
+            removePresSubClient(c);
             delete c;
         }
-        // the buddy has to be accepted before being added in the list
     }
 }
 
@@ -288,8 +306,38 @@ SIPPresence::recoverSubscriptionsAndPublish(const std::string& contactHeader, bo
 }
 
 void
+SIPPresence::invalidateSubscriptionsAndPublish(const char* reason)
+{
+    std::vector<PresSubClient*> subscriptions;
+    {
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
+        subscriptions.assign(sub_client_list_.begin(), sub_client_list_.end());
+    }
+
+    for (auto* sub : subscriptions) {
+        if (!sub)
+            continue;
+        sub->invalidateDialog(reason, true, false);
+    }
+
+    if (publish_sess_) {
+        SIP_CORE_WARN("Invalidating presence publish session for account %s locally (%s)",
+                      acc_->getAccountID().c_str(),
+                      reason ? reason : "unspecified");
+        pjsip_publishc_destroy(publish_sess_);
+        publish_sess_ = NULL;
+    }
+}
+
+void
 SIPPresence::addPresSubClient(PresSubClient* c)
 {
+    if (!c)
+        return;
+    for (const auto& existing : sub_client_list_) {
+        if (existing == c)
+            return;
+    }
     if (sub_client_list_.size() < MAX_N_SUB_CLIENT) {
         sub_client_list_.push_back(c);
         SIP_CORE_DBG("New Presence_subscription_client added (list[%zu]).", sub_client_list_.size());

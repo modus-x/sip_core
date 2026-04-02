@@ -154,6 +154,7 @@ public:
      */
     void subscribeClient(const std::string& uri, bool flag);
     void recoverSubscriptionsAndPublish(const std::string& contactHeader, bool republish);
+    void invalidateSubscriptionsAndPublish(const char* reason);
     /**
      * Add a buddy in the buddy list.
      * @param b     PresSubClient pointer

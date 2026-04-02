@@ -82,6 +82,9 @@ public:
      * the 0s timeout make the dialog expire immediately.
      */
     bool unsubscribe();
+    void invalidateDialog(const char* reason,
+                          bool preserveDesired = true,
+                          bool emitStateSignal = false);
     /**
      * Return  the monitor variable.
      */

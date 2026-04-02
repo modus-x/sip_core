@@ -77,12 +77,24 @@ SIPEvents::enable(bool enabled)
 void
 SIPEvents::subscribeClient(const std::string& uri, const std::string& event, bool flag)
 {
+    auto* account = acc_;
+    const bool canAttemptNow = account && !account->isTransportRecoveryActive()
+                               && static_cast<bool>(account->getTransport());
     /* Check if the buddy was already subscribed */
     for (const auto& c : sub_list_) {
         if (c->getURI() == uri && c->getEvent() == event) {
             c->setDesired(flag);
             if (flag) {
                 c->refreshContact(acc_->getContactHeader());
+                if (!canAttemptNow) {
+                    SIP_CORE_WARN("Deferring event subscription [%.*s] %.*s until account transport "
+                                  "recovery completes",
+                                  (int) c->getEvent().size(),
+                                  c->getEvent().data(),
+                                  (int) c->getURI().size(),
+                                  c->getURI().data());
+                    return;
+                }
                 c->subscribe();
             } else {
                 c->unsubscribe();
@@ -95,11 +107,21 @@ SIPEvents::subscribeClient(const std::string& uri, const std::string& event, boo
         CustomEventSubClient* c = new CustomEventSubClient(uri, event, this);
         c->setDesired(true);
         c->refreshContact(acc_->getContactHeader());
+        addSubClient(c);
+        if (!canAttemptNow) {
+            SIP_CORE_WARN("Deferring new event subscription [%.*s] %.*s until account transport "
+                          "recovery completes",
+                          (int) c->getEvent().size(),
+                          c->getEvent().data(),
+                          (int) c->getURI().size(),
+                          c->getURI().data());
+            return;
+        }
         if (!(c->subscribe())) {
             SIP_CORE_WARN("Failed send subscribe.");
+            removeSubClient(c);
             delete c;
         }
-        // the uri has to be accepted before being added in the list
     }
 }
 
@@ -127,8 +149,28 @@ SIPEvents::recoverSubscriptions(const std::string& contactHeader)
 }
 
 void
+SIPEvents::invalidateSubscriptions(const char* reason)
+{
+    std::vector<CustomEventSubClient*> subscriptions;
+    {
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
+        subscriptions.assign(sub_list_.begin(), sub_list_.end());
+    }
+
+    for (auto* sub : subscriptions) {
+        if (!sub)
+            continue;
+        sub->invalidateDialog(reason, true, false);
+    }
+}
+
+void
 SIPEvents::addSubClient(CustomEventSubClient* c)
 {
+    if (!c)
+        return;
+    if (std::find(sub_list_.begin(), sub_list_.end(), c) != sub_list_.end())
+        return;
     SIP_CORE_DBG("addSubClient added (list[%zu]).", sub_list_.size());
     sub_list_.push_back(c);
 }

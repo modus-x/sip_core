@@ -905,12 +905,14 @@ connectivityChanged()
 
     SIP_CORE_WARN("Connectivity changed: resetting SIP transports and recovering %zu SIP accounts",
                   eligibleSipAccounts.size());
+    for (const auto& account : eligibleSipAccounts)
+        account->prepareConnectivityRecovery("connectivity-changed");
 
     if (auto* broker = sipVoipLink.sipTransportBroker.get())
         broker->resetForConnectivityChange();
 
     for (const auto& account : eligibleSipAccounts)
-        account->handleConnectivityChangedForced("connectivity-changed");
+        account->dispatchPreparedConnectivityRecovery("connectivity-changed");
 
     SIP_CORE_DBG("Connectivity changed: recovery dispatch complete");
 }

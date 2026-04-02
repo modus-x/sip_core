@@ -1144,6 +1144,34 @@ SIPAccount::markTransportRebindRequired(const char* reason)
                  reason ? reason : "unknown");
 }
 
+void
+SIPAccount::prepareTransportReset(const char* reason, bool resetNetworkRuntimeState)
+{
+    SIP_CORE_WARN("Preparing transport reset for account %s (%s)",
+                  accountID_.c_str(),
+                  reason ? reason : "unspecified");
+
+    if (resetNetworkRuntimeState)
+        resetNetworkRuntimeStateForConnectivityChange();
+
+    markTransportRebindRequired(reason);
+
+    cancelKeepAliveTimer();
+    cancelMainRouteKeepAliveTimer();
+    cancelBackupRouteKeepAliveTimer();
+    cancelAutoReregistrationTimer();
+    resetAutoRegistration();
+    pendingBackupKeepAliveStart_.store(false);
+
+    if (sip_events_)
+        sip_events_->invalidateSubscriptions(reason);
+    if (presence_)
+        presence_->invalidateSubscriptionsAndPublish(reason);
+
+    destroyRegistrationInfo();
+    setTransport(nullptr);
+}
+
 bool
 SIPAccount::isOptionsSuccess200(int statusCode) const
 {
@@ -1703,6 +1731,33 @@ SIPAccount::scheduleConnectivityRecovery(const char* reason)
     handleConnectivityChangedForced(reason);
 }
 
+void
+SIPAccount::prepareConnectivityRecovery(const char* reason)
+{
+    if (isShuttingDown_.load() || !isUsable()) {
+        SIP_CORE_DBG("Skipping connectivity recovery preparation for account %s",
+                     accountID_.c_str());
+        return;
+    }
+
+    connectivityRecoveryRequested_.store(true);
+    connectivityRecoveryInProgress_.store(true);
+
+    SIP_CORE_WARN("Forced connectivity recovery requested for account %s (%s)",
+                  accountID_.c_str(),
+                  reason ? reason : "unspecified");
+
+    prepareTransportReset(reason ? reason : "connectivity-changed", true);
+}
+
+void
+SIPAccount::dispatchPreparedConnectivityRecovery(const char* reason)
+{
+    scheduleRecoveryInternal(reason ? reason : "connectivity-changed",
+                             PJSIP_SC_TSX_TRANSPORT_ERROR,
+                             false);
+}
+
 bool
 SIPAccount::scheduleRecoveryInternal(const char* reason, pj_status_t status, bool debounced)
 {
@@ -1752,6 +1807,7 @@ SIPAccount::recoverTransport(const std::string& reason, pj_status_t status)
 {
     if (!transportRecoveryPending_.exchange(false))
         return;
+    connectivityRecoveryInProgress_.store(true);
     const bool connectivityRequested = connectivityRecoveryRequested_.exchange(false);
     const bool connectivityReason = reason.rfind("connectivity-changed", 0) == 0;
 
@@ -1781,19 +1837,7 @@ SIPAccount::recoverTransport(const std::string& reason, pj_status_t status)
                   reason.c_str(),
                   status,
                   sip_utils::sip_strerror(status).c_str());
-
-    if (connectivityRequested || connectivityReason)
-        resetNetworkRuntimeStateForConnectivityChange();
-
-    markTransportRebindRequired(reason.c_str());
-
-    cancelKeepAliveTimer();
-    cancelMainRouteKeepAliveTimer();
-    cancelBackupRouteKeepAliveTimer();
-    pendingBackupKeepAliveStart_.store(false);
-
-    destroyRegistrationInfo();
-    setTransport(nullptr);
+    prepareTransportReset(reason.c_str(), connectivityRequested || connectivityReason);
 
     if (!switchTransportInternal(config().transport, false, false, nullptr)) {
         SIP_CORE_ERR("Transport recreation failed during recovery for account %s",
@@ -2780,11 +2824,17 @@ SIPAccount::doUnregisterFireAndForget()
     // pjsip_regc_destroy2(regc, PJ_TRUE) defers internal cleanup until the
     // final response but suppresses the callback — the packet IS still sent.
     try {
-        pjsip_tx_data* tdata = nullptr;
-        if (pjsip_regc_unregister(regc, &tdata) == PJ_SUCCESS) {
-            const pjsip_tpselector tp_sel = getTransportSelector();
-            pjsip_regc_set_transport(regc, &tp_sel);
-            pjsip_regc_send(regc, tdata);
+        const pjsip_tpselector tp_sel = getTransportSelector();
+        if (!isTransportRecoveryActive() && tp_sel.type != PJSIP_TPSELECTOR_NONE) {
+            pjsip_tx_data* tdata = nullptr;
+            if (pjsip_regc_unregister(regc, &tdata) == PJ_SUCCESS) {
+                pjsip_regc_set_transport(regc, &tp_sel);
+                pjsip_regc_send(regc, tdata);
+            }
+        } else {
+            SIP_CORE_WARN("Skipping fire-and-forget unregister send for account %s: transport is "
+                          "being recovered",
+                          accountID_.c_str());
         }
     } catch (...) {
         SIP_CORE_WARN("Fire-and-forget unregister send failed for account %s",
@@ -2879,20 +2929,8 @@ SIPAccount::handleConnectivityChangedForced(const char* reason)
                      isShuttingDown_.load() ? 1 : 0);
         return;
     }
-
-    connectivityRecoveryRequested_.store(true);
-    connectivityRecoveryInProgress_.store(true);
-    markTransportRebindRequired(reason ? reason : "connectivity-changed");
-    cancelAutoReregistrationTimer();
-    resetAutoRegistration();
-
-    SIP_CORE_WARN("Forced connectivity recovery requested for account %s (%s)",
-                  accountID_.c_str(),
-                  reason ? reason : "unspecified");
-
-    scheduleRecoveryInternal(reason ? reason : "connectivity-changed",
-                             PJSIP_SC_TSX_TRANSPORT_ERROR,
-                             false);
+    prepareConnectivityRecovery(reason ? reason : "connectivity-changed");
+    dispatchPreparedConnectivityRecovery(reason ? reason : "connectivity-changed");
 }
 
 void
@@ -3447,11 +3485,18 @@ SIPAccount::sendUnregister()
     if (!regc)
         throw VoipLinkException("Registration structure is NULL");
 
+    const pjsip_tpselector tp_sel = getTransportSelector();
+    if (isTransportRecoveryActive() || tp_sel.type == PJSIP_TPSELECTOR_NONE) {
+        SIP_CORE_WARN("Skipping network unregister for account %s: transport is being recovered",
+                      accountID_.c_str());
+        destroyRegistrationInfo();
+        setRegistrationState(RegistrationState::UNREGISTERED);
+        return;
+    }
+
     pjsip_tx_data* tdata = nullptr;
     if (pjsip_regc_unregister(regc, &tdata) != PJ_SUCCESS)
         throw VoipLinkException("Unable to unregister sip account");
-
-    const pjsip_tpselector tp_sel = getTransportSelector();
     if (pjsip_regc_set_transport(regc, &tp_sel) != PJ_SUCCESS)
         throw VoipLinkException("Unable to set transport");
 
