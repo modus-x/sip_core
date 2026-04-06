@@ -233,6 +233,11 @@ struct Manager::ManagerPimpl
 
     void initAudioDriver();
 
+    /**
+     * Check if any account has an active conference.
+     */
+    bool hasActiveConference() const;
+
     void processIncomingCall(const std::string& accountId,
                              Call& incomCall,
                              const std::map<std::string, std::string>& headers = {});
@@ -566,6 +571,15 @@ Manager::ManagerPimpl::bindCallToConference(Call& call, Conference& conf)
         SIP_CORE_WARN("[call:%s] call state %s not recognized for conference",
                       callId.c_str(),
                       state.c_str());
+}
+
+bool
+Manager::ManagerPimpl::hasActiveConference() const
+{
+    for (const auto& account : base_.getAllAccounts())
+        if (!account->getConferenceList().empty())
+            return true;
+    return false;
 }
 
 //==============================================================================
@@ -1977,12 +1991,14 @@ Manager::peerRingingCall(Call& call)
 {
     SIP_CORE_DBG("[call:%s] Peer ringing!!!", call.getCallId().c_str());
 
-    // Don't play ringback tone for conference participants — the tone takes
+    // Don't play ringback tone when any conference is active — the tone takes
     // exclusive priority over the ring-buffer pool in the audio mixer
     // (see AudioLayer::getToPlay), so it would completely mute the ongoing
     // conference audio for the host until the new participant answers.
-    if (call.isConferenceParticipant()) {
-        SIP_CORE_DBG("[call:%s] Skipping ringback: call is a conference participant",
+    // Note: isConferenceParticipant() alone is not enough — when the host
+    // dials out from a conference the new call is not yet bound to it.
+    if (call.isConferenceParticipant() || pimpl_->hasActiveConference()) {
+        SIP_CORE_DBG("[call:%s] Skipping ringback: conference is active",
                      call.getCallId().c_str());
         return;
     }
