@@ -1596,12 +1596,17 @@ public:
 
     void process(uintptr_t key, pj_status_t status, const pjsip_server_addresses* addr)
     {
-        std::lock_guard<std::mutex> lk(mutex_);
-        auto it = cbMap_.find(key);
-        if (it != cbMap_.end()) {
-            it->second(status, addr);
+        ResolveCallback cb;
+        {
+            std::lock_guard<std::mutex> lk(mutex_);
+            auto it = cbMap_.find(key);
+            if (it == cbMap_.end()) {
+                return;
+            }
+            cb = std::move(it->second);
             cbMap_.erase(it);
         }
+        cb(status, addr);
     }
 
 private:

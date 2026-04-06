@@ -187,6 +187,26 @@ test_keepalive_options_selection()
 }
 
 void
+test_startup_main_route_probe_selection()
+{
+    expect_true(SIPAccount::shouldUseStartupMainRouteProbe(
+                    true, SIPAccount::KeepAliveTopology::ServiceRouteWithBackup, false, false),
+                "dual-route OPTIONS mode on main route must use the startup main-route probe");
+    expect_true(!SIPAccount::shouldUseStartupMainRouteProbe(
+                    true, SIPAccount::KeepAliveTopology::ServiceRouteWithBackup, true, false),
+                "backup route registrations must skip the startup main-route probe");
+    expect_true(!SIPAccount::shouldUseStartupMainRouteProbe(
+                    true, SIPAccount::KeepAliveTopology::ServiceRouteWithBackup, false, true),
+                "one-shot skip flag must suppress the startup main-route probe");
+    expect_true(!SIPAccount::shouldUseStartupMainRouteProbe(
+                    false, SIPAccount::KeepAliveTopology::ServiceRouteWithBackup, false, false),
+                "packet mode must skip the startup main-route probe");
+    expect_true(!SIPAccount::shouldUseStartupMainRouteProbe(
+                    true, SIPAccount::KeepAliveTopology::ServiceRoute, false, false),
+                "single-route topology must skip the startup main-route probe");
+}
+
+void
 test_active_probe_interval_resolution()
 {
     expect_true(SIPAccount::resolveActiveKeepAliveIntervalSec(20, false, true) == 20,
@@ -230,6 +250,7 @@ main()
     test_main_route_fast_probe_status_transitions();
     test_keepalive_topology_resolution();
     test_keepalive_options_selection();
+    test_startup_main_route_probe_selection();
     test_active_probe_interval_resolution();
     test_active_no_route_fast_probe_status_transitions();
 

@@ -299,6 +299,10 @@ public:
 
     static KeepAliveTopology resolveKeepAliveTopology(bool hasServiceRoute, bool hasBackServiceRoute);
     static bool shouldUseOptionsForKeepAlive(KeepAliveType keepAliveType, bool isUdpTransport);
+    static bool shouldUseStartupMainRouteProbe(bool optionsKeepAliveMode,
+                                               KeepAliveTopology topology,
+                                               bool usingBackupRoute,
+                                               bool skipStartupProbe);
 
     /**
      * Get the currently active service route (main or backup)
@@ -656,10 +660,12 @@ public:
     bool isOptionsKeepAliveMode() const;
     KeepAliveTopology getKeepAliveTopology() const;
     bool shouldRunStartupMainRouteProbe() const;
+    bool consumeShouldRunStartupMainRouteProbe();
     std::string getServerUriForTarget(const std::string& target) const;
     std::string getActiveKeepAliveUri() const;
     std::string getMainRouteKeepAliveUri() const;
     std::string getBackupRouteKeepAliveUri() const;
+    void handleStartupMainRouteProbeResult(int statusCode);
     void handleActiveRouteOptionsSuccess(int statusCode);
     void handleActiveRouteOptionsFailure(int statusCode);
     void reregisterCurrentRoute(const char* reason);

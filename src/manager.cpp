@@ -1977,6 +1977,16 @@ Manager::peerRingingCall(Call& call)
 {
     SIP_CORE_DBG("[call:%s] Peer ringing!!!", call.getCallId().c_str());
 
+    // Don't play ringback tone for conference participants — the tone takes
+    // exclusive priority over the ring-buffer pool in the audio mixer
+    // (see AudioLayer::getToPlay), so it would completely mute the ongoing
+    // conference audio for the host until the new participant answers.
+    if (call.isConferenceParticipant()) {
+        SIP_CORE_DBG("[call:%s] Skipping ringback: call is a conference participant",
+                     call.getCallId().c_str());
+        return;
+    }
+
     ringback();
 }
 

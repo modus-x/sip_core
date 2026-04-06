@@ -236,17 +236,7 @@ startup_main_route_probe_on_complete(void* token, pjsip_event* event)
 
     const int code = tsx->status_code;
     SIP_CORE_INFO("KA_EVT: options-final route=startup-main-probe code=%d", code);
-
-    if (acc->isOptionsSuccess200(code)) {
-        acc->mainRouteAvailable_.store(true);
-        acc->skipMainRouteStartupProbeOnce_.store(true);
-        acc->doRegister();
-        return;
-    }
-
-    acc->mainRouteAvailable_.store(false);
-    acc->switchRouteAndReregister(true, "startup-main-route-options-failure");
-    acc->enableMainRouteFastProbe("startup-main-route-options-failure");
+    acc->handleStartupMainRouteProbeResult(code);
 }
 
 /* Main route keep alive timer callback - sends OPTIONS to main route */
@@ -2429,16 +2419,6 @@ SIPAccount::doRegister1_()
                                              return;
                                          }
                                          acc->serviceRouteIp_ = host_ips[0];
-                                         const bool skipStartupProbe
-                                             = acc->skipMainRouteStartupProbeOnce_.exchange(false);
-                                         if (acc->isOptionsKeepAliveMode()
-                                             && acc->getKeepAliveTopology()
-                                                    == KeepAliveTopology::ServiceRouteWithBackup
-                                             && !acc->isUsingBackupRoute()
-                                             && !skipStartupProbe) {
-                                             acc->sendStartupMainRouteProbe();
-                                             return;
-                                         }
                                          acc->doRegister2_();
                                      }
                                  });
@@ -2514,6 +2494,16 @@ SIPAccount::shouldUseOptionsForKeepAlive(KeepAliveType keepAliveType, bool isUdp
 }
 
 bool
+SIPAccount::shouldUseStartupMainRouteProbe(bool optionsKeepAliveMode,
+                                           KeepAliveTopology topology,
+                                           bool usingBackupRoute,
+                                           bool skipStartupProbe)
+{
+    return optionsKeepAliveMode && topology == KeepAliveTopology::ServiceRouteWithBackup
+           && !usingBackupRoute && !skipStartupProbe;
+}
+
+bool
 SIPAccount::isOptionsKeepAliveMode() const
 {
     return shouldUseOptionsForKeepAlive(config().keepAliveType,
@@ -2529,9 +2519,20 @@ SIPAccount::getKeepAliveTopology() const
 bool
 SIPAccount::shouldRunStartupMainRouteProbe() const
 {
-    return isOptionsKeepAliveMode()
-           && getKeepAliveTopology() == KeepAliveTopology::ServiceRouteWithBackup
-           && !isUsingBackupRoute() && !skipMainRouteStartupProbeOnce_.load();
+    return shouldUseStartupMainRouteProbe(isOptionsKeepAliveMode(),
+                                          getKeepAliveTopology(),
+                                          isUsingBackupRoute(),
+                                          skipMainRouteStartupProbeOnce_.load());
+}
+
+bool
+SIPAccount::consumeShouldRunStartupMainRouteProbe()
+{
+    const bool skipStartupProbe = skipMainRouteStartupProbeOnce_.exchange(false);
+    return shouldUseStartupMainRouteProbe(isOptionsKeepAliveMode(),
+                                          getKeepAliveTopology(),
+                                          isUsingBackupRoute(),
+                                          skipStartupProbe);
 }
 
 std::string
@@ -2639,6 +2640,21 @@ SIPAccount::reregisterCurrentRoute(const char* reason)
     needsRepublish_.store(true);
     destroyRegistrationInfo();
     doRegister();
+}
+
+void
+SIPAccount::handleStartupMainRouteProbeResult(int statusCode)
+{
+    if (isOptionsSuccess200(statusCode)) {
+        mainRouteAvailable_.store(true);
+        skipMainRouteStartupProbeOnce_.store(true);
+        doRegister2_();
+        return;
+    }
+
+    mainRouteAvailable_.store(false);
+    switchRouteAndReregister(true, "startup-main-route-options-failure");
+    enableMainRouteFastProbe("startup-main-route-options-failure");
 }
 
 void
@@ -2762,6 +2778,11 @@ SIPAccount::doRegister2_()
         bool result = switchTransportInternal(config().transport, false, false, nullptr);
         if (!result) {
             setRegistrationState(RegistrationState::ERROR_GENERIC);
+            return;
+        }
+
+        if (consumeShouldRunStartupMainRouteProbe()) {
+            sendStartupMainRouteProbe();
             return;
         }
 
