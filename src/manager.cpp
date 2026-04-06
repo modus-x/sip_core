@@ -1991,14 +1991,12 @@ Manager::peerRingingCall(Call& call)
 {
     SIP_CORE_DBG("[call:%s] Peer ringing!!!", call.getCallId().c_str());
 
-    // Don't play ringback tone when any conference is active — the tone takes
-    // exclusive priority over the ring-buffer pool in the audio mixer
-    // (see AudioLayer::getToPlay), so it would completely mute the ongoing
-    // conference audio for the host until the new participant answers.
-    // Note: isConferenceParticipant() alone is not enough — when the host
-    // dials out from a conference the new call is not yet bound to it.
-    if (call.isConferenceParticipant() || pimpl_->hasActiveConference()) {
-        SIP_CORE_DBG("[call:%s] Skipping ringback: conference is active",
+    // Don't play ringback tone when there is any other active audio source
+    // (conference or another call) — the tone takes exclusive priority over
+    // the ring-buffer pool in the audio mixer (see AudioLayer::getToPlay),
+    // so it would completely mute ongoing audio until this call is answered.
+    if (call.isConferenceParticipant() || pimpl_->hasActiveConference() || hasCurrentCall()) {
+        SIP_CORE_DBG("[call:%s] Skipping ringback: other audio source is active",
                      call.getCallId().c_str());
         return;
     }
