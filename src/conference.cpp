@@ -549,6 +549,12 @@ Conference::requestMediaChange(const std::vector<libsip_core::MediaMap>& mediaLi
                 // if videoMixer_ is defined, switch inputs!
                 if (videoMixer_) {
                     videoMixer_->switchInputs(newVideoInputs);
+                    // Remove the host's audio-only placeholder now that real
+                    // video is being attached (mirrors handleMediaChangeRequest
+                    // logic for remote participants).
+                    videoMixer_->removeAudioOnlySource(
+                        "",
+                        sip_utils::streamId("", sip_utils::DEFAULT_VIDEO_STREAMID));
                 }
             }
         }
@@ -1943,11 +1949,18 @@ Conference::muteLocalHost(bool is_muted, const std::string& mediaType)
             if (auto mixer = videoMixer_) {
                 SIP_CORE_DBG("Muting local video sources");
                 mixer->muteInputs(true);
+                // No audio-only placeholder needed here: the muted video
+                // source stays in sources_ and already renders black frames.
             }
         } else {
             if (auto mixer = videoMixer_) {
                 SIP_CORE_DBG("Un-muting local video sources");
                 mixer->muteInputs(false);
+                // Remove the host audio-only placeholder since the real video
+                // source is now rendering.
+                mixer->removeAudioOnlySource(
+                    "",
+                    sip_utils::streamId("", sip_utils::DEFAULT_VIDEO_STREAMID));
             }
         }
         emitSignal<libsip_core::CallSignal::VideoMuted>(id_, is_muted);

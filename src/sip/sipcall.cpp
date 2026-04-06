@@ -2950,6 +2950,29 @@ SIPCall::handleMediaChangeRequest(const std::vector<libsip_core::MediaMap>& remo
         return;
     }
 
+    // For new video media coming from the remote offer, SOURCE will be empty
+    // (the remote SDP does not carry our local device). Populate it with the
+    // default local video device so that both the auto-answer path and the
+    // MediaChangeRequested signal deliver a usable source to the client.
+    auto enrichedMediaList = remoteMediaList;
+#ifdef ENABLE_VIDEO
+    {
+        auto defaultMrl = Manager::instance()
+                              .getVideoManager()
+                              .videoDeviceMonitor.getMRLForDefaultDevice();
+        for (auto& mediaMap : enrichedMediaList) {
+            auto typeIt = mediaMap.find(libsip_core::Media::MediaAttributeKey::MEDIA_TYPE);
+            if (typeIt != mediaMap.end()
+                && typeIt->second == libsip_core::Media::MediaAttributeValue::VIDEO) {
+                auto& source = mediaMap[libsip_core::Media::MediaAttributeKey::SOURCE];
+                if (source.empty()) {
+                    source = defaultMrl;
+                }
+            }
+        }
+    }
+#endif
+
     if (account->isAutoAnswerEnabled()) {
         // NOTE:
         // Since the auto-answer is enabled in the account, newly
@@ -2959,15 +2982,15 @@ SIPCall::handleMediaChangeRequest(const std::vector<libsip_core::MediaMap>& remo
         // in the account settings.
 
         std::vector<libsip_core::MediaMap> newMediaList;
-        newMediaList.reserve(remoteMediaList.size());
+        newMediaList.reserve(enrichedMediaList.size());
         for (auto const& stream : rtpStreams_) {
             newMediaList.emplace_back(MediaAttribute::toMediaMap(*stream.mediaAttribute_));
         }
 
-        assert(remoteMediaList.size() > 0);
-        if (remoteMediaList.size() > newMediaList.size()) {
-            for (auto idx = newMediaList.size(); idx < remoteMediaList.size(); idx++) {
-                newMediaList.emplace_back(remoteMediaList[idx]);
+        assert(enrichedMediaList.size() > 0);
+        if (enrichedMediaList.size() > newMediaList.size()) {
+            for (auto idx = newMediaList.size(); idx < enrichedMediaList.size(); idx++) {
+                newMediaList.emplace_back(enrichedMediaList[idx]);
             }
         }
         answerMediaChangeRequest(newMediaList, true);
@@ -2977,7 +3000,7 @@ SIPCall::handleMediaChangeRequest(const std::vector<libsip_core::MediaMap>& remo
     // Report the media change request.
     emitSignal<libsip_core::CallSignal::MediaChangeRequested>(getAccountId(),
                                                               getCallId(),
-                                                              remoteMediaList);
+                                                              enrichedMediaList);
 }
 
 pj_status_t

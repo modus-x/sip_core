@@ -41,11 +41,11 @@ MediaAttribute::MediaAttribute(const libsip_core::MediaMap& mediaMap, bool secur
 
     std::pair<bool, std::string> pairString;
     pairString = getStringValue(mediaMap, libsip_core::Media::MediaAttributeKey::SOURCE);
-    if (pairBool.first)
+    if (pairString.first)
         sourceUri_ = pairString.second;
 
     pairString = getStringValue(mediaMap, libsip_core::Media::MediaAttributeKey::LABEL);
-    if (pairBool.first)
+    if (pairString.first)
         label_ = pairString.second;
 
     pairBool = getBoolValue(mediaMap, libsip_core::Media::MediaAttributeKey::ON_HOLD);
