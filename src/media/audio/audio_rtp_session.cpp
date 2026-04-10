@@ -438,6 +438,7 @@ AudioRtpSession::stop()
 
     receiveThread_.reset();
     sender_.reset();
+    preserveCurrentSocketPairReservationIfNeeded();
     socketPair_.reset();
     audioInput_.reset();
 }

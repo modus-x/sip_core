@@ -147,4 +147,12 @@ AudioFrameResizer::dequeue()
     return frame;
 }
 
+void
+AudioFrameResizer::clear()
+{
+    av_audio_fifo_reset(queue_);
+    nextOutputPts_ = 0;
+    hasVoice_ = false;
+}
+
 } // namespace sip_core

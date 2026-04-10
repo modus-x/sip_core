@@ -81,6 +81,11 @@ public:
      */
     std::shared_ptr<AudioFrame> dequeue();
 
+    /**
+     * Discard all queued samples and reset output state.
+     */
+    void clear();
+
 private:
     NON_COPYABLE(AudioFrameResizer);
 

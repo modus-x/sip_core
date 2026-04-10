@@ -278,11 +278,13 @@ protected:
 
     /**
      * Pre-buffering state for playback jitter absorption.
-     * Accumulates a few frames before starting playback to avoid
-     * glitches caused by timing jitter (especially over RDP/VDI).
+     * Use a bounded time-based target on startup/rebuffering so large
+     * device callback sizes do not multiply silence duration.
      */
-    static constexpr unsigned PREBUFFER_FRAME_COUNT = 3; // ~60ms at 20ms/frame
-    bool prebuffering_ {true};
+    static constexpr unsigned PREBUFFER_TARGET_MS = 60;
+    static constexpr unsigned REBUFFER_EMPTY_CALLBACK_THRESHOLD = 3;
+    std::atomic_bool prebuffering_ {true};
+    std::atomic_uint consecutiveEmptyPlaybackCallbacks_ {0};
 
     /**
      * Whether or not the audio layer's playback stream is started
@@ -333,6 +335,10 @@ private:
     void destroyAudioProcessor();
     void applyVadSensitivityLocked();
     static int clampVadSensitivity(int32_t sensitivity);
+    void enterPlaybackPrebuffering(const char* reason, bool clearQueue = false, bool warn = false);
+    void leavePlaybackPrebuffering(const char* reason,
+                                   size_t availableSamples = 0,
+                                   size_t targetSamples = 0);
 
     int vadSensitivity_ {3};
 

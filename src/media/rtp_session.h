@@ -115,6 +115,17 @@ protected:
     std::shared_ptr<MediaRecorder> recorder_;
     std::function<void(MediaType, bool)> onSuccessfulSetup_;
     std::optional<ReservedSocketPair> reservedSocketPair_ {};
+    void preserveCurrentSocketPairReservationIfNeeded()
+    {
+        if (reservedSocketPair_ || !socketPair_ || (!send_.enabled && !receive_.enabled)) {
+            return;
+        }
+
+        auto reserved = socketPair_->releaseLocalReservation();
+        if (reserved) {
+            reservedSocketPair_.emplace(std::move(reserved));
+        }
+    }
 
     ReservedSocketPair takeReservedSocketPair()
     {

@@ -63,12 +63,14 @@ RingBuffer::~RingBuffer()
 void
 RingBuffer::flush(const std::string& call_id)
 {
+    std::lock_guard<std::mutex> l(lock_);
     storeReadOffset(endPos_, call_id);
 }
 
 void
 RingBuffer::flushAll()
 {
+    std::lock_guard<std::mutex> l(lock_);
     for (auto& offset : readoffsets_)
         offset.second.offset = endPos_;
 }

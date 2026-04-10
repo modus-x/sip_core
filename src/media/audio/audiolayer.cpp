@@ -75,6 +75,7 @@ AudioLayer::hardwareFormatAvailable(AudioFormat playback, size_t bufSize)
     audioInputFormat_.sampleFormat = audioFormat_.sampleFormat;
     urgentRingBuffer_.setFormat(audioFormat_);
     nativeFrameSize_ = bufSize;
+    enterPlaybackPrebuffering("hardware playback format changed");
 }
 
 void
@@ -86,6 +87,7 @@ AudioLayer::hardwareInputFormatAvailable(AudioFormat capture)
 void
 AudioLayer::devicesChanged()
 {
+    enterPlaybackPrebuffering("audio devices changed");
     emitSignal<libsip_core::AudioSignal::DeviceEvent>();
 #ifdef ENABLE_VIDEO
     // Also emit VideoSignal::DeviceEvent so the Dart side (which only listens
@@ -119,6 +121,10 @@ void
 AudioLayer::playbackChanged(bool started)
 {
     playbackStarted_ = started;
+    if (started)
+        enterPlaybackPrebuffering("playback stream started");
+    else
+        enterPlaybackPrebuffering("playback stream stopped", true);
 }
 
 void
@@ -315,6 +321,45 @@ AudioLayer::notifyIncomingCall()
     putUrgent(buf);
 }
 
+void
+AudioLayer::enterPlaybackPrebuffering(const char* reason, bool clearQueue, bool warn)
+{
+    consecutiveEmptyPlaybackCallbacks_.store(0);
+    if (clearQueue && playbackQueue_)
+        playbackQueue_->clear();
+
+    const bool wasPrebuffering = prebuffering_.exchange(true);
+    if (!wasPrebuffering || clearQueue) {
+        if (warn) {
+            SIP_CORE_WARN("[audiolayer] Entering playback prebuffering: %s%s",
+                          reason,
+                          clearQueue ? " (queue cleared)" : "");
+        } else {
+            SIP_CORE_DBG("[audiolayer] Entering playback prebuffering: %s%s",
+                         reason,
+                         clearQueue ? " (queue cleared)" : "");
+        }
+    }
+}
+
+void
+AudioLayer::leavePlaybackPrebuffering(const char* reason,
+                                      size_t availableSamples,
+                                      size_t targetSamples)
+{
+    consecutiveEmptyPlaybackCallbacks_.store(0);
+    if (prebuffering_.exchange(false)) {
+        if (targetSamples != 0) {
+            SIP_CORE_DBG("[audiolayer] Leaving playback prebuffering: %s (%zu/%zu samples)",
+                         reason,
+                         availableSamples,
+                         targetSamples);
+        } else {
+            SIP_CORE_DBG("[audiolayer] Leaving playback prebuffering: %s", reason);
+        }
+    }
+}
+
 std::shared_ptr<AudioFrame>
 AudioLayer::getToRing(AudioFormat format, size_t writableSamples)
 {
@@ -351,6 +396,7 @@ AudioLayer::getToPlay(AudioFormat format, size_t writableSamples)
     // This is separated from dequeueing so that pre-buffering can
     // accumulate samples without consuming them.
     bool hasDataSource = true;
+    bool missingDataSource = false;
     while (hasDataSource) {
         std::shared_ptr<AudioFrame> resampled;
 
@@ -358,18 +404,14 @@ AudioLayer::getToPlay(AudioFormat format, size_t writableSamples)
             bufferPool.discard(1, RingBufferPool::DEFAULT_ID);
             resampled = resampler_->resample(std::move(urgentSamples), format);
             // Urgent audio (DTMF tones etc.) bypasses pre-buffering
-            prebuffering_ = false;
+            leavePlaybackPrebuffering("urgent audio");
         } else if (auto toneToPlay = Manager::instance().getTelephoneTone()) {
             resampled = resampler_->resample(toneToPlay->getNext(), format);
-            prebuffering_ = false;
+            leavePlaybackPrebuffering("telephone tone");
         } else if (auto buf = bufferPool.getData(RingBufferPool::DEFAULT_ID)) {
             resampled = resampler_->resample(std::move(buf), format);
         } else {
-            // No data available — if we were playing, re-enter pre-buffering
-            // mode so the next burst of data is smoothed out.
-            if (!prebuffering_) {
-                prebuffering_ = true;
-            }
+            missingDataSource = true;
             // Use try_lock to avoid blocking the real-time audio callback.
             // If the lock is contended, just skip the audio processor this time.
             std::unique_lock<std::mutex> lock(audioProcessorMutex, std::try_to_lock);
@@ -383,6 +425,7 @@ AudioLayer::getToPlay(AudioFormat format, size_t writableSamples)
         }
 
         if (resampled) {
+            consecutiveEmptyPlaybackCallbacks_.store(0);
             // Use try_lock to avoid blocking the real-time audio callback.
             std::unique_lock<std::mutex> lock(audioProcessorMutex, std::try_to_lock);
 
@@ -401,19 +444,21 @@ AudioLayer::getToPlay(AudioFormat format, size_t writableSamples)
         // Don't spin: only enqueue one frame per callback during normal playback.
         // During pre-buffering we also only get one frame per callback from the
         // ring buffer, so the accumulation happens across successive callbacks.
-        if (!prebuffering_)
+        if (!prebuffering_.load())
             break;
     }
 
     // Phase 2: Pre-buffering check — accumulate enough samples before starting
-    // output to absorb timing jitter (important for RDP/VDI virtual audio devices).
+    // output to absorb timing jitter without scaling the silence window with
+    // very large device callback sizes.
     // We check sample count BEFORE dequeuing to avoid consuming frames prematurely.
-    if (prebuffering_) {
-        int available = playbackQueue_->samples();
-        int threshold = static_cast<int>(PREBUFFER_FRAME_COUNT * writableSamples);
-        if (available >= threshold) {
-            // Threshold reached — exit pre-buffering and start playing.
-            prebuffering_ = false;
+    if (prebuffering_.load()) {
+        const auto targetSamples = std::max<size_t>(
+            writableSamples,
+            (static_cast<size_t>(format.sample_rate) * PREBUFFER_TARGET_MS + 999) / 1000);
+        const auto available = static_cast<size_t>(std::max(playbackQueue_->samples(), 0));
+        if (available >= targetSamples) {
+            leavePlaybackPrebuffering("buffer target reached", available, targetSamples);
         } else {
             // Still accumulating — return null so the callback outputs silence.
             return {};
@@ -423,6 +468,13 @@ AudioLayer::getToPlay(AudioFormat format, size_t writableSamples)
     // Phase 3: Dequeue one frame for output. If the queue doesn't have enough
     // samples yet, return null (silence will be output).
     auto playbackBuf = playbackQueue_->dequeue();
+    if (playbackBuf) {
+        consecutiveEmptyPlaybackCallbacks_.store(0);
+    } else if (missingDataSource && !prebuffering_.load()) {
+        const auto emptyCallbacks = consecutiveEmptyPlaybackCallbacks_.fetch_add(1) + 1;
+        if (emptyCallbacks >= REBUFFER_EMPTY_CALLBACK_THRESHOLD)
+            enterPlaybackPrebuffering("consecutive empty playback callbacks", false, true);
+    }
 
     sip_core_tracepoint(audio_layer_get_to_play_end);
 

@@ -1039,6 +1039,10 @@ Manager::switchTransport(const std::string& accountId, libsip_core::TransportTyp
 bool
 Manager::answerCall(Call& call, const std::vector<libsip_core::MediaMap>& mediaList)
 {
+    if (call.getCallType() != Call::CallType::INCOMING) {
+        SIP_CORE_WARN("Ignoring answer request for non-incoming call %s", call.getCallId().c_str());
+        return false;
+    }
     SIP_CORE_INFO("Answer call %s", call.getCallId().c_str());
 
     if (call.getConnectionState() != Call::ConnectionState::RINGING) {

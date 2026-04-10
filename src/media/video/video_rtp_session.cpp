@@ -633,6 +633,7 @@ VideoRtpSession::stop()
 
     videoBitrateInfo_.videoBitrateCurrent = SystemCodecInfo::DEFAULT_VIDEO_BITRATE;
     storeVideoBitrateInfo();
+    preserveCurrentSocketPairReservationIfNeeded();
 
     socketPair_.reset();
     if (!localHoldBlackoutActive_) {

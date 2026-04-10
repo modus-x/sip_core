@@ -1,4 +1,5 @@
 #include "media/socket_pair.h"
+#include "media/rtp_session.h"
 #include "connectivity/ip_utils.h"
 
 #include <cstdlib>
@@ -29,6 +30,16 @@ expect_true(bool condition, const std::string& message)
     if (!condition)
         fail(message);
 }
+
+#ifdef _WIN32
+void
+init_winsock()
+{
+    WSADATA data;
+    if (WSAStartup(MAKEWORD(2, 2), &data) != 0)
+        fail("Unable to initialize WinSock");
+}
+#endif
 
 class BoundUdpSocket
 {
@@ -86,6 +97,62 @@ public:
 
 private:
     int handle_ {-1};
+};
+
+class DummyRtpSession : public RtpSession
+{
+public:
+    DummyRtpSession()
+        : RtpSession("test-call", "audio_0", MediaType::MEDIA_AUDIO, {})
+    {
+        send_.enabled = true;
+        receive_.enabled = true;
+    }
+
+    void start() override {}
+    void restartSender() override {}
+    void stop() override {}
+    void setMuted(bool, Direction) override {}
+    void initRecorder() override {}
+    void deinitRecorder() override {}
+    rtcpRRHeader getRtcpRR() override { return {}; }
+    rtcpREMBHeader getRtcpREMB() override { return {}; }
+    rtcpSRHeader getRtcpSR() override { return {}; }
+
+    void stageReservation(ReservedSocketPair&& reserved)
+    {
+        setReservedSocketPair(std::move(reserved));
+    }
+
+    void consumeReservation(const char* uri)
+    {
+        socketPair_.reset(new SocketPair(uri, takeReservedSocketPair()));
+    }
+
+    void preserveReservationForRestart()
+    {
+        preserveCurrentSocketPairReservationIfNeeded();
+    }
+
+    uint16_t stagedRtpPort() const
+    {
+        return reservedSocketPair_ ? reservedSocketPair_->rtpPort() : 0;
+    }
+
+    uint16_t stagedRtcpPort() const
+    {
+        return reservedSocketPair_ ? reservedSocketPair_->rtcpPort() : 0;
+    }
+
+    void dropSocketPair()
+    {
+        socketPair_.reset();
+    }
+
+    void clearReservation()
+    {
+        reservedSocketPair_.reset();
+    }
 };
 
 std::pair<uint16_t, uint16_t>
@@ -186,14 +253,119 @@ test_reservation_keeps_ports_busy_until_release()
                 "Released RTCP port should be reusable");
 }
 
+void
+test_reservation_finds_only_remaining_pair()
+{
+    const auto range = find_free_range(3);
+    auto busyA = occupy(range.first);
+    auto busyB = occupy(static_cast<uint16_t>(range.first + 1));
+    auto busyC = occupy(static_cast<uint16_t>(range.first + 2));
+    auto busyD = occupy(static_cast<uint16_t>(range.first + 3));
+
+    auto reserved = reserveSocketPairInRange(AF_INET, range, "test");
+    expect_true(reserved.rtpPort() == range.first + 4,
+                "Allocator should probe the full range until it finds the last free RTP pair");
+    expect_true(reserved.rtcpPort() == range.first + 5,
+                "Allocator should probe the full range until it finds the last free RTCP pair");
+}
+
+void
+test_reclaim_preserves_consumed_socket_pair_for_restart()
+{
+    const auto range = find_free_range(1);
+    auto reserved = reserveSocketPairInRange(AF_INET, range, "test");
+
+    DummyRtpSession session;
+    session.stageReservation(std::move(reserved));
+    session.consumeReservation("rtp://127.0.0.1:9000");
+
+    expect_true(!session.hasReservedSocketPair(),
+                "Consuming the socket pair should clear the staged reservation");
+
+    session.preserveReservationForRestart();
+
+    expect_true(session.hasReservedSocketPair(),
+                "A stopped live session should reclaim its consumed socket pair");
+    expect_true(session.stagedRtpPort() == range.first,
+                "Reclaimed reservation should preserve the original RTP port");
+    expect_true(session.stagedRtcpPort() == range.first + 1,
+                "Reclaimed reservation should preserve the original RTCP port");
+
+    session.dropSocketPair();
+    expect_true(!can_bind(range.first),
+                "Reclaimed RTP port should remain busy after dropping the SocketPair");
+    expect_true(!can_bind(static_cast<uint16_t>(range.first + 1)),
+                "Reclaimed RTCP port should remain busy after dropping the SocketPair");
+
+    session.clearReservation();
+
+    expect_true(can_bind(range.first),
+                "Clearing the reclaimed reservation should release the RTP port");
+    expect_true(can_bind(static_cast<uint16_t>(range.first + 1)),
+                "Clearing the reclaimed reservation should release the RTCP port");
+}
+
+void
+test_new_reservation_replaces_old_live_socket_pair()
+{
+    const auto range = find_free_range(2);
+
+    auto first = reserveSocketPairInRange(AF_INET, range, "test");
+    const auto firstRtpPort = first.rtpPort();
+    const auto firstRtcpPort = first.rtcpPort();
+
+    DummyRtpSession session;
+    session.stageReservation(std::move(first));
+    session.consumeReservation("rtp://127.0.0.1:9000");
+
+    auto second = reserveSocketPairInRange(AF_INET, range, "test");
+    const auto secondRtpPort = second.rtpPort();
+    const auto secondRtcpPort = second.rtcpPort();
+
+    session.stageReservation(std::move(second));
+    session.preserveReservationForRestart();
+
+    expect_true(session.stagedRtpPort() == secondRtpPort,
+                "A fresh staged RTP reservation must replace the old live reservation");
+    expect_true(session.stagedRtcpPort() == secondRtcpPort,
+                "A fresh staged RTCP reservation must replace the old live reservation");
+
+    session.dropSocketPair();
+
+    expect_true(can_bind(firstRtpPort),
+                "Dropping the old SocketPair should release the previous RTP port");
+    expect_true(can_bind(firstRtcpPort),
+                "Dropping the old SocketPair should release the previous RTCP port");
+    expect_true(!can_bind(secondRtpPort),
+                "The newly staged RTP port should remain reserved");
+    expect_true(!can_bind(secondRtcpPort),
+                "The newly staged RTCP port should remain reserved");
+
+    session.clearReservation();
+
+    expect_true(can_bind(secondRtpPort),
+                "Clearing the replacement reservation should release the RTP port");
+    expect_true(can_bind(secondRtcpPort),
+                "Clearing the replacement reservation should release the RTCP port");
+}
+
 } // namespace
 
 int
 main()
 {
+#ifdef _WIN32
+    init_winsock();
+#endif
     test_reservation_skips_busy_pair();
     test_reservation_exhaustion();
     test_reservation_keeps_ports_busy_until_release();
+    test_reservation_finds_only_remaining_pair();
+    test_reclaim_preserves_consumed_socket_pair_for_restart();
+    test_new_reservation_replaces_old_live_socket_pair();
+#ifdef _WIN32
+    WSACleanup();
+#endif
 
     std::cout << "All socket pair reservation tests passed.\n";
     return 0;

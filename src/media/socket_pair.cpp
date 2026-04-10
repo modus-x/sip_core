@@ -32,6 +32,7 @@
 #include <string>
 #include <algorithm>
 #include <iterator>
+#include <random>
 #include <sstream>
 
 extern "C" {
@@ -230,6 +231,13 @@ reservation_mutex()
     return mutex;
 }
 
+static std::mt19937&
+reservation_rng()
+{
+    static std::mt19937 rng {std::random_device {}()};
+    return rng;
+}
+
 ReservedSocketPair::ReservedSocketPair(
     uint16_t family, int rtpHandle, int rtcpHandle, uint16_t rtpPort, uint16_t rtcpPort) noexcept
     : family_(family)
@@ -328,12 +336,16 @@ reserveSocketPairInRange(uint16_t family,
         SIP_CORE_ERR("%s", oss.str().c_str());
         throw std::runtime_error(oss.str());
     }
+    const auto pairCount = static_cast<uint32_t>(((lastCandidate - firstCandidate) / 2u) + 1u);
 
     std::lock_guard<std::mutex> lk(reservation_mutex());
+    std::uniform_int_distribution<uint32_t> startDist(0, pairCount - 1u);
+    const auto startIndex = startDist(reservation_rng());
 
-    for (uint32_t candidate = firstCandidate; candidate <= lastCandidate; candidate += 2) {
-        const auto rtpPort = static_cast<uint16_t>(candidate);
-        const auto rtcpPort = static_cast<uint16_t>(candidate + 1);
+    for (uint32_t attempt = 0; attempt < pairCount; ++attempt) {
+        const auto candidateIndex = (startIndex + attempt) % pairCount;
+        const auto rtpPort = static_cast<uint16_t>(firstCandidate + candidateIndex * 2u);
+        const auto rtcpPort = static_cast<uint16_t>(rtpPort + 1);
 
         int rtpHandle = create_nonblocking_udp_socket(family);
         if (rtpHandle < 0) {
@@ -510,6 +522,9 @@ SocketPair::closeSockets()
 {
     close_socket_handle(rtcpHandle_);
     close_socket_handle(rtpHandle_);
+    localFamily_ = AF_UNSPEC;
+    localRtpPort_ = 0;
+    localRtcpPort_ = 0;
 }
 
 void
@@ -549,6 +564,9 @@ SocketPair::openSockets(const char* uri, ReservedSocketPair&& reserved)
 
     rtpHandle_ = reserved.releaseRtpHandle();
     rtcpHandle_ = reserved.releaseRtcpHandle();
+    localFamily_ = reserved.family();
+    localRtpPort_ = local_rtp_port;
+    localRtcpPort_ = local_rtcp_port;
 
     SIP_CORE_WARN("SocketPair: local{%d,%d} / %s{%d,%d}",
                   local_rtp_port,
@@ -556,6 +574,24 @@ SocketPair::openSockets(const char* uri, ReservedSocketPair&& reserved)
                   hostname,
                   dst_rtp_port,
                   dst_rtcp_port);
+}
+
+ReservedSocketPair
+SocketPair::releaseLocalReservation() noexcept
+{
+    if ((localFamily_ != AF_INET && localFamily_ != AF_INET6) || rtpHandle_ < 0 || rtcpHandle_ < 0
+        || localRtpPort_ == 0 || localRtcpPort_ == 0) {
+        return {};
+    }
+
+    auto reserved
+        = ReservedSocketPair {localFamily_, rtpHandle_, rtcpHandle_, localRtpPort_, localRtcpPort_};
+    rtpHandle_ = -1;
+    rtcpHandle_ = -1;
+    localFamily_ = AF_UNSPEC;
+    localRtpPort_ = 0;
+    localRtcpPort_ = 0;
+    return reserved;
 }
 
 MediaIOHandle*

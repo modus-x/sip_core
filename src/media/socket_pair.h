@@ -177,6 +177,7 @@ public:
     ~SocketPair();
 
     void interrupt();
+    ReservedSocketPair releaseLocalReservation() noexcept;
 
     // Set the read blocking mode.
     // By default, the read operation will block until data is available
@@ -255,6 +256,9 @@ private:
 
     int rtpHandle_ {-1};
     int rtcpHandle_ {-1};
+    uint16_t localFamily_ {AF_UNSPEC};
+    uint16_t localRtpPort_ {0};
+    uint16_t localRtcpPort_ {0};
     IpAddr rtpDestAddr_;
     IpAddr rtcpDestAddr_;
     std::atomic_bool interrupted_ {false};

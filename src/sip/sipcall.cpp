@@ -887,6 +887,11 @@ void
 SIPCall::answer()
 {
     std::lock_guard<std::recursive_mutex> lk {callMutex_};
+    if (!isIncoming()) {
+        SIP_CORE_WARN("[call:%s] Ignoring answer request on non-incoming call",
+                      getCallId().c_str());
+        return;
+    }
     auto account = getSIPAccount();
     if (!account) {
         SIP_CORE_ERR("No account detected");
@@ -942,6 +947,11 @@ void
 SIPCall::answer(const std::vector<libsip_core::MediaMap>& mediaList)
 {
     std::lock_guard<std::recursive_mutex> lk {callMutex_};
+    if (!isIncoming()) {
+        SIP_CORE_WARN("[call:%s] Ignoring answer request on non-incoming call",
+                      getCallId().c_str());
+        return;
+    }
     auto account = getSIPAccount();
     if (not account) {
         SIP_CORE_ERR("No account detected");
