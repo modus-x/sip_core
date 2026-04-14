@@ -2579,6 +2579,14 @@ SIPCall::updateMediaStream(const MediaAttribute& newMediaAttr, size_t streamIdx)
     // Only update source and type if actually set.
     if (mediaAttr->type_ == MediaType::MEDIA_VIDEO) {
         mediaAttr->sourceUri_ = newMediaAttr.sourceUri_;
+        // Fall back to the current default device when the requested source is
+        // empty.  This covers the case where the call was created before a
+        // camera was connected (sourceUri_ was empty at construction time) and
+        // the client did not explicitly provide a source when answering.
+        if (mediaAttr->sourceUri_.empty()) {
+            mediaAttr->sourceUri_
+                = Manager::instance().getVideoManager().videoDeviceMonitor.getMRLForDefaultDevice();
+        }
         rtpStream.rtpSession_->setMediaSource(mediaAttr->sourceUri_);
     }
 
