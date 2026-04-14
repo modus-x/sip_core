@@ -1963,6 +1963,27 @@ Manager::sendCallTextMessage(const std::string& accountId,
     }
 }
 
+// THREAD=Main
+void
+Manager::onCallEarlyMedia(Call& call)
+{
+    SIP_CORE_DBG("[call:%s] Early media started, enabling playback", call.getCallId().c_str());
+
+    // Start the playback device BEFORE stopping the tone so the refcount
+    // never drops to zero (avoids a brief playback-stream gap).
+    auto oldGuard = std::move(call.audioGuard);
+    call.audioGuard = startAudioStream(AudioDeviceType::PLAYBACK);
+
+    // Stop any local ringback tone — the server is now providing audio.
+    if (isCurrentCall(call))
+        stopTone();
+
+    if (pimpl_->audiodriver_) {
+        std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
+        pimpl_->audiodriver_->flushUrgent();
+    }
+}
+
 // THREAD=VoIP CALL=Outgoing
 void
 Manager::peerAnsweredCall(Call& call)

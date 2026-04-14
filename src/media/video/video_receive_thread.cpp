@@ -302,6 +302,18 @@ VideoReceiveThread::configureVideoOutput()
 }
 
 void
+VideoReceiveThread::publishBlackFrame()
+{
+    if (dstWidth_ > 0 && dstHeight_ > 0) {
+        auto blackFrame = std::make_shared<VideoFrame>();
+        blackFrame->reserve(AV_PIX_FMT_YUV420P, dstWidth_, dstHeight_);
+        libav_utils::fillWithBlack(blackFrame->pointer());
+        publishFrame(blackFrame);
+        SIP_CORE_DBG("VideoReceiveThread [%p] Published black frame %dx%d", this, dstWidth_, dstHeight_);
+    }
+}
+
+void
 VideoReceiveThread::stopSink()
 {
     SIP_CORE_DBG("VideoReceiveThread [%p] Stopping sink", this);

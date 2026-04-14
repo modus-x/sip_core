@@ -444,6 +444,10 @@ VideoRtpSession::startReceiver()
         if (receiveThread_) {
             if (socketPair_)
                 socketPair_->setReadBlockingMode(false);
+            // Push a black frame before replacing the receive thread so the
+            // sink does not keep showing the last real video frame during
+            // the gap between the old and new receiver (e.g. hold re-INVITE).
+            receiveThread_->publishBlackFrame();
         }
 
         receiveThread_.reset(
@@ -525,6 +529,11 @@ VideoRtpSession::stopReceiver()
             recorder_->removeStream(ms);
         }
     }
+
+    // Push a black frame to the sink before stopping the decode loop.
+    // This ensures the display shows black (not the last real video frame)
+    // when the receiver is stopped, e.g. due to peer hold.
+    receiveThread_->publishBlackFrame();
 
     receiveThread_->stopLoop();
     receiveThread_->stopSink();

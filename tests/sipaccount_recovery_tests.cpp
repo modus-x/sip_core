@@ -1,4 +1,5 @@
 #include "sip/sipaccount.h"
+#include "sip/sipcall.h"
 
 #include <cstdlib>
 #include <deque>
@@ -237,6 +238,68 @@ test_active_no_route_fast_probe_status_transitions()
                 "non-200 must not disable active no-route fast probing");
 }
 
+void
+test_connectivity_recovery_redial_resolution()
+{
+    expect_true(SIPCall::shouldRedialSetupPhaseAfterConnectivityChange(
+                    Call::CallType::OUTGOING, Call::ConnectionState::RINGING),
+                "outgoing ringing call must be classified as setup-phase for connectivity recovery");
+    expect_true(SIPCall::shouldRedialSetupPhaseAfterConnectivityChange(
+                    Call::CallType::OUTGOING, Call::ConnectionState::PROGRESSING),
+                "outgoing progressing call must be classified as setup-phase for connectivity recovery");
+    expect_true(!SIPCall::shouldRedialSetupPhaseAfterConnectivityChange(
+                    Call::CallType::OUTGOING, Call::ConnectionState::CONNECTED),
+                "connected outgoing call must not be classified as setup-phase");
+    expect_true(SIPCall::shouldRedialAfterConnectivityRecovery(
+                    true, Call::CallType::OUTGOING, Call::ConnectionState::CONNECTED),
+                "stored setup-phase snapshot must force cancel+redial even after later answer");
+    expect_true(!SIPCall::shouldRedialAfterConnectivityRecovery(
+                    false, Call::CallType::OUTGOING, Call::ConnectionState::CONNECTED),
+                "connected outgoing call without setup snapshot must stay on re-INVITE path");
+    expect_true(!SIPCall::shouldRedialAfterConnectivityRecovery(
+                    false, Call::CallType::INCOMING, Call::ConnectionState::RINGING),
+                "incoming ringing call must not use outgoing setup-phase redial logic");
+}
+
+void
+test_connectivity_transport_reset_guard()
+{
+    auto* expectedTransport = reinterpret_cast<const SipTransport*>(0x1);
+    auto* differentTransport = reinterpret_cast<const SipTransport*>(0x2);
+    const auto expectedToken = reinterpret_cast<uintptr_t>(expectedTransport);
+
+    expect_true(SIPCall::shouldIgnoreTransportFailureForConnectivityReset(
+                    expectedToken,
+                    expectedTransport,
+                    PJSIP_TP_STATE_SHUTDOWN,
+                    Call::ConnectionState::RINGING),
+                "expected connectivity-reset shutdown must be ignored");
+    expect_true(!SIPCall::shouldIgnoreTransportFailureForConnectivityReset(
+                    0,
+                    expectedTransport,
+                    PJSIP_TP_STATE_SHUTDOWN,
+                    Call::ConnectionState::RINGING),
+                "shutdown without connectivity-reset token must not be ignored");
+    expect_true(!SIPCall::shouldIgnoreTransportFailureForConnectivityReset(
+                    expectedToken,
+                    differentTransport,
+                    PJSIP_TP_STATE_SHUTDOWN,
+                    Call::ConnectionState::RINGING),
+                "shutdown from a different transport must not be ignored");
+    expect_true(!SIPCall::shouldIgnoreTransportFailureForConnectivityReset(
+                    expectedToken,
+                    expectedTransport,
+                    PJSIP_TP_STATE_CONNECTED,
+                    Call::ConnectionState::RINGING),
+                "alive transport states must never be ignored as failures");
+    expect_true(!SIPCall::shouldIgnoreTransportFailureForConnectivityReset(
+                    expectedToken,
+                    expectedTransport,
+                    PJSIP_TP_STATE_SHUTDOWN,
+                    Call::ConnectionState::DISCONNECTED),
+                "disconnected calls must not keep suppressing transport failures");
+}
+
 } // namespace
 
 int
@@ -253,6 +316,8 @@ main()
     test_startup_main_route_probe_selection();
     test_active_probe_interval_resolution();
     test_active_no_route_fast_probe_status_transitions();
+    test_connectivity_recovery_redial_resolution();
+    test_connectivity_transport_reset_guard();
 
     std::cout << "All SIP account recovery tests passed.\n";
     return 0;

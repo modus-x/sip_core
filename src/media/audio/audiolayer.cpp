@@ -34,8 +34,11 @@
 #include "audio-processing/webrtc.h"
 #endif
 
+#include "libav_deps.h"
+
 #include <ctime>
 #include <algorithm>
+#include <limits>
 
 namespace sip_core {
 
@@ -51,6 +54,7 @@ AudioLayer::AudioLayer(const AudioPreference& pref)
     , audioInputFormat_(Manager::instance().getRingBufferPool().getInternalAudioFormat())
     , urgentRingBuffer_("urgentRingBuffer_id", SIZEBUF, audioFormat_)
     , resampler_(new Resampler)
+    , toneResampler_(new Resampler)
     , vadSensitivity_(pref.getVoiceActivitySensitivity())
     , lastNotificationTime_()
 {
@@ -337,6 +341,56 @@ AudioLayer::getToRing(AudioFormat format, size_t writableSamples)
     return {};
 }
 
+// Mix ringback tone audio into call/conference audio in-place.
+// Handles frames of potentially different lengths by mixing only up
+// to the shorter frame's sample count; extra call samples are kept as-is.
+static void
+mixToneIntoCallFrame(const std::shared_ptr<AudioFrame>& callFrame,
+                     const std::shared_ptr<AudioFrame>& toneFrame)
+{
+    auto* cf = callFrame->pointer();
+    auto* tf = toneFrame->pointer();
+
+    if (cf->format != tf->format
+        || cf->ch_layout.nb_channels != tf->ch_layout.nb_channels
+        || cf->sample_rate != tf->sample_rate)
+        return;
+
+    int mixSamples = std::min(cf->nb_samples, tf->nb_samples);
+    if (mixSamples <= 0)
+        return;
+
+    av_frame_make_writable(cf);
+
+    AVSampleFormat fmt = static_cast<AVSampleFormat>(cf->format);
+    bool isPlanar = av_sample_fmt_is_planar(fmt);
+    unsigned samplesPerChannel = isPlanar
+                                     ? static_cast<unsigned>(mixSamples)
+                                     : static_cast<unsigned>(mixSamples) * cf->ch_layout.nb_channels;
+    unsigned channels = isPlanar ? static_cast<unsigned>(cf->ch_layout.nb_channels) : 1u;
+
+    if (fmt == AV_SAMPLE_FMT_S16 || fmt == AV_SAMPLE_FMT_S16P) {
+        for (unsigned ch = 0; ch < channels; ++ch) {
+            auto* c = reinterpret_cast<int16_t*>(cf->extended_data[ch]);
+            auto* t = reinterpret_cast<const int16_t*>(tf->extended_data[ch]);
+            for (unsigned s = 0; s < samplesPerChannel; ++s) {
+                c[s] = static_cast<int16_t>(
+                    std::clamp(static_cast<int32_t>(c[s]) + static_cast<int32_t>(t[s]),
+                               static_cast<int32_t>(std::numeric_limits<int16_t>::min()),
+                               static_cast<int32_t>(std::numeric_limits<int16_t>::max())));
+            }
+        }
+    } else if (fmt == AV_SAMPLE_FMT_FLT || fmt == AV_SAMPLE_FMT_FLTP) {
+        for (unsigned ch = 0; ch < channels; ++ch) {
+            auto* c = reinterpret_cast<float*>(cf->extended_data[ch]);
+            auto* t = reinterpret_cast<const float*>(tf->extended_data[ch]);
+            for (unsigned s = 0; s < samplesPerChannel; ++s) {
+                c[s] += t[s];
+            }
+        }
+    }
+}
+
 std::shared_ptr<AudioFrame>
 AudioLayer::getToPlay(AudioFormat format, size_t writableSamples)
 {
@@ -355,18 +409,33 @@ AudioLayer::getToPlay(AudioFormat format, size_t writableSamples)
         if (auto urgentSamples = urgentRingBuffer_.get(RingBufferPool::DEFAULT_ID)) {
             bufferPool.discard(1, RingBufferPool::DEFAULT_ID);
             resampled = resampler_->resample(std::move(urgentSamples), format);
-        } else if (auto toneToPlay = Manager::instance().getTelephoneTone()) {
-            resampled = resampler_->resample(toneToPlay->getNext(), format);
-        } else if (auto buf = bufferPool.getData(RingBufferPool::DEFAULT_ID)) {
-            resampled = resampler_->resample(std::move(buf), format);
         } else {
-            std::lock_guard<std::mutex> lock(audioProcessorMutex);
-            if (audioProcessor) {
-                auto silence = std::make_shared<AudioFrame>(format, writableSamples);
-                libav_utils::fillWithSilence(silence->pointer());
-                audioProcessor->putPlayback(silence);
+            // Fetch tone and call audio independently so they can be mixed
+            std::shared_ptr<AudioFrame> toneFrame;
+            std::shared_ptr<AudioFrame> callFrame;
+
+            if (auto toneToPlay = Manager::instance().getTelephoneTone())
+                toneFrame = toneResampler_->resample(toneToPlay->getNext(), format);
+
+            if (auto buf = bufferPool.getData(RingBufferPool::DEFAULT_ID))
+                callFrame = resampler_->resample(std::move(buf), format);
+
+            if (toneFrame && callFrame) {
+                mixToneIntoCallFrame(callFrame, toneFrame);
+                resampled = std::move(callFrame);
+            } else if (toneFrame) {
+                resampled = std::move(toneFrame);
+            } else if (callFrame) {
+                resampled = std::move(callFrame);
+            } else {
+                std::lock_guard<std::mutex> lock(audioProcessorMutex);
+                if (audioProcessor) {
+                    auto silence = std::make_shared<AudioFrame>(format, writableSamples);
+                    libav_utils::fillWithSilence(silence->pointer());
+                    audioProcessor->putPlayback(silence);
+                }
+                break;
             }
-            break;
         }
 
         if (resampled) {

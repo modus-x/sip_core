@@ -1730,6 +1730,14 @@ SIPAccount::prepareConnectivityRecovery(const char* reason)
         return;
     }
 
+    for (const auto& id : getCallList()) {
+        auto call = getCall(id);
+        auto sipCall = std::dynamic_pointer_cast<SIPCall>(call);
+        if (!sipCall)
+            continue;
+        sipCall->prepareConnectivityRecoverySnapshot();
+    }
+
     connectivityRecoveryRequested_.store(true);
     connectivityRecoveryInProgress_.store(true);
 
@@ -2981,49 +2989,55 @@ SIPAccount::reinviteActiveCalls()
 
         const auto callState = sipCall->getState();
         const auto connState = sipCall->getConnectionState();
+        std::string recoveryPeerNumber;
+        std::vector<libsip_core::MediaMap> recoveryMediaList;
+        const bool snapshotRequiresRedial = sipCall->consumeConnectivityRecoveryRedialSnapshot(
+            recoveryPeerNumber, recoveryMediaList);
+
+        if (SIPCall::shouldRedialAfterConnectivityRecovery(snapshotRequiresRedial,
+                                                           sipCall->getCallType(),
+                                                           connState)) {
+            SIP_CORE_WARN("[call:%s] Outgoing call in setup phase (%s) during connectivity "
+                          "change — cancelling and scheduling re-dial",
+                          id.c_str(),
+                          sipCall->getStateStr().c_str());
+
+            if (recoveryPeerNumber.empty())
+                recoveryPeerNumber = sipCall->getPeerNumber();
+            if (recoveryMediaList.empty())
+                recoveryMediaList = sipCall->currentMediaList();
+
+            sipCall->clearConnectivityTransportResetExpectation();
+
+            // Best-effort CANCEL on old transport + cleanup
+            sipCall->hangup(0);
+
+            // Re-dial on the new transport after a short delay
+            std::weak_ptr<SIPAccount> wAcc
+                = std::dynamic_pointer_cast<SIPAccount>(shared_from_this());
+            Manager::instance().scheduleTaskIn(
+                [wAcc,
+                 peerNumber = std::move(recoveryPeerNumber),
+                 mediaList = std::move(recoveryMediaList)] {
+                    auto acc = wAcc.lock();
+                    if (!acc || !acc->isUsable() || acc->isShuttingDown_.load())
+                        return;
+
+                    SIP_CORE_WARN("Re-dialing %s after connectivity change",
+                                  peerNumber.c_str());
+                    try {
+                        acc->newOutgoingCall(peerNumber, mediaList);
+                    } catch (const std::exception& e) {
+                        SIP_CORE_ERR("Failed to re-dial after connectivity change: %s",
+                                     e.what());
+                    }
+                },
+                std::chrono::milliseconds(500));
+            continue;
+        }
 
         if (connState != Call::ConnectionState::CONNECTED
             || (callState != Call::CallState::ACTIVE && callState != Call::CallState::HOLD)) {
-
-            // Outgoing calls still in setup (TRYING/PROGRESSING/RINGING): the original
-            // INVITE was sent on the old transport with the old Via address. The 200 OK
-            // from the callee will be routed to that (now dead) address and never arrive.
-            // There is no SIP mechanism to rebind an in-flight client INVITE transaction,
-            // so we must CANCEL the call and re-dial on the new transport.
-            if (sipCall->getCallType() == Call::CallType::OUTGOING
-                && connState != Call::ConnectionState::CONNECTED) {
-                SIP_CORE_WARN("[call:%s] Outgoing call in setup phase (%s) during connectivity "
-                              "change — cancelling and scheduling re-dial",
-                              id.c_str(),
-                              sipCall->getStateStr().c_str());
-
-                auto peerNumber = sipCall->getPeerNumber();
-                auto mediaList = sipCall->currentMediaList();
-
-                // Best-effort CANCEL on old transport + cleanup
-                sipCall->hangup(0);
-
-                // Re-dial on the new transport after a short delay
-                std::weak_ptr<SIPAccount> wAcc
-                    = std::dynamic_pointer_cast<SIPAccount>(shared_from_this());
-                Manager::instance().scheduleTaskIn(
-                    [wAcc, peerNumber, mediaList] {
-                        auto acc = wAcc.lock();
-                        if (!acc || !acc->isUsable() || acc->isShuttingDown_.load())
-                            return;
-
-                        SIP_CORE_WARN("Re-dialing %s after connectivity change",
-                                      peerNumber.c_str());
-                        try {
-                            acc->newOutgoingCall(peerNumber, mediaList);
-                        } catch (const std::exception& e) {
-                            SIP_CORE_ERR("Failed to re-dial after connectivity change: %s",
-                                         e.what());
-                        }
-                    },
-                    std::chrono::milliseconds(500));
-                continue;
-            }
 
             // Fix 5: Non-outgoing calls (e.g. incoming ringing) — defer re-INVITE
             SIP_CORE_WARN("[call:%s] Not in re-invitable state (%s), deferring connectivity "
@@ -3032,6 +3046,7 @@ SIPAccount::reinviteActiveCalls()
                           sipCall->getStateStr().c_str());
             sipCall->pendingConnectivityReinvite_.store(true);
             sipCall->setSipTransport(transport_, contactHdr);
+            sipCall->clearConnectivityTransportResetExpectation();
 
             // Register a state listener to trigger reinvite when call becomes eligible
             std::weak_ptr<SIPCall> wCall = sipCall;
@@ -3056,6 +3071,7 @@ SIPAccount::reinviteActiveCalls()
                       id.c_str());
 
         sipCall->setSipTransport(transport_, contactHdr);
+        sipCall->clearConnectivityTransportResetExpectation();
 
         auto result = sipCall->reinviteOnConnectivityChange();
         if (result == PJ_EPENDING) {

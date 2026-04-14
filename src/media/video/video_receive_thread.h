@@ -69,6 +69,7 @@ public:
     };
     bool startSink();
     void stopSink();
+    void publishBlackFrame();
     void setUseSink(bool useSink) { useSink_ = useSink; }
     std::shared_ptr<SinkClient>& getSink() { return sink_; }
 

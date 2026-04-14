@@ -221,8 +221,11 @@ MediaRecorder::startRecording()
                     rec->cv_.wait(lk, [rec] {
                         return rec->interrupted_ or not rec->frameBuff_.empty();
                     });
-                    if (rec->interrupted_) {
+                    if (rec->interrupted_ && rec->frameBuff_.empty()) {
                         break;
+                    }
+                    if (rec->frameBuff_.empty()) {
+                        continue;
                     }
                     frame = std::move(rec->frameBuff_.front());
                     rec->frameBuff_.pop_front();
@@ -760,21 +763,62 @@ MediaRecorder::buildAudioFilter(const std::vector<MediaStream>& peers,
 void
 MediaRecorder::flush()
 {
+#ifdef ENABLE_VIDEO
+    // Flush video filters and drain remaining frames into the encoder.
+    // The two-stage pipeline must be drained in order: first filter → second filter → encoder.
     {
         std::lock_guard<std::mutex> lk(mutexFilterVideo_);
-        if (videoFilter_)
+        if (videoFilter_) {
             videoFilter_->flush();
-        if (outputVideoFilter_)
+            // Drain remaining output from the first filter and forward to the second
+            while (auto frame = videoFilter_->readOutput()) {
+                if (outputVideoFilter_)
+                    outputVideoFilter_->feedInput(frame->pointer(), "input");
+            }
+        }
+        if (outputVideoFilter_) {
             outputVideoFilter_->flush();
+            // Drain all remaining video frames from the output filter into the encoder
+            while (auto frame = outputVideoFilter_->readOutput()) {
+                if (encoder_ && frame->pointer()) {
+                    try {
+                        encoder_->encode(frame->pointer(), videoIdx_);
+                    } catch (const MediaEncoderException& e) {
+                        SIP_CORE_ERR() << "Failed to encode flushed video frame: " << e.what();
+                    }
+                }
+            }
+        }
     }
+#endif
 
+    // Flush audio filters and drain remaining frames into the encoder.
+    // Same two-stage drain: first audioFilter_ → then outputAudioFilter_ → encoder.
     {
         std::lock_guard<std::mutex> lk(mutexFilterAudio_);
-        if (audioFilter_)
+        if (audioFilter_) {
             audioFilter_->flush();
-        if (outputAudioFilter_)
+            // Drain remaining output from the first filter and forward to the second
+            while (auto frame = audioFilter_->readOutput()) {
+                if (outputAudioFilter_)
+                    outputAudioFilter_->feedInput(frame->pointer(), "input");
+            }
+        }
+        if (outputAudioFilter_) {
             outputAudioFilter_->flush();
+            // Drain all remaining audio frames from the output filter into the encoder
+            while (auto frame = outputAudioFilter_->readOutput()) {
+                if (encoder_ && frame->pointer()) {
+                    try {
+                        encoder_->encode(frame->pointer(), audioIdx_);
+                    } catch (const MediaEncoderException& e) {
+                        SIP_CORE_ERR() << "Failed to encode flushed audio frame: " << e.what();
+                    }
+                }
+            }
+        }
     }
+
     if (encoder_)
         encoder_->flush();
 }

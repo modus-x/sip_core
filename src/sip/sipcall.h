@@ -41,6 +41,7 @@
 #endif
 #include "noncopyable.h"
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 
@@ -246,6 +247,19 @@ public:
                          const std::string& contactHdr = {});
 
     std::shared_ptr<SipTransport> getTransport() { return sipTransport_; }
+    static bool shouldRedialSetupPhaseAfterConnectivityChange(Call::CallType callType,
+                                                              Call::ConnectionState connectionState);
+    static bool shouldRedialAfterConnectivityRecovery(bool snapshotRequiresRedial,
+                                                      Call::CallType callType,
+                                                      Call::ConnectionState connectionState);
+    static bool shouldIgnoreTransportFailureForConnectivityReset(uintptr_t expectedTransportToken,
+                                                                 const SipTransport* eventTransport,
+                                                                 pjsip_transport_state transportState,
+                                                                 Call::ConnectionState connectionState);
+    void prepareConnectivityRecoverySnapshot();
+    bool consumeConnectivityRecoveryRedialSnapshot(
+        std::string& peerNumber, std::vector<libsip_core::MediaMap>& mediaList);
+    void clearConnectivityTransportResetExpectation();
 
     /**
      * Send a re-INVITE to refresh the media path after a connectivity change.
@@ -457,6 +471,10 @@ private:
     std::string peerRegisteredName_ {};
 
     std::string contactHeader_ {};
+    bool connectivityRecoveryRedialSnapshot_ {false};
+    std::string connectivityRecoveryPeerNumber_ {};
+    std::vector<libsip_core::MediaMap> connectivityRecoveryMediaList_ {};
+    std::atomic<uintptr_t> connectivityTransportResetToken_ {0};
 
     /** Local audio port, as seen by me. */
     unsigned int localAudioPort_ {0};

@@ -314,6 +314,12 @@ protected:
      */
     std::unique_ptr<Resampler> resampler_;
 
+    /**
+     * Separate resampler for tone audio during mixing, to avoid
+     * thrashing the main resampler's SwrContext when source formats differ.
+     */
+    std::unique_ptr<Resampler> toneResampler_;
+
 
     void adjustVolume(std::shared_ptr<AudioFrame> &frame, bool playback);
 

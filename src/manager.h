@@ -353,6 +353,13 @@ public:
     void stopTone();
 
     /**
+     * Called when an outgoing call enters early media (183 with SDP).
+     * Stops any local ringback tone and ensures the playback device is active
+     * so the server-provided RTP audio is audible.
+     */
+    void onCallEarlyMedia(Call& call);
+
+    /**
      * Notify the user that the recipient of the call has answered and the put the
      * call in Current state
      * @param id  The call identifier
