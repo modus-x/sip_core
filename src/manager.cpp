@@ -1406,7 +1406,8 @@ Manager::joinParticipant(const std::string& accountId,
                          const std::string& callId1,
                          const std::string& account2Id,
                          const std::string& callId2,
-                         bool attached)
+                         bool attached,
+                         bool muteLocalPlayback)
 {
     SIP_CORE_INFO("JoinParticipant(%s, %s, %i)", callId1.c_str(), callId2.c_str(), attached);
     auto account = getAccount(accountId);
@@ -1479,6 +1480,13 @@ Manager::joinParticipant(const std::string& accountId,
     }
 
     auto conf = std::make_shared<Conference>(account, "");
+
+    // Set the local playback mute flag BEFORE any bindings are established.
+    // attachLocalParticipant() and bindParticipant() already respect this flag,
+    // using half-duplex (host-inaudible) bindings when it is true.
+    if (muteLocalPlayback)
+        conf->muteLocalPlayback(true);
+
     account->attach(conf);
     emitSignal<libsip_core::CallSignal::ConferenceCreated>(account->getAccountID(),
                                                            conf->getConfId());
@@ -1975,8 +1983,9 @@ Manager::onCallEarlyMedia(Call& call)
     call.audioGuard = startAudioStream(AudioDeviceType::PLAYBACK);
 
     // Stop any local ringback tone — the server is now providing audio.
-    if (isCurrentCall(call))
-        stopTone();
+    // Always stop regardless of current-call status because the tone is
+    // global and now gets mixed into every active audio stream.
+    stopTone();
 
     if (pimpl_->audiodriver_) {
         std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
@@ -1991,9 +2000,10 @@ Manager::peerAnsweredCall(Call& call)
     const auto& callId = call.getCallId();
     SIP_CORE_DBG("[call:%s] Peer answered", callId.c_str());
 
-    // The if statement is useful only if we sent two calls at the same time.
-    if (isCurrentCall(call) || call.isConferenceParticipant())
-        stopTone();
+    // Always stop the ringback tone — it is global and now gets mixed into
+    // every active audio stream, so it must be silenced as soon as any
+    // outgoing call is answered.
+    stopTone();
 
     addAudio(call);
 
@@ -2016,16 +2026,10 @@ Manager::peerRingingCall(Call& call)
 {
     SIP_CORE_DBG("[call:%s] Peer ringing!!!", call.getCallId().c_str());
 
-    // Don't play ringback tone when there is any other active audio source
-    // (conference or another call) — the tone takes exclusive priority over
-    // the ring-buffer pool in the audio mixer (see AudioLayer::getToPlay),
-    // so it would completely mute ongoing audio until this call is answered.
-    if (call.isConferenceParticipant() || pimpl_->hasActiveConference() || hasCurrentCall()) {
-        SIP_CORE_DBG("[call:%s] Skipping ringback: other audio source is active",
-                     call.getCallId().c_str());
-        return;
-    }
-
+    // Always play the ringback tone.  AudioLayer::getToPlay() now mixes
+    // the tone with any active call / conference audio instead of choosing
+    // one over the other, so the ringback is audible without muting the
+    // ongoing conversation.
     ringback();
 }
 
