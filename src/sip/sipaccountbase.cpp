@@ -111,7 +111,8 @@ SIPAccountBase::CreateClientDialogAndInvite(const pj_str_t* from,
                             nullptr));
         pj_list_push_back(&dialog->inv_hdr, subj_hdr);
 
-        if (pjsip_inv_create_uac(dialog, local_sdp, 0, inv) != PJ_SUCCESS) {
+        if (pjsip_inv_create_uac(dialog, local_sdp, PJSIP_INV_SUPPORT_100REL, inv)
+            != PJ_SUCCESS) {
             SIP_CORE_ERR("Unable to create invite session for user agent client");
             return false;
         }

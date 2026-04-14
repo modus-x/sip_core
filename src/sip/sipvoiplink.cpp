@@ -972,14 +972,21 @@ invite_session_state_changed_cb(pjsip_inv_session* inv, pjsip_event* ev)
 
     switch (inv->state) {
     case PJSIP_INV_STATE_EARLY:
+        SIP_CORE_WARN("[call:%s] EARLY state: status_code=%d, role=%d",
+                      call->getCallId().c_str(),
+                      status_code,
+                      inv->role);
         if (status_code == PJSIP_SC_RINGING) {
             call->onPeerRinging();
         }
 
-        // Early media (183 Session Progress): start provisional media flow only.
-        // Do not promote call state to ACTIVE/CONNECTED yet.
+        // Early media (183 Session Progress with SDP): treat as answered so
+        // that onMediaNegotiationComplete starts media exactly once via the
+        // normal startAllMedia path.  This matches the proven v0.14.22
+        // behaviour and avoids a double stop/restart that causes some SIP
+        // servers to stop sending RTP.
         if (status_code == PJSIP_SC_PROGRESS && inv->role == PJSIP_ROLE_UAC) {
-            call->onEarlyMediaProgress183();
+            call->onAnswered();
         }
         break;
 
@@ -1228,6 +1235,12 @@ sdp_media_update_cb(pjsip_inv_session* inv, pj_status_t status)
     auto call = getCallFromInvite(inv);
     if (not call)
         return;
+
+    SIP_CORE_WARN("[call:%s] sdp_media_update_cb: inv_state=%d (%s), status=%d",
+                  call->getCallId().c_str(),
+                  inv->state,
+                  pjsip_inv_state_name(inv->state),
+                  status);
 
     SIP_CORE_DBG("[call:%s] INVITE@%p media update: status %d",
                  call->getCallId().c_str(),

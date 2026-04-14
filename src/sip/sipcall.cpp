@@ -1966,24 +1966,36 @@ SIPCall::onEarlyMediaProgress183()
 {
     std::lock_guard<std::recursive_mutex> lk {callMutex_};
 
+    SIP_CORE_WARN("[call:%s] onEarlyMediaProgress183 ENTER: callType=%d, inv=%p, sdp=%p",
+                  getCallId().c_str(),
+                  (int) getCallType(),
+                  inviteSession_.get(),
+                  sdp_.get());
+
     if (getCallType() != CallType::OUTGOING or !inviteSession_ or !sdp_) {
+        SIP_CORE_WARN("[call:%s] onEarlyMediaProgress183: BAIL (precondition)",
+                      getCallId().c_str());
         return;
     }
 
     if (inviteSession_->state != PJSIP_INV_STATE_EARLY
         || getConnectionState() == ConnectionState::CONNECTED) {
+        SIP_CORE_WARN("[call:%s] onEarlyMediaProgress183: BAIL (state=%d, cnx=%d)",
+                      getCallId().c_str(),
+                      inviteSession_->state,
+                      (int) getConnectionState());
         return;
     }
 
-    SIP_CORE_DBG("[call:%s] Received 183 Session Progress: enabling early audio media",
-                 getCallId().c_str());
+    SIP_CORE_WARN("[call:%s] Received 183 Session Progress: enabling early audio media",
+                  getCallId().c_str());
 
     earlyMediaRequested_ = true;
 
     // If SDP is not active yet, early media startup will happen from onMediaNegotiationComplete().
     if (!sdp_->getActiveLocalSdpSession() or !sdp_->getActiveRemoteSdpSession()) {
-        SIP_CORE_DBG("[call:%s] 183 received before active SDP; waiting media negotiation callback",
-                     getCallId().c_str());
+        SIP_CORE_WARN("[call:%s] 183 received before active SDP; waiting media negotiation callback",
+                      getCallId().c_str());
         return;
     }
 
@@ -2950,6 +2962,19 @@ SIPCall::onMediaNegotiationComplete()
 
     // Update the negotiated media.
     if (mediaRestartRequired_) {
+        // If early media is already running (started by onEarlyMediaProgress183),
+        // skip the stop/restart cycle. Tearing down the socket — even briefly —
+        // causes some SIP servers to stop sending RTP after receiving ICMP
+        // "port unreachable" during the gap.
+        if (earlyMediaStarted_ and inviteSession_
+            and inviteSession_->state == PJSIP_INV_STATE_EARLY) {
+            SIP_CORE_WARN("[call:%s] Early media already active, skipping redundant restart",
+                          getCallId().c_str());
+            reportMediaNegotiationStatus();
+            tryDeferredConnectivityReinvite();
+            return;
+        }
+
         bool hasUsableMedia = setupNegotiatedMedia();
 
         if (!hasUsableMedia) {

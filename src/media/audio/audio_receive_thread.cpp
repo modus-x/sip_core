@@ -99,13 +99,15 @@ AudioReceiveThread::setup()
     std::lock_guard lk(mutex_);
     
     constexpr int G729_RTP_FMT = 18;
-    // TODO: get_rtp_packet_type consumes the first RTP packet (one frame lost at call start)
+    // Probe the first RTP packet to detect G729 vs other codecs.
+    // If the probe fails (e.g. no RTP arrived yet during early media),
+    // fall back to the standard decoder — the SDP already tells us the codec.
     auto rtp_type = MediaDecoderBase::get_rtp_packet_type(demuxContext_.get(), 5000);
     if (rtp_type < 0) {
-        SIP_CORE_ERR("Failed to test audio rtp packets");
-        return false;
+        SIP_CORE_WARN("Could not probe RTP packet type, falling back to standard decoder");
     }
-    else if (rtp_type == G729_RTP_FMT) {
+
+    if (rtp_type == G729_RTP_FMT) {
         audioDecoder_.reset(new g729MediaDecoder(observer));
         if (audioDecoder_->openInput(args_)) {
             SIP_CORE_ERR("Could not open input \"%s\"", SDP_FILENAME);
