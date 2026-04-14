@@ -125,6 +125,8 @@ private:
                        std::mutex& mutex);
     int baseWidth_ {};
     int baseHeight_ {};
+    int (*interruptCb_)(void*) = nullptr;
+    void* interruptOpaque_ = nullptr;
 };
 
 class MediaDecoder final : public MediaDecoderBase

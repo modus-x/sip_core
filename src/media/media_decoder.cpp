@@ -95,6 +95,19 @@ MediaDemuxer::getStatusStr(DecodeStatus status)
 int
 MediaDemuxer::openInput(const DeviceParams& params)
 {
+
+    // Re-allocate context if it was freed by a previous failed avformat_open_input() call.
+    // avformat_open_input() frees and NULLs *ps on failure, so retries need a fresh context.
+    if (!inputCtx_) {
+        inputCtx_ = avformat_alloc_context();
+        if (!inputCtx_)
+            return -ENOMEM;
+        if (interruptCb_) {
+            inputCtx_->interrupt_callback.callback = interruptCb_;
+            inputCtx_->interrupt_callback.opaque = interruptOpaque_;
+        }
+    }
+    av_dict_free(&options_);
     inputParams_ = params;
     auto iformat = av_find_input_format(params.format.c_str());
 
@@ -306,13 +319,18 @@ MediaDemuxer::selectStream(AVMediaType type)
 void
 MediaDemuxer::setInterruptCallback(int (*cb)(void*), void* opaque)
 {
-    if (cb) {
-        inputCtx_->interrupt_callback.callback = cb;
-        inputCtx_->interrupt_callback.opaque = opaque;
-    } else {
-        inputCtx_->interrupt_callback.callback = 0;
+    interruptCb_ = cb;
+    interruptOpaque_ = opaque;
+    if (inputCtx_) {
+        if (cb) {
+            inputCtx_->interrupt_callback.callback = cb;
+            inputCtx_->interrupt_callback.opaque = opaque;
+        } else {
+            inputCtx_->interrupt_callback.callback = 0;
+        }
     }
 }
+
 void
 MediaDemuxer::setNeedFrameCb(std::function<void()> cb)
 {
