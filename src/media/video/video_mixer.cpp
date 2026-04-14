@@ -126,7 +126,14 @@ struct VideoMixer::VideoMixerSource
             render_frame = black_frame;
         } else {
             auto newFrame = std::make_shared<VideoFrame>();
-            newFrame->copyFrom(other);
+            // Deep copy: allocate an independent buffer and copy pixel data.
+            // copyFrom() only does av_frame_ref() which keeps data pointers
+            // aimed at the original buffer (e.g. V4L2 mmap'd memory).  If
+            // the device is torn down on another thread those pages get
+            // unmapped while the mixer is still reading them -> SIGSEGV.
+            newFrame->reserve(other.format(), other.width(), other.height());
+            av_frame_copy(newFrame->pointer(), other.pointer());
+            av_frame_copy_props(newFrame->pointer(), other.pointer());
             render_frame = newFrame;
         }
     }
