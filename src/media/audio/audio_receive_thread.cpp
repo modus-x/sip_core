@@ -138,7 +138,20 @@ AudioReceiveThread::setup()
     audioDecoder_->setInterruptCallback(interruptCb, this);
 
     ringbuffer_ = Manager::instance().getRingBufferPool().getRingBuffer(id_);
-    Manager::instance().getRingBufferPool().bindHalfDuplexOut(RingBufferPool::DEFAULT_ID, id_);
+
+    // Only bind the call's ring buffer to the local playback (DEFAULT_ID)
+    // for non-conference calls.  When the call is a conference participant,
+    // the Conference object manages all ring-buffer bindings itself
+    // (respecting localPlaybackMuted_, per-participant mute, etc.).
+    // Binding here unconditionally would override the conference's muted
+    // playback state every time the RTP audio stream is (re-)initialized
+    // (e.g. after a re-INVITE triggered by takeOverMediaSourceControl).
+    if (auto call = Manager::instance().getCallFromCallID(id_)) {
+        if (!call->isConferenceParticipant())
+            Manager::instance().getRingBufferPool().bindHalfDuplexOut(RingBufferPool::DEFAULT_ID, id_);
+    } else {
+        Manager::instance().getRingBufferPool().bindHalfDuplexOut(RingBufferPool::DEFAULT_ID, id_);
+    }
 
 
     if (onSuccessfulSetup_)
