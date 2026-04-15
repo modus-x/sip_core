@@ -349,7 +349,8 @@ getConferenceDetails(const std::string& accountId, const std::string& confId)
                     {"VIDEO_SOURCE", conf->getVideoInput()},
 #endif
                     {"RECORDING", conf->isRecording() ? sip_core::TRUE_STR : sip_core::FALSE_STR}, 
-                    {"LAYOUT", std::to_string(conf->getLayout())}, 
+                    {"LAYOUT", std::to_string(conf->getLayout())},
+                    {"IS_PLAYBACK_MUTED", conf->isLocalPlaybackMuted() ? sip_core::TRUE_STR : sip_core::FALSE_STR},
                     };
     return {};
 }

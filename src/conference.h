@@ -382,6 +382,7 @@ public:
     void muteParticipant(const std::string& uri, const bool& state);
     void muteLocalHost(bool is_muted, const std::string& mediaType);
     void muteLocalPlayback(bool muted);
+    bool isLocalPlaybackMuted() const { return localPlaybackMuted_; }
     // bool isRemoteParticipant(const std::string& uri);
     void mergeConfInfo(ConfInfo& newInfo, const std::string& peerURI);
 
