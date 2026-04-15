@@ -115,6 +115,13 @@ public:
     bool isAudioMeterActive(const std::string& id);
     void setAudioMeterState(const std::string& id, bool state);
 
+    /**
+     * Mark a ring buffer ID so that getData(DEFAULT_ID) skips it.
+     * Used by Conference::muteLocalPlayback to silence participants
+     * in the local speaker output without affecting inter-participant audio.
+     */
+    void setLocalPlaybackMuted(const std::string& id, bool muted);
+
 private:
     NON_COPYABLE(RingBufferPool);
 
@@ -143,6 +150,10 @@ private:
     AudioFormat internalAudioFormat_ {AudioFormat::DEFAULT()};
 
     std::shared_ptr<RingBuffer> defaultRingBuffer_;
+
+    // Ring buffer IDs whose audio should be skipped when mixing for
+    // local playback (DEFAULT_ID).  Protected by stateLock_.
+    std::set<std::string> localPlaybackMutedIds_;
 };
 
 } // namespace sip_core

@@ -147,7 +147,7 @@ AudioReceiveThread::setup()
     // playback state every time the RTP audio stream is (re-)initialized
     // (e.g. after a re-INVITE triggered by takeOverMediaSourceControl).
     if (auto call = Manager::instance().getCallFromCallID(id_)) {
-        if (!call->isConferenceParticipant())
+        if (!call->isConferenceAudioManaged())
             Manager::instance().getRingBufferPool().bindHalfDuplexOut(RingBufferPool::DEFAULT_ID, id_);
     } else {
         Manager::instance().getRingBufferPool().bindHalfDuplexOut(RingBufferPool::DEFAULT_ID, id_);

@@ -553,6 +553,13 @@ Manager::ManagerPimpl::bindCallToConference(Call& call, Conference& conf)
                  state.c_str());
 
     base_.getRingBufferPool().unBindAll(callId);
+    // unBindAll only removes bindings where callId is the reader.
+    // The 1-to-1 call's AudioReceiveThread::setup() created a half-duplex
+    // binding where DEFAULT_ID reads from rb_callId — that lives in
+    // readBindingsMap_[DEFAULT_ID] and is NOT cleaned by unBindAll(callId).
+    // Remove it explicitly so the conference can establish its own bindings
+    // (which respect localPlaybackMuted_).
+    base_.getRingBufferPool().unBindHalfDuplexOut(RingBufferPool::DEFAULT_ID, callId);
 
     conf.addParticipant(callId);
 

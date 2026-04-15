@@ -144,6 +144,11 @@ public:
      */
     std::shared_ptr<Conference> getConference() const { return conf_.lock(); }
     bool isConferenceParticipant() const { return not is_uninitialized(conf_); }
+    bool isConferenceAudioManaged() const
+    {
+        return conferenceAudioManaged_.load() || isConferenceParticipant();
+    }
+    void setConferenceAudioManaged(bool managed) { conferenceAudioManaged_.store(managed); }
     bool isRemoteConferenceParticipant() const { std::lock_guard<std::mutex> lock(confInfoMutex_); return !confInfo_.empty(); }
 
     std::weak_ptr<Account> getAccount() const { return account_; }
@@ -510,6 +515,7 @@ private:
 protected:
     /** Unique conference ID, used exclusively in case of a conference */
     std::weak_ptr<Conference> conf_ {};
+    std::atomic_bool conferenceAudioManaged_ {false};
 
     /** Type of the call */
     CallType type_;

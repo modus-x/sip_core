@@ -242,6 +242,11 @@ Conference::~Conference()
 {
     SIP_CORE_INFO("Destroying conference %s", id_.c_str());
 
+    // Clear all playback-mute filters for participants of this conference.
+    auto& rbPool = Manager::instance().getRingBufferPool();
+    for (const auto& p : getParticipantList())
+        rbPool.setLocalPlaybackMuted(p, false);
+
 #ifdef ENABLE_VIDEO
     foreachCall([&](auto call) {
         call->exitConference();
@@ -661,11 +666,23 @@ Conference::addParticipant(const std::string& participant_id)
         // Check if participant was muted before conference
         if (call->isPeerMuted())
             participantsMuted_.emplace(call->getCallId());
+        // Mark conference audio management before takeover-triggered
+        // renegotiation can restart RTP receive threads.  Otherwise the
+        // restart path may briefly treat this as a 1:1 call and bind its
+        // audio directly to local playback.
+        call->setConferenceAudioManaged(true);
 
         // NOTE:
         // When a call joins a conference, the media source of the call
         // will be set to the output of the conference mixer.
         takeOverMediaSourceControl(participant_id);
+
+        // If local playback is muted, mark this new participant in the
+        // ring buffer pool so getData(DEFAULT_ID) skips its audio.
+        if (localPlaybackMuted_)
+            Manager::instance().getRingBufferPool().setLocalPlaybackMuted(
+                call->getCallId(), true);
+
         auto w = call->getAccount();
         auto account = w.lock();
         if (account) {
@@ -695,7 +712,9 @@ Conference::addParticipant(const std::string& participant_id)
                                                                 sip_utils::DEFAULT_AUDIO_STREAMID),
                                             call->getPeerNumber());
         }
+#endif // ENABLE_VIDEO
         call->enterConference(shared_from_this());
+#ifdef ENABLE_VIDEO
         // Continue the recording for the conference if one participant was recording
         if (call->isRecording()) {
             SIP_CORE_DEBUG("Stop recording for call {:s}", call->getCallId());
@@ -893,6 +912,8 @@ void
 Conference::removeParticipant(const std::string& participant_id)
 {
     SIP_CORE_DEBUG("Remove call {:s} in conference {:s}", participant_id, id_);
+    // Clear the playback-mute filter for the departing participant.
+    Manager::instance().getRingBufferPool().setLocalPlaybackMuted(participant_id, false);
     {
         std::lock_guard<std::mutex> lk(participantsMtx_);
         if (!participants_.erase(participant_id))
@@ -908,7 +929,9 @@ Conference::removeParticipant(const std::string& participant_id)
         if (videoMixer_->verifyActive(
                 sip_utils::streamId(participant_id, sip_utils::DEFAULT_VIDEO_STREAMID)))
             videoMixer_->resetActiveStream();
+#endif // ENABLE_VIDEO
         call->exitConference();
+#ifdef ENABLE_VIDEO
         if (call->isPeerRecording())
             call->peerRecording(false);
 #endif // ENABLE_VIDEO
@@ -1649,27 +1672,32 @@ void
 Conference::muteLocalPlayback(bool muted)
 {
     if (localPlaybackMuted_ == muted) {
-        SIP_CORE_DEBUG("Local conference playback already %s for %s",
+        SIP_CORE_DEBUG("Re-applying local conference playback state %s for %s",
                        muted ? "muted" : "un-muted",
                        id_.c_str());
-        return;
+    } else {
+        SIP_CORE_INFO("Set local conference playback to %s for %s",
+                      muted ? "muted" : "un-muted",
+                      id_.c_str());
     }
-
-    SIP_CORE_INFO("Set local conference playback to %s for %s",
-                  muted ? "muted" : "un-muted",
-                  id_.c_str());
     localPlaybackMuted_ = muted;
+
+    // Primary mute mechanism: tell the ring buffer pool to skip these
+    // participants when mixing audio for the local speaker (DEFAULT_ID).
+    // This is race-proof — no async re-bind can override it.
+    auto& rbPool = Manager::instance().getRingBufferPool();
+    const auto participants = getParticipantList();
+    for (const auto& participantId : participants)
+        rbPool.setLocalPlaybackMuted(participantId, muted);
 
     if (getState() != State::ACTIVE_ATTACHED)
         return;
 
-    auto& rbPool = Manager::instance().getRingBufferPool();
+    // Secondary: also adjust bindings for correctness when unmuting.
     const bool hostAudioMuted = isMediaSourceMuted(MediaType::MEDIA_AUDIO);
-
-    for (const auto& participantId : getParticipantList()) {
-        if (muted) {
-            rbPool.unBindHalfDuplexOut(RingBufferPool::DEFAULT_ID, participantId);
-        } else if (!isMuted(participantId)) {
+    for (const auto& participantId : participants) {
+        rbPool.unBindHalfDuplexOut(RingBufferPool::DEFAULT_ID, participantId);
+        if (!muted && !isMuted(participantId)) {
             if (hostAudioMuted)
                 rbPool.bindHalfDuplexOut(RingBufferPool::DEFAULT_ID, participantId);
             else

@@ -3442,6 +3442,7 @@ SIPCall::enterConference(std::shared_ptr<Conference> conference)
                  getCallId().c_str(),
                  conference->getConfId().c_str());
     conf_ = conference;
+    setConferenceAudioManaged(false);
 
 #ifdef ENABLE_VIDEO
     if (conference->isVideoEnabled())
@@ -3455,6 +3456,7 @@ SIPCall::exitConference()
 {
     std::lock_guard<std::recursive_mutex> lk {callMutex_};
     SIP_CORE_DBG("[call:%s] Leaving conference", getCallId().c_str());
+    setConferenceAudioManaged(false);
 
     auto const hasAudio = !getRtpSessionList(MediaType::MEDIA_AUDIO).empty();
     if (hasAudio && !isCaptureDeviceMuted(MediaType::MEDIA_AUDIO)) {
