@@ -200,9 +200,14 @@ public:
      */
     void onPeerRinging();
     /**
-     * Peer answered the call
+     * Peer answered the call (200 OK)
      */
     void onAnswered();
+    /**
+     * 183 Session Progress with SDP received — start media but keep
+     * the call in RINGING state (not CURRENT) and defer duration_start_.
+     */
+    void onEarlyAnswered();
     /**
      * Peer sent 183 Session Progress with SDP (early media).
      */

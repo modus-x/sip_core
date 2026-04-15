@@ -980,13 +980,12 @@ invite_session_state_changed_cb(pjsip_inv_session* inv, pjsip_event* ev)
             call->onPeerRinging();
         }
 
-        // Early media (183 Session Progress with SDP): treat as answered so
-        // that onMediaNegotiationComplete starts media exactly once via the
-        // normal startAllMedia path.  This matches the proven v0.14.22
-        // behaviour and avoids a double stop/restart that causes some SIP
-        // servers to stop sending RTP.
+        // Early media (183 Session Progress with SDP): start the media path
+        // (addAudio + startAllMedia) but keep the call in RINGING state so
+        // the UI does not show "CURRENT" and the duration timer is deferred
+        // until the real 200 OK arrives.
         if (status_code == PJSIP_SC_PROGRESS && inv->role == PJSIP_ROLE_UAC) {
-            call->onAnswered();
+            call->onEarlyAnswered();
         }
         break;
 

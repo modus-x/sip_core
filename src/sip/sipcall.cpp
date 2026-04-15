@@ -1962,6 +1962,25 @@ SIPCall::onAnswered()
 }
 
 void
+SIPCall::onEarlyAnswered()
+{
+    SIP_CORE_WARN("[call:%s] onEarlyAnswered() — 183 with SDP", getCallId().c_str());
+    runOnMainThread([w = weak()] {
+        if (auto shared = w.lock()) {
+            if (shared->getConnectionState() != ConnectionState::CONNECTED) {
+                // Set ACTIVE/RINGING — emits "RINGING" to UI, not "CURRENT".
+                // duration_start_ is NOT set (state listener only fires on CONNECTED).
+                shared->setState(CallState::ACTIVE, ConnectionState::RINGING);
+                if (not shared->isSubcall()) {
+                    // Start audio (addAudio + stopTone) — same media path as onAnswered.
+                    Manager::instance().peerAnsweredCall(*shared);
+                }
+            }
+        }
+    });
+}
+
+void
 SIPCall::onEarlyMediaProgress183()
 {
     std::lock_guard<std::recursive_mutex> lk {callMutex_};
