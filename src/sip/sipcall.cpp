@@ -455,77 +455,6 @@ SIPCall::getContactHeader() const
     return contactHeader_;
 }
 
-bool
-SIPCall::shouldRedialSetupPhaseAfterConnectivityChange(Call::CallType callType,
-                                                       Call::ConnectionState connectionState)
-{
-    return callType == Call::CallType::OUTGOING
-           && connectionState != Call::ConnectionState::CONNECTED;
-}
-
-bool
-SIPCall::shouldRedialAfterConnectivityRecovery(bool snapshotRequiresRedial,
-                                               Call::CallType callType,
-                                               Call::ConnectionState connectionState)
-{
-    return snapshotRequiresRedial
-           || shouldRedialSetupPhaseAfterConnectivityChange(callType, connectionState);
-}
-
-bool
-SIPCall::shouldIgnoreTransportFailureForConnectivityReset(uintptr_t expectedTransportToken,
-                                                          const SipTransport* eventTransport,
-                                                          pjsip_transport_state transportState,
-                                                          Call::ConnectionState connectionState)
-{
-    return expectedTransportToken != 0
-           && reinterpret_cast<uintptr_t>(eventTransport) == expectedTransportToken
-           && !SipTransport::isAlive(transportState)
-           && connectionState != Call::ConnectionState::DISCONNECTED;
-}
-
-void
-SIPCall::prepareConnectivityRecoverySnapshot()
-{
-    std::lock_guard<std::recursive_mutex> lk {callMutex_};
-
-    connectivityTransportResetToken_.store(reinterpret_cast<uintptr_t>(sipTransport_.get()));
-    connectivityRecoveryRedialSnapshot_
-        = shouldRedialSetupPhaseAfterConnectivityChange(getCallType(), getConnectionState());
-
-    if (connectivityRecoveryRedialSnapshot_) {
-        connectivityRecoveryPeerNumber_ = getPeerNumber();
-        connectivityRecoveryMediaList_
-            = MediaAttribute::mediaAttributesToMediaMaps(getMediaAttributeList());
-    } else {
-        connectivityRecoveryPeerNumber_.clear();
-        connectivityRecoveryMediaList_.clear();
-    }
-}
-
-bool
-SIPCall::consumeConnectivityRecoveryRedialSnapshot(
-    std::string& peerNumber, std::vector<libsip_core::MediaMap>& mediaList)
-{
-    std::lock_guard<std::recursive_mutex> lk {callMutex_};
-
-    if (!connectivityRecoveryRedialSnapshot_)
-        return false;
-
-    peerNumber = connectivityRecoveryPeerNumber_;
-    mediaList = connectivityRecoveryMediaList_;
-    connectivityRecoveryRedialSnapshot_ = false;
-    connectivityRecoveryPeerNumber_.clear();
-    connectivityRecoveryMediaList_.clear();
-    return true;
-}
-
-void
-SIPCall::clearConnectivityTransportResetExpectation()
-{
-    connectivityTransportResetToken_.store(0);
-}
-
 void
 SIPCall::setSipTransport(const std::shared_ptr<SipTransport>& transport,
                          const std::string& contactHdr)
@@ -563,31 +492,16 @@ SIPCall::setSipTransport(const std::shared_ptr<SipTransport>& transport,
 
     // listen for transport destruction
     sipTransport_->addStateListener(
-        list_id,
-        [wthis_ = weak(),
-         boundTransport = transport.get()](pjsip_transport_state state,
-                                           const pjsip_transport_state_info*) {
+        list_id, [wthis_ = weak()](pjsip_transport_state state, const pjsip_transport_state_info*) {
             if (auto this_ = wthis_.lock()) {
-                const auto connectionState = this_->getConnectionState();
                 SIP_CORE_DBG("[call:%s] SIP transport state [%i] - connection state [%u]",
                              this_->getCallId().c_str(),
                              state,
-                             static_cast<unsigned>(connectionState));
-
-                if (shouldIgnoreTransportFailureForConnectivityReset(
-                        this_->connectivityTransportResetToken_.load(),
-                        boundTransport,
-                        state,
-                        connectionState)) {
-                    SIP_CORE_WARN(
-                        "[call:%s] Ignoring SIP transport shutdown from connectivity recovery reset",
-                        this_->getCallId().c_str());
-                    return;
-                }
+                             static_cast<unsigned>(this_->getConnectionState()));
 
                 // End the call if the SIP transport was shut down
                 auto isAlive = SipTransport::isAlive(state);
-                if (not isAlive and connectionState != ConnectionState::DISCONNECTED) {
+                if (not isAlive and this_->getConnectionState() != ConnectionState::DISCONNECTED) {
                     SIP_CORE_WARN(
                         "[call:%s] Ending call because underlying SIP transport was closed",
                         this_->getCallId().c_str());
@@ -1879,10 +1793,6 @@ SIPCall::removeCall()
 {
     std::lock_guard<std::recursive_mutex> lk {callMutex_};
     SIP_CORE_DBG("[call:%s] removeCall()", getCallId().c_str());
-    connectivityRecoveryRedialSnapshot_ = false;
-    connectivityRecoveryPeerNumber_.clear();
-    connectivityRecoveryMediaList_.clear();
-    connectivityTransportResetToken_.store(0);
     pendingAudioSocketPair_.reset();
 #ifdef ENABLE_VIDEO
     pendingVideoSocketPair_.reset();
