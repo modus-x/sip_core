@@ -700,6 +700,27 @@ public:
     void playRingtone(const std::string& accountID);
 
     /**
+     * Set a custom ringtone for the currently ringing incoming call.
+     * Used by the client when the INVITE carried an Alert-Info header and
+     * the client has resolved the desired ringtone file.
+     *
+     * If the call is still in the Alert-Info wait window, the scheduled
+     * fallback to the default ringtone is cancelled and the supplied
+     * ringtone is played.
+     *
+     * @param accountId The account on which the call is incoming
+     * @param callId    The call id reported via IncomingCallWithMedia
+     * @param ringtonePath Absolute path to the ringtone file (WAV/MP3)
+     * @return true if the custom ringtone was scheduled for playback,
+     *         false if there is no pending Alert-Info call with this id
+     *         or if playback could not be started (default ringtone is
+     *         played as a fallback in the latter case).
+     */
+    bool setRingtoneForIncomingCall(const std::string& accountId,
+                                    const std::string& callId,
+                                    const std::string& ringtonePath);
+
+    /**
      * Handle played music when a congestion occurs
      */
     void congestion();

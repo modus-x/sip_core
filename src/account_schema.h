@@ -43,6 +43,7 @@ static const char* const CONFIG_ACCOUNT_REGISTRATION_EXPIRE = "Account.registrat
 static const char* const CONFIG_ACCOUNT_DTMF_TYPE = "Account.dtmfType";
 static const char* const CONFIG_RINGTONE_PATH = "Account.ringtonePath";
 static const char* const CONFIG_RINGTONE_ENABLED = "Account.ringtoneEnabled";
+static const char* const CONFIG_ACCOUNT_PAUSE_AFTER_ALERT_INFO = "Account.pauseAfterAlertInfo";
 static const char* const CONFIG_VIDEO_ENABLED = "Account.videoEnabled";
 static const char* const CONFIG_PRESENCE_ENABLED = "Account.presenceEnabled";
 static const char* const CONFIG_PRESENCE_PUBLISH_SUPPORTED = "Account.presencePublishSupported";

@@ -192,6 +192,17 @@ LIBSIP_CORE_PUBLIC bool toggleRecording(const std::string& accountId, const std:
 /* DEPRECATED */
 LIBSIP_CORE_PUBLIC void setRecording(const std::string& accountId, const std::string& callId);
 
+/**
+ * Set a custom ringtone for the currently ringing incoming call.
+ * Used by the client when the INVITE carried an Alert-Info header and
+ * the client has resolved the desired ringtone file (e.g. downloaded it
+ * over HTTPS). If the call is no longer in the Alert-Info wait window,
+ * this call is a no-op and returns false.
+ */
+LIBSIP_CORE_PUBLIC bool setRingtoneForIncomingCall(const std::string& accountId,
+                                                   const std::string& callId,
+                                                   const std::string& ringtonePath);
+
 LIBSIP_CORE_PUBLIC void recordPlaybackSeek(double value);
 LIBSIP_CORE_PUBLIC bool getIsRecording(const std::string& accountId, const std::string& callId);
 LIBSIP_CORE_PUBLIC void playDTMF(const std::string& accountId, const std::string& callId, const std::string& dtmfEvents, double duration, unsigned int volume);

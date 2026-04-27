@@ -189,6 +189,14 @@ Account::setRingtoneEnabled(bool enabled)
 }
 
 void
+Account::setPauseAfterAlertInfo(int seconds)
+{
+    if (seconds < 0)
+        seconds = 0;
+    editConfig([&](AccountConfig& config) { config.pauseAfterAlertInfo = seconds; });
+}
+
+void
 Account::saveConfig() const
 {
     Manager::instance().saveConfig();

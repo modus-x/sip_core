@@ -89,6 +89,16 @@ refuse(const std::string& accountId, const std::string& callId)
 }
 
 bool
+setRingtoneForIncomingCall(const std::string& accountId,
+                           const std::string& callId,
+                           const std::string& ringtonePath)
+{
+    return sip_core::Manager::instance().setRingtoneForIncomingCall(accountId,
+                                                                    callId,
+                                                                    ringtonePath);
+}
+
+bool
 accept(const std::string& accountId, const std::string& callId)
 {
     return sip_core::Manager::instance().answerCall(accountId, callId);

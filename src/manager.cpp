@@ -243,6 +243,36 @@ struct Manager::ManagerPimpl
                              const std::map<std::string, std::string>& headers = {});
     static void stripSipPrefix(Call& incomCall);
 
+    /**
+     * Tracks an incoming call that arrived with an Alert-Info header.
+     * Until either the client pushes a custom ringtone via
+     * setRingtoneForIncomingCall() or the scheduled fallback fires, the
+     * default ringtone is intentionally NOT played.
+     */
+    struct PendingAlertInfoCall
+    {
+        std::string accountId;
+        std::shared_ptr<Task> fallbackTask;
+        bool delivered {false};
+    };
+
+    /// Lookup an incoming-call header by name in a case-insensitive manner.
+    /// PJSIP preserves the original casing of received headers, so the
+    /// remote PBX may emit "Alert-Info" in any case.
+    static std::string findHeaderCaseInsensitive(
+        const std::map<std::string, std::string>& headers,
+        std::string_view name);
+
+    /// Called from the scheduler when the Alert-Info wait window expired
+    /// without the client pushing a custom ringtone. Plays the default
+    /// ringtone and logs an ERROR.
+    void onAlertInfoTimeout(const std::string& accountId, const std::string& callId);
+
+    /// Drop any pending Alert-Info entry for the given call id and cancel
+    /// the scheduled fallback if it has not run yet. Safe to call for
+    /// calls that never had a pending entry.
+    void clearPendingAlertInfoCall(const std::string& callId);
+
     Manager& base_; // pimpl back-pointer
 
     /** Main scheduler */
@@ -316,6 +346,13 @@ struct Manager::ManagerPimpl
 
     std::atomic_bool finished_ {false};
     std::atomic_bool shuttingDown_ {false};
+
+    /// Protects pendingAlertInfoCalls_.
+    std::mutex pendingAlertInfoMutex_;
+
+    /// Active incoming calls that received an Alert-Info header and are
+    /// awaiting a custom ringtone from the client. Keyed by call id.
+    std::map<std::string, PendingAlertInfoCall> pendingAlertInfoCalls_;
 
     /* Sink ID mapping */
     std::map<std::string, std::weak_ptr<video::SinkClient>> sinkMap_;
@@ -1059,6 +1096,7 @@ Manager::answerCall(Call& call, const std::vector<libsip_core::MediaMap>& mediaL
 
     // If ringing
     stopTone();
+    pimpl_->clearPendingAlertInfoCall(call.getCallId());
     pimpl_->removeWaitingCall(call.getCallId());
 
     try {
@@ -1095,6 +1133,7 @@ Manager::hangupCall(const std::string& accountId, const std::string& callId)
         return false;
     // store the current call id
     stopTone();
+    pimpl_->clearPendingAlertInfoCall(callId);
     pimpl_->removeWaitingCall(callId);
 
     /* We often get here when the call was hungup before being created */
@@ -1252,6 +1291,7 @@ Manager::refuseCall(const std::string& accountId, const std::string& id)
     if (auto account = getAccount(accountId)) {
         if (auto call = account->getCall(id)) {
             stopTone();
+            pimpl_->clearPendingAlertInfoCall(id);
             call->refuse();
             pimpl_->removeWaitingCall(id);
             removeAudio(*call);
@@ -2047,6 +2087,8 @@ Manager::peerHungupCall(Call& call)
     const auto& callId = call.getCallId();
     SIP_CORE_DBG("[call:%s] Peer hung up", callId.c_str());
 
+    pimpl_->clearPendingAlertInfoCall(callId);
+
     if (call.isConferenceParticipant()) {
         removeParticipant(call);
     } else if (isCurrentCall(call)) {
@@ -2069,6 +2111,8 @@ Manager::callBusy(Call& call)
 {
     SIP_CORE_DBG("[call:%s] Busy", call.getCallId().c_str());
 
+    pimpl_->clearPendingAlertInfoCall(call.getCallId());
+
     if (isCurrentCall(call)) {
         pimpl_->unsetCurrentCall();
     }
@@ -2085,6 +2129,8 @@ Manager::callFailure(Call& call)
     SIP_CORE_DBG("[call:%s] %s failed",
                  call.getCallId().c_str(),
                  call.isSubcall() ? "Sub-call" : "Parent call");
+
+    pimpl_->clearPendingAlertInfoCall(call.getCallId());
 
     if (isCurrentCall(call)) {
         pimpl_->unsetCurrentCall();
@@ -2763,6 +2809,144 @@ Manager::ManagerPimpl::stripSipPrefix(Call& incomCall)
         incomCall.setPeerNumber(peerNumber.substr(startIndex + sizeof(SIP_PREFIX) - 1));
 }
 
+std::string
+Manager::ManagerPimpl::findHeaderCaseInsensitive(
+    const std::map<std::string, std::string>& headers, std::string_view name)
+{
+    auto equalIgnoreCase = [](std::string_view a, std::string_view b) {
+        if (a.size() != b.size())
+            return false;
+        for (size_t i = 0; i < a.size(); ++i) {
+            if (std::tolower(static_cast<unsigned char>(a[i]))
+                != std::tolower(static_cast<unsigned char>(b[i])))
+                return false;
+        }
+        return true;
+    };
+    for (const auto& [k, v] : headers) {
+        if (equalIgnoreCase(k, name))
+            return v;
+    }
+    return {};
+}
+
+void
+Manager::ManagerPimpl::onAlertInfoTimeout(const std::string& accountId,
+                                          const std::string& callId)
+{
+    bool needFallback = false;
+    {
+        std::lock_guard<std::mutex> lock(pendingAlertInfoMutex_);
+        auto it = pendingAlertInfoCalls_.find(callId);
+        if (it == pendingAlertInfoCalls_.end()) {
+            // Already handled (delivered or cleared).
+            return;
+        }
+        if (!it->second.delivered) {
+            needFallback = true;
+        }
+        pendingAlertInfoCalls_.erase(it);
+    }
+
+    if (needFallback) {
+        SIP_CORE_ERR(
+            "[call:%s] Alert-Info wait timed out, falling back to default ringtone",
+            callId.c_str());
+        base_.playRingtone(accountId);
+    }
+}
+
+void
+Manager::ManagerPimpl::clearPendingAlertInfoCall(const std::string& callId)
+{
+    std::shared_ptr<Task> taskToCancel;
+    {
+        std::lock_guard<std::mutex> lock(pendingAlertInfoMutex_);
+        auto it = pendingAlertInfoCalls_.find(callId);
+        if (it == pendingAlertInfoCalls_.end())
+            return;
+        taskToCancel = std::move(it->second.fallbackTask);
+        pendingAlertInfoCalls_.erase(it);
+    }
+    // Cancel outside the lock to avoid potential reentrancy if the task
+    // somehow runs synchronously on cancel().
+    if (taskToCancel)
+        taskToCancel->cancel();
+}
+
+bool
+Manager::setRingtoneForIncomingCall(const std::string& accountId,
+                                    const std::string& callId,
+                                    const std::string& ringtonePath)
+{
+    std::shared_ptr<Task> taskToCancel;
+    {
+        std::lock_guard<std::mutex> lock(pimpl_->pendingAlertInfoMutex_);
+        auto it = pimpl_->pendingAlertInfoCalls_.find(callId);
+        if (it == pimpl_->pendingAlertInfoCalls_.end()) {
+            SIP_CORE_WARN(
+                "setRingtoneForIncomingCall: no pending Alert-Info call %s on account %s",
+                callId.c_str(),
+                accountId.c_str());
+            return false;
+        }
+        if (it->second.delivered) {
+            SIP_CORE_WARN(
+                "setRingtoneForIncomingCall: ringtone already delivered for call %s",
+                callId.c_str());
+            return false;
+        }
+        // Mark delivered + remove the entry (we own everything we need locally now).
+        taskToCancel = std::move(it->second.fallbackTask);
+        it->second.delivered = true;
+        pimpl_->pendingAlertInfoCalls_.erase(it);
+    }
+
+    if (taskToCancel)
+        taskToCancel->cancel();
+
+    auto account = getAccount(accountId);
+    if (!account) {
+        SIP_CORE_ERR("setRingtoneForIncomingCall: unknown account %s", accountId.c_str());
+        return false;
+    }
+
+    if (account->isAutoAnswerEnabled())
+        return true; // intentionally do not play any ringtone
+
+    if (!account->getRingtoneEnabled()) {
+        ringback();
+        return true;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
+        if (not pimpl_->audiodriver_) {
+            SIP_CORE_ERR("setRingtoneForIncomingCall: no audio layer for call %s",
+                         callId.c_str());
+            return false;
+        }
+        auto oldGuard = std::move(pimpl_->toneDeviceGuard_);
+        pimpl_->toneDeviceGuard_ = startAudioStream(AudioDeviceType::RINGTONE);
+        pimpl_->toneCtrl_.setSampleRate(pimpl_->audiodriver_->getSampleRate());
+    }
+
+    if (not pimpl_->toneCtrl_.setAudioFile(ringtonePath)) {
+        SIP_CORE_ERR(
+            "setRingtoneForIncomingCall: failed to play custom ringtone '%s' for call %s — "
+            "falling back to default ringtone",
+            ringtonePath.c_str(),
+            callId.c_str());
+        playRingtone(accountId);
+        return false;
+    }
+
+    SIP_CORE_INFO("[call:%s] Playing custom ringtone '%s'",
+                  callId.c_str(),
+                  ringtonePath.c_str());
+    return true;
+}
+
 // Internal helper method
 void
 Manager::ManagerPimpl::processIncomingCall(const std::string& accountId,
@@ -2799,6 +2983,31 @@ Manager::ManagerPimpl::processIncomingCall(const std::string& accountId,
                   accountId.c_str(),
                   mediaList.size());
 
+    // Look up the Alert-Info header (case-insensitive) BEFORE we emit the
+    // signal so that, if present, we can install a pending entry first and
+    // a fast-responding client cannot push a custom ringtone before we are
+    // ready to honor it.
+    const std::string alertInfo = findHeaderCaseInsensitive(headers, "Alert-Info");
+    const bool hasAlertInfo = !alertInfo.empty();
+
+    if (hasAlertInfo) {
+        const int pauseSec = std::max(0, account->getPauseAfterAlertInfo());
+        SIP_CORE_INFO("[call:%s] Alert-Info present (%s) — postponing default ringtone for %d s",
+                      incomCallId.c_str(),
+                      alertInfo.c_str(),
+                      pauseSec);
+
+        std::lock_guard<std::mutex> lock(pendingAlertInfoMutex_);
+        // Replace any stale entry for this id (paranoia).
+        pendingAlertInfoCalls_.erase(incomCallId);
+        auto& entry = pendingAlertInfoCalls_[incomCallId];
+        entry.accountId = accountId;
+        entry.delivered = false;
+        entry.fallbackTask = base_.scheduler().scheduleIn(
+            [this, accountId, incomCallId] { this->onAlertInfoTimeout(accountId, incomCallId); },
+            std::chrono::seconds(pauseSec));
+    }
+
     emitSignal<libsip_core::CallSignal::IncomingCallWithMedia>(accountId,
                                                                incomCallId,
                                                                incomCall.getPeerNumber(),
@@ -2810,7 +3019,11 @@ Manager::ManagerPimpl::processIncomingCall(const std::string& accountId,
 #if !defined(RING_UWP) && !(defined(TARGET_OS_IOS) && TARGET_OS_IOS)
         if (not account->isRendezVous() && incomCall.getPeerNumber().find("__callback") == -1
             && incomCall.getPeerNumber().find("_supervise") == -1) {
-            base_.playRingtone(accountId);
+            // When Alert-Info is present, the ringtone is played either by
+            // setRingtoneForIncomingCall() or by the scheduled timeout.
+            if (not hasAlertInfo) {
+                base_.playRingtone(accountId);
+            }
         }
 
 #endif

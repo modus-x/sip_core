@@ -296,6 +296,11 @@ public:
     // is playing ringtone?
     bool getRingtoneEnabled() const { return ringtoneEnabled_; }
     void setRingtoneEnabled(bool enabled);
+
+    // Number of seconds to wait for the client to push a custom ringtone
+    // for an incoming call carrying an Alert-Info header. 0 disables the wait.
+    int getPauseAfterAlertInfo() const { return config().pauseAfterAlertInfo; }
+    void setPauseAfterAlertInfo(int seconds);
     std::string getDisplayName() const { return config().displayName; }
     std::string getMailBox() const { return config().mailbox; }
 
