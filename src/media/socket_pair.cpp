@@ -496,8 +496,9 @@ SocketPair::createSRTP(const char* out_suite,
 void
 SocketPair::interrupt()
 {
+    if (interrupted_.exchange(true))
+        return;
     SIP_CORE_WARN("[%p] Interrupting RTP sockets", this);
-    interrupted_ = true;
     cv_.notify_all();
     cvRtcpPacketReadyToRead_.notify_all();
 }

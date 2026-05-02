@@ -1186,6 +1186,10 @@ void
 SIPCall::hangup(int reason)
 {
     std::lock_guard<std::recursive_mutex> lk {callMutex_};
+    if (localHangupInProgress_.exchange(true)) {
+        SIP_CORE_DBG("[call:%s] Local hangup already in progress", getCallId().c_str());
+        return;
+    }
     pendingRecord_ = false;
     if (inviteSession_ and inviteSession_->dlg) {
         pjsip_route_hdr* route = inviteSession_->dlg->route_set.next;
@@ -1235,6 +1239,7 @@ SIPCall::detachAudioFromConference()
 void
 SIPCall::refuse()
 {
+    std::lock_guard<std::recursive_mutex> lk {callMutex_};
     if (!isIncoming() or getConnectionState() == ConnectionState::CONNECTED or !inviteSession_)
         return;
 
@@ -1666,6 +1671,7 @@ SIPCall::switchInput(const std::string& source)
 void
 SIPCall::peerHungup()
 {
+    std::lock_guard<std::recursive_mutex> lk {callMutex_};
     pendingRecord_ = false;
     // Stop all RTP streams
     stopAllMedia();
@@ -1842,8 +1848,18 @@ SIPCall::onBusyHere()
 void
 SIPCall::onClosed()
 {
+    if (localHangupInProgress_.load()) {
+        SIP_CORE_DBG("[call:%s] Ignoring close callback during local hangup", getCallId().c_str());
+        return;
+    }
     runOnMainThread([w = weak()] {
         if (auto shared = w.lock()) {
+            if (shared->localHangupInProgress_.load()
+                || shared->getConnectionState() == ConnectionState::DISCONNECTED) {
+                SIP_CORE_DBG("[call:%s] Skipping peer-hangup teardown for already closing call",
+                             shared->getCallId().c_str());
+                return;
+            }
             auto& call = *shared;
             Manager::instance().peerHungupCall(call);
             call.removeCall();
@@ -2342,6 +2358,8 @@ void
 SIPCall::startAllMedia()
 {
     SIP_CORE_DBG("[call:%s] Starting all media", getCallId().c_str());
+    std::lock_guard<std::recursive_mutex> callLock {callMutex_};
+    std::unique_lock<std::mutex> mediaLock {mediaLifecycleMtx_};
 
     if (not sipTransport_ or not sdp_) {
         SIP_CORE_ERR("[call:%s] The call is in invalid state", getCallId().c_str());
@@ -2387,6 +2405,7 @@ SIPCall::startAllMedia()
         applyLocalHoldVideoBlackout(true, true);
 #endif
     }
+    mediaLock.unlock();
 
     // Media is restarted, we can process the last holding request.
     if (remainingRequest_ != Request::NoRequest) {
@@ -2498,6 +2517,8 @@ void
 SIPCall::stopAllMedia()
 {
     SIP_CORE_DBG("[call:%s] Stopping all media", getCallId().c_str());
+    std::lock_guard<std::recursive_mutex> callLock {callMutex_};
+    std::lock_guard<std::mutex> mediaLock {mediaLifecycleMtx_};
 
 #ifdef ENABLE_VIDEO
     {

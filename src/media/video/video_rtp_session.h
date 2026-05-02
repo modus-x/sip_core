@@ -28,6 +28,7 @@
 #include "threadloop.h"
 #include "sip/sipvoiplink.h"
 
+#include <atomic>
 #include <string>
 #include <memory>
 
@@ -195,6 +196,7 @@ private:
     void ensureMutedKeepAliveLocked();
     void sendHoldBlackPrerollLocked();
     bool isDisplayCaptureSource() const;
+    std::atomic<bool> stopInProgress_ {false};
     std::atomic<bool> sendMutedFrames_ {false};
     std::atomic<bool> localMuted_ {false};
     bool localHoldBlackoutActive_ {false};

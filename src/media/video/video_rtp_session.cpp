@@ -571,6 +571,10 @@ VideoRtpSession::start()
 {
     SIP_CORE_WARN("VideoRtpSession [%p] Starting video rtp session", this);
     std::unique_lock<std::recursive_mutex> lock(mutex_);
+    if (stopInProgress_.load()) {
+        SIP_CORE_DBG("VideoRtpSession [%p] Start skipped because stop is in progress", this);
+        return;
+    }
 
     // start only if local and remote sessions are active
     if (not send_.enabled or not receive_.enabled) {
@@ -621,13 +625,22 @@ VideoRtpSession::start()
 void
 VideoRtpSession::stop()
 {
+    if (stopInProgress_.exchange(true)) {
+        SIP_CORE_DBG("VideoRtpSession [%p] Stop already in progress", this);
+        return;
+    }
+    struct StopGuard
+    {
+        std::atomic<bool>& flag;
+        ~StopGuard() { flag.store(false); }
+    } stopGuard {stopInProgress_};
     std::unique_lock<std::recursive_mutex> lock(mutex_);
 
     stopSender();
-    stopReceiver();
 
     if (socketPair_)
         socketPair_->interrupt();
+    stopReceiver();
 
     // Release lock before joining to avoid deadlock:
     // processMutedFrame() and processRtcpChecker() acquire mutex_.
@@ -642,9 +655,11 @@ VideoRtpSession::stop()
 
     videoBitrateInfo_.videoBitrateCurrent = SystemCodecInfo::DEFAULT_VIDEO_BITRATE;
     storeVideoBitrateInfo();
+    sender_.reset();
     preserveCurrentSocketPairReservationIfNeeded();
 
     socketPair_.reset();
+    receiveThread_.reset();
     if (!localHoldBlackoutActive_) {
         videoLocal_.reset();
         displaySuspendedForHold_ = false;

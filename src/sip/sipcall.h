@@ -41,7 +41,9 @@
 #endif
 #include "noncopyable.h"
 
+#include <atomic>
 #include <memory>
+#include <mutex>
 #include <optional>
 
 extern "C" {
@@ -381,6 +383,9 @@ private:
     void startAllMedia();
     void stopAllMedia();
     void updateRemoteMedia();
+
+    mutable std::mutex mediaLifecycleMtx_ {};
+    std::atomic_bool localHangupInProgress_ {false};
 
     /**
      * Transfer method used for both type of transfer
