@@ -656,10 +656,14 @@ VideoRtpSession::stop()
     videoBitrateInfo_.videoBitrateCurrent = SystemCodecInfo::DEFAULT_VIDEO_BITRATE;
     storeVideoBitrateInfo();
     sender_.reset();
+    // Destroy the receive thread (and therefore its demuxContext_, whose AVIO
+    // callbacks hold a raw SocketPair* via createIOContext) BEFORE tearing down
+    // socketPair_. The thread is already stopped, but this keeps the lifetime
+    // invariant explicit and resilient against future changes.
+    receiveThread_.reset();
     preserveCurrentSocketPairReservationIfNeeded();
 
     socketPair_.reset();
-    receiveThread_.reset();
     if (!localHoldBlackoutActive_) {
         videoLocal_.reset();
         displaySuspendedForHold_ = false;

@@ -2405,6 +2405,10 @@ SIPCall::startAllMedia()
         applyLocalHoldVideoBlackout(true, true);
 #endif
     }
+    // Release the media-lifecycle lock before processing the deferred request:
+    // hold()/unhold()/SIPSessionReinvite() may re-enter startAllMedia()/stopAllMedia(),
+    // which would deadlock on the non-recursive mediaLifecycleMtx_. callMutex_
+    // (recursive) remains held throughout, which is the intended invariant.
     mediaLock.unlock();
 
     // Media is restarted, we can process the last holding request.
