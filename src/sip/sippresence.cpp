@@ -202,8 +202,11 @@ void
 SIPPresence::subscribeClient(const std::string& uri, bool flag)
 {
     auto* account = acc_;
-    const bool canAttemptNow = account && !account->isTransportRecoveryActive()
-                               && static_cast<bool>(account->getTransport());
+    const bool transportReady = account && !account->isTransportRecoveryActive()
+                                && static_cast<bool>(account->getTransport());
+    const bool registered = account
+                            && account->getRegistrationState() == RegistrationState::REGISTERED;
+    const bool canAttemptNow = transportReady && registered;
     /* if an account has a server that doesn't support SUBSCRIBE, it's still possible
      * to subscribe to someone on another server */
     /*
@@ -222,10 +225,14 @@ SIPPresence::subscribeClient(const std::string& uri, bool flag)
             if (flag) {
                 c->refreshContact(acc_->getContactHeader());
                 if (!canAttemptNow) {
-                    SIP_CORE_WARN("Deferring presence subscription %.*s until account transport "
-                                  "recovery completes",
+                    if (account)
+                        account->needsResubscribe_.store(true);
+                    SIP_CORE_WARN("Deferring presence subscription %.*s until account is "
+                                  "REGISTERED (transportReady=%d, registered=%d)",
                                   (int) c->getURI().size(),
-                                  c->getURI().data());
+                                  c->getURI().data(),
+                                  transportReady ? 1 : 0,
+                                  registered ? 1 : 0);
                     return;
                 }
                 c->subscribe();
@@ -247,10 +254,14 @@ SIPPresence::subscribeClient(const std::string& uri, bool flag)
         c->refreshContact(acc_->getContactHeader());
         addPresSubClient(c);
         if (!canAttemptNow) {
-            SIP_CORE_WARN("Deferring new presence subscription %.*s until account transport "
-                          "recovery completes",
+            if (account)
+                account->needsResubscribe_.store(true);
+            SIP_CORE_WARN("Deferring new presence subscription %.*s until account is "
+                          "REGISTERED (transportReady=%d, registered=%d)",
                           (int) c->getURI().size(),
-                          c->getURI().data());
+                          c->getURI().data(),
+                          transportReady ? 1 : 0,
+                          registered ? 1 : 0);
             return;
         }
         if (!(c->subscribe())) {

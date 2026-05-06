@@ -635,10 +635,16 @@ PresSubClient::subscribe()
     SIPAccount* acc = pres_->getAccount();
     SIP_CORE_DBG("PresSubClient %.*s: subscribing ", (int) uri_.slen, uri_.ptr);
 
-    if (acc->isTransportRecoveryActive() || !acc->getTransport()) {
-        SIP_CORE_WARN("Deferring presence subscription %.*s until transport recovery completes",
+    if (acc->isTransportRecoveryActive() || !acc->getTransport()
+        || acc->getRegistrationState() != RegistrationState::REGISTERED) {
+        acc->needsResubscribe_.store(true);
+        SIP_CORE_WARN("Deferring presence subscription %.*s until account is REGISTERED "
+                      "(transportRecovery=%d, hasTransport=%d, regState=%d)",
                       (int) getURI().size(),
-                      getURI().data());
+                      getURI().data(),
+                      acc->isTransportRecoveryActive() ? 1 : 0,
+                      acc->getTransport() ? 1 : 0,
+                      static_cast<int>(acc->getRegistrationState()));
         return false;
     }
 

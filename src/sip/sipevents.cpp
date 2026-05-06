@@ -78,8 +78,11 @@ void
 SIPEvents::subscribeClient(const std::string& uri, const std::string& event, bool flag)
 {
     auto* account = acc_;
-    const bool canAttemptNow = account && !account->isTransportRecoveryActive()
-                               && static_cast<bool>(account->getTransport());
+    const bool transportReady = account && !account->isTransportRecoveryActive()
+                                && static_cast<bool>(account->getTransport());
+    const bool registered = account
+                            && account->getRegistrationState() == RegistrationState::REGISTERED;
+    const bool canAttemptNow = transportReady && registered;
     /* Check if the buddy was already subscribed */
     for (const auto& c : sub_list_) {
         if (c->getURI() == uri && c->getEvent() == event) {
@@ -87,12 +90,16 @@ SIPEvents::subscribeClient(const std::string& uri, const std::string& event, boo
             if (flag) {
                 c->refreshContact(acc_->getContactHeader());
                 if (!canAttemptNow) {
-                    SIP_CORE_WARN("Deferring event subscription [%.*s] %.*s until account transport "
-                                  "recovery completes",
+                    if (account)
+                        account->needsResubscribe_.store(true);
+                    SIP_CORE_WARN("Deferring event subscription [%.*s] %.*s until account is "
+                                  "REGISTERED (transportReady=%d, registered=%d)",
                                   (int) c->getEvent().size(),
                                   c->getEvent().data(),
                                   (int) c->getURI().size(),
-                                  c->getURI().data());
+                                  c->getURI().data(),
+                                  transportReady ? 1 : 0,
+                                  registered ? 1 : 0);
                     return;
                 }
                 c->subscribe();
@@ -109,12 +116,16 @@ SIPEvents::subscribeClient(const std::string& uri, const std::string& event, boo
         c->refreshContact(acc_->getContactHeader());
         addSubClient(c);
         if (!canAttemptNow) {
-            SIP_CORE_WARN("Deferring new event subscription [%.*s] %.*s until account transport "
-                          "recovery completes",
+            if (account)
+                account->needsResubscribe_.store(true);
+            SIP_CORE_WARN("Deferring new event subscription [%.*s] %.*s until account is "
+                          "REGISTERED (transportReady=%d, registered=%d)",
                           (int) c->getEvent().size(),
                           c->getEvent().data(),
                           (int) c->getURI().size(),
-                          c->getURI().data());
+                          c->getURI().data(),
+                          transportReady ? 1 : 0,
+                          registered ? 1 : 0);
             return;
         }
         if (!(c->subscribe())) {
