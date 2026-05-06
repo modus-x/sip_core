@@ -28,6 +28,7 @@
 
 #include "threadloop.h"
 
+#include <optional>
 #include <string>
 #include <memory>
 
@@ -98,6 +99,12 @@ private:
     std::shared_ptr<AudioInput> audioInput_;
     std::shared_ptr<RingBuffer> ringbuffer_;
     uint16_t initSeqVal_ {0};
+    // Last RTP sequence value used by sender_ before it was reset.
+    // Persisted across stop()/startSender() so the new sender continues the
+    // sequence space rather than restarting from a low value, which would
+    // otherwise create a wire-level RTP discontinuity for the peer at
+    // hold/unhold transitions.
+    std::optional<uint16_t> lastSenderSeqVal_;
     bool muteState_ {false};
     bool receiverActive_ {true};
     bool earlyMediaMode_ {false};

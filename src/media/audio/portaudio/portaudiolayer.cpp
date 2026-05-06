@@ -31,12 +31,224 @@
 
 #include <portaudio.h>
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstring>
+#include <functional>
+#include <thread>
+#ifdef _WIN32
+#include <windows.h>
+#include <dbt.h>
+#endif
 
 namespace sip_core {
 
 enum Direction { Input = 0, Output = 1, IO = 2, End = 3 };
+#ifdef _WIN32
+namespace {
+
+constexpr auto DEVICE_CHANGE_DEBOUNCE = std::chrono::milliseconds(250);
+const GUID GUID_DEVINTERFACE_AUDIO_RENDER_LOCAL
+    = {0xe6327cad, 0xdcec, 0x4949, {0xae, 0x8a, 0x99, 0x1e, 0x97, 0x6a, 0x79, 0xd2}};
+const GUID GUID_DEVINTERFACE_AUDIO_CAPTURE_LOCAL
+    = {0x2eef81be, 0x33fa, 0x4800, {0x96, 0x70, 0x1c, 0xd4, 0x74, 0x97, 0x2c, 0x3f}};
+
+void
+schedulePortAudioDeviceRecovery(const std::shared_ptr<std::atomic_bool>& scheduled)
+{
+    if (!Manager::initialized)
+        return;
+
+    bool expected = false;
+    if (!scheduled->compare_exchange_strong(expected, true))
+        return;
+
+    Manager::instance().scheduleTaskIn(
+        [scheduled] {
+            scheduled->store(false);
+            Manager::instance().recoverAudioDevices();
+        },
+        DEVICE_CHANGE_DEBOUNCE);
+}
+
+bool
+registerAudioDeviceInterfaceToHwnd(HWND hWnd, const GUID& guid, HDEVNOTIFY* hDeviceNotify)
+{
+    DEV_BROADCAST_DEVICEINTERFACE NotificationFilter;
+    ZeroMemory(&NotificationFilter, sizeof(NotificationFilter));
+    NotificationFilter.dbcc_size = sizeof(DEV_BROADCAST_DEVICEINTERFACE);
+    NotificationFilter.dbcc_devicetype = DBT_DEVTYP_DEVICEINTERFACE;
+    NotificationFilter.dbcc_classguid = guid;
+
+    *hDeviceNotify = RegisterDeviceNotification(hWnd,
+                                                &NotificationFilter,
+                                                DEVICE_NOTIFY_WINDOW_HANDLE);
+
+    return *hDeviceNotify != nullptr;
+}
+
+class WindowsAudioDeviceMonitor
+{
+public:
+    explicit WindowsAudioDeviceMonitor(std::function<void()>&& callback)
+        : callback_(std::move(callback))
+    {}
+
+    ~WindowsAudioDeviceMonitor()
+    {
+        if (hWnd_)
+            PostMessageW(hWnd_, WM_CLOSE, 0, 0);
+        if (thread_.joinable())
+            thread_.join();
+    }
+
+    void start()
+    {
+        thread_ = std::thread(&WindowsAudioDeviceMonitor::run, this);
+        std::unique_lock<std::mutex> lk(stateMutex_);
+        stateCv_.wait(lk, [this] { return ready_; });
+    }
+
+private:
+    NON_COPYABLE(WindowsAudioDeviceMonitor);
+
+    void notifyReady()
+    {
+        {
+            std::lock_guard<std::mutex> lk(stateMutex_);
+            ready_ = true;
+        }
+        stateCv_.notify_all();
+    }
+
+    void notifyDeviceChange()
+    {
+        SIP_CORE_DBG() << "Windows audio device change detected";
+        if (callback_)
+            callback_();
+    }
+
+    void unregisterNotifications()
+    {
+        for (auto& notification : deviceNotifications_) {
+            if (notification) {
+                UnregisterDeviceNotification(notification);
+                notification = nullptr;
+            }
+        }
+    }
+
+    static LRESULT CALLBACK WinProcCallback(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
+    {
+        auto* pThis = reinterpret_cast<WindowsAudioDeviceMonitor*>(
+            GetWindowLongPtrW(hWnd, GWLP_USERDATA));
+
+        switch (message) {
+        case WM_CREATE: {
+            auto createParams = reinterpret_cast<CREATESTRUCTW*>(lParam)->lpCreateParams;
+            pThis = static_cast<WindowsAudioDeviceMonitor*>(createParams);
+            SetLastError(0);
+            SetWindowLongPtrW(hWnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(pThis));
+
+            if (!registerAudioDeviceInterfaceToHwnd(hWnd,
+                                                    GUID_DEVINTERFACE_AUDIO_CAPTURE_LOCAL,
+                                                    &pThis->deviceNotifications_[0])) {
+                SIP_CORE_ERR() << "Cannot register for audio capture device notifications";
+            }
+            if (!registerAudioDeviceInterfaceToHwnd(hWnd,
+                                                    GUID_DEVINTERFACE_AUDIO_RENDER_LOCAL,
+                                                    &pThis->deviceNotifications_[1])) {
+                SIP_CORE_ERR() << "Cannot register for audio render device notifications";
+            }
+        } break;
+        case WM_DEVICECHANGE:
+            switch (wParam) {
+            case DBT_DEVICEARRIVAL:
+            case DBT_DEVICEREMOVECOMPLETE:
+            case DBT_DEVNODES_CHANGED:
+                if (pThis)
+                    pThis->notifyDeviceChange();
+                break;
+            default:
+                break;
+            }
+            break;
+        case WM_CLOSE:
+            if (pThis)
+                pThis->unregisterNotifications();
+            DestroyWindow(hWnd);
+            break;
+        case WM_DESTROY:
+            PostQuitMessage(0);
+            break;
+        default:
+            return DefWindowProcW(hWnd, message, wParam, lParam);
+        }
+
+        return 0;
+    }
+
+    void run()
+    {
+        static const wchar_t* className = L"SipCoreAudioDeviceNotifications";
+        static const wchar_t* windowName = L"sip-core-audio-device-notifications";
+        WNDCLASSEXW wx = {};
+        wx.cbSize = sizeof(WNDCLASSEXW);
+        wx.lpfnWndProc = WinProcCallback;
+        auto instance = reinterpret_cast<HINSTANCE>(GetModuleHandleW(nullptr));
+        wx.hInstance = instance;
+        wx.lpszClassName = className;
+
+        const ATOM classAtom = RegisterClassExW(&wx);
+        if (!classAtom && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
+            SIP_CORE_ERR() << "Cannot register audio device monitor window class";
+            notifyReady();
+            return;
+        }
+
+        hWnd_ = CreateWindowExW(0,
+                                className,
+                                windowName,
+                                0,
+                                0,
+                                0,
+                                0,
+                                0,
+                                HWND_MESSAGE,
+                                nullptr,
+                                instance,
+                                this);
+        if (!hWnd_) {
+            SIP_CORE_ERR() << "Cannot create audio device monitor window";
+            notifyReady();
+            return;
+        }
+
+        notifyReady();
+
+        MSG msg;
+        int retVal;
+        while ((retVal = GetMessageW(&msg, nullptr, 0, 0)) != 0) {
+            if (retVal != -1) {
+                TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+        }
+    }
+
+    std::function<void()> callback_;
+    std::thread thread_;
+    HWND hWnd_ {nullptr};
+    std::array<HDEVNOTIFY, 2> deviceNotifications_ {nullptr, nullptr};
+    std::mutex stateMutex_;
+    std::condition_variable stateCv_;
+    bool ready_ {false};
+};
+
+} // namespace
+#endif
 
 struct PortAudioLayer::PortAudioLayerImpl
 {
@@ -67,7 +279,12 @@ struct PortAudioLayer::PortAudioLayerImpl
     bool inputInitialized_ {false};
     bool outputInitialized_ {false};
 
-    std::array<PaStream*, static_cast<int>(Direction::End)> streams_;
+    std::array<PaStream*, static_cast<int>(Direction::End)> streams_ {};
+#ifdef _WIN32
+    std::shared_ptr<std::atomic_bool> deviceRecoveryScheduled_ {
+        std::make_shared<std::atomic_bool>(false)};
+    std::unique_ptr<WindowsAudioDeviceMonitor> deviceMonitor_;
+#endif
 
     // Track the actual PortAudio format opened for input/output streams
     // This is critical for proper format conversion in callbacks
@@ -221,26 +438,42 @@ PortAudioLayer::startStream(AudioDeviceType stream)
 void
 PortAudioLayer::stopStream(AudioDeviceType stream)
 {
-    auto stopPaStream = [](PaStream* stream) -> bool {
-        if (!stream || Pa_IsStreamStopped(stream) != paNoError)
+    auto stopPaStream = [](PaStream*& stream) -> bool {
+        if (!stream)
             return false;
-        auto err = Pa_StopStream(stream);
-        if (err != paNoError) {
-            SIP_CORE_ERR("Pa_StopStream error : %s", Pa_GetErrorText(err));
-            return false;
+
+        auto active = Pa_IsStreamActive(stream);
+        if (active == 1) {
+            auto err = Pa_StopStream(stream);
+            if (err != paNoError) {
+                SIP_CORE_WARN("Pa_StopStream error : %s; aborting stream", Pa_GetErrorText(err));
+                err = Pa_AbortStream(stream);
+                if (err != paNoError)
+                    SIP_CORE_WARN("Pa_AbortStream error : %s", Pa_GetErrorText(err));
+            }
+        } else if (active < 0) {
+            SIP_CORE_WARN("Pa_IsStreamActive error : %s; aborting stream", Pa_GetErrorText(active));
+            auto err = Pa_AbortStream(stream);
+            if (err != paNoError)
+                SIP_CORE_WARN("Pa_AbortStream error : %s", Pa_GetErrorText(err));
+        } else {
+            auto stopped = Pa_IsStreamStopped(stream);
+            if (stopped < 0)
+                SIP_CORE_WARN("Pa_IsStreamStopped error : %s", Pa_GetErrorText(stopped));
         }
-        err = Pa_CloseStream(stream);
+
+        auto err = Pa_CloseStream(stream);
         if (err != paNoError) {
             SIP_CORE_ERR("Pa_CloseStream error : %s", Pa_GetErrorText(err));
-            return false;
         }
+        stream = nullptr;
         return true;
     };
 
     auto stopPlayback = [this, &stopPaStream](bool fullDuplexMode = false) -> bool {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (status_.load() != Status::Started)
-            return false;
+        if (status_.load() != Status::Started && !fullDuplexMode)
+            return stopPaStream(pimpl_->streams_[Direction::Output]);
         bool stopped = false;
         if (fullDuplexMode)
             stopped = stopPaStream(pimpl_->streams_[Direction::IO]);
@@ -257,18 +490,25 @@ PortAudioLayer::stopStream(AudioDeviceType stream)
         if (pimpl_->streams_[Direction::IO]) {
             stopped = stopPlayback(true);
         } else {
-            stopped = stopPaStream(pimpl_->streams_[Direction::Input]) && stopPlayback();
+            stopped = stopPaStream(pimpl_->streams_[Direction::Input]);
+            stopped = stopPlayback() || stopped;
         }
         if (stopped) {
-            recordChanged(false);
-            playbackChanged(false);
+            if (recordStarted_)
+                recordChanged(false);
+            if (playbackStarted_)
+                playbackChanged(false);
+            pimpl_->inputInitialized_ = false;
+            pimpl_->outputInitialized_ = false;
             SIP_CORE_DBG("PortAudioLayer I/O streams stopped");
         } else
             return;
         break;
     case AudioDeviceType::CAPTURE:
         if (stopPaStream(pimpl_->streams_[Direction::Input])) {
-            recordChanged(false);
+            if (recordStarted_)
+                recordChanged(false);
+            pimpl_->inputInitialized_ = false;
             SIP_CORE_DBG("PortAudioLayer input stream stopped");
         } else
             return;
@@ -276,7 +516,9 @@ PortAudioLayer::stopStream(AudioDeviceType stream)
     case AudioDeviceType::PLAYBACK:
     case AudioDeviceType::RINGTONE:
         if (stopPlayback()) {
-            playbackChanged(false);
+            if (playbackStarted_)
+                playbackChanged(false);
+            pimpl_->outputInitialized_ = false;
             SIP_CORE_DBG("PortAudioLayer output stream stopped");
         } else
             return;
@@ -318,10 +560,20 @@ PortAudioLayer::PortAudioLayerImpl::PortAudioLayerImpl(PortAudioLayer& parent,
     SIP_CORE_INFO() << "PortAudioLayerImpl: prefs are " << deviceRecord_ << " ; " << devicePlayback_
                     << "; " << deviceRingtone_;
     init(parent);
+#ifdef _WIN32
+    if (apiInitialised_) {
+        deviceMonitor_ = std::make_unique<WindowsAudioDeviceMonitor>(
+            [scheduled = deviceRecoveryScheduled_] { schedulePortAudioDeviceRecovery(scheduled); });
+        deviceMonitor_->start();
+    }
+#endif
 }
 
 PortAudioLayer::PortAudioLayerImpl::~PortAudioLayerImpl()
 {
+#ifdef _WIN32
+    deviceMonitor_.reset();
+#endif
     terminate();
 }
 
@@ -973,6 +1225,8 @@ bool
 PortAudioLayer::PortAudioLayerImpl::initInputStream(PortAudioLayer& parent)
 {
     SIP_CORE_INFO("[PortAudio Input] Opening PortAudio Input Stream");
+    inputInitialized_ = false;
+    initInput(parent);
     auto& stream = streams_[Direction::Input];
     auto apiIndex = getApiIndexByType(AudioDeviceType::CAPTURE);
     
@@ -1043,6 +1297,8 @@ bool
 PortAudioLayer::PortAudioLayerImpl::initOutputStream(PortAudioLayer& parent, bool ringtone)
 {
     SIP_CORE_INFO("[PortAudio Output] Opening PortAudio Output Stream (ringtone=%d)", ringtone);
+    outputInitialized_ = false;
+    initOutput(parent);
     auto& stream = streams_[Direction::Output];
     auto apiIndex = getApiIndexByType(ringtone == false ? AudioDeviceType::PLAYBACK : AudioDeviceType::RINGTONE);
     
@@ -1105,6 +1361,10 @@ bool
 PortAudioLayer::PortAudioLayerImpl::initFullDuplexStream(PortAudioLayer& parent)
 {
     SIP_CORE_INFO("[PortAudio FullDuplex] Initializing full-duplex stream");
+    inputInitialized_ = false;
+    outputInitialized_ = false;
+    initInput(parent);
+    initOutput(parent);
     
     auto apiIndexRecord = getApiIndexByType(AudioDeviceType::CAPTURE);
     auto apiIndexPlayback = getApiIndexByType(AudioDeviceType::PLAYBACK);

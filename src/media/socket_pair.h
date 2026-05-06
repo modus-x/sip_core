@@ -213,6 +213,20 @@ public:
                     const char* in_params);
 
     void stopSendOp(bool state = true);
+
+    /**
+     * Drain any pending RTP/RTCP datagrams from the kernel UDP receive buffer
+     * (and from any queued ICE packets if no system socket is in use).
+     *
+     * Used after a media renegotiation (hold/unhold re-INVITE) to discard the
+     * burst of packets that accumulated while the old receiver was being torn
+     * down and the new one set up. Without this, the FFmpeg RTP demuxer in the
+     * fresh receiver may consume those buffered packets in arrival order with
+     * stale relative timing, causing it to emit "RTP: dropping old packet
+     * received too late" warnings until it eventually re-syncs.
+     */
+    void flushReadQueue();
+
     std::list<rtcpRRHeader> getRtcpRR();
     std::list<rtcpREMBHeader> getRtcpREMB();
 

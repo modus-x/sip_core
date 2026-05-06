@@ -519,6 +519,73 @@ SocketPair::stopSendOp(bool state)
 }
 
 void
+SocketPair::flushReadQueue()
+{
+    // System-socket path: drain the kernel UDP receive buffers for both
+    // RTP and RTCP. The sockets are already created in non-blocking mode
+    // (SOCK_NONBLOCK on Linux/Android, F_SETFL O_NONBLOCK on Apple,
+    // FIONBIO on Windows), so recvfrom() will return -1/EAGAIN once the
+    // buffer is empty. We discard everything we read.
+    if (rtpHandle_ >= 0 || rtcpHandle_ >= 0) {
+        char drainBuf[RTP_MAX_PACKET_LENGTH];
+        struct sockaddr_storage from;
+        socklen_t from_len;
+        unsigned drainedRtp = 0;
+        unsigned drainedRtcp = 0;
+        // Cap the drain loops so a flooded socket cannot stall the caller.
+        constexpr unsigned MAX_DRAIN_PACKETS = 4096;
+        if (rtpHandle_ >= 0) {
+            for (; drainedRtp < MAX_DRAIN_PACKETS; ++drainedRtp) {
+                from_len = sizeof(from);
+                int n = recvfrom(rtpHandle_,
+                                 drainBuf,
+                                 sizeof(drainBuf),
+                                 0,
+                                 reinterpret_cast<struct sockaddr*>(&from),
+                                 &from_len);
+                if (n <= 0) {
+                    break;
+                }
+            }
+        }
+        if (rtcpHandle_ >= 0) {
+            for (; drainedRtcp < MAX_DRAIN_PACKETS; ++drainedRtcp) {
+                from_len = sizeof(from);
+                int n = recvfrom(rtcpHandle_,
+                                 drainBuf,
+                                 sizeof(drainBuf),
+                                 0,
+                                 reinterpret_cast<struct sockaddr*>(&from),
+                                 &from_len);
+                if (n <= 0) {
+                    break;
+                }
+            }
+        }
+        if (drainedRtp || drainedRtcp) {
+            SIP_CORE_DBG("[%p] flushReadQueue drained %u RTP + %u RTCP datagrams",
+                         this,
+                         drainedRtp,
+                         drainedRtcp);
+        }
+        return;
+    }
+
+    // ICE / non-system-socket path: clear the in-memory queues.
+    std::unique_lock<std::mutex> lk(dataBuffMutex_);
+    const auto rtpCount = rtpDataBuff_.size();
+    const auto rtcpCount = rtcpDataBuff_.size();
+    rtpDataBuff_.clear();
+    rtcpDataBuff_.clear();
+    if (rtpCount || rtcpCount) {
+        SIP_CORE_DBG("[%p] flushReadQueue cleared %zu RTP + %zu RTCP queued ICE datagrams",
+                     this,
+                     rtpCount,
+                     rtcpCount);
+    }
+}
+
+void
 SocketPair::closeSockets()
 {
     close_socket_handle(rtcpHandle_);

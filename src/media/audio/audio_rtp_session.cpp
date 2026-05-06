@@ -110,6 +110,10 @@ AudioRtpSession::ensureEarlySenderLocked()
     socketPair_->stopSendOp();
     if (sender_) {
         initSeqVal_ = sender_->getLastSeqValue() + 1;
+    } else if (lastSenderSeqVal_) {
+        // Continue the wire RTP sequence from the previous sender across a
+        // full stop()/start() cycle (e.g. hold/unhold renegotiation).
+        initSeqVal_ = static_cast<uint16_t>(*lastSenderSeqVal_ + 1);
     }
 
     try {
@@ -227,6 +231,12 @@ AudioRtpSession::startHoldKeepalive()
 
     if (!sender_) {
         socketPair_->stopSendOp();
+        // Continue the wire RTP sequence space across the previous stop()
+        // when constructing the keepalive sender, so the peer does not see a
+        // discontinuity at the hold transition.
+        if (lastSenderSeqVal_) {
+            initSeqVal_ = static_cast<uint16_t>(*lastSenderSeqVal_ + 1);
+        }
         try {
             sender_.reset();
             socketPair_->stopSendOp(false);
@@ -310,8 +320,14 @@ AudioRtpSession::startSender()
 
     // be sure to not send any packets before saving last RTP seq value
     socketPair_->stopSendOp();
-    if (sender_)
+    if (sender_) {
         initSeqVal_ = sender_->getLastSeqValue() + 1;
+    } else if (lastSenderSeqVal_) {
+        // Continue the wire RTP sequence from the previous sender across a
+        // full stop()/start() cycle (e.g. hold/unhold renegotiation) so the
+        // peer's RTP demuxer does not see a sequence-number discontinuity.
+        initSeqVal_ = static_cast<uint16_t>(*lastSenderSeqVal_ + 1);
+    }
     try {
         sender_.reset();
         socketPair_->stopSendOp(false);
@@ -437,6 +453,12 @@ AudioRtpSession::stop()
     rtcpCheckerThread_.join();
 
     receiveThread_.reset();
+    // Persist the sender's last RTP sequence number across full stop/start so
+    // the next sender can continue the wire sequence space instead of
+    // restarting from a low value.
+    if (sender_) {
+        lastSenderSeqVal_ = sender_->getLastSeqValue();
+    }
     sender_.reset();
     preserveCurrentSocketPairReservationIfNeeded();
     socketPair_.reset();

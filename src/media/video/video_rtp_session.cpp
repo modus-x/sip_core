@@ -323,9 +323,21 @@ VideoRtpSession::startSender()
             initSeqVal_ = socketPair_->lastSeqValOut();
 
         try {
-            auto lastSeq = initSeqVal_ + 1;
+            // Compute the next RTP sequence number for the new sender.
+            // Priority order:
+            //   1. The currently-alive sender (covers restartSender()).
+            //   2. The value persisted from the previous sender across a full
+            //      stop()/start() cycle (covers hold/unhold renegotiation).
+            //   3. The SocketPair / SRTP fallback for the very first start.
+            // Without (2), every full stop/start would reset the wire seq to a
+            // small value, which makes the peer's FFmpeg RTP demuxer drop
+            // subsequent packets with "RTP: dropping old packet received too
+            // late" until it eventually re-syncs.
+            uint16_t lastSeq = static_cast<uint16_t>(initSeqVal_ + 1);
             if (sender_) {
-                lastSeq = sender_->getLastSeqValue() + 1;
+                lastSeq = static_cast<uint16_t>(sender_->getLastSeqValue() + 1);
+            } else if (lastSenderSeqVal_) {
+                lastSeq = static_cast<uint16_t>(*lastSenderSeqVal_ + 1);
             }
             sender_.reset();
             socketPair_->stopSendOp(false);
@@ -441,6 +453,7 @@ VideoRtpSession::startReceiver()
     SIP_CORE_DBG("VideoRtpSession [%p] Starting receiver", this);
 
     if (receive_.enabled and not receive_.onHold) {
+        const bool isReceiverRestart = static_cast<bool>(receiveThread_);
         if (receiveThread_) {
             if (socketPair_)
                 socketPair_->setReadBlockingMode(false);
@@ -448,6 +461,21 @@ VideoRtpSession::startReceiver()
             // sink does not keep showing the last real video frame during
             // the gap between the old and new receiver (e.g. hold re-INVITE).
             receiveThread_->publishBlackFrame();
+        }
+
+        // On a receiver RESTART (e.g. hold/unhold re-INVITE), the kernel
+        // UDP buffer for our local RTP/RTCP ports has been quietly
+        // accumulating packets sent by the peer while we tore down the
+        // old receiver. If we let the new FFmpeg RTPDemuxContext consume
+        // them as its first inputs, it would set its baseline sequence
+        // number from a packet that may not be the temporally earliest
+        // one in the burst, then drop every "older" packet that follows
+        // with the well-known "RTP: dropping old packet received too late"
+        // warning until probation logic eventually re-syncs - which can
+        // take seconds for high-bandwidth video. Drain the buffer first
+        // so the new receiver baseline against fresh, real-time packets.
+        if (isReceiverRestart && socketPair_) {
+            socketPair_->flushReadQueue();
         }
 
         receiveThread_.reset(
@@ -655,6 +683,14 @@ VideoRtpSession::stop()
 
     videoBitrateInfo_.videoBitrateCurrent = SystemCodecInfo::DEFAULT_VIDEO_BITRATE;
     storeVideoBitrateInfo();
+    // Persist the sender's last RTP sequence number across the full stop/start
+    // cycle so that the next sender continues from where this one left off.
+    // This is essential to avoid wire sequence-number discontinuities at
+    // hold/unhold transitions, which otherwise make the peer drop packets via
+    // FFmpeg's reordering logic ("RTP: dropping old packet received too late").
+    if (sender_) {
+        lastSenderSeqVal_ = sender_->getLastSeqValue();
+    }
     sender_.reset();
     // Destroy the receive thread (and therefore its demuxContext_, whose AVIO
     // callbacks hold a raw SocketPair* via createIOContext) BEFORE tearing down
@@ -770,7 +806,14 @@ VideoRtpSession::setMuted(bool mute, Direction dir)
                     }
                     if (sender_) {
                         attachVideoInput();
-                        if (resumingSuspendedDisplay) {
+                        // Force a fresh I-frame whenever we re-attach the
+                        // local input after a (local hold) blackout, not
+                        // just for display capture. This lets the peer
+                        // recover the stream immediately even if a few
+                        // initial packets are lost or reordered during
+                        // the media renegotiation that follows.
+                        if (resumingSuspendedDisplay || localHoldBlackoutActive_
+                            || lastSenderSeqVal_) {
                             sender_->forceKeyFrame();
                         }
                     }

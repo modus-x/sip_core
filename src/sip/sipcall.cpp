@@ -62,6 +62,7 @@
 #include "errno.h"
 
 #include <atomic>
+#include <chrono>
 #include <fmt/ranges.h>
 
 #include "tracepoint.h"
@@ -108,6 +109,7 @@ mediaDirectionToString(MediaDirection direction)
 }
 
 static constexpr std::chrono::milliseconds MS_BETWEEN_2_KEYFRAME_REQUEST {1000};
+static constexpr std::chrono::seconds CONNECTIVITY_DIALOG_REFRESH_TIMEOUT {15};
 static constexpr auto MULTISTREAM_REQUIRED_VERSION_STR = "10.0.2"sv;
 static const std::vector<unsigned> MULTISTREAM_REQUIRED_VERSION
     = split_string_to_unsigned(MULTISTREAM_REQUIRED_VERSION_STR, '.');
@@ -457,9 +459,11 @@ SIPCall::getContactHeader() const
 
 void
 SIPCall::setSipTransport(const std::shared_ptr<SipTransport>& transport,
-                         const std::string& contactHdr)
+                         const std::string& contactHdr,
+                         bool keepRebindPending)
 {
     const auto list_id = reinterpret_cast<uintptr_t>(this);
+    const auto generation = sipTransportGeneration_.fetch_add(1) + 1;
     if (sipTransport_)
         sipTransport_->removeStateListener(list_id);
 
@@ -472,7 +476,18 @@ SIPCall::setSipTransport(const std::shared_ptr<SipTransport>& transport,
 
     if (not transport) {
         // Done.
+        if (!keepRebindPending)
+            connectivityTransportRebindPending_.store(false);
+        connectivityAnswerRetryScheduled_.store(false);
         return;
+    }
+    if (keepRebindPending) {
+        // Caller is mid-connectivity-recovery: keep the rebind-pending flag
+        // armed so the new transport's state listener does NOT hang the call
+        // up if the new transport flaps before the deferred re-INVITE is sent.
+        connectivityTransportRebindPending_.store(true);
+    } else {
+        connectivityTransportRebindPending_.store(false);
     }
 
     if (contactHeader_.empty()) {
@@ -492,8 +507,15 @@ SIPCall::setSipTransport(const std::shared_ptr<SipTransport>& transport,
 
     // listen for transport destruction
     sipTransport_->addStateListener(
-        list_id, [wthis_ = weak()](pjsip_transport_state state, const pjsip_transport_state_info*) {
+        list_id, [wthis_ = weak(), generation](pjsip_transport_state state,
+                                               const pjsip_transport_state_info*) {
             if (auto this_ = wthis_.lock()) {
+                if (generation != this_->sipTransportGeneration_.load()) {
+                    SIP_CORE_DBG("[call:%s] Ignoring stale SIP transport state [%i]",
+                                 this_->getCallId().c_str(),
+                                 state);
+                    return;
+                }
                 SIP_CORE_DBG("[call:%s] SIP transport state [%i] - connection state [%u]",
                              this_->getCallId().c_str(),
                              state,
@@ -502,6 +524,12 @@ SIPCall::setSipTransport(const std::shared_ptr<SipTransport>& transport,
                 // End the call if the SIP transport was shut down
                 auto isAlive = SipTransport::isAlive(state);
                 if (not isAlive and this_->getConnectionState() != ConnectionState::DISCONNECTED) {
+                    if (this_->connectivityTransportRebindPending_.load()) {
+                        SIP_CORE_WARN("[call:%s] Underlying SIP transport closed during planned "
+                                      "connectivity rebind; keeping call alive",
+                                      this_->getCallId().c_str());
+                        return;
+                    }
                     SIP_CORE_WARN(
                         "[call:%s] Ending call because underlying SIP transport was closed",
                         this_->getCallId().c_str());
@@ -511,6 +539,171 @@ SIPCall::setSipTransport(const std::shared_ptr<SipTransport>& transport,
                 }
             }
         });
+}
+
+void
+SIPCall::markConnectivityTransportRebindPending(const char* reason)
+{
+    connectivityTransportRebindPending_.store(true);
+    SIP_CORE_WARN("[call:%s] Marked SIP transport rebind pending for connectivity change (%s)",
+                  getCallId().c_str(),
+                  reason ? reason : "unspecified");
+}
+bool
+SIPCall::isConnectivityDialogRefreshPending() const
+{
+    return connectivityDialogRefreshPending_.load();
+}
+
+bool
+SIPCall::isConnectivityDialogRefreshAwaitingResponse() const
+{
+    return connectivityDialogRefreshPending_.load()
+           && connectivityDialogRefreshAwaitingResponse_.load();
+}
+
+bool
+SIPCall::isConnectivityDialogRefreshSuccessCode(int statusCode)
+{
+    return statusCode >= 200 && statusCode < 300;
+}
+
+bool
+SIPCall::isConnectivityDialogRefreshFinalFailureCode(int statusCode)
+{
+    if (statusCode == PJSIP_SC_TSX_TRANSPORT_ERROR || statusCode == PJSIP_SC_REQUEST_TIMEOUT)
+        return true;
+    return statusCode >= 300;
+}
+
+void
+SIPCall::clearConnectivityDialogRefreshState()
+{
+    connectivityDialogRefreshPending_.store(false);
+    connectivityDialogRefreshAwaitingResponse_.store(false);
+    connectivityDialogRefreshGeneration_.fetch_add(1);
+}
+
+void
+SIPCall::beginConnectivityDialogRefresh(const char* reason, bool awaitingResponse)
+{
+    uint64_t generation = 0;
+    {
+        std::lock_guard<std::recursive_mutex> lk {callMutex_};
+        if (getConnectionState() == ConnectionState::DISCONNECTED || getState() == CallState::OVER)
+            return;
+
+        connectivityDialogRefreshPending_.store(true);
+        connectivityDialogRefreshAwaitingResponse_.store(awaitingResponse);
+        generation = connectivityDialogRefreshGeneration_.fetch_add(1) + 1;
+    }
+
+    const std::string reasonStr = reason ? reason : "connectivity-dialog-refresh";
+    SIP_CORE_WARN("[call:%s] Connectivity dialog refresh pending (%s, generation=%llu)",
+                  getCallId().c_str(),
+                  reasonStr.c_str(),
+                  static_cast<unsigned long long>(generation));
+    scheduleConnectivityDialogRefreshWatchdog(generation, reasonStr);
+}
+
+void
+SIPCall::scheduleConnectivityDialogRefreshWatchdog(uint64_t generation, const std::string& reason)
+{
+    std::weak_ptr<SIPCall> wCall = weak();
+    Manager::instance().scheduleTaskIn(
+        [wCall, generation, reason] {
+            auto call = wCall.lock();
+            if (!call)
+                return;
+            call->onConnectivityDialogRefreshWatchdog(generation, reason);
+        },
+        CONNECTIVITY_DIALOG_REFRESH_TIMEOUT);
+}
+
+void
+SIPCall::onConnectivityDialogRefreshWatchdog(uint64_t generation, const std::string& reason)
+{
+    {
+        std::lock_guard<std::recursive_mutex> lk {callMutex_};
+        if (!connectivityDialogRefreshPending_.load()
+            || generation != connectivityDialogRefreshGeneration_.load()
+            || getConnectionState() == ConnectionState::DISCONNECTED
+            || getState() == CallState::OVER) {
+            return;
+        }
+    }
+
+    SIP_CORE_ERR("[call:%s] Connectivity dialog refresh timed out after %lld ms (%s)",
+                 getCallId().c_str(),
+                 static_cast<long long>(CONNECTIVITY_DIALOG_REFRESH_TIMEOUT.count() * 1000),
+                 reason.c_str());
+    forceConnectivityDialogRefreshFailure("connectivity-dialog-refresh-timeout",
+                                          PJSIP_SC_REQUEST_TIMEOUT);
+}
+
+void
+SIPCall::onConnectivityReinviteFinalResponse(int statusCode)
+{
+    if (!isConnectivityDialogRefreshAwaitingResponse())
+        return;
+
+    if (isConnectivityDialogRefreshSuccessCode(statusCode)) {
+        SIP_CORE_WARN("[call:%s] Connectivity re-INVITE accepted with %d; dialog refreshed",
+                      getCallId().c_str(),
+                      statusCode);
+        pendingConnectivityReinvite_.store(false);
+        connectivityReinviteRetryCount_ = 0;
+        clearConnectivityDialogRefreshState();
+        return;
+    }
+
+    if (!isConnectivityDialogRefreshFinalFailureCode(statusCode))
+        return;
+
+    SIP_CORE_WARN("[call:%s] Connectivity re-INVITE failed with final status %d",
+                  getCallId().c_str(),
+                  statusCode);
+    clearConnectivityDialogRefreshState();
+
+    auto account = std::dynamic_pointer_cast<SIPAccount>(getSIPAccount());
+    if (account && connectivityReinviteRetryCount_ < MAX_CONNECTIVITY_REINVITE_RETRIES) {
+        account->scheduleConnectivityReinviteRetry(shared());
+        return;
+    }
+
+    forceConnectivityDialogRefreshFailure("connectivity-reinvite-final-failure", statusCode);
+}
+
+void
+SIPCall::forceConnectivityDialogRefreshFailure(const char* reason, int statusCode)
+{
+    {
+        std::lock_guard<std::recursive_mutex> lk {callMutex_};
+        if (localHangupInProgress_.load()
+            || getConnectionState() == ConnectionState::DISCONNECTED
+            || getState() == CallState::OVER) {
+            clearConnectivityDialogRefreshState();
+            pendingConnectivityReinvite_.store(false);
+            return;
+        }
+
+        SIP_CORE_ERR("[call:%s] Ending call after failed connectivity dialog refresh (%s, "
+                     "status=%d)",
+                     getCallId().c_str(),
+                     reason ? reason : "unspecified",
+                     statusCode);
+        clearConnectivityDialogRefreshState();
+        pendingConnectivityReinvite_.store(false);
+    }
+
+    try {
+        hangup(0);
+    } catch (const std::exception& e) {
+        SIP_CORE_ERR("[call:%s] Failed to hang up after connectivity dialog refresh failure: %s",
+                     getCallId().c_str(),
+                     e.what());
+        onFailure(ECONNRESET);
+    }
 }
 
 void
@@ -532,9 +725,19 @@ SIPCall::SIPSessionReinvite(const std::vector<MediaAttribute>& mediaAttrList)
 
     std::lock_guard<std::recursive_mutex> lk {callMutex_};
 
-    // Do nothing if no invitation processed yet
-    if (not inviteSession_ or inviteSession_->invite_tsx)
-        return PJ_SUCCESS;
+    // Bail out if no invite session, or another INVITE transaction is already
+    // in flight on this dialog. Returning PJ_EBUSY (instead of the historical
+    // silent PJ_SUCCESS) lets callers — particularly the connectivity-recovery
+    // path — distinguish "nothing was sent" from "re-INVITE was sent" and
+    // schedule a retry rather than swallow the failure.
+    if (not inviteSession_ or inviteSession_->invite_tsx) {
+        SIP_CORE_WARN("[call:%s] connectivity-recovery: SIPSessionReinvite skipped: "
+                      "inv=%p tsx_pending=%d",
+                      getCallId().c_str(),
+                      inviteSession_.get(),
+                      (inviteSession_ && inviteSession_->invite_tsx) ? 1 : 0);
+        return PJ_EBUSY;
+    }
 
     SIP_CORE_DBG("[call:%s] Preparing and sending a re-invite (state=%s)",
                  getCallId().c_str(),
@@ -562,6 +765,11 @@ SIPCall::SIPSessionReinvite(const std::vector<MediaAttribute>& mediaAttrList)
     pjsip_tx_data* tdata;
     auto local_sdp = sdp_->getLocalSdpSession();
     auto result = pjsip_inv_reinvite(inviteSession_.get(), nullptr, local_sdp, &tdata);
+    SIP_CORE_WARN("[call:%s] connectivity-recovery: pjsip_inv_reinvite returned %d (%s) tdata=%p",
+                  getCallId().c_str(),
+                  result,
+                  sip_utils::sip_strerror(result).c_str(),
+                  tdata);
     if (result == PJ_SUCCESS) {
         if (!tdata)
             return PJ_SUCCESS;
@@ -573,6 +781,10 @@ SIPCall::SIPSessionReinvite(const std::vector<MediaAttribute>& mediaAttrList)
         sip_utils::addContactHeader(contactHeader_, tdata);
 
         result = pjsip_inv_send_msg(inviteSession_.get(), tdata);
+        SIP_CORE_WARN("[call:%s] connectivity-recovery: pjsip_inv_send_msg returned %d (%s)",
+                      getCallId().c_str(),
+                      result,
+                      sip_utils::sip_strerror(result).c_str());
         if (result == PJ_SUCCESS)
             return PJ_SUCCESS;
         SIP_CORE_ERR("[call:%s] Failed to send REINVITE msg (pjsip: %s)",
@@ -603,6 +815,84 @@ SIPCall::resetConnectivityReinviteState()
 {
     connectivityReinviteRetryCount_ = 0;
     pendingConnectivityReinvite_.store(false);
+    clearConnectivityDialogRefreshState();
+}
+
+bool
+SIPCall::refreshSdpForConnectivityChange()
+{
+    std::lock_guard<std::recursive_mutex> lk {callMutex_};
+
+    if (!sdp_) {
+        SIP_CORE_WARN("[call:%s] connectivity-recovery: refreshSdp skipped: no SDP session",
+                      getCallId().c_str());
+        return false;
+    }
+
+    auto baseAccount = getSIPAccount();
+    auto account = std::dynamic_pointer_cast<SIPAccount>(baseAccount);
+    if (!account) {
+        SIP_CORE_WARN("[call:%s] connectivity-recovery: refreshSdp skipped: no SIPAccount",
+                      getCallId().c_str());
+        return false;
+    }
+
+    // Mirror the address-resolution logic in SIPAccount::newRegisteredAccountCall:
+    // pick the published IP family that matches the (new) account transport,
+    // then use STUN/published / local-interface fallback as appropriate.
+    int family = AF_UNSPEC;
+    if (auto accTransport = account->getTransport()) {
+        family = pjsip_transport_type_get_af(accTransport->getPjSipTransportType());
+    }
+    if (family != AF_INET && family != AF_INET6) {
+        family = pjsip_transport_type_get_af(account->getTransportType());
+    }
+
+    const auto localAddress = ip_utils::getInterfaceAddr(account->getLocalInterface(), family);
+
+    IpAddr addrSdp;
+    addrSdp = account->isStunEnabled() || (!account->getPublishedSameasLocal())
+                  ? account->getPublishedIpAddress()
+                  : localAddress;
+    if (!addrSdp)
+        addrSdp = localAddress;
+
+    if (!addrSdp) {
+        SIP_CORE_WARN("[call:%s] connectivity-recovery: refreshSdp could not resolve a published "
+                      "address (family=%d, localInterface=%s)",
+                      getCallId().c_str(),
+                      family,
+                      account->getLocalInterface().c_str());
+        return false;
+    }
+
+    if (account->getPublishedSameasLocal())
+        sdp_->setPublishedIP(addrSdp);
+    else
+        sdp_->setPublishedIP(account->getPublishedAddress());
+
+    SIP_CORE_WARN("[call:%s] connectivity-recovery: refreshSdp publishedIP=%s family=%d",
+                  getCallId().c_str(),
+                  addrSdp.toString(true).c_str(),
+                  family);
+
+    // Reserve fresh local RTP/RTCP ports on the (new) interface so the
+    // upcoming offer carries usable m= ports. SIPSessionReinvite() also
+    // calls prepareLocalMediaReservations(); this earlier call ensures
+    // that if reservation fails we surface it now and skip the re-INVITE.
+    auto mediaAttrList = getMediaAttributeList();
+    if (mediaAttrList.empty()) {
+        SIP_CORE_WARN("[call:%s] connectivity-recovery: refreshSdp has no media attributes",
+                      getCallId().c_str());
+        return false;
+    }
+    if (!prepareLocalMediaReservations(mediaAttrList)) {
+        SIP_CORE_WARN("[call:%s] connectivity-recovery: refreshSdp failed to reserve local "
+                      "media ports",
+                      getCallId().c_str());
+        return false;
+    }
+    return true;
 }
 
 bool
@@ -640,10 +930,35 @@ SIPCall::tryDeferredConnectivityReinvite()
 {
     if (!pendingConnectivityReinvite_.load())
         return;
-
+    std::lock_guard<std::recursive_mutex> lk {callMutex_};
     // Only attempt if call is in a re-invitable state
     if (getConnectionState() != ConnectionState::CONNECTED
         || (getState() != CallState::ACTIVE && getState() != CallState::HOLD)) {
+        SIP_CORE_DBG("[call:%s] Waiting to execute deferred connectivity re-INVITE: app state "
+                     "is not connected/active yet",
+                     getCallId().c_str());
+        return;
+    }
+
+    if (!inviteSession_) {
+        SIP_CORE_WARN("[call:%s] Waiting to execute deferred connectivity re-INVITE: no invite "
+                      "session",
+                      getCallId().c_str());
+        return;
+    }
+
+    if (inviteSession_->state != PJSIP_INV_STATE_CONFIRMED) {
+        SIP_CORE_WARN("[call:%s] Waiting to execute deferred connectivity re-INVITE: PJSIP "
+                      "state is %s, not CONFIRMED",
+                      getCallId().c_str(),
+                      pjsip_inv_state_name(inviteSession_->state));
+        return;
+    }
+
+    if (inviteSession_->invite_tsx) {
+        SIP_CORE_WARN("[call:%s] Waiting to execute deferred connectivity re-INVITE: INVITE "
+                      "transaction is still pending",
+                      getCallId().c_str());
         return;
     }
 
@@ -657,10 +972,22 @@ SIPCall::reinviteOnConnectivityChange()
 {
     std::lock_guard<std::recursive_mutex> lk {callMutex_};
 
+    SIP_CORE_WARN("[call:%s] connectivity-recovery: reinviteOnConnectivityChange entered",
+                  getCallId().c_str());
+
     if (!inviteSession_) {
         SIP_CORE_WARN("[call:%s] No invite session, cannot re-INVITE for connectivity change",
                       getCallId().c_str());
         return !PJ_SUCCESS;
+    }
+    if (inviteSession_->state != PJSIP_INV_STATE_CONFIRMED) {
+        SIP_CORE_WARN("[call:%s] PJSIP state is %s, deferring connectivity re-INVITE until "
+                      "CONFIRMED",
+                      getCallId().c_str(),
+                      pjsip_inv_state_name(inviteSession_->state));
+        pendingConnectivityReinvite_.store(true);
+        beginConnectivityDialogRefresh("connectivity-reinvite-waiting-confirmed", false);
+        return PJ_EPENDING;
     }
 
     // If a transaction is pending, defer the re-INVITE
@@ -668,6 +995,7 @@ SIPCall::reinviteOnConnectivityChange()
         SIP_CORE_WARN("[call:%s] INVITE transaction pending, deferring connectivity re-INVITE",
                       getCallId().c_str());
         pendingConnectivityReinvite_.store(true);
+        beginConnectivityDialogRefresh("connectivity-reinvite-pending-transaction", false);
         return PJ_EPENDING;
     }
 
@@ -678,10 +1006,36 @@ SIPCall::reinviteOnConnectivityChange()
         // Continue anyway — the re-INVITE might still succeed for UDP
     }
 
-    auto result = SIPSessionReinvite();
-    if (result == PJ_SUCCESS) {
-        resetConnectivityReinviteState();
+    // Refresh SDP `c=`/`o=` and reserve fresh local RTP ports so the offer
+    // we are about to send actually advertises the *new* local interface.
+    if (!refreshSdpForConnectivityChange()) {
+        SIP_CORE_WARN("[call:%s] connectivity-recovery: SDP refresh failed; deferring re-INVITE",
+                      getCallId().c_str());
+        pendingConnectivityReinvite_.store(true);
+        beginConnectivityDialogRefresh("connectivity-reinvite-sdp-refresh-failed", false);
+        return PJ_EPENDING;
     }
+
+    auto result = SIPSessionReinvite();
+    SIP_CORE_WARN("[call:%s] connectivity-recovery: SIPSessionReinvite() returned %d",
+                  getCallId().c_str(),
+                  result);
+    if (result == PJ_SUCCESS) {
+        pendingConnectivityReinvite_.store(false);
+        beginConnectivityDialogRefresh("connectivity-reinvite-sent", true);
+        return PJ_SUCCESS;
+    }
+
+    if (result == PJ_EBUSY) {
+        // SIPSessionReinvite found a busy invite_tsx in the brief window
+        // between our check and the actual send — defer rather than fail.
+        SIP_CORE_WARN("[call:%s] connectivity-recovery: re-INVITE deferred (PJ_EBUSY); will retry",
+                      getCallId().c_str());
+        pendingConnectivityReinvite_.store(true);
+        beginConnectivityDialogRefresh("connectivity-reinvite-busy", false);
+        return PJ_EPENDING;
+    }
+
     return result;
 }
 
@@ -884,6 +1238,131 @@ SIPCall::setExtraSipHeaders(std::map<std::string, std::string> extraHeaders)
     extraHeaders_.merge(extraHeaders);
 }
 
+bool
+SIPCall::prepareConnectivityTransportForAnswer()
+{
+    auto baseAccount = getSIPAccount();
+    auto account = std::dynamic_pointer_cast<SIPAccount>(baseAccount);
+    if (!account)
+        return true;
+
+    auto accountTransport = account->getTransport();
+    auto contactHeader = account->getContactHeader();
+    if (!accountTransport || contactHeader.empty()) {
+        if (account->isTransportRecoveryActive()) {
+            SIP_CORE_WARN("[call:%s] Deferring 200 OK: account transport recovery is active "
+                          "(transport=%p, contact_empty=%d)",
+                          getCallId().c_str(),
+                          accountTransport.get(),
+                          contactHeader.empty() ? 1 : 0);
+            return false;
+        }
+        return true;
+    }
+
+    const bool needsRebind = sipTransport_ != accountTransport
+                             || contactHeader_ != contactHeader
+                             || connectivityTransportRebindPending_.load()
+                             || pendingConnectivityReinvite_.load();
+    if (!needsRebind)
+        return true;
+
+    SIP_CORE_WARN("[call:%s] Rebinding SIP transport before 200 OK after connectivity change "
+                  "(old=%p, new=%p, contact=%s)",
+                  getCallId().c_str(),
+                  sipTransport_.get(),
+                  accountTransport.get(),
+                  contactHeader.c_str());
+    setSipTransport(accountTransport, contactHeader);
+    if (!updateDialogTransport()) {
+        SIP_CORE_WARN("[call:%s] Failed to update dialog transport before 200 OK; continuing",
+                      getCallId().c_str());
+    }
+    return true;
+}
+
+void
+SIPCall::scheduleDeferredConnectivityAnswer()
+{
+    bool expected = false;
+    if (!connectivityAnswerRetryScheduled_.compare_exchange_strong(expected, true))
+        return;
+
+    std::weak_ptr<SIPCall> wCall = weak();
+    Manager::instance().scheduleTaskIn(
+        [wCall] {
+            auto call = wCall.lock();
+            if (!call)
+                return;
+            call->connectivityAnswerRetryScheduled_.store(false);
+            {
+                std::lock_guard<std::recursive_mutex> lk {call->callMutex_};
+                if (!call->isIncoming()
+                    || call->getConnectionState() == ConnectionState::DISCONNECTED
+                    || call->getState() == CallState::OVER
+                    || !call->inviteSession_
+                    || call->inviteSession_->state == PJSIP_INV_STATE_CONNECTING
+                    || call->inviteSession_->state == PJSIP_INV_STATE_CONFIRMED
+                    || call->inviteSession_->state == PJSIP_INV_STATE_DISCONNECTED) {
+                    SIP_CORE_DBG("[call:%s] Skipping deferred answer retry: call is no longer "
+                                 "answerable",
+                                 call->getCallId().c_str());
+                    return;
+                }
+            }
+
+            try {
+                call->answer();
+            } catch (const std::exception& e) {
+                SIP_CORE_ERR("[call:%s] Deferred connectivity answer failed: %s",
+                             call->getCallId().c_str(),
+                             e.what());
+            }
+        },
+        std::chrono::milliseconds(200));
+}
+
+void
+SIPCall::scheduleDeferredConnectivityAnswer(const std::vector<libsip_core::MediaMap>& mediaList)
+{
+    bool expected = false;
+    if (!connectivityAnswerRetryScheduled_.compare_exchange_strong(expected, true))
+        return;
+
+    std::weak_ptr<SIPCall> wCall = weak();
+    Manager::instance().scheduleTaskIn(
+        [wCall, mediaList] {
+            auto call = wCall.lock();
+            if (!call)
+                return;
+            call->connectivityAnswerRetryScheduled_.store(false);
+            {
+                std::lock_guard<std::recursive_mutex> lk {call->callMutex_};
+                if (!call->isIncoming()
+                    || call->getConnectionState() == ConnectionState::DISCONNECTED
+                    || call->getState() == CallState::OVER
+                    || !call->inviteSession_
+                    || call->inviteSession_->state == PJSIP_INV_STATE_CONNECTING
+                    || call->inviteSession_->state == PJSIP_INV_STATE_CONFIRMED
+                    || call->inviteSession_->state == PJSIP_INV_STATE_DISCONNECTED) {
+                    SIP_CORE_DBG("[call:%s] Skipping deferred answer retry: call is no longer "
+                                 "answerable",
+                                 call->getCallId().c_str());
+                    return;
+                }
+            }
+
+            try {
+                call->answer(mediaList);
+            } catch (const std::exception& e) {
+                SIP_CORE_ERR("[call:%s] Deferred connectivity answer failed: %s",
+                             call->getCallId().c_str(),
+                             e.what());
+            }
+        },
+        std::chrono::milliseconds(200));
+}
+
 void
 SIPCall::answer()
 {
@@ -913,6 +1392,10 @@ SIPCall::answer()
     pjsip_tx_data* tdata;
     if (!inviteSession_->last_answer)
         throw std::runtime_error("Should only be called for initial answer");
+    if (!prepareConnectivityTransportForAnswer()) {
+        scheduleDeferredConnectivityAnswer();
+        return;
+    }
 
     // answer with SDP if no SDP was given in initial invite (i.e. inv->neg is NULL)
     if (pjsip_inv_answer(inviteSession_.get(),
@@ -940,6 +1423,9 @@ SIPCall::answer()
         setInviteSession();
         throw std::runtime_error("Could not send invite request answer (200 OK)");
     }
+    SIP_CORE_WARN("[call:%s] 200 OK sent; PJSIP invite state is now %s",
+                  getCallId().c_str(),
+                  pjsip_inv_state_name(inviteSession_->state));
 
     setState(CallState::ACTIVE, ConnectionState::CONNECTED);
 }
@@ -966,6 +1452,10 @@ SIPCall::answer(const std::vector<libsip_core::MediaMap>& mediaList)
 
     if (not sdp_) {
         SIP_CORE_ERR("[call:%s] No SDP session for this call", getCallId().c_str());
+        return;
+    }
+    if (!prepareConnectivityTransportForAnswer()) {
+        scheduleDeferredConnectivityAnswer(mediaList);
         return;
     }
 
@@ -1069,6 +1559,9 @@ SIPCall::answer(const std::vector<libsip_core::MediaMap>& mediaList)
         setInviteSession();
         throw std::runtime_error("Could not send invite request answer (200 OK)");
     }
+    SIP_CORE_WARN("[call:%s] 200 OK sent; PJSIP invite state is now %s",
+                  getCallId().c_str(),
+                  pjsip_inv_state_name(inviteSession_->state));
 
     setState(CallState::ACTIVE, ConnectionState::CONNECTED);
 }
@@ -1799,6 +2292,8 @@ SIPCall::removeCall()
 {
     std::lock_guard<std::recursive_mutex> lk {callMutex_};
     SIP_CORE_DBG("[call:%s] removeCall()", getCallId().c_str());
+    clearConnectivityDialogRefreshState();
+    pendingConnectivityReinvite_.store(false);
     pendingAudioSocketPair_.reset();
 #ifdef ENABLE_VIDEO
     pendingVideoSocketPair_.reset();
@@ -1870,7 +2365,9 @@ SIPCall::onClosed()
 void
 SIPCall::onAnswered()
 {
-    SIP_CORE_WARN("[call:%s] onAnswered()", getCallId().c_str());
+    SIP_CORE_WARN("[call:%s] onAnswered() (PJSIP state=%s)",
+                  getCallId().c_str(),
+                  inviteSession_ ? pjsip_inv_state_name(inviteSession_->state) : "none");
     {
         std::lock_guard<std::recursive_mutex> lk {callMutex_};
         promoteEarlyMediaToActiveLocked();
@@ -1883,6 +2380,7 @@ SIPCall::onAnswered()
                     Manager::instance().peerAnsweredCall(*shared);
                 }
             }
+            shared->tryDeferredConnectivityReinvite();
         }
     });
 }
@@ -2983,6 +3481,31 @@ SIPCall::onMediaNegotiationComplete()
             if (inviteSession_ and inviteSession_->state != PJSIP_INV_STATE_EARLY) {
                 earlyMediaRequested_ = false;
             }
+
+#ifdef ENABLE_VIDEO
+            // Re-issue a key-frame request for every video stream whose
+            // remote side is now sending. updateRemoteMedia() already asks
+            // for one before stopAllMedia()/startAllMedia(), but at that
+            // point our socketPair_ has just been torn down by stopAllMedia,
+            // so the RTCP feedback may be sent over a transport that is
+            // about to be replaced. By repeating the request here we make
+            // sure it travels on the freshly-rebuilt socket and arrives at
+            // the peer once both sides have completed the renegotiation.
+            // This is the recovery path that lets the receiver display a
+            // fresh I-frame quickly after hold/unhold transitions, even if
+            // a few packets were dropped during the brief restart window.
+            for (size_t idx = 0; idx < rtpStreams_.size(); ++idx) {
+                const auto& stream = rtpStreams_[idx];
+                if (!stream.rtpSession_ || !stream.mediaAttribute_
+                    || stream.mediaAttribute_->type_ != MediaType::MEDIA_VIDEO) {
+                    continue;
+                }
+                if (stream.remoteMediaAttribute_ && stream.remoteMediaAttribute_->muted_) {
+                    continue;
+                }
+                requestKeyframe(static_cast<int>(idx));
+            }
+#endif
         }
     }
 

@@ -29,6 +29,7 @@
 #include "sip/sipvoiplink.h"
 
 #include <atomic>
+#include <optional>
 #include <string>
 #include <memory>
 
@@ -160,6 +161,12 @@ private:
     Conference* conference_ {nullptr};
 
     uint16_t initSeqVal_ = 0;
+    // Last RTP sequence value used by sender_ before it was reset.
+    // Persisted across stop()/startSender() so the new sender continues the
+    // sequence space rather than restarting from a low value, which would
+    // otherwise confuse the peer's FFmpeg RTP demuxer ("RTP: dropping old
+    // packet received too late" warning) on hold/unhold transitions.
+    std::optional<uint16_t> lastSenderSeqVal_;
 
     std::function<void(void)> requestKeyFrameCallback_;
 

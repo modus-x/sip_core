@@ -505,6 +505,11 @@ public:
     void setAudioDevice(int index, AudioDeviceType streamType);
 
     void startAudio();
+    /**
+     * Recreate the audio layer after a platform audio-device hot-plug event,
+     * then notify clients and active calls.
+     */
+    void recoverAudioDevices();
 
     /**
      * Called when audio devices are added/removed.

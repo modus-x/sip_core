@@ -406,11 +406,13 @@ transaction_request_cb(pjsip_rx_data* rdata)
     }
 
     pjmedia_sdp_session* r_sdp {nullptr};
-    if (body) {
+    const bool hasSdpBody = body && body->data && body->len > 0;
+    if (hasSdpBody) {
         if (pjmedia_sdp_parse(rdata->tp_info.pool, (char*) body->data, body->len, &r_sdp)
             != PJ_SUCCESS) {
-            SIP_CORE_WARN("Failed to parse the SDP in offer");
-            r_sdp = nullptr;
+            SIP_CORE_WARN("Failed to parse SDP in incoming INVITE offer; refusing call");
+            try_respond_stateless(endpt_, rdata, PJSIP_SC_NOT_ACCEPTABLE_HERE, NULL, NULL, NULL);
+            return PJ_FALSE;
         }
     }
 
@@ -426,6 +428,22 @@ transaction_request_cb(pjsip_rx_data* rdata)
         SIP_CORE_ERR("Couldn't verify INVITE request in secure dialog.");
         try_respond_stateless(endpt_, rdata, PJSIP_SC_METHOD_NOT_ALLOWED, NULL, NULL, NULL);
         return PJ_FALSE;
+    }
+    if (r_sdp) {
+        const auto audioCodecs = account->getActiveAccountCodecInfoList(MEDIA_AUDIO);
+        const auto videoCodecs = account->isVideoEnabled()
+                                     ? account->getActiveAccountCodecInfoList(MEDIA_VIDEO)
+                                     : std::vector<std::shared_ptr<AccountCodecInfo>> {};
+        if (!Sdp::hasNegotiableMedia(r_sdp, audioCodecs, videoCodecs)) {
+            SIP_CORE_WARN("Incoming INVITE offer has no negotiable media; refusing call");
+            try_respond_stateless(endpt_,
+                                  rdata,
+                                  PJSIP_SC_NOT_ACCEPTABLE_HERE,
+                                  NULL,
+                                  NULL,
+                                  NULL);
+            return PJ_FALSE;
+        }
     }
 
     // Build the initial media using the remote offer.
@@ -1487,11 +1505,28 @@ transaction_state_changed_cb(pjsip_inv_session* inv, pjsip_transaction* tsx, pjs
     auto call = getCallFromInvite(inv);
     if (not call)
         return;
+    if (!tsx || !event || event->type != PJSIP_EVENT_TSX_STATE)
+        return;
 
 #ifdef DEBUG_SIP_REQUEST_MSG
     processInviteResponseHelper(inv, event);
 #endif
 
+    if (tsx->role == PJSIP_ROLE_UAC && tsx->method.id == PJSIP_INVITE_METHOD
+        && call->isConnectivityDialogRefreshAwaitingResponse()) {
+        const bool finalState = tsx->state == PJSIP_TSX_STATE_COMPLETED
+                                || tsx->state == PJSIP_TSX_STATE_TERMINATED;
+        if (finalState) {
+            const auto statusCode = tsx->status_code ? tsx->status_code
+                                                     : PJSIP_SC_TSX_TRANSPORT_ERROR;
+            SIP_CORE_WARN("[call:%s] Connectivity re-INVITE transaction final state=%d "
+                          "status=%d",
+                          call->getCallId().c_str(),
+                          tsx->state,
+                          statusCode);
+            call->onConnectivityReinviteFinalResponse(statusCode);
+        }
+    }
     // We process here only incoming request message
     if (tsx->role != PJSIP_ROLE_UAS or tsx->state != PJSIP_TSX_STATE_TRYING
         or event->body.tsx_state.type != PJSIP_EVENT_RX_MSG) {

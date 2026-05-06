@@ -40,6 +40,8 @@
 #include <pj/assert.h>
 
 #include <map>
+#include <memory>
+#include <optional>
 #include <vector>
 #include <string>
 #include <stdexcept>
@@ -179,6 +181,14 @@ public:
 
     static std::vector<MediaAttribute> getMediaAttributeListFromSdp(
         const pjmedia_sdp_session* sdpSession, bool ignoreDisabled = false, bool remote = true);
+    /*
+     * Return true if the remote SDP offer contains at least one enabled RTP audio/video media
+     * line with a codec compatible with the provided local active codec lists.
+     */
+    static bool hasNegotiableMedia(
+        const pjmedia_sdp_session* sdpSession,
+        const std::vector<std::shared_ptr<AccountCodecInfo>>& audioCodecs,
+        const std::vector<std::shared_ptr<AccountCodecInfo>>& videoCodecs);
 
     using MediaSlot = std::pair<MediaDescription, MediaDescription>;
     std::vector<MediaSlot> getMediaSlots() const;
@@ -251,18 +261,23 @@ private:
     /*
      * Look up the offer's payload type for the given codec specification. Match is
      * case-insensitive on encoding name; clock rate must match exactly; channels treats a
-     * missing param and "1" as equivalent (RFC 4566). Returns 0 when no match is found.
+     * missing param and "1" as equivalent (RFC 4566). Returns std::nullopt when no
+     * matching rtpmap entry is present in the remote media.
+     *
+     * NOTE: do not use 0 as a "not found" sentinel here. PCMU's static RFC 3551 payload
+     * type is 0, so a return of 0 must be a *valid* match.
      */
-    static unsigned findRemotePayloadType(const pjmedia_sdp_media* remoteMedia,
-                                          std::string_view encName,
-                                          unsigned clockRate,
-                                          unsigned channels);
+    static std::optional<unsigned> findRemotePayloadType(const pjmedia_sdp_media* remoteMedia,
+                                                         std::string_view encName,
+                                                         unsigned clockRate,
+                                                         unsigned channels);
 
     /*
      * Convenience wrapper around findRemotePayloadType for telephone-event/8000.
-     * Returns 0 when telephone-event was not offered.
+     * Returns std::nullopt when telephone-event was not offered.
      */
-    static unsigned findRemoteTelephoneEventPayload(const pjmedia_sdp_media* remoteMedia);
+    static std::optional<unsigned> findRemoteTelephoneEventPayload(
+        const pjmedia_sdp_media* remoteMedia);
 
     /*
      * Create a new SDP

@@ -2362,6 +2362,28 @@ Manager::startAudio()
             pimpl_->audiodriver_->startStream(type);
 #endif
 }
+void
+Manager::recoverAudioDevices()
+{
+    if (!initialized || pimpl_->finished_ || pimpl_->shuttingDown_)
+        return;
+
+    std::shared_ptr<AudioLayer> refreshedDriver;
+    {
+        std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
+        SIP_CORE_WARN("Audio devices changed, refreshing audio layer");
+        pimpl_->audiodriver_.reset();
+        pimpl_->initAudioDriver();
+        refreshedDriver = pimpl_->audiodriver_;
+    }
+
+    if (refreshedDriver) {
+        refreshedDriver->notifyDevicesChanged();
+    } else {
+        SIP_CORE_ERR("Audio devices changed, but audio layer could not be recreated");
+        onAudioDevicesChanged();
+    }
+}
 
 AudioDeviceGuard::AudioDeviceGuard(Manager& manager, AudioDeviceType type)
     : manager_(manager)
@@ -2786,6 +2808,10 @@ void
 Manager::ManagerPimpl::initAudioDriver()
 {
     audiodriver_.reset(base_.audioPreference.createAudioLayer());
+    if (!audiodriver_) {
+        SIP_CORE_ERR("Unable to initialize audio driver");
+        return;
+    }
     constexpr std::array<AudioDeviceType, 3> TYPES {AudioDeviceType::CAPTURE,
                                                     AudioDeviceType::PLAYBACK,
                                                     AudioDeviceType::RINGTONE};

@@ -230,14 +230,14 @@ Sdp::getCrypto(pjmedia_sdp_media* media)
     return crypto;
 }
 
-unsigned
+std::optional<unsigned>
 Sdp::findRemotePayloadType(const pjmedia_sdp_media* remoteMedia,
                            std::string_view encName,
                            unsigned clockRate,
                            unsigned channels)
 {
     if (!remoteMedia)
-        return 0;
+        return std::nullopt;
 
     static constexpr pj_str_t STR_RTPMAP {sip_utils::CONST_PJ_STR("rtpmap")};
 
@@ -276,10 +276,10 @@ Sdp::findRemotePayloadType(const pjmedia_sdp_media* remoteMedia,
 
         return static_cast<unsigned>(pj_strtoul(&rtpmap.pt));
     }
-    return 0;
+    return std::nullopt;
 }
 
-unsigned
+std::optional<unsigned>
 Sdp::findRemoteTelephoneEventPayload(const pjmedia_sdp_media* remoteMedia)
 {
     return findRemotePayloadType(remoteMedia, "telephone-event", 8000, 0);
@@ -300,7 +300,125 @@ offerHasFormat(const pjmedia_sdp_media* remoteMedia, unsigned pt)
     }
     return false;
 }
+
+MediaType
+getSupportedMediaType(const pjmedia_sdp_media* media)
+{
+    if (!media)
+        return MediaType::MEDIA_NONE;
+    if (!pj_stricmp2(&media->desc.media, "audio"))
+        return MediaType::MEDIA_AUDIO;
+    if (!pj_stricmp2(&media->desc.media, "video"))
+        return MediaType::MEDIA_VIDEO;
+    return MediaType::MEDIA_NONE;
+}
+
+bool
+hasSupportedRtpTransport(const pjmedia_sdp_media* media)
+{
+    return media
+           && (pj_stricmp2(&media->desc.transport, "RTP/AVP") == 0
+               || pj_stricmp2(&media->desc.transport, "RTP/SAVP") == 0);
+}
+
+struct LocalCodecSpec
+{
+    unsigned payload {0};
+    std::string encName;
+    unsigned clockRate {0};
+    unsigned channels {0};
+};
+
+bool
+resolveLocalCodecSpec(const std::shared_ptr<AccountCodecInfo>& accountCodec,
+                      MediaType type,
+                      unsigned& dynamicPayload,
+                      LocalCodecSpec& spec)
+{
+    if (!accountCodec || !(accountCodec->systemCodecInfo.mediaType & type))
+        return false;
+
+    spec = {};
+
+    if (type == MediaType::MEDIA_AUDIO) {
+        auto accountAudioCodec = std::static_pointer_cast<AccountAudioCodecInfo>(accountCodec);
+        spec.payload = accountAudioCodec->payloadType;
+        spec.encName = accountAudioCodec->systemCodecInfo.name;
+        if (accountAudioCodec->audioformat.nb_channels > 1)
+            spec.channels = accountAudioCodec->audioformat.nb_channels;
+
+        // G722 requires G722/8000 media description even though it's @ 16000 Hz.
+        if (accountAudioCodec->isPCMG722() || accountAudioCodec->isG729())
+            spec.clockRate = 8000;
+        else
+            spec.clockRate = accountAudioCodec->audioformat.sample_rate;
+    } else if (type == MediaType::MEDIA_VIDEO) {
+        spec.payload = dynamicPayload++;
+        spec.encName = accountCodec->systemCodecInfo.name;
+        spec.clockRate = 90000;
+    } else {
+        return false;
+    }
+
+    return !spec.encName.empty() && spec.clockRate > 0;
+}
 } // anonymous namespace
+bool
+Sdp::hasNegotiableMedia(const pjmedia_sdp_session* sdpSession,
+                        const std::vector<std::shared_ptr<AccountCodecInfo>>& audioCodecs,
+                        const std::vector<std::shared_ptr<AccountCodecInfo>>& videoCodecs)
+{
+    if (!sdpSession) {
+        return false;
+    }
+
+    for (unsigned mediaIdx = 0; mediaIdx < sdpSession->media_count; ++mediaIdx) {
+        auto* media = sdpSession->media[mediaIdx];
+        const auto type = getSupportedMediaType(media);
+        if (type == MediaType::MEDIA_NONE) {
+            SIP_CORE_WARN("Media#%u: skipping unsupported type '%.*s' (transport: '%.*s')",
+                          mediaIdx,
+                          (int) media->desc.media.slen,
+                          media->desc.media.ptr,
+                          (int) media->desc.transport.slen,
+                          media->desc.transport.ptr);
+            continue;
+        }
+
+        if (media->desc.port == 0) {
+            continue;
+        }
+
+        if (!hasSupportedRtpTransport(media)) {
+            SIP_CORE_WARN("Media#%u: skipping unsupported transport '%.*s'",
+                          mediaIdx,
+                          (int) media->desc.transport.slen,
+                          media->desc.transport.ptr);
+            continue;
+        }
+
+        const auto& codecList = type == MediaType::MEDIA_AUDIO ? audioCodecs : videoCodecs;
+        unsigned dynamicPayload = 96;
+        for (const auto& accountCodec : codecList) {
+            LocalCodecSpec spec;
+            if (!resolveLocalCodecSpec(accountCodec, type, dynamicPayload, spec))
+                continue;
+
+            if (findRemotePayloadType(media, spec.encName, spec.clockRate, spec.channels))
+                return true;
+
+            if (spec.payload < 96 && offerHasFormat(media, spec.payload))
+                return true;
+        }
+
+        SIP_CORE_WARN("Media#%u: no compatible local codec for enabled %s media",
+                      mediaIdx,
+                      type == MediaType::MEDIA_AUDIO ? "audio" : "video");
+    }
+
+    SIP_CORE_WARN("SDP offer contains no negotiable RTP audio/video media");
+    return false;
+}
 
 pjmedia_sdp_media*
 Sdp::addMediaDescription(const MediaAttribute& mediaAttr, const pjmedia_sdp_media* remoteMedia)
@@ -348,6 +466,16 @@ Sdp::addMediaDescription(const MediaAttribute& mediaAttr, const pjmedia_sdp_medi
 
     const auto& codec_list = (type == MediaType::MEDIA_AUDIO) ? audio_codec_list_
                                                               : video_codec_list_;
+
+    if (answering && codec_list.empty()) {
+        // Producing an answer with no local codecs configured for this media type leads to the
+        // "disabled stream" fallback below. Surface this loudly so the operator can tell it
+        // apart from a genuine "no overlap with offer" mismatch.
+        SIP_CORE_WARN(
+            "[sdp] No local active %s codec configured; answer will advertise a disabled stream",
+            (type == MediaType::MEDIA_AUDIO) ? "audio" : "video");
+    }
+
     std::vector<ResolvedCodec> resolved;
     resolved.reserve(codec_list.size());
 
@@ -383,15 +511,19 @@ Sdp::addMediaDescription(const MediaAttribute& mediaAttr, const pjmedia_sdp_medi
             // RFC 3264 §6.1: for dynamic codecs the answer MUST reuse the offer's PT for the
             // matching codec; for static codecs the PT is fixed by RFC 3551 but the codec must
             // still be listed in the offer's m= line, otherwise the answer is invalid.
-            unsigned remotePt = findRemotePayloadType(remoteMedia,
-                                                      rc.enc_name,
-                                                      rc.clock_rate,
-                                                      rc.channels);
-            if (remotePt == 0 && rc.payload < 96 && offerHasFormat(remoteMedia, rc.payload)) {
+            //
+            // matchedPt is std::optional so a real match of PT 0 (PCMU's static assignment) is
+            // not confused with "no match" — that collision was the original bug behind the
+            // disabled-stream answer for PCMU-only configurations.
+            auto matchedPt = findRemotePayloadType(remoteMedia,
+                                                   rc.enc_name,
+                                                   rc.clock_rate,
+                                                   rc.channels);
+            if (!matchedPt && rc.payload < 96 && offerHasFormat(remoteMedia, rc.payload)) {
                 // Static PT carried in the offer's m= line without an explicit rtpmap entry.
-                remotePt = rc.payload;
+                matchedPt = rc.payload;
             }
-            if (remotePt == 0) {
+            if (!matchedPt) {
                 SIP_CORE_DEBUG(
                     "[sdp] Dropping local codec {:s}/{:d} (PT {:d}) from answer: "
                     "not present in remote offer",
@@ -400,15 +532,15 @@ Sdp::addMediaDescription(const MediaAttribute& mediaAttr, const pjmedia_sdp_medi
                     rc.payload);
                 continue;
             }
-            if (remotePt != rc.payload) {
+            if (*matchedPt != rc.payload) {
                 SIP_CORE_DEBUG(
                     "[sdp] Remapping codec {:s}/{:d} payload {:d} -> {:d} "
                     "to match remote offer",
                     rc.enc_name,
                     rc.clock_rate,
                     rc.payload,
-                    remotePt);
-                rc.payload = remotePt;
+                    *matchedPt);
+                rc.payload = *matchedPt;
             }
         }
 
@@ -549,20 +681,20 @@ Sdp::setTelephoneEventRtpmap(pjmedia_sdp_media* med, const pjmedia_sdp_media* re
     unsigned pt = telephoneEventPayload_;
 
     if (sdpDirection_ == SdpDirection::ANSWER && remoteMedia != nullptr) {
-        unsigned remotePt = findRemoteTelephoneEventPayload(remoteMedia);
-        if (remotePt == 0) {
+        auto remotePt = findRemoteTelephoneEventPayload(remoteMedia);
+        if (!remotePt) {
             // Peer did not offer telephone-event; do not advertise it in the answer, otherwise
             // PJSIP will reject the answer because the format isn't in the offer.
             SIP_CORE_DEBUG("[sdp] Skipping telephone-event in answer: not offered by remote");
             return;
         }
-        if (remotePt != pt) {
+        if (*remotePt != pt) {
             SIP_CORE_DEBUG(
                 "[sdp] Remapping telephone-event payload {:d} -> {:d} to match remote offer",
                 pt,
-                remotePt);
+                *remotePt);
         }
-        pt = remotePt;
+        pt = *remotePt;
     }
 
     auto pt_str = std::to_string(pt);

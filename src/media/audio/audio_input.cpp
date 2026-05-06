@@ -332,6 +332,7 @@ AudioInput::switchInput(const std::string& resource)
                                                                     fileId_);
     }
     fileBuf_.reset();
+    oldGuard.reset();
 
     playingDevice_ = false;
     currentResource_ = resource;

@@ -42,6 +42,7 @@
 #include <map>
 #include <cstdint>
 #include <atomic>
+#include <chrono>
 #include <utility>
 #include <deque>
 
@@ -524,8 +525,17 @@ public:
     {
         return transportRecoveryPending_.load() || connectivityRecoveryInProgress_.load();
     }
+    void rebindCallsToCurrentTransportForConnectivityChange(const char* reason);
     void reinviteActiveCalls();
     void scheduleConnectivityReinviteRetry(const std::shared_ptr<SIPCall>& sipCall);
+    /**
+     * Schedule a delayed follow-up that retries reinviteOnConnectivityChange()
+     * for a single call. Used when the re-INVITE was deferred (PJ_EPENDING /
+     * PJ_EBUSY / SDP-refresh-failed) and there is no other state-change hook
+     * to wake it up. Reuses the same retry budget as scheduleConnectivityReinviteRetry().
+     */
+    void scheduleConnectivityReinviteFollowup(const std::shared_ptr<SIPCall>& sipCall,
+                                              std::chrono::milliseconds delay);
 
     std::string getUserUri() const override;
 
@@ -633,6 +643,12 @@ public:
      * Transport-dependent operations should be skipped or deferred.
      */
     std::atomic<bool> connectivityRecoveryInProgress_ {false};
+    /**
+     * Latched in prepareConnectivityRecovery() and consumed in recoverTransport()
+     * so the duplicate prepareTransportReset() in the head of recoverTransport()
+     * is skipped when the connectivity-prepare step already ran for this event.
+     */
+    std::atomic<bool> prepareTransportResetDone_ {false};
     std::atomic<bool> mainRouteFastProbeEnabled_ {false};
     std::atomic<bool> activeNoRouteFastProbeEnabled_ {false};
     std::atomic<bool> startupMainRouteProbePending_ {false};
@@ -707,6 +723,7 @@ private:
     bool isBenignTransportShutdown(pjsip_transport_state state, pj_status_t status) const;
     void markTransportRebindRequired(const char* reason);
     void prepareTransportReset(const char* reason, bool resetNetworkRuntimeState);
+    void failConnectivityRefreshForActiveCalls(const char* reason, int statusCode);
     void runPostRegisterRecoverySync();
     std::pair<std::string, pj_uint16_t> currentLocalBinding() const;
     void resetViaTransport();

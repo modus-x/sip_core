@@ -200,6 +200,7 @@ public:
     void notifyIncomingCall();
 
     virtual void updatePreference(AudioPreference& pref, int index, AudioDeviceType type) = 0;
+    void notifyDevicesChanged() { devicesChanged(); }
 
 protected:
     /**

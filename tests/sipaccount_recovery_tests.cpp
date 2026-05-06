@@ -1,4 +1,5 @@
 #include "sip/sipaccount.h"
+#include "sip/sipcall.h"
 
 #include <cstdlib>
 #include <deque>
@@ -21,6 +22,39 @@ expect_true(bool condition, const std::string& message)
 {
     if (!condition)
         fail(message);
+}
+
+void
+test_connectivity_dialog_refresh_success_classification()
+{
+    expect_true(SIPCall::isConnectivityDialogRefreshSuccessCode(PJSIP_SC_OK),
+                "200 must complete connectivity dialog refresh");
+    expect_true(SIPCall::isConnectivityDialogRefreshSuccessCode(PJSIP_SC_ACCEPTED),
+                "202 must complete connectivity dialog refresh");
+    expect_true(!SIPCall::isConnectivityDialogRefreshSuccessCode(PJSIP_SC_RINGING),
+                "180 must not complete connectivity dialog refresh");
+    expect_true(!SIPCall::isConnectivityDialogRefreshSuccessCode(PJSIP_SC_MULTIPLE_CHOICES),
+                "300 must not be classified as refresh success");
+}
+
+void
+test_connectivity_dialog_refresh_failure_classification()
+{
+    expect_true(SIPCall::isConnectivityDialogRefreshFinalFailureCode(
+                    PJSIP_SC_TSX_TRANSPORT_ERROR),
+                "transport error must fail connectivity dialog refresh");
+    expect_true(SIPCall::isConnectivityDialogRefreshFinalFailureCode(PJSIP_SC_REQUEST_TIMEOUT),
+                "408 must fail connectivity dialog refresh");
+    expect_true(SIPCall::isConnectivityDialogRefreshFinalFailureCode(
+                    PJSIP_SC_CALL_TSX_DOES_NOT_EXIST),
+                "481 must fail connectivity dialog refresh");
+    expect_true(SIPCall::isConnectivityDialogRefreshFinalFailureCode(
+                    PJSIP_SC_MULTIPLE_CHOICES),
+                "3xx final response must fail connectivity dialog refresh");
+    expect_true(!SIPCall::isConnectivityDialogRefreshFinalFailureCode(PJSIP_SC_OK),
+                "200 must not fail connectivity dialog refresh");
+    expect_true(!SIPCall::isConnectivityDialogRefreshFinalFailureCode(PJSIP_SC_RINGING),
+                "180 must not fail connectivity dialog refresh");
 }
 
 void
@@ -242,6 +276,8 @@ test_active_no_route_fast_probe_status_transitions()
 int
 main()
 {
+    test_connectivity_dialog_refresh_success_classification();
+    test_connectivity_dialog_refresh_failure_classification();
     test_transient_options_classification();
     test_hard_options_classification();
     test_options_recovery_suppression_window();

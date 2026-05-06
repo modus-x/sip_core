@@ -42,6 +42,7 @@
 #include "noncopyable.h"
 
 #include <atomic>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -250,9 +251,25 @@ public:
     const std::string& getContactHeader() const;
 
     void setSipTransport(const std::shared_ptr<SipTransport>& transport,
-                         const std::string& contactHdr = {});
+                         const std::string& contactHdr = {},
+                         bool keepRebindPending = false);
 
     std::shared_ptr<SipTransport> getTransport() { return sipTransport_; }
+
+    void markConnectivityTransportRebindPending(const char* reason);
+    bool isConnectivityDialogRefreshPending() const;
+    bool isConnectivityDialogRefreshAwaitingResponse() const;
+    static bool isConnectivityDialogRefreshSuccessCode(int statusCode);
+    static bool isConnectivityDialogRefreshFinalFailureCode(int statusCode);
+    void onConnectivityReinviteFinalResponse(int statusCode);
+    void forceConnectivityDialogRefreshFailure(const char* reason, int statusCode);
+
+    /**
+     * Refresh the SDP's published IP/port based on the current account transport
+     * binding before sending a re-INVITE on connectivity change. Reserves new
+     * RTP ports via prepareLocalMediaReservations(). Returns true on success.
+     */
+    bool refreshSdpForConnectivityChange();
 
     /**
      * Send a re-INVITE to refresh the media path after a connectivity change.
@@ -377,6 +394,13 @@ private:
 #ifdef ENABLE_VIDEO
     void applyLocalHoldVideoBlackout(bool enable, bool startSessionsIfNeeded);
 #endif
+    bool prepareConnectivityTransportForAnswer();
+    void scheduleDeferredConnectivityAnswer();
+    void scheduleDeferredConnectivityAnswer(const std::vector<libsip_core::MediaMap>& mediaList);
+    void beginConnectivityDialogRefresh(const char* reason, bool awaitingResponse);
+    void clearConnectivityDialogRefreshState();
+    void scheduleConnectivityDialogRefreshWatchdog(uint64_t generation, const std::string& reason);
+    void onConnectivityDialogRefreshWatchdog(uint64_t generation, const std::string& reason);
 
     void startIceMedia();
     void onIceNegoSucceed();
@@ -386,6 +410,12 @@ private:
 
     mutable std::mutex mediaLifecycleMtx_ {};
     std::atomic_bool localHangupInProgress_ {false};
+    std::atomic_bool connectivityTransportRebindPending_ {false};
+    std::atomic_bool connectivityDialogRefreshPending_ {false};
+    std::atomic_bool connectivityDialogRefreshAwaitingResponse_ {false};
+    std::atomic_bool connectivityAnswerRetryScheduled_ {false};
+    std::atomic<uint64_t> sipTransportGeneration_ {0};
+    std::atomic<uint64_t> connectivityDialogRefreshGeneration_ {0};
 
     /**
      * Transfer method used for both type of transfer
