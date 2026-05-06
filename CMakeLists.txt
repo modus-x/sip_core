@@ -4,7 +4,7 @@ cmake_policy(VERSION 3.25...3.31)
 
 project(
   sip_core
-  VERSION 0.18.11
+  VERSION 0.18.12
   LANGUAGES C CXX)
 
 set(BUILD_NUMBER 1)
@@ -841,6 +841,9 @@ if(BUILD_TESTING)
   add_executable(sipaccount_recovery_tests tests/sipaccount_recovery_tests.cpp)
   target_link_libraries(sipaccount_recovery_tests PRIVATE ${PROJECT_NAME})
   add_test(NAME sipaccount_recovery_tests COMMAND sipaccount_recovery_tests)
+  add_executable(sdp_offer_validation_tests tests/sdp_offer_validation_tests.cpp)
+  target_link_libraries(sdp_offer_validation_tests PRIVATE ${PROJECT_NAME})
+  add_test(NAME sdp_offer_validation_tests COMMAND sdp_offer_validation_tests)
 
   add_executable(socket_pair_reservation_tests tests/socket_pair_reservation_tests.cpp)
   target_link_libraries(socket_pair_reservation_tests PRIVATE ${PROJECT_NAME})
