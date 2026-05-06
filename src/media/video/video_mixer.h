@@ -177,30 +177,15 @@ public:
 
     std::shared_ptr<SinkClient>& getSink() { return sink_; }
 
+    // Definitions live in video_mixer.cpp because they touch
+    // audioOnlyRenderSources_, whose value type std::unique_ptr<VideoMixerSource>
+    // requires the complete (private) VideoMixerSource definition for its
+    // destructor.
     void addAudioOnlySource(const std::string& callId,
                             const std::string& streamId,
-                            const std::string& overlayLabel = {})
-    {
-        std::unique_lock lock(rwMutex_);
-        auto key = AudioOnlySourceKey {callId, streamId};
-        auto [it, inserted] = audioOnlySources_.try_emplace(
-            key, AudioOnlySource {callId, streamId, overlayLabel});
-        if (!inserted) {
-            it->second.callId = callId;
-            it->second.streamId = streamId;
-            if (!overlayLabel.empty())
-                it->second.overlayLabel = overlayLabel;
-        }
-        updateLayout();
-    }
+                            const std::string& overlayLabel = {});
 
-    void removeAudioOnlySource(const std::string& callId, const std::string& streamId)
-    {
-        std::unique_lock lock(rwMutex_);
-        if (audioOnlySources_.erase({callId, streamId})) {
-            updateLayout();
-        }
-    }
+    void removeAudioOnlySource(const std::string& callId, const std::string& streamId);
 
     void attachVideo(Observable<std::shared_ptr<MediaFrame>>* frame,
                      const std::string& callId,
@@ -334,6 +319,11 @@ private:
     int voiceInactiveHoldMs_ {500};
 
     AudioOnlySources audioOnlySources_;
+    // Persistent render-side state for each audio-only placeholder so that
+    // VideoMixer::process() can cache geometry/border filter across frames
+    // and only recompute when the layout actually changes (mirrors the
+    // needsUpdate gating used for video sources).
+    std::map<AudioOnlySourceKey, std::unique_ptr<VideoMixerSource>> audioOnlyRenderSources_;
     std::string activeStream_ {};
 
     // Stable source ordering: maps streamId -> first-seen insertion index.

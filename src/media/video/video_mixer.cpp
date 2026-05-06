@@ -573,6 +573,38 @@ VideoMixer::expireVoiceHoldsLocked(std::chrono::steady_clock::time_point now)
 }
 
 void
+VideoMixer::addAudioOnlySource(const std::string& callId,
+                               const std::string& streamId,
+                               const std::string& overlayLabel)
+{
+    std::unique_lock lock(rwMutex_);
+    auto key = AudioOnlySourceKey {callId, streamId};
+    auto [it, inserted] = audioOnlySources_.try_emplace(
+        key, AudioOnlySource {callId, streamId, overlayLabel});
+    if (!inserted) {
+        it->second.callId = callId;
+        it->second.streamId = streamId;
+        if (!overlayLabel.empty())
+            it->second.overlayLabel = overlayLabel;
+    }
+    updateLayout();
+}
+
+void
+VideoMixer::removeAudioOnlySource(const std::string& callId, const std::string& streamId)
+{
+    std::unique_lock lock(rwMutex_);
+    auto key = AudioOnlySourceKey {callId, streamId};
+    if (audioOnlySources_.erase(key)) {
+        // Drop the cached render-side state in lock-step with the metadata
+        // entry so the unique_ptr<VideoMixerSource> destructor (which needs
+        // the complete VideoMixerSource type) runs from this .cpp.
+        audioOnlyRenderSources_.erase(key);
+        updateLayout();
+    }
+}
+
+void
 VideoMixer::attachVideo(Observable<std::shared_ptr<MediaFrame>>* frame,
                         const std::string& callId,
                         const std::string& streamId)
@@ -926,15 +958,27 @@ VideoMixer::process()
         if (!activeStream_.empty())
             i++; // reserve 0 index place for active stream
 
-        // first, iterate and draw audioOnlySources_
-        for (auto& [_, audioOnlySource] : audioOnlySources_) {
+        // First, iterate and draw audioOnlySources_. Each placeholder uses a
+        // persistent VideoMixerSource cached in audioOnlyRenderSources_ so
+        // that calc_position() / initBorderFilter() only run when the layout
+        // actually changes (or the cached geometry is still uninitialized).
+        // Without this, every audio-only placeholder would rebuild its FFmpeg
+        // border/text filter graph on every mixer frame — wasting CPU and
+        // flooding the logs while a participant is held in the conference.
+        for (auto& [key, audioOnlySource] : audioOnlySources_) {
             /* thread stop pending? */
             if (!loop_.isRunning())
                 return;
 
-            auto audioSource = std::make_unique<VideoMixer::VideoMixerSource>();
-            audioSource->hasVideo = false;
-            audioSource->overlayLabel = audioOnlySource.overlayLabel;
+            auto& renderSource = audioOnlyRenderSources_[key];
+            if (!renderSource) {
+                renderSource = std::unique_ptr<VideoMixer::VideoMixerSource>(
+                    new VideoMixer::VideoMixerSource);
+                renderSource->hasVideo = false;
+            }
+            // Refresh in case the metadata entry was updated via
+            // addAudioOnlySource() since the last frame.
+            renderSource->overlayLabel = audioOnlySource.overlayLabel;
 
             bool voiceActive = false;
             if (auto itVA = voiceActivitySnapshot.find(audioOnlySource.streamId);
@@ -949,22 +993,24 @@ VideoMixer::process()
                 continue;
             }
 
-            // Audio-only source geometry is computed each frame because we instantiate temporary
-            // sources for placeholders.
-            processSource(audioSource,
-                          audioOnlyFrame,
-                          i,
-                          audioOnlySource.streamId,
-                          voiceActive,
-                          audioOnlySource.callId);
-            render_frame(output, audioOnlyFrame, audioSource, needsUpdate);
+            const bool aoNeedsUpdate = needsUpdate || renderSource->w == 0
+                                       || renderSource->h == 0;
+            if (aoNeedsUpdate) {
+                processSource(renderSource,
+                              audioOnlyFrame,
+                              i,
+                              audioOnlySource.streamId,
+                              voiceActive,
+                              audioOnlySource.callId);
+            }
+            render_frame(output, audioOnlyFrame, renderSource, aoNeedsUpdate);
 
             sourcesInfo.emplace_back(SourceInfo {{},
-                                                 audioSource->x.load(),
-                                                 audioSource->y.load(),
-                                                 audioSource->w,
-                                                 audioSource->h,
-                                                 audioSource->hasVideo,
+                                                 renderSource->x.load(),
+                                                 renderSource->y.load(),
+                                                 renderSource->w,
+                                                 renderSource->h,
+                                                 renderSource->hasVideo,
                                                  audioOnlySource.callId,
                                                  audioOnlySource.streamId});
             i++;

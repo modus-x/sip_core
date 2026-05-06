@@ -403,7 +403,13 @@ VideoRtpSession::restartSender()
     // ensure that start has been called before restart
     if (not socketPair_)
         return;
-    if (conference_) {
+    // Outside of local hold blackout, the conference mixer drives the sender
+    // and the muted-keepalive thread must be stopped before the encoder is
+    // recreated. While in hold blackout we deliberately keep the thread alive
+    // so the held peer continues to receive decodable black frames across
+    // the encoder restart; setupConferenceVideoPipeline(SEND) below will
+    // skip the mixer attach for the same reason.
+    if (conference_ && !localHoldBlackoutActive_) {
         stopMutedKeepAliveLocked(lock);
     }
 
@@ -717,6 +723,27 @@ VideoRtpSession::enterLocalHoldBlackout(bool startSessionIfNeeded)
 
     setMuted(true, Direction::SEND);
 
+#ifndef VIDEO_CLIENT_INPUT
+    // For conference participants the sender is normally driven by the
+    // conference video mixer, and setMuted()'s camera/keepalive paths are
+    // skipped (see the !conference_ guard in setMuted() and the early return
+    // in ensureMutedKeepAliveLocked()). Detach the sender from the mixer so
+    // that decodable black frames — first the preroll, then the muted
+    // keepalive at ~10 fps — reach the held peer instead of normal mixer
+    // video right up until the re-INVITE renegotiation.
+    {
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
+        if (conference_ && sender_) {
+            if (videoMixer_)
+                videoMixer_->detach(sender_.get());
+
+            if (holdBlackoutPrerollPending_)
+                sendHoldBlackPrerollLocked();
+            ensureMutedKeepAliveLocked();
+        }
+    }
+#endif
+
     if (startSessionIfNeeded) {
         start();
     }
@@ -729,6 +756,16 @@ VideoRtpSession::leaveLocalHoldBlackout()
     localHoldBlackoutActive_ = false;
     holdBlackoutPrerollPending_ = false;
     stopMutedKeepAliveLocked(lock);
+
+    // Conference participant: re-bind the sender to the mixer so it resumes
+    // receiving real conference frames between unhold and the re-INVITE
+    // response. The follow-up SDP renegotiation will create a fresh sender
+    // via startSender()/setupConferenceVideoPipeline(SEND); this just bridges
+    // the gap so the peer is not stuck on black past the unhold request.
+    if (conference_ && sender_ && videoMixer_) {
+        videoMixer_->attach(sender_.get());
+        sender_->forceKeyFrame();
+    }
 }
 
 void
@@ -865,8 +902,12 @@ void
 VideoRtpSession::ensureMutedKeepAliveLocked()
 {
 #ifndef VIDEO_CLIENT_INPUT
-    // Keep this behavior scoped to standard 1:1 calls.
-    if (conference_) {
+    // For conference participants, the conference video mixer is normally the
+    // input source for the sender, so the muted keepalive thread is inhibited.
+    // The exception is local hold blackout: while the participant is held we
+    // detach from the mixer (see enterLocalHoldBlackout()) and use this thread
+    // to deliver decodable black frames to the held peer.
+    if (conference_ && !localHoldBlackoutActive_) {
         return;
     }
 
@@ -997,7 +1038,11 @@ VideoRtpSession::setupConferenceVideoPipeline(Conference& conference, Direction 
             // Swap sender from local video to conference video mixer
             if (videoLocal_)
                 videoLocal_->detach(sender_.get());
-            if (videoMixer_)
+            // Skip attaching to the mixer when the sender is in local hold
+            // blackout: the muted-keepalive thread is delivering decodable
+            // black frames to the peer and mixer frames must not interleave
+            // until leaveLocalHoldBlackout() re-attaches.
+            if (videoMixer_ && !localHoldBlackoutActive_)
                 videoMixer_->attach(sender_.get());
         } else {
             SIP_CORE_WARN("[%p] no sender", this);
