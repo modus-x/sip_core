@@ -2392,9 +2392,10 @@ SIPCall::onEarlyAnswered()
     runOnMainThread([w = weak()] {
         if (auto shared = w.lock()) {
             if (shared->getConnectionState() != ConnectionState::CONNECTED) {
-                // Set ACTIVE/RINGING — emits "RINGING" to UI, not "CURRENT".
-                // duration_start_ is NOT set (state listener only fires on CONNECTED).
-                shared->setState(CallState::ACTIVE, ConnectionState::RINGING);
+                // Do NOT mutate the call state on 183 Session Progress.
+                // The client must not observe any status change (and certainly
+                // not "CURRENT") until the real 200 OK arrives in onAnswered().
+                // Only kick off the media path so early-media RTP can play.
                 if (not shared->isSubcall()) {
                     // Start audio (addAudio + stopTone) — same media path as onAnswered.
                     Manager::instance().peerAnsweredCall(*shared);

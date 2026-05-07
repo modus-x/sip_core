@@ -33,6 +33,7 @@
 #include "accel.h"
 #endif
 #include "connectivity/sip_utils.h"
+#include "string_utils.h"
 #include "video_source_utils.h"
 
 #include <cmath>
@@ -587,6 +588,32 @@ VideoMixer::addAudioOnlySource(const std::string& callId,
         if (!overlayLabel.empty())
             it->second.overlayLabel = overlayLabel;
     }
+
+    // Eagerly create the render-side state so the placeholder gets a
+    // stable grid slot at insertion time. Inherit the slot of the
+    // corresponding video stream when it exists so that a participant
+    // transitioning from video to audio-only (e.g. when held by the host)
+    // keeps the same position in the grid instead of jumping to the front.
+    auto& renderSource = audioOnlyRenderSources_[key];
+    if (!renderSource) {
+        renderSource = std::unique_ptr<VideoMixerSource>(new VideoMixerSource);
+        renderSource->hasVideo = false;
+        // Audio-only stream IDs are derived by replacing "video" with
+        // "audio" (see VideoRtpSession::stopReceiver). Reverse that so we
+        // can find the previous video streamId in stableOrder_.
+        auto videoStreamId = streamId;
+        string_replace(videoStreamId, "audio", "video");
+        if (auto orderIt = stableOrder_.find(videoStreamId);
+            orderIt != stableOrder_.end()) {
+            renderSource->stableIndex = orderIt->second;
+        } else {
+            renderSource->stableIndex = nextStableIndex_++;
+            // Register under the video streamId so a later video re-attach
+            // (e.g. after unhold) lands on the same slot via attached().
+            stableOrder_[videoStreamId] = renderSource->stableIndex;
+        }
+    }
+
     updateLayout();
 }
 
@@ -958,75 +985,106 @@ VideoMixer::process()
         if (!activeStream_.empty())
             i++; // reserve 0 index place for active stream
 
-        // First, iterate and draw audioOnlySources_. Each placeholder uses a
+        // Build a stableIndex-sorted iteration order across video sources
+        // and audio-only placeholders. Without this, audio-only placeholders
+        // are always rendered before any video source, which makes a held
+        // participant jump to the front of the grid the moment its video
+        // is replaced by the audio-only placeholder. Sorting both kinds by
+        // stableIndex preserves the pre-hold ordering: audio-only sources
+        // inherit the held participant's video slot in addAudioOnlySource()
+        // (and the same slot is reused by attached() on unhold).
+        struct PendingItem
+        {
+            int stableIndex;
+            bool isAudioOnly;
+            std::unique_ptr<VideoMixer::VideoMixerSource>* uptr;
+            AudioOnlySource* audioOnlySource;
+        };
+        std::vector<PendingItem> pending;
+        pending.reserve(sources_.size() + audioOnlySources_.size());
+        for (auto& src : sources_) {
+            pending.push_back({src->stableIndex, false, &src, nullptr});
+        }
+        for (auto& [key, audioOnlySource] : audioOnlySources_) {
+            auto& renderSource = audioOnlyRenderSources_[key];
+            if (!renderSource) {
+                // Defensive lazy init in case process() runs before any
+                // addAudioOnlySource() has populated the render-side map.
+                renderSource = std::unique_ptr<VideoMixer::VideoMixerSource>(
+                    new VideoMixer::VideoMixerSource);
+                renderSource->hasVideo = false;
+                renderSource->stableIndex = nextStableIndex_++;
+            }
+            pending.push_back(
+                {renderSource->stableIndex, true, &renderSource, &audioOnlySource});
+        }
+        std::sort(pending.begin(), pending.end(),
+                  [](const PendingItem& a, const PendingItem& b) {
+                      return a.stableIndex < b.stableIndex;
+                  });
+
+        // Iterate and render in stableIndex order. Each placeholder uses a
         // persistent VideoMixerSource cached in audioOnlyRenderSources_ so
         // that calc_position() / initBorderFilter() only run when the layout
         // actually changes (or the cached geometry is still uninitialized).
-        // Without this, every audio-only placeholder would rebuild its FFmpeg
-        // border/text filter graph on every mixer frame — wasting CPU and
-        // flooding the logs while a participant is held in the conference.
-        for (auto& [key, audioOnlySource] : audioOnlySources_) {
+        // Without that, every audio-only placeholder would rebuild its
+        // FFmpeg border/text filter graph on every mixer frame — wasting
+        // CPU and flooding the logs while a participant is held.
+        for (auto& item : pending) {
             /* thread stop pending? */
             if (!loop_.isRunning())
                 return;
 
-            auto& renderSource = audioOnlyRenderSources_[key];
-            if (!renderSource) {
-                renderSource = std::unique_ptr<VideoMixer::VideoMixerSource>(
-                    new VideoMixer::VideoMixerSource);
-                renderSource->hasVideo = false;
-            }
-            // Refresh in case the metadata entry was updated via
-            // addAudioOnlySource() since the last frame.
-            renderSource->overlayLabel = audioOnlySource.overlayLabel;
+            auto& src = *item.uptr;
 
-            bool voiceActive = false;
-            if (auto itVA = voiceActivitySnapshot.find(audioOnlySource.streamId);
-                itVA != voiceActivitySnapshot.end())
-                voiceActive = itVA->second;
+            if (item.isAudioOnly) {
+                auto& audioOnlySource = *item.audioOnlySource;
+                // Refresh in case the metadata entry was updated via
+                // addAudioOnlySource() since the last frame.
+                src->overlayLabel = audioOnlySource.overlayLabel;
 
-            if (!audioOnlyFrame || !audioOnlyFrame->pointer()) {
-                SIP_CORE_WARN("[mixer:%s] No placeholder frame for audio-only source %s",
-                              id_.c_str(),
-                              audioOnlySource.streamId.c_str());
+                bool voiceActive = false;
+                if (auto itVA = voiceActivitySnapshot.find(audioOnlySource.streamId);
+                    itVA != voiceActivitySnapshot.end())
+                    voiceActive = itVA->second;
+
+                if (!audioOnlyFrame || !audioOnlyFrame->pointer()) {
+                    SIP_CORE_WARN("[mixer:%s] No placeholder frame for audio-only source %s",
+                                  id_.c_str(),
+                                  audioOnlySource.streamId.c_str());
+                    i++;
+                    continue;
+                }
+
+                const bool aoNeedsUpdate = needsUpdate || src->w == 0 || src->h == 0;
+                if (aoNeedsUpdate) {
+                    processSource(src,
+                                  audioOnlyFrame,
+                                  i,
+                                  audioOnlySource.streamId,
+                                  voiceActive,
+                                  audioOnlySource.callId);
+                }
+                render_frame(output, audioOnlyFrame, src, aoNeedsUpdate);
+
+                sourcesInfo.emplace_back(SourceInfo {{},
+                                                     src->x.load(),
+                                                     src->y.load(),
+                                                     src->w,
+                                                     src->h,
+                                                     src->hasVideo,
+                                                     audioOnlySource.callId,
+                                                     audioOnlySource.streamId});
                 i++;
                 continue;
             }
 
-            const bool aoNeedsUpdate = needsUpdate || renderSource->w == 0
-                                       || renderSource->h == 0;
-            if (aoNeedsUpdate) {
-                processSource(renderSource,
-                              audioOnlyFrame,
-                              i,
-                              audioOnlySource.streamId,
-                              voiceActive,
-                              audioOnlySource.callId);
-            }
-            render_frame(output, audioOnlyFrame, renderSource, aoNeedsUpdate);
-
-            sourcesInfo.emplace_back(SourceInfo {{},
-                                                 renderSource->x.load(),
-                                                 renderSource->y.load(),
-                                                 renderSource->w,
-                                                 renderSource->h,
-                                                 renderSource->hasVideo,
-                                                 audioOnlySource.callId,
-                                                 audioOnlySource.streamId});
-            i++;
-        }
-
-        // add video sources
-        for (auto& x : sources_) {
-            /* thread stop pending? */
-            if (!loop_.isRunning())
-                return;
-
-            if (x->w == 0 || x->h == 0)
+            // Video source path.
+            if (src->w == 0 || src->h == 0)
                 needsUpdate = true;
 
             StreamInfo sinfo = {};
-            if (auto itSI = streamInfoCache.find(x->source); itSI != streamInfoCache.end())
+            if (auto itSI = streamInfoCache.find(src->source); itSI != streamInfoCache.end())
                 sinfo = itSI->second;
 
             bool voiceActive = false;
@@ -1036,17 +1094,17 @@ VideoMixer::process()
 
             // make rendered frame temporarily unavailable for update()
             // to avoid concurrent access.
-            std::shared_ptr<VideoFrame> input = x->getRenderFrame();
+            std::shared_ptr<VideoFrame> input = src->getRenderFrame();
 
             // Skip processing if input frame is null (can happen when video is just attached
             // or when all participants turn off video)
             if (!input) {
-                SIP_CORE_DBG("[mixer:%s] No frame yet for source %p", id_.c_str(), x->source);
-                sourcesInfo.emplace_back(SourceInfo {x->source,
-                                                     x->x.load(),
-                                                     x->y.load(),
-                                                     x->w,
-                                                     x->h,
+                SIP_CORE_DBG("[mixer:%s] No frame yet for source %p", id_.c_str(), src->source);
+                sourcesInfo.emplace_back(SourceInfo {src->source,
+                                                     src->x.load(),
+                                                     src->y.load(),
+                                                     src->w,
+                                                     src->h,
                                                      false,
                                                      sinfo.callId,
                                                      sinfo.streamId});
@@ -1054,39 +1112,38 @@ VideoMixer::process()
                 continue;
             }
 
-            bool geometryChanged = false;
             if (input->height() and input->width()) {
-                if (input->width() != x->lastLayoutFrameWidth
-                    || input->height() != x->lastLayoutFrameHeight
-                    || input->getOrientation() != x->lastLayoutOrientation) {
+                if (input->width() != src->lastLayoutFrameWidth
+                    || input->height() != src->lastLayoutFrameHeight
+                    || input->getOrientation() != src->lastLayoutOrientation) {
                     needsUpdate = true;
-                    x->lastLayoutFrameWidth = input->width();
-                    x->lastLayoutFrameHeight = input->height();
-                    x->lastLayoutOrientation = input->getOrientation();
+                    src->lastLayoutFrameWidth = input->width();
+                    src->lastLayoutFrameHeight = input->height();
+                    src->lastLayoutOrientation = input->getOrientation();
                 }
             }
 
             if (needsUpdate)
-                processSource(x, input, i, sinfo.streamId, voiceActive, sinfo.callId);
+                processSource(src, input, i, sinfo.streamId, voiceActive, sinfo.callId);
 
             bool frameRendered = false;
-            if (x->w > 0 and x->h > 0 and input->height() and input->width()) {
-                frameRendered = render_frame(output, input, x, needsUpdate);
+            if (src->w > 0 and src->h > 0 and input->height() and input->width()) {
+                frameRendered = render_frame(output, input, src, needsUpdate);
             } else if (input->height() == 0 or input->width() == 0) {
-                SIP_CORE_WARN("[mixer:%s] Nothing to render for %p", id_.c_str(), x->source);
+                SIP_CORE_WARN("[mixer:%s] Nothing to render for %p", id_.c_str(), src->source);
             }
 
-            if (frameRendered != x->hasVideo) {
-                x->hasVideo = frameRendered;
+            if (frameRendered != src->hasVideo) {
+                src->hasVideo = frameRendered;
                 layoutInvalidated = true;
             }
 
-            sourcesInfo.emplace_back(SourceInfo {x->source,
-                                                 x->x.load(),
-                                                 x->y.load(),
-                                                 x->w,
-                                                 x->h,
-                                                 x->hasVideo,
+            sourcesInfo.emplace_back(SourceInfo {src->source,
+                                                 src->x.load(),
+                                                 src->y.load(),
+                                                 src->w,
+                                                 src->h,
+                                                 src->hasVideo,
                                                  sinfo.callId,
                                                  sinfo.streamId});
 
