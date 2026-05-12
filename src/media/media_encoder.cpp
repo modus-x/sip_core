@@ -847,8 +847,12 @@ MediaEncoder::writeContainerToRtp(uint8_t* buf, int buf_size)
         } else {
             encoderCtx->sample_fmt = AV_SAMPLE_FMT_S16;
             encoderCtx->sample_rate = std::max(8000, audioOpts_.sampleRate);
+            if (outputCodec->id == AV_CODEC_ID_OPUS)
+                encoderCtx->sample_rate = 48000;
             encoderCtx->time_base = AVRational {1, encoderCtx->sample_rate};
-            if (audioOpts_.nbChannels > 2 || audioOpts_.nbChannels < 1) {
+            if (outputCodec->id == AV_CODEC_ID_OPUS) {
+                encoderCtx->ch_layout.nb_channels = 1;
+            } else if (audioOpts_.nbChannels > 2 || audioOpts_.nbChannels < 1) {
                 encoderCtx->ch_layout.nb_channels = std::clamp(audioOpts_.nbChannels, 1, 2);
                 SIP_CORE_ERR() << "[" << encoderName
                                << "] Clamping invalid channel count: " << audioOpts_.nbChannels
@@ -857,8 +861,11 @@ MediaEncoder::writeContainerToRtp(uint8_t* buf, int buf_size)
                 encoderCtx->ch_layout.nb_channels = audioOpts_.nbChannels;
             }
             av_channel_layout_default(&encoderCtx->ch_layout, encoderCtx->ch_layout.nb_channels);
-            if (audioOpts_.frameSize) {
-                encoderCtx->frame_size = audioOpts_.frameSize;
+            const auto frameSize = outputCodec->id == AV_CODEC_ID_OPUS
+                                       ? encoderCtx->sample_rate / 50
+                                       : audioOpts_.frameSize;
+            if (frameSize) {
+                encoderCtx->frame_size = frameSize;
                 SIP_CORE_DBG() << "[" << encoderName << "] Frame size " << encoderCtx->frame_size;
             } else {
                 SIP_CORE_WARN() << "[" << encoderName << "] Frame size not set";
@@ -1304,10 +1311,19 @@ MediaEncoder::enableAccel(bool enableAccel)
     void
     MediaEncoder::initOpus(AVCodecContext* encoderCtx)
     {
+        encoderCtx->sample_rate = 48000;
+        encoderCtx->time_base = AVRational {1, encoderCtx->sample_rate};
+        av_channel_layout_uninit(&encoderCtx->ch_layout);
+        av_channel_layout_default(&encoderCtx->ch_layout, 1);
+        encoderCtx->frame_size = encoderCtx->sample_rate / 50;
+        encoderCtx->bit_rate = 40000;
+        encoderCtx->cutoff = 12000; // Super-wideband, matching common SIP Opus/48000/1 use.
+
         // Enable FEC support by default with 10% packet loss
         av_opt_set_int(encoderCtx, "fec", fecEnabled_ ? 1 : 0, AV_OPT_SEARCH_CHILDREN);
         av_opt_set_int(encoderCtx, "packet_loss", 10, AV_OPT_SEARCH_CHILDREN);
         av_opt_set(encoderCtx, "application", "voip", AV_OPT_SEARCH_CHILDREN);
+        av_opt_set_double(encoderCtx, "frame_duration", 20.0, AV_OPT_SEARCH_CHILDREN);
         encoderCtx->compression_level = 10;
     }
 

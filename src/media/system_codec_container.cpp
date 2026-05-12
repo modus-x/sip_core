@@ -102,9 +102,9 @@ SystemCodecContainer::initCodecConfig()
                                                "opus",
                                                "libopus",
                                                CODEC_ENCODER_DECODER,
-                                               0,
+                                               40,
                                                48000,
-                                               2,
+                                               1,
                                                104),
 
         std::make_shared<SystemAudioCodecInfo>(AV_CODEC_ID_PCM_ALAW,
