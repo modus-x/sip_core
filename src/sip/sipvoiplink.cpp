@@ -436,12 +436,7 @@ transaction_request_cb(pjsip_rx_data* rdata)
                                      : std::vector<std::shared_ptr<AccountCodecInfo>> {};
         if (!Sdp::hasNegotiableMedia(r_sdp, audioCodecs, videoCodecs)) {
             SIP_CORE_WARN("Incoming INVITE offer has no negotiable media; refusing call");
-            try_respond_stateless(endpt_,
-                                  rdata,
-                                  PJSIP_SC_NOT_ACCEPTABLE_HERE,
-                                  NULL,
-                                  NULL,
-                                  NULL);
+            try_respond_stateless(endpt_, rdata, PJSIP_SC_NOT_ACCEPTABLE_HERE, NULL, NULL, NULL);
             return PJ_FALSE;
         }
     }
@@ -614,12 +609,8 @@ transaction_request_cb(pjsip_rx_data* rdata)
     }
 
     if (account->isDND()) {
-        const pj_str_t message = CONST_PJ_STR(
-            "Call was declined because user is in DND state");
-        if (pjsip_inv_end_session(call->inviteSession_.get(),
-                                    PJSIP_SC_DECLINE,
-                                    &message,
-                                    &tdata)) {
+        const pj_str_t message = CONST_PJ_STR("Call was declined because user is in DND state");
+        if (pjsip_inv_end_session(call->inviteSession_.get(), PJSIP_SC_DECLINE, &message, &tdata)) {
             SIP_CORE_ERR("Could not create answer DECLINE");
             return PJ_FALSE;
         }
@@ -1511,6 +1502,13 @@ transaction_state_changed_cb(pjsip_inv_session* inv, pjsip_transaction* tsx, pjs
 #ifdef DEBUG_SIP_REQUEST_MSG
     processInviteResponseHelper(inv, event);
 #endif
+
+    if (tsx->role == PJSIP_ROLE_UAC && event->body.tsx_state.type == PJSIP_EVENT_RX_MSG
+        && (tsx->status_code == PJSIP_SC_UNAUTHORIZED
+            || tsx->status_code == PJSIP_SC_PROXY_AUTHENTICATION_REQUIRED)) {
+        if (auto account = std::dynamic_pointer_cast<SIPAccount>(call->getAccount().lock()))
+            account->updateCachedDigestAuth(event->body.tsx_state.src.rdata);
+    }
 
     if (tsx->role == PJSIP_ROLE_UAC && tsx->method.id == PJSIP_INVITE_METHOD
         && call->isConnectivityDialogRefreshAwaitingResponse()) {

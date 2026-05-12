@@ -508,6 +508,8 @@ public:
         const std::shared_ptr<SipTransport>& sipTr = {}) override;
 
     void onRegister(pjsip_regc_cbparam* param);
+    void updateCachedDigestAuth(pjsip_rx_data* rdata);
+    void addCachedDigestAuth(pjsip_tx_data* tdata);
 
     virtual void sendMessage(const std::string& to,
                              const std::map<std::string, std::string>& payloads,
@@ -688,7 +690,6 @@ public:
     bool sendStartupMainRouteProbe();
 
 private:
-
     NON_COPYABLE(SIPAccount);
 
     std::shared_ptr<Call> newRegisteredAccountCall(const std::string& id, const std::string& toUrl);
@@ -799,6 +800,21 @@ private:
      * Points to credentials_ members.
      */
     std::vector<pjsip_cred_info> cred_;
+
+    struct CachedDigestAuth
+    {
+        bool isProxy {false};
+        std::string realm;
+        std::string nonce;
+        std::string opaque;
+        std::string algorithm;
+        std::string qop;
+        std::string cnonce;
+        uint32_t nonceCount {0};
+    };
+
+    std::mutex cachedDigestAuthMutex_;
+    std::vector<CachedDigestAuth> cachedDigestAuth_;
 
     /**
      * The TLS settings, used only if tls is chosen as a sip transport.
