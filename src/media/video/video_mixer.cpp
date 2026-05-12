@@ -519,7 +519,7 @@ VideoMixer::process()
         VideoToStream streamInfoCache = getVideoToStreamInfo();
 
         // Snapshot voice activity to avoid locking vocieActivivtyMtx_ under rwMutex_
-        std::map<std::string, bool> voiceActivitySnapshot = getVoiceActivity();
+        std::map<std::string, bool> voiceActivitySnapshot = voiceActivity_;
 
         const int pendingLayoutUpdates = layoutUpdated_.load(std::memory_order_acquire);
         bool needsUpdate = pendingLayoutUpdates > 0;
@@ -527,7 +527,7 @@ VideoMixer::process()
         bool layoutInvalidated = false;
 
         int i = 0;
-        if(hasActive())
+        if(!activeStream_.empty())
             i++; // reserve 0 index place for active stream
 
         // first, iterate and draw audioOnlySources_
@@ -671,7 +671,7 @@ VideoMixer::processSource(std::unique_ptr<VideoMixer::VideoMixerSource>& source,
     auto wantedIndex = i;
     if(currentLayout_ == Layout::ONE_BIG) {
         // show active stream FIRST
-        if (verifyActive(streamId)) {
+        if (activeStream_ == streamId) {
             wantedIndex = 0;
             i--; // negilate i++ further
         }
@@ -684,7 +684,7 @@ VideoMixer::processSource(std::unique_ptr<VideoMixer::VideoMixerSource>& source,
         }
     }
     else {
-        if (currentLayout_ == Layout::ONE_BIG_WITH_SMALL && verifyActive(streamId)) {
+        if (currentLayout_ == Layout::ONE_BIG_WITH_SMALL && activeStream_ == streamId) {
             wantedIndex = 0;
             i--; // negilate i++ further
         }
