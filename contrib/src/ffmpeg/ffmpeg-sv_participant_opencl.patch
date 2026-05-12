@@ -1,7 +1,7 @@
 diff --git a/configure b/configure
 --- a/configure	
 +++ b/configure
-@@ -4080,6 +4080,7 @@ sr_amf_filter_deps="amf"
+@@ -4080,6 +4080,7 @@
  vpp_amf_filter_deps="amf"
  scale_qsv_filter_deps="libmfx"
  scale_qsv_filter_select="qsvvpp"
@@ -12,7 +12,7 @@ diff --git a/configure b/configure
 diff --git a/libavfilter/Makefile b/libavfilter/Makefile
 --- a/libavfilter/Makefile	
 +++ b/libavfilter/Makefile
-@@ -477,6 +477,7 @@ OBJS-$(CONFIG_SCALE_VT_FILTER)               += vf_scale_vt.o scale_eval.o
+@@ -477,6 +477,7 @@
  OBJS-$(CONFIG_SCALE_VULKAN_FILTER)           += vf_scale_vulkan.o vulkan.o vulkan_filter.o
  OBJS-$(CONFIG_SCALE2REF_FILTER)              += vf_scale.o scale_eval.o framesync.o
  OBJS-$(CONFIG_SCALE2REF_NPP_FILTER)          += vf_scale_npp.o scale_eval.o
@@ -23,7 +23,7 @@ diff --git a/libavfilter/Makefile b/libavfilter/Makefile
 diff --git a/libavfilter/allfilters.c b/libavfilter/allfilters.c
 --- a/libavfilter/allfilters.c	
 +++ b/libavfilter/allfilters.c
-@@ -448,6 +448,7 @@ extern const FFFilter ff_vf_scale_vt;
+@@ -448,6 +448,7 @@
  extern const FFFilter ff_vf_scale_vulkan;
  extern const FFFilter ff_vf_scale2ref;
  extern const FFFilter ff_vf_scale2ref_npp;
@@ -35,7 +35,7 @@ diff --git a/libavfilter/opencl/sv_participant.cl b/libavfilter/opencl/sv_partic
 new file mode 100644
 --- /dev/null
 +++ b/libavfilter/opencl/sv_participant.cl
-@@ -0,0 +1,124 @@
+@@ -0,0 +1,313 @@
 +/*
 + * This file is part of FFmpeg.
 + *
@@ -55,7 +55,7 @@ new file mode 100644
 + */
 +
 +float4 scale_lankzos(__read_only  image2d_t src,
-+                     const        int2      src_loc,
++                     const        int2      overlay_loc,
 +                     const        int2      overlay_size,
 +                     __constant   float    *cx,
 +                     __constant   float    *cy,
@@ -68,7 +68,7 @@ new file mode 100644
 +    float2 dst_size = convert_float2(overlay_size);
 +    float2 src_size = convert_float2(get_image_dim(src));
 +
-+    float2 src_coord = (convert_float2(src_loc) + 0.5f) * src_size / dst_size;
++    float2 src_coord = (convert_float2(overlay_loc) + 0.5f) * src_size / dst_size;
 +    int2 src_pos = convert_int2(floor(src_coord - 0.5f));
 +
 +    float4 col = 0.0f;
@@ -76,9 +76,9 @@ new file mode 100644
 +        float4 s = 0.0f;
 +        for (int j = 0; j < flt_size.x; ++j) {
 +            float4 c = read_imagef(src, s_img, src_pos + (int2){flt_size.x/2 - j, flt_size.y/2 - i});
-+            s += c * cx[src_loc.x * flt_size.x + j];
++            s += c * cx[overlay_loc.x * flt_size.x + j];
 +        }
-+        col += s * cy[src_loc.y * flt_size.y + i];
++        col += s * cy[overlay_loc.y * flt_size.y + i];
 +    }
 +
 +    return col;
@@ -87,11 +87,15 @@ new file mode 100644
 +__kernel void overlay(__write_only image2d_t dst,
 +                      __read_only  image2d_t main,
 +                      __read_only  image2d_t overlay,
-+                      const int2 overlay_loc,
-+                      const int2 overlay_size,
-+                      const int border_width,
++                      __read_only  image2d_t overlay_mask,
++                      const float4 mask_color,
++                      const int2   src_subsampling,
++                      const int4   overlay_box,
++                      const int2   overlay_offset,
++                      const int2   overlay_target_size,
++                      const int    border_width,
 +                      const float4 border_color,
-+                      const int dir,
++                      const int    dir,
 +                      __constant   float    *cx,
 +                      __constant   float    *cy,
 +                      const int2      flt_size)
@@ -101,70 +105,255 @@ new file mode 100644
 +
 +    int2 global_loc = (int2)(get_global_id(0), get_global_id(1));
 +
-+    if (global_loc.x < overlay_loc.x + border_width ||
-+        global_loc.y < overlay_loc.y + border_width || 
-+        global_loc.x >= overlay_loc.x + overlay_size.x + 2 * border_width ||
-+        global_loc.y >= overlay_loc.y + overlay_size.y + 2 * border_width) {
++    if (global_loc.x < overlay_box.x - border_width ||
++        global_loc.y < overlay_box.y - border_width ||
++        global_loc.x >= overlay_box.x + overlay_box.z + border_width ||
++        global_loc.y >= overlay_box.y + overlay_box.w + border_width)
++    {
 +        float4 val = read_imagef(main, sampler, global_loc);
 +        write_imagef(dst, global_loc, val);
 +    }
-+    else if (global_loc.x < overlay_loc.x ||
-+             global_loc.y < overlay_loc.y ||
-+             global_loc.x >= overlay_loc.x + overlay_size.x ||
-+             global_loc.y >= overlay_loc.y + overlay_size.y) {
++    else if (global_loc.x < overlay_box.x ||
++             global_loc.y < overlay_box.y ||
++             global_loc.x >= overlay_box.x + overlay_box.z ||
++             global_loc.y >= overlay_box.y + overlay_box.w)
++    {
 +        write_imagef(dst, global_loc, border_color);
 +    }
-+    else {
-+        int2 overlay_rel = global_loc - overlay_loc;
-+        int xin = (dir & 2) ? (overlay_size.y - 1 - overlay_rel.y) : overlay_rel.y;
-+        int yin = (dir & 1) ? (overlay_size.x - 1 - overlay_rel.x) : overlay_rel.x;
-+        overlay_rel.x = xin;
-+        overlay_rel.y = yin;
-+        float4 val = scale_lankzos(overlay, overlay_rel, overlay_size, cx, cy, flt_size);
++    else
++    {
++        int2 overlay_rel = global_loc - (int2)(overlay_box.x, overlay_box.y);
++        float4 mask_val = read_imagef(overlay_mask, sampler, overlay_rel * src_subsampling);
++
++        int2 actual_target_size;
++        if (dir & 4) {
++            actual_target_size = overlay_target_size;
++        } else {
++            actual_target_size = overlay_target_size.yx;
++        }
++
++        float4 overlay_val;
++        if (overlay_rel.x < overlay_offset.x ||
++            overlay_rel.y < overlay_offset.y ||
++            overlay_rel.x >= overlay_offset.x + actual_target_size.x ||
++            overlay_rel.y >= overlay_offset.y + actual_target_size.y)
++        {
++            overlay_val = read_imagef(main, sampler, global_loc);
++        }
++        else {
++            overlay_rel = overlay_rel - overlay_offset;
++
++            int xin = (dir & 2) ? (actual_target_size.y - 1 - overlay_rel.y) : overlay_rel.y;
++            int yin = (dir & 1) ? (actual_target_size.x - 1 - overlay_rel.x) : overlay_rel.x;
++            if (dir & 4) {
++                overlay_rel.x = yin;
++                overlay_rel.y = xin;
++            } else {
++                overlay_rel.x = xin;
++                overlay_rel.y = yin;
++                
++            }
++
++            overlay_val = scale_lankzos(overlay, overlay_rel,
++                                        overlay_target_size, cx, cy, flt_size);
++        }
++        
++        float4 val = mix(overlay_val, mask_color, mask_val.x);
 +        write_imagef(dst, global_loc, val);
++    }
++}
++
++__kernel void overlay_no_mask(__write_only image2d_t dst,
++                      __read_only  image2d_t main,
++                      __read_only  image2d_t overlay,
++                      const int4   overlay_box,
++                      const int2   overlay_offset,
++                      const int2   overlay_target_size,
++                      const int    border_width,
++                      const float4 border_color,
++                      const int    dir,
++                      __constant   float    *cx,
++                      __constant   float    *cy,
++                      const int2   flt_size)
++{
++    const sampler_t sampler = (CLK_NORMALIZED_COORDS_FALSE |
++                               CLK_FILTER_NEAREST | CLK_ADDRESS_NONE);
++
++    int2 global_loc = (int2)(get_global_id(0), get_global_id(1));
++
++    if (global_loc.x < overlay_box.x - border_width ||
++        global_loc.y < overlay_box.y - border_width ||
++        global_loc.x >= overlay_box.x + overlay_box.z + border_width ||
++        global_loc.y >= overlay_box.y + overlay_box.w + border_width)
++    {
++        float4 val = read_imagef(main, sampler, global_loc);
++        write_imagef(dst, global_loc, val);
++    }
++    else if (global_loc.x < overlay_box.x ||
++             global_loc.y < overlay_box.y ||
++             global_loc.x >= overlay_box.x + overlay_box.z ||
++             global_loc.y >= overlay_box.y + overlay_box.w)
++    {
++        write_imagef(dst, global_loc, border_color);
++    }
++    else
++    {
++        int2 overlay_rel = global_loc - (int2)(overlay_box.x, overlay_box.y);
++
++
++        int2 actual_target_size;
++        if (dir & 4) {
++            actual_target_size = overlay_target_size;
++        } else {
++            actual_target_size = overlay_target_size.yx;
++        }
++
++        float4 overlay_val;
++        if (overlay_rel.x < overlay_offset.x ||
++            overlay_rel.y < overlay_offset.y ||
++            overlay_rel.x >= overlay_offset.x + actual_target_size.x ||
++            overlay_rel.y >= overlay_offset.y + actual_target_size.y)
++        {
++            overlay_val = read_imagef(main, sampler, global_loc);
++        }
++        else {
++            overlay_rel = overlay_rel - overlay_offset;
++
++            int xin = (dir & 2) ? (overlay_target_size.y - 1 - overlay_rel.y) : overlay_rel.y;
++            int yin = (dir & 1) ? (overlay_target_size.x - 1 - overlay_rel.x) : overlay_rel.x;
++            if (dir & 4) {
++                overlay_rel.x = yin;
++                overlay_rel.y = xin;
++                overlay_val = scale_lankzos(overlay, overlay_rel - overlay_offset,
++                                            overlay_target_size, cx, cy, flt_size);
++            } else {
++                overlay_rel.x = xin;
++                overlay_rel.y = yin;
++                overlay_val = scale_lankzos(overlay, overlay_rel - overlay_offset,
++                                            overlay_target_size.yx, cx, cy, flt_size);
++            }
++
++            overlay_val = scale_lankzos(overlay, overlay_rel,
++                                        overlay_target_size, cx, cy, flt_size);
++        }
++
++        write_imagef(dst, global_loc, overlay_val);
 +    }
 +}
 +
 +__kernel void overlay_no_transpose(__write_only image2d_t dst,
 +                      __read_only  image2d_t main,
 +                      __read_only  image2d_t overlay,
-+                      const int2 overlay_loc,
-+                      const int2 overlay_size,
-+                      const int border_width,
++                      __read_only  image2d_t overlay_mask,
++                      const float4 mask_color,
++                      const int2   src_subsampling,
++                      const int4   overlay_box,
++                      const int2   overlay_offset,
++                      const int2   overlay_target_size,
++                      const int    border_width,
 +                      const float4 border_color,
 +                      __constant   float    *cx,
 +                      __constant   float    *cy,
-+                      const int2      flt_size)
++                      const int2   flt_size)
 +{
 +    const sampler_t sampler = (CLK_NORMALIZED_COORDS_FALSE |
 +                               CLK_FILTER_NEAREST | CLK_ADDRESS_NONE);
 +
 +    int2 global_loc = (int2)(get_global_id(0), get_global_id(1));
 +
-+    if (global_loc.x < overlay_loc.x + border_width ||
-+        global_loc.y < overlay_loc.y + border_width || 
-+        global_loc.x >= overlay_loc.x + overlay_size.x + 2 * border_width ||
-+        global_loc.y >= overlay_loc.y + overlay_size.y + 2 * border_width) {
++    if (global_loc.x < overlay_box.x - border_width ||
++        global_loc.y < overlay_box.y - border_width ||
++        global_loc.x >= overlay_box.x + overlay_box.z + border_width ||
++        global_loc.y >= overlay_box.y + overlay_box.w + border_width)
++    {
 +        float4 val = read_imagef(main, sampler, global_loc);
 +        write_imagef(dst, global_loc, val);
 +    }
-+    else if (global_loc.x < overlay_loc.x ||
-+             global_loc.y < overlay_loc.y ||
-+             global_loc.x >= overlay_loc.x + overlay_size.x ||
-+             global_loc.y >= overlay_loc.y + overlay_size.y) {
++    else if (global_loc.x < overlay_box.x ||
++             global_loc.y < overlay_box.y ||
++             global_loc.x >= overlay_box.x + overlay_box.z ||
++             global_loc.y >= overlay_box.y + overlay_box.w)
++    {
 +        write_imagef(dst, global_loc, border_color);
 +    }
-+    else {
-+        int2 overlay_rel = global_loc - overlay_loc;
-+        float4 val = scale_lankzos(overlay, overlay_rel, overlay_size, cx, cy, flt_size);
++    else
++    {
++        int2 overlay_rel = global_loc - (int2)(overlay_box.x, overlay_box.y);
++        float4 mask_val = read_imagef(overlay_mask, sampler, overlay_rel * src_subsampling);
++        
++        float4 overlay_val;
++        if (overlay_rel.x < overlay_offset.x ||
++            overlay_rel.y < overlay_offset.y ||
++            overlay_rel.x >= overlay_offset.x + overlay_target_size.x ||
++            overlay_rel.y >= overlay_offset.y + overlay_target_size.y)
++        {
++            overlay_val = read_imagef(main, sampler, global_loc);
++        }
++        else {
++            overlay_val = scale_lankzos(overlay, overlay_rel - overlay_offset,
++                                        overlay_target_size, cx, cy, flt_size);
++        }
++
++        float4 val = mix(overlay_val, mask_color, mask_val.x);
 +        write_imagef(dst, global_loc, val);
++    }
++}
++
++__kernel void overlay_no_transpose_no_mask(__write_only image2d_t dst,
++                      __read_only  image2d_t main,
++                      __read_only  image2d_t overlay,
++                      const int4   overlay_box,
++                      const int2   overlay_offset,
++                      const int2   overlay_target_size,
++                      const int    border_width,
++                      const float4 border_color,
++                      __constant   float    *cx,
++                      __constant   float    *cy,
++                      const int2   flt_size)
++{
++    const sampler_t sampler = (CLK_NORMALIZED_COORDS_FALSE |
++                               CLK_FILTER_NEAREST | CLK_ADDRESS_NONE);
++
++    int2 global_loc = (int2)(get_global_id(0), get_global_id(1));
++
++    if (global_loc.x < overlay_box.x - border_width ||
++        global_loc.y < overlay_box.y - border_width ||
++        global_loc.x >= overlay_box.x + overlay_box.z + border_width ||
++        global_loc.y >= overlay_box.y + overlay_box.w + border_width)
++    {
++        float4 val = read_imagef(main, sampler, global_loc);
++        write_imagef(dst, global_loc, val);
++    }
++    else if (global_loc.x < overlay_box.x ||
++             global_loc.y < overlay_box.y ||
++             global_loc.x >= overlay_box.x + overlay_box.z ||
++             global_loc.y >= overlay_box.y + overlay_box.w)
++    {
++        write_imagef(dst, global_loc, border_color);
++    }
++    else 
++    {
++        int2 overlay_rel = global_loc - (int2)(overlay_box.x, overlay_box.y) - overlay_offset;
++        float4 overlay_val;
++        if (overlay_rel.x < overlay_offset.x ||
++            overlay_rel.y < overlay_offset.y ||
++            overlay_rel.x >= overlay_offset.x + overlay_target_size.x ||
++            overlay_rel.y >= overlay_offset.y + overlay_target_size.y)
++        {
++            overlay_val = read_imagef(main, sampler, global_loc);
++        }
++        else {
++            overlay_val = scale_lankzos(overlay, overlay_rel - overlay_offset,
++                                        overlay_target_size, cx, cy, flt_size);
++        }
++        write_imagef(dst, global_loc, overlay_val);
 +    }
 +}
 \ No newline at end of file
 diff --git a/libavfilter/opencl_source.h b/libavfilter/opencl_source.h
 --- a/libavfilter/opencl_source.h	
 +++ b/libavfilter/opencl_source.h
-@@ -33,5 +33,6 @@ extern const char *ff_source_tonemap_cl;
+@@ -33,5 +33,6 @@
  extern const char *ff_source_transpose_cl;
  extern const char *ff_source_unsharp_cl;
  extern const char *ff_source_xfade_cl;
@@ -175,7 +364,7 @@ diff --git a/libavfilter/vf_sv_participant_opencl.c b/libavfilter/vf_sv_particip
 new file mode 100644
 --- /dev/null
 +++ b/libavfilter/vf_sv_participant_opencl.c
-@@ -0,0 +1,593 @@
+@@ -0,0 +1,1780 @@
 +/*
 + * This file is part of FFmpeg.
 + *
@@ -194,10 +383,14 @@ new file mode 100644
 + * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 + */
 +
++#include "config.h"
 +#include "libavutil/log.h"
 +#include "libavutil/opt.h"
 +#include "libavutil/pixdesc.h"
 +#include "libavutil/eval.h"
++#include "libavutil/mem.h"
++#include "libavutil/colorspace.h"
++#include "libavutil/tree.h"
 +
 +#if CONFIG_LIBFONTCONFIG
 +#include <fontconfig/fontconfig.h>
@@ -211,10 +404,12 @@ new file mode 100644
 +#include "video.h"
 +#include "transpose.h"
 +#include "drawutils.h"
++#include "textutils.h"
 +
 +#if CONFIG_LIBFRIBIDI
 +#include <fribidi.h>
 +#endif
++
 +#include <ft2build.h>
 +#include FT_FREETYPE_H
 +#include FT_GLYPH_H
@@ -223,8 +418,24 @@ new file mode 100644
 +#include <hb.h>
 +#include <hb-ft.h>
 +
++// Ceiling operation for positive integers division
++#define POS_CEIL(x, y) ((x)/(y) + ((x)%(y) != 0))
++
 +#define NO_TRANSPOSE -1
 +#define LANCZOS_RADIUS 3
++
++#undef __FTERRORS_H__
++#define FT_ERROR_START_LIST {
++#define FT_ERRORDEF(e, v, s) { (e), (s) },
++#define FT_ERROR_END_LIST { 0, NULL } };
++
++static const struct ft_error {
++    int err;
++    const char *err_msg;
++} ft_errors[] =
++#include FT_ERRORS_H
++
++#define FT_ERRMSG(e) ft_errors[e].err_msg
 +
 +static const char *const var_names[] = {
 +    "in_w",   "iw",
@@ -233,6 +444,10 @@ new file mode 100644
 +    "out_h",  "oh",
 +    "x",
 +    "y",
++    "text_h", "th",
++    "text_w", "tw",
++    "text_x",
++    "text_y",
 +    "a",
 +    "sar",
 +    "dar",
@@ -246,20 +461,93 @@ new file mode 100644
 +    VAR_OUT_H,  VAR_OH,
 +    VAR_X,
 +    VAR_Y,
++    VAR_TEXT_H, VAR_TH,
++    VAR_TEXT_W, VAR_TW,
++    VAR_TEXT_X,
++    VAR_TEXT_Y,
 +    VAR_A,
 +    VAR_SAR,
 +    VAR_DAR,
 +    VARS_NB
 +};
 +
++enum y_alignment {
++    YA_TEXT,
++    YA_BASELINE,
++    YA_FONT,
++};
++
++typedef struct HarfbuzzData {
++    hb_buffer_t* buf;
++    hb_font_t* font;
++    unsigned int glyph_count;
++    hb_glyph_info_t* glyph_info;
++    hb_glyph_position_t* glyph_pos;
++} HarfbuzzData;
++
++/** Information about a single glyph in a text line */
++typedef struct GlyphInfo {
++    uint32_t code;                  ///< the glyph code point
++    int x;                          ///< the x position of the glyph
++    int y;                          ///< the y position of the glyph
++    int shift_x64;                  ///< the horizontal shift of the glyph in 26.6 units
++    int shift_y64;                  ///< the vertical shift of the glyph in 26.6 units
++} GlyphInfo;
++
++/** Information about a single line of text */
++typedef struct TextLine {
++    int offset_left64;              ///< offset between the origin and
++                                    ///  the leftmost pixel of the first glyph
++    int offset_right64;             ///< maximum offset between the origin and
++                                    ///  the rightmost pixel of the last glyph
++    int width64;                    ///< width of the line
++    HarfbuzzData hb_data;           ///< libharfbuzz data of this text line
++    GlyphInfo* glyphs;              ///< array of glyphs in this text line
++    int cluster_offset;             ///< the offset at which this line begins
++} TextLine;
++
++/** A glyph as loaded and rendered using libfreetype */
++typedef struct Glyph {
++    FT_Glyph glyph;
++    uint32_t code;
++    unsigned int fontsize;
++    /** Glyph bitmaps with 1/4 pixel precision in both directions */
++    FT_BitmapGlyph bglyph[16];
++    FT_BBox bbox;
++} Glyph;
++
++/** Global text metrics */
++typedef struct TextMetrics {
++    int offset_top64;               ///< ascender amount of the first line (in 26.6 units)
++    int offset_bottom64;            ///< descender amount of the last line (in 26.6 units)
++    int offset_left64;              ///< maximum offset between the origin and
++                                    ///  the leftmost pixel of the first glyph
++                                    ///  of each line (in 26.6 units)
++    int offset_right64;             ///< maximum offset between the origin and
++                                    ///  the rightmost pixel of the last glyph
++                                    ///  of each line (in 26.6 units)
++    int line_height64;              ///< the font-defined line height
++    int width;                      ///< width of the longest line - ceil(width64/64)
++    int height;                     ///< total height of the text - ceil(height64/64)
++
++    int min_y64;                    ///< minimum value of bbox.yMin among glyphs (in 26.6 units)
++    int max_y64;                    ///< maximum value of bbox.yMax among glyphs (in 26.6 units)
++    int min_x64;                    ///< minimum value of bbox.xMin among glyphs (in 26.6 units)
++    int max_x64;                    ///< maximum value of bbox.xMax among glyphs (in 26.6 units)
++
++    // Position of the background box (without borders)
++    int rect_x;                     ///< x position of the box
++    int rect_y;                     ///< y position of the box
++} TextMetrics;
++
 +typedef struct SvParticipantOpenCLContext {
 +    // OpenCL common
 +    OpenCLFilterContext ocf;
 +    int              initialised;
 +    cl_command_queue command_queue;
++    cl_kernel        kernel;
 +    
 +    // overlay params
-+    cl_kernel        kernel;
 +    FFFrameSync      fs;
 +    int              nb_planes;
 +    int              x_subsample;
@@ -270,35 +558,66 @@ new file mode 100644
 +
 +    // crop params
 +    char *x_expr, *y_expr, *w_expr, *h_expr;
-+    double cropped_sar;
++    int no_black_fields;
 +
 +    // scale params
-+    cl_mem  cx, cy;
-+    int     src_w,    src_h;
-+    cl_int2 flt_size;
++    cl_mem   *cx, *cy;
++    int      src_w,    src_h;
++    cl_int2  flt_size;
 +
 +    // draw text params
-+// #if CONFIG_LIBFONTCONFIG
-+//     uint8_t *font;                  ///< font to be used
-+// #endif
-+//     char *fontsize_expr;            ///< expression for fontsize
-+//     AVExpr *fontsize_pexpr;         ///< parsed expressions for fontsize
-+//     uint8_t *fontfile;              ///< font to be used
-+//     uint8_t *text;                  ///< text to be drawn
-+//     unsigned int fontsize;          ///< font size to use
-+//     unsigned int default_fontsize;  ///< default font size to use
-+//     FFDrawContext dc;
-+//     FFDrawColor fontcolor;          ///< foreground color
++#if CONFIG_LIBFONTCONFIG
++    uint8_t *font;                   ///< font to be used
++#endif
++    char *fontsize_expr;             ///< expression for fontsize
++    uint8_t *fontfile;               ///< font to be used
++    uint8_t *text;                   ///< text to be drawn
++    unsigned int fontsize;           ///< font size to use
++    unsigned int default_fontsize;   ///< default font size to use
++    int line_spacing;                ///< lines spacing in pixels
++    FFDrawContext dc;
++    FFDrawColor fontcolor;           ///< foreground color
++    FFDrawColor   black;             ///< mask color
++    AVBPrint expanded_fontcolor;     ///< used to contain the expanded fontcolor spec
++
++    FT_Library library;             ///< freetype font library handle
++    FT_Face face;                   ///< freetype font face handle
++    struct AVTreeNode *glyphs;      ///< rendered glyphs, stored using the UTF-32 char code
++#if CONFIG_LIBFRIBIDI
++    int text_shaping;               ///< 1 to shape the text before drawing it
++#endif
++    AVDictionary *metadata;
++
++    int y_align;                    ///< the value of the y_align parameter
++    
++    int tabsize;                    ///< tab size
++    TextLine *lines;                ///< computed information about text lines
++    int line_count;                 ///< the number of text lines
++    uint32_t *tab_clusters;         ///< the position of tab characters in the text
++    int tab_count;                  ///< the number of tab characters
++    int blank_advance64;            ///< the size of the space character
++    int tab_warning_printed;        ///< ensure the tab warning to be printed only once
++
++    int text_x, text_y;
++    char *text_x_expr, *text_y_expr;
++
++    TextMetrics metrics;
++    AVFrame* hw_font_mask;
 +
 +    // common params
 +    int              x;
 +    int              y;
 +    int              width;
 +    int              height;
++    int              scaled_height;
++    int              scaled_width;
++    int              overlay_inner_offset_x;
++    int              overlay_inner_offset_y;
 +    int              border_w;
 +    uint8_t          bordercolor_rgba[4];
 +    // Stored as a normalized float for passing to the OpenCL kernel
-+    cl_float4        bordercolor_rgba_float;
++    cl_float4        bordercolor_converted_color;
++    cl_float4        font_converted_color;
 +} SvParticipantOpenCLContext;
 +
 +static float sinc(float t)
@@ -311,6 +630,803 @@ new file mode 100644
 +    return (t < a) ? sinc(t) * sinc(t / a) : 0;
 +}
 +
++#if CONFIG_LIBFRIBIDI
++static int shape_text(AVFilterContext *ctx)
++{
++    SvParticipantOpenCLContext *s = ctx->priv;
++    uint8_t *tmp;
++    int ret = AVERROR(ENOMEM);
++    static const FriBidiFlags flags = FRIBIDI_FLAGS_DEFAULT |
++                                      FRIBIDI_FLAGS_ARABIC;
++    FriBidiChar *unicodestr = NULL;
++    FriBidiStrIndex len;
++    FriBidiParType direction = FRIBIDI_PAR_LTR;
++    FriBidiStrIndex line_start = 0;
++    FriBidiStrIndex line_end = 0;
++    FriBidiLevel *embedding_levels = NULL;
++    FriBidiArabicProp *ar_props = NULL;
++    FriBidiCharType *bidi_types = NULL;
++    FriBidiStrIndex i,j;
++
++    len = strlen(s->text);
++    if (!(unicodestr = av_malloc_array(len, sizeof(*unicodestr)))) {
++        goto out;
++    }
++    len = fribidi_charset_to_unicode(FRIBIDI_CHAR_SET_UTF8,
++                                     s->text, len, unicodestr);
++
++    bidi_types = av_malloc_array(len, sizeof(*bidi_types));
++    if (!bidi_types) {
++        goto out;
++    }
++
++    fribidi_get_bidi_types(unicodestr, len, bidi_types);
++
++    embedding_levels = av_malloc_array(len, sizeof(*embedding_levels));
++    if (!embedding_levels) {
++        goto out;
++    }
++
++    if (!fribidi_get_par_embedding_levels(bidi_types, len, &direction,
++                                          embedding_levels)) {
++        goto out;
++    }
++
++    ar_props = av_malloc_array(len, sizeof(*ar_props));
++    if (!ar_props) {
++        goto out;
++    }
++
++    fribidi_get_joining_types(unicodestr, len, ar_props);
++    fribidi_join_arabic(bidi_types, len, embedding_levels, ar_props);
++    fribidi_shape(flags, embedding_levels, len, ar_props, unicodestr);
++
++    for (line_end = 0, line_start = 0; line_end < len; line_end++) {
++        if (ff_is_newline(unicodestr[line_end]) || line_end == len - 1) {
++            if (!fribidi_reorder_line(flags, bidi_types,
++                                      line_end - line_start + 1, line_start,
++                                      direction, embedding_levels, unicodestr,
++                                      NULL)) {
++                goto out;
++            }
++            line_start = line_end + 1;
++        }
++    }
++
++    /* Remove zero-width fill chars put in by libfribidi */
++    for (i = 0, j = 0; i < len; i++)
++        if (unicodestr[i] != FRIBIDI_CHAR_FILL)
++            unicodestr[j++] = unicodestr[i];
++    len = j;
++
++    if (!(tmp = av_realloc(s->text, (len * 4 + 1) * sizeof(*s->text)))) {
++        /* Use len * 4, as a unicode character can be up to 4 bytes in UTF-8 */
++        goto out;
++    }
++
++    s->text = tmp;
++    len = fribidi_unicode_to_charset(FRIBIDI_CHAR_SET_UTF8,
++                                     unicodestr, len, s->text);
++
++    ret = 0;
++
++out:
++    av_free(unicodestr);
++    av_free(embedding_levels);
++    av_free(ar_props);
++    av_free(bidi_types);
++    return ret;
++}
++#endif
++
++static inline int get_subpixel_idx(int shift_x64, int shift_y64)
++{
++    int idx = (shift_x64 >> 2) + (shift_y64 >> 4);
++    return idx;
++}
++
++static int glyph_cmp(const void *key, const void *b)
++{
++    const Glyph *a = key, *bb = b;
++    int64_t diff = (int64_t)a->code - (int64_t)bb->code;
++
++    if (diff != 0)
++        return diff > 0 ? 1 : -1;
++    else
++        return FFDIFFSIGN((int64_t)a->fontsize, (int64_t)bb->fontsize);
++}
++
++// Loads and (optionally) renders a glyph
++static int load_glyph(AVFilterContext *ctx, Glyph **glyph_ptr, uint32_t code, int8_t shift_x64, int8_t shift_y64)
++{
++    SvParticipantOpenCLContext *s = ctx->priv;
++    Glyph dummy = { 0 };
++    Glyph *glyph;
++    FT_Vector shift;
++    struct AVTreeNode *node = NULL;
++    int ret = 0;
++
++    /* get glyph */
++    dummy.code = code;
++    dummy.fontsize = s->fontsize;
++    glyph = av_tree_find(s->glyphs, &dummy, glyph_cmp, NULL);
++    if (!glyph) {
++        if (FT_Load_Glyph(s->face, code, FT_LOAD_DEFAULT)) {
++            return AVERROR(EINVAL);
++        }
++        glyph = av_mallocz(sizeof(*glyph));
++        if (!glyph) {
++            ret = AVERROR(ENOMEM);
++            goto error;
++        }
++        glyph->code  = code;
++        glyph->fontsize = s->fontsize;
++        if (FT_Get_Glyph(s->face->glyph, &glyph->glyph)) {
++            ret = AVERROR(EINVAL);
++            goto error;
++        }
++        /* measure text height to calculate text_height (or the maximum text height) */
++        FT_Glyph_Get_CBox(glyph->glyph, FT_GLYPH_BBOX_SUBPIXELS, &glyph->bbox);
++
++        /* cache the newly created glyph */
++        if (!(node = av_tree_node_alloc())) {
++            ret = AVERROR(ENOMEM);
++            goto error;
++        }
++        av_tree_insert(&s->glyphs, glyph, glyph_cmp, &node);
++    }
++
++    // Check if a bitmap is needed
++    if (shift_x64 >= 0 && shift_y64 >= 0) {
++        // Get the bitmap subpixel index (0 -> 15)
++        int idx = get_subpixel_idx(shift_x64, shift_y64);
++        shift.x = shift_x64;
++        shift.y = shift_y64;
++
++        if (!glyph->bglyph[idx]) {
++            FT_Glyph tmp_glyph = glyph->glyph;
++            if (FT_Glyph_To_Bitmap(&tmp_glyph, FT_RENDER_MODE_NORMAL, &shift, 0)) {
++                ret = AVERROR_EXTERNAL;
++                goto error;
++            }
++            glyph->bglyph[idx] = (FT_BitmapGlyph)tmp_glyph;
++            if (glyph->bglyph[idx]->bitmap.pixel_mode == FT_PIXEL_MODE_MONO) {
++                av_log(ctx, AV_LOG_ERROR, "Monocromatic (1bpp) fonts are not supported.\n");
++                ret = AVERROR(EINVAL);
++                goto error;
++            }
++        }
++    }
++    if (glyph_ptr) {
++        *glyph_ptr = glyph;
++    }
++    return 0;
++
++error:
++    if (glyph && glyph->glyph)
++        FT_Done_Glyph(glyph->glyph);
++
++    av_freep(&glyph);
++    av_freep(&node);
++    return ret;
++}
++
++static int load_font_file(AVFilterContext *ctx, const char *path, int index)
++{
++    SvParticipantOpenCLContext *s = ctx->priv;
++    int err;
++
++    err = FT_New_Face(s->library, path, index, &s->face);
++    if (err) {
++#if !CONFIG_LIBFONTCONFIG
++        av_log(ctx, AV_LOG_ERROR, "Could not load font \"%s\": %s\n",
++               s->fontfile, FT_ERRMSG(err));
++#endif
++        return AVERROR(EINVAL);
++    }
++    return 0;
++}
++
++#if CONFIG_LIBFONTCONFIG
++static int load_font_fontconfig(AVFilterContext *ctx)
++{
++    SvParticipantOpenCLContext *s = ctx->priv;
++    FcConfig *fontconfig;
++    FcPattern *pat, *best;
++    FcResult result = FcResultMatch;
++    FcChar8 *filename;
++    int index;
++    double size;
++    int err = AVERROR(ENOENT);
++
++    fontconfig = FcInitLoadConfigAndFonts();
++    if (!fontconfig) {
++        av_log(ctx, AV_LOG_ERROR, "impossible to init fontconfig\n");
++        return AVERROR_UNKNOWN;
++    }
++    pat = FcNameParse(s->fontfile ? s->fontfile :
++                          (uint8_t *)(intptr_t)"default");
++    if (!pat) {
++        av_log(ctx, AV_LOG_ERROR, "could not parse fontconfig pat");
++        return AVERROR(EINVAL);
++    }
++
++    FcPatternAddString(pat, FC_FAMILY, s->font);
++
++    FcPatternAddDouble(pat, FC_SIZE, s->fontsize);
++
++    FcDefaultSubstitute(pat);
++
++    if (!FcConfigSubstitute(fontconfig, pat, FcMatchPattern)) {
++        av_log(ctx, AV_LOG_ERROR, "could not substitute fontconfig options"); /* very unlikely */
++        FcPatternDestroy(pat);
++        return AVERROR(ENOMEM);
++    }
++
++    best = FcFontMatch(fontconfig, pat, &result);
++    FcPatternDestroy(pat);
++
++    if (!best || result != FcResultMatch) {
++        av_log(ctx, AV_LOG_ERROR,
++               "Cannot find a valid font for the family %s\n",
++               s->font);
++        goto fail;
++    }
++
++    if (
++        FcPatternGetInteger(best, FC_INDEX, 0, &index   ) != FcResultMatch ||
++        FcPatternGetDouble (best, FC_SIZE,  0, &size    ) != FcResultMatch) {
++        av_log(ctx, AV_LOG_ERROR, "impossible to find font information");
++        return AVERROR(EINVAL);
++    }
++
++    if (FcPatternGetString(best, FC_FILE, 0, &filename) != FcResultMatch) {
++        av_log(ctx, AV_LOG_ERROR, "No file path for %s\n",
++               s->font);
++        goto fail;
++    }
++
++    av_log(ctx, AV_LOG_VERBOSE, "Using \"%s\"\n", filename);
++    s->default_fontsize = size + 0.5;
++
++    err = load_font_file(ctx, filename, index);
++    if (err)
++        return err;
++    FcConfigDestroy(fontconfig);
++fail:
++    FcPatternDestroy(best);
++    return err;
++}
++#endif
++
++static int load_font(AVFilterContext *ctx)
++{
++    SvParticipantOpenCLContext *s = ctx->priv;
++    int err;
++
++    /* load the face, and set up the encoding, which is by default UTF-8 */
++    err = load_font_file(ctx, s->fontfile, 0);
++    if (!err)
++        return 0;
++#if CONFIG_LIBFONTCONFIG
++    err = load_font_fontconfig(ctx);
++    if (!err)
++        return 0;
++#endif
++    return err;
++}
++
++static int draw_glyphs(AVFilterContext *ctx, AVFrame *frame,
++                       FFDrawColor *color,
++                       TextMetrics *metrics,
++                       int x, int y)
++{
++    SvParticipantOpenCLContext *s = ctx->priv;
++    int g, l, x1, y1, w1, h1, idx;
++    int dx = 0, dy = 0, pdx = 0;
++    GlyphInfo *info;
++    Glyph dummy = { 0 }, *glyph;
++    FT_Bitmap bitmap;
++    FT_BitmapGlyph b_glyph;
++    int line_w, offset_y = 0;
++    int clip_x = 0, clip_y = 0;
++
++    if (!s->tab_warning_printed && s->tab_count > 0) {
++        s->tab_warning_printed = 1;
++        av_log(ctx, AV_LOG_WARNING, "Tab characters are not supported\n");
++    }
++
++    clip_x = FFMIN(metrics->rect_x + s->metrics.width, frame->width);
++    clip_y = FFMIN(metrics->rect_y + s->metrics.height, frame->height);
++
++    for (l = 0; l < s->line_count; ++l) {
++        TextLine *line = &s->lines[l];
++        line_w = POS_CEIL(line->width64, 64);
++        for (g = 0; g < line->hb_data.glyph_count; ++g) {
++            info = &line->glyphs[g];
++            dummy.fontsize = s->fontsize;
++            dummy.code = info->code;
++            glyph = av_tree_find(s->glyphs, &dummy, glyph_cmp, NULL);
++            if (!glyph) {
++                return AVERROR(EINVAL);
++            }
++
++            idx = get_subpixel_idx(info->shift_x64, info->shift_y64);
++            b_glyph = glyph->bglyph[idx];
++            bitmap = b_glyph->bitmap;
++            x1 = x + info->x + b_glyph->left;
++            y1 = y + info->y - b_glyph->top + offset_y;
++            w1 = bitmap.width;
++            h1 = bitmap.rows;
++
++            // Offset of the glyph's bitmap in the visible region
++            dx = dy = 0;
++            if (x1 < metrics->rect_x) {
++                dx = metrics->rect_x - x1;
++                x1 = metrics->rect_x;
++            }
++            if (y1 < metrics->rect_y) {
++                dy = metrics->rect_y - y1;
++                y1 = metrics->rect_y;
++            }
++
++            // check if the glyph is empty or out of the clipping region
++            if (dx >= w1 || dy >= h1 || x1 >= clip_x || y1 >= clip_y) {
++                continue;
++            }
++
++            pdx = dx + dy * bitmap.pitch;
++            w1 = FFMIN(clip_x - x1, w1 - dx);
++            h1 = FFMIN(clip_y - y1, h1 - dy);
++
++            ff_blend_mask(&s->dc, color, frame->data, frame->linesize, clip_x, clip_y,
++                bitmap.buffer + pdx, bitmap.pitch, w1, h1, 3, 0, x1, y1);
++        }
++    }
++
++    return 0;
++}
++
++// Shapes a line of text using libharfbuzz
++static int shape_text_hb(SvParticipantOpenCLContext *s, HarfbuzzData* hb, const char* text, int textLen)
++{
++    hb->buf = hb_buffer_create();
++    if(!hb_buffer_allocation_successful(hb->buf)) {
++        return AVERROR(ENOMEM);
++    }
++    hb_buffer_set_direction(hb->buf, HB_DIRECTION_LTR);
++    hb_buffer_set_script(hb->buf, HB_SCRIPT_LATIN);
++    hb_buffer_set_language(hb->buf, hb_language_from_string("en", -1));
++    hb_buffer_guess_segment_properties(hb->buf);
++    hb->font = hb_ft_font_create_referenced(s->face);
++    if(hb->font == NULL) {
++        return AVERROR(ENOMEM);
++    }
++    hb_buffer_add_utf8(hb->buf, text, textLen, 0, -1);
++    hb_shape(hb->font, hb->buf, NULL, 0);
++    hb->glyph_info = hb_buffer_get_glyph_infos(hb->buf, &hb->glyph_count);
++    hb->glyph_pos = hb_buffer_get_glyph_positions(hb->buf, &hb->glyph_count);
++
++    return 0;
++}
++
++static void hb_destroy(HarfbuzzData *hb)
++{
++    hb_font_destroy(hb->font);
++    hb_buffer_destroy(hb->buf);
++    hb->buf = NULL;
++    hb->font = NULL;
++    hb->glyph_info = NULL;
++    hb->glyph_pos = NULL;
++}
++
++static int measure_text(AVFilterContext *ctx, TextMetrics *metrics)
++{
++    SvParticipantOpenCLContext *s = ctx->priv;
++    char *textdup = NULL, *start = NULL;
++    int num_chars = 0;
++    int width64 = 0, w64 = 0;
++    int cur_min_y64 = 0, first_max_y64 = -32000;
++    int first_min_x64 = 32000, last_max_x64 = -32000;
++    int min_y64 = 32000, max_y64 = -32000, min_x64 = 32000, max_x64 = -32000;
++    int line_count = 0;
++    uint32_t code = 0;
++    Glyph *glyph = NULL;
++
++    int i, tab_idx = 0, last_tab_idx = 0, line_offset = 0;
++    char* p;
++    int ret = 0;
++
++    // Count the lines and the tab characters
++    s->tab_count = 0;
++    for (i = 0, p = s->text; 1; i++) {
++        GET_UTF8(code, *p ? *p++ : 0, code = 0xfffd; goto continue_on_failed;);
++continue_on_failed:
++        if (ff_is_newline(code) || code == 0) {
++            ++line_count;
++            if (code == 0) {
++                break;
++            }
++        } else if (code == '\t') {
++            ++s->tab_count;
++        }
++    }
++
++    // Evaluate the width of the space character if needed to replace tabs
++    if (s->tab_count > 0 && !s->blank_advance64) {
++        HarfbuzzData hb_data;
++        ret = shape_text_hb(s, &hb_data, " ", 1);
++        if(ret != 0) {
++            goto done;
++        }
++        s->blank_advance64 = hb_data.glyph_pos[0].x_advance;
++        hb_destroy(&hb_data);
++    }
++
++    s->line_count = line_count;
++    s->lines = av_mallocz(line_count * sizeof(TextLine));
++    s->tab_clusters = av_mallocz(s->tab_count * sizeof(uint32_t));
++    for (i = 0; i < s->tab_count; ++i) {
++        s->tab_clusters[i] = -1;
++    }
++
++    start = textdup = av_strdup(s->text);
++    if (textdup == NULL) {
++        ret = AVERROR(ENOMEM);
++        goto done;
++    }
++    line_count = 0;
++    for (i = 0, p = textdup; 1; i++) {
++        if (*p == '\t') {
++            s->tab_clusters[tab_idx++] = i;
++            *p = ' ';
++        }
++        GET_UTF8(code, *p ? *p++ : 0, code = 0xfffd; goto continue_on_failed2;);
++continue_on_failed2:
++        if (ff_is_newline(code) || code == 0) {
++            TextLine *cur_line = &s->lines[line_count];
++            HarfbuzzData *hb = &cur_line->hb_data;
++            cur_line->cluster_offset = line_offset;
++            ret = shape_text_hb(s, hb, start, num_chars);
++            if (ret != 0) {
++                goto done;
++            }
++            w64 = 0;
++            cur_min_y64 = 32000;
++            for (int t = 0; t < hb->glyph_count; ++t) {
++                uint8_t is_tab = last_tab_idx < s->tab_count &&
++                    hb->glyph_info[t].cluster == s->tab_clusters[last_tab_idx] - line_offset;
++                if (is_tab) {
++                    ++last_tab_idx;
++                }
++                ret = load_glyph(ctx, &glyph, hb->glyph_info[t].codepoint, -1, -1);
++                if (ret != 0) {
++                    goto done;
++                }
++                if (line_count == 0) {
++                    first_max_y64 = FFMAX(glyph->bbox.yMax, first_max_y64);
++                }
++                if (t == 0) {
++                    cur_line->offset_left64 = glyph->bbox.xMin;
++                    first_min_x64 = FFMIN(glyph->bbox.xMin, first_min_x64);
++                }
++                if (t == hb->glyph_count - 1) {
++                    // The following code measures the width of the line up to the last
++                    // character's horizontal advance
++                    int last_char_width = hb->glyph_pos[t].x_advance;
++
++                    // The following code measures the width of the line up to the rightmost
++                    // visible pixel of the last character
++                    // int last_char_width = glyph->bbox.xMax;
++
++                    w64 += last_char_width;
++                    last_max_x64 = FFMAX(last_char_width, last_max_x64);
++                    cur_line->offset_right64 = last_char_width;
++                } else {
++                    if (is_tab) {
++                        int size = s->blank_advance64 * s->tabsize;
++                        w64 = (w64 / size + 1) * size;
++                    } else {
++                        w64 += hb->glyph_pos[t].x_advance;
++                    }
++                }
++                cur_min_y64 = FFMIN(glyph->bbox.yMin, cur_min_y64);
++                min_y64 = FFMIN(glyph->bbox.yMin, min_y64);
++                max_y64 = FFMAX(glyph->bbox.yMax, max_y64);
++                min_x64 = FFMIN(glyph->bbox.xMin, min_x64);
++                max_x64 = FFMAX(glyph->bbox.xMax, max_x64);
++            }
++
++            cur_line->width64 = w64;
++
++            av_log(ctx, AV_LOG_DEBUG, "  Line: %d -- glyphs count: %d - width64: %d - offset_left64: %d - offset_right64: %d)\n",
++                line_count, hb->glyph_count, cur_line->width64, cur_line->offset_left64, cur_line->offset_right64);
++
++            if (w64 > width64) {
++                width64 = w64;
++            }
++            num_chars = -1;
++            start = p;
++            ++line_count;
++            line_offset = i + 1;
++        }
++
++        if (code == 0) break;
++        ++num_chars;
++    }
++
++    metrics->line_height64 = s->face->size->metrics.height;
++
++    metrics->width = POS_CEIL(width64, 64);
++    if (s->y_align == YA_FONT) {
++        metrics->height = POS_CEIL(metrics->line_height64 * line_count, 64);
++    } else {
++        int height64 = (metrics->line_height64 + s->line_spacing * 64) *
++            (FFMAX(0, line_count - 1)) + first_max_y64 - cur_min_y64;
++        metrics->height = POS_CEIL(height64, 64);
++    }
++    metrics->offset_top64 = first_max_y64;
++    metrics->offset_right64 = last_max_x64;
++    metrics->offset_bottom64 = cur_min_y64;
++    metrics->offset_left64 = first_min_x64;
++    metrics->min_x64 = min_x64;
++    metrics->min_y64 = min_y64;
++    metrics->max_x64 = max_x64;
++    metrics->max_y64 = max_y64;
++
++done:
++    av_free(textdup);
++    return ret;
++}
++
++static int draw_text(AVFilterContext *ctx, AVFrame *frame)
++{
++    SvParticipantOpenCLContext *s = ctx->priv;
++    AVFilterLink *inlink = ctx->inputs[0];
++    FilterLink *inl = ff_filter_link(inlink);
++    int x = 0, y = 0, ret;
++    int shift_x64, shift_y64;
++    int x64, y64;
++    Glyph *glyph = NULL;
++
++    int width = frame->width;
++    int height = frame->height;
++    int rec_x = 0, rec_y = 0, rec_width = 0, rec_height = 0;
++    int is_outside = 0;
++    int last_tab_idx = 0;
++
++    x = 0;
++    y = 0;
++    x64 = (int)(s->text_x * 64.);
++    if (s->y_align == YA_FONT) {
++        y64 = (int)(s->text_y * 64. + s->face->size->metrics.ascender);
++    } else if (s->y_align == YA_BASELINE) {
++        y64 = (int)(s->text_y * 64.);
++    } else {
++        y64 = (int)(s->text_y * 64. + s->metrics.offset_top64);
++    }
++
++    for (int l = 0; l < s->line_count; ++l) {
++        TextLine *line = &s->lines[l];
++        HarfbuzzData *hb = &line->hb_data;
++        line->glyphs = av_mallocz(hb->glyph_count * sizeof(GlyphInfo));
++
++        for (int t = 0; t < hb->glyph_count; ++t) {
++            GlyphInfo *g_info = &line->glyphs[t];
++            uint8_t is_tab = last_tab_idx < s->tab_count &&
++                hb->glyph_info[t].cluster == s->tab_clusters[last_tab_idx] - line->cluster_offset;
++            int true_x, true_y;
++            if (is_tab) {
++                ++last_tab_idx;
++            }
++            true_x = x + hb->glyph_pos[t].x_offset;
++            true_y = y + hb->glyph_pos[t].y_offset;
++            shift_x64 = (((x64 + true_x) >> 4) & 0b0011) << 4;
++            shift_y64 = ((4 - (((y64 + true_y) >> 4) & 0b0011)) & 0b0011) << 4;
++
++            ret = load_glyph(ctx, &glyph, hb->glyph_info[t].codepoint, shift_x64, shift_y64);
++            if (ret != 0) {
++                return ret;
++            }
++            g_info->code = hb->glyph_info[t].codepoint;
++            g_info->x = (x64 + true_x) >> 6;
++            g_info->y = ((y64 + true_y) >> 6) + (shift_y64 > 0 ? 1 : 0);
++            g_info->shift_x64 = shift_x64;
++            g_info->shift_y64 = shift_y64;
++
++            if (!is_tab) {
++                x += hb->glyph_pos[t].x_advance;
++            } else {
++                int size = s->blank_advance64 * s->tabsize;
++                x = (x / size + 1) * size;
++            }
++            y += hb->glyph_pos[t].y_advance;
++        }
++
++        y += s->metrics.line_height64 + s->line_spacing * 64;
++        x = 0;
++    }
++
++    s->metrics.rect_x = s->text_x;
++    if (s->y_align == YA_BASELINE) {
++        s->metrics.rect_y = s->text_y - s->metrics.offset_top64 / 64;
++    } else {
++        s->metrics.rect_y = s->text_y;
++    }
++
++    /* Check if the whole box is out of the frame */
++    is_outside = s->metrics.rect_x - 1 >= width ||
++                    s->metrics.rect_y - 1 >= height ||
++                    s->metrics.rect_x + s->metrics.width + 1 <= 0 ||
++                    s->metrics.rect_y + s->metrics.height + 1 <= 0;
++
++    if (!is_outside) {
++        /* draw box */
++        if ((ret = draw_glyphs(ctx, frame, &s->black, &s->metrics, 0,
++                0)) < 0) {
++            return ret;
++        }
++    }
++
++    // FREE data structures
++    for (int l = 0; l < s->line_count; ++l) {
++        TextLine *line = &s->lines[l];
++        av_freep(&line->glyphs);
++        hb_destroy(&line->hb_data);
++    }
++    av_freep(&s->lines);
++    av_freep(&s->tab_clusters);
++
++    return 0;
++}
++
++static int create_lanczos_weights(AVFilterContext *avctx)
++{
++    SvParticipantOpenCLContext *ctx = avctx->priv;
++    cl_int cle;
++    int err, i, j;
++    int filterw, filterh;
++    float scalex, scaley;
++    float *cx = NULL, *cy = NULL;
++
++    ctx->cx = av_calloc(ctx->nb_planes, sizeof(cl_mem));
++    ctx->cy = av_calloc(ctx->nb_planes, sizeof(cl_mem));
++    if (!ctx->cx || !ctx->cy) {
++        av_log(avctx, AV_LOG_ERROR, "Failed to create weights buffers: %d.\n", cle);
++        err = AVERROR(EIO);
++        goto fail;
++    }
++
++    float src_aspect;
++    if (ctx->dir != NO_TRANSPOSE && !(ctx->dir & 4) ) {
++        src_aspect = (float) ctx->src_h / ctx->src_w;
++    }
++    else {
++        src_aspect = (float) ctx->src_w / ctx->src_h;
++    }
++
++    float grid_aspect = (float) ctx->width / ctx->height;
++    if ((ctx->no_black_fields && grid_aspect > src_aspect) ||
++            (!ctx->no_black_fields && grid_aspect < src_aspect)) {
++        ctx->scaled_width = ctx->width;
++        ctx->scaled_height = (float) ctx->width / src_aspect;
++        ctx->overlay_inner_offset_x = 0;
++        ctx->overlay_inner_offset_y = (ctx->height - ctx->scaled_height) / 2;
++    }
++    else {
++        ctx->scaled_height = ctx->height;
++        ctx->scaled_width = (float) ctx->height * src_aspect;
++        ctx->overlay_inner_offset_x = (ctx->width - ctx->scaled_width) / 2;
++        ctx->overlay_inner_offset_y = 0;
++    }
++
++    if (ctx->dir != NO_TRANSPOSE && !(ctx->dir & 4) ) {
++        int temp = ctx->scaled_width;
++        ctx->scaled_width = ctx->scaled_height;
++        ctx->scaled_height = temp;
++    }
++
++    scalex = FFMAX((float) ctx->src_w / ctx->scaled_width, 1);
++    scaley = FFMAX((float) ctx->src_h / ctx->scaled_height, 1);
++
++    filterw = ceil(2 * LANCZOS_RADIUS * scalex);
++    filterh = ceil(2 * LANCZOS_RADIUS * scaley);
++
++    filterw = FFMIN(filterw, ctx->src_w - 2);
++    filterw = FFMAX(filterw, 1);
++    filterh = FFMIN(filterh, ctx->src_h - 2);
++    filterh = FFMAX(filterh, 1);
++
++    ctx->flt_size.s[0] = filterw;
++    ctx->flt_size.s[1] = filterh;
++
++    for (int plane = 0; plane < ctx->nb_planes; plane++) {
++        
++        int actual_height, actual_width;
++        actual_width = ctx->scaled_width / (plane == 0 ? 1 : ctx->x_subsample);
++        actual_height = ctx->scaled_height / (plane == 0 ? 1 : ctx->y_subsample);
++
++        av_log(avctx, AV_LOG_INFO, "filter size: %d %d.\n", filterw, filterh);
++
++        cx = av_malloc_array(actual_width * filterw, sizeof(cl_float));
++        cy = av_malloc_array(actual_height * filterh, sizeof(cl_float));
++
++        if (!cx || !cy) {
++            err = AVERROR(ENOMEM);
++            goto fail;
++        }
++
++        for (i = 0; i < actual_width; ++i) {
++            float s_x = (i + 0.5) * ctx->src_w / actual_width - 0.5;
++            float t = s_x - floor(s_x);  // fract
++
++            float sum = 0;
++            for (j = 0; j < filterw; ++j) {
++                int x = filterw/2 - j;
++                sum += cx[i * filterw + j] = lanczos((x - t) / scalex, LANCZOS_RADIUS);
++            }
++
++            for (j = 0; j < filterw; ++j)
++                cx[i * filterw + j] /= sum;
++        }
++
++        for (i = 0; i < actual_height; ++i) {
++            float s_y = (i + 0.5) * ctx->src_h / actual_height - 0.5;
++            float t = s_y - floor(s_y);  // fract
++
++            float sum = 0;
++            for (j = 0; j < filterh; ++j) {
++                int y = filterh/2 - j;
++                sum += cy[i * filterh + j] = lanczos((y - t) / scaley, LANCZOS_RADIUS);
++            }
++
++            for (j = 0; j < filterh; ++j)
++                cy[i * filterh + j] /= sum;
++        }
++
++        ctx->cx[plane] = clCreateBuffer(ctx->ocf.hwctx->context,
++                                    CL_MEM_READ_ONLY     |
++                                    CL_MEM_COPY_HOST_PTR |
++                                    CL_MEM_HOST_NO_ACCESS,
++                                    actual_width * filterw * sizeof(cl_float),
++                                    cx,
++                                    &cle);
++
++        ctx->cy[plane] = clCreateBuffer(ctx->ocf.hwctx->context,
++                                    CL_MEM_READ_ONLY     |
++                                    CL_MEM_COPY_HOST_PTR |
++                                    CL_MEM_HOST_NO_ACCESS,
++                                    actual_height * filterh * sizeof(cl_float),
++                                    cy,
++                                    &cle);
++        av_freep(&cx);
++        av_freep(&cy);
++        if (!ctx->cx[plane] || !ctx->cy[plane]) {
++            av_log(avctx, AV_LOG_ERROR, "Failed to create weights buffer: %d.\n", cle);
++            err = AVERROR(EIO);
++            goto fail;
++        }
++    }
++    return 0;
++
++fail:
++    if (ctx->cx) {
++        for (int plane = 0; plane < ctx->nb_planes; plane++)
++            clReleaseMemObject(ctx->cx[plane]);
++        av_freep(&ctx->cx);
++    }
++    if (ctx->cy) {
++        for (int plane = 0; plane < ctx->nb_planes; plane++)
++            clReleaseMemObject(ctx->cy[plane]);
++        av_freep(&ctx->cy);
++    }
++    if (cx)
++        av_free(cx);
++    if (cy)
++        av_free(cy);
++    return err;
++}
++
 +static int sv_participant_opencl_load(AVFilterContext *avctx,
 +                                      enum AVPixelFormat main_format,
 +                                      enum AVPixelFormat sv_participant_format)
@@ -319,14 +1435,57 @@ new file mode 100644
 +    cl_int cle;
 +    const char *kernel;
 +    const AVPixFmtDescriptor *main_desc, *overlay_desc;
-+    int err, i, j, main_planes, overlay_planes;
-+    int filterw, filterh;
-+    float scalex, scaley;
-+    float *cx = NULL, *cy = NULL;
++    int err, i, main_planes, overlay_planes;
 +    const char *source = ff_source_sv_participant_cl;
 +
 +    main_desc    = av_pix_fmt_desc_get(main_format);
 +    overlay_desc = av_pix_fmt_desc_get(sv_participant_format);
++
++    int is_rgb = !!(main_desc->flags & AV_PIX_FMT_FLAG_RGB);
++    uint8_t rgba_map[4];
++    ff_fill_rgba_map(rgba_map, main_format);
++
++    if (is_rgb) {
++        ctx->bordercolor_converted_color.s[rgba_map[0]] = (float)ctx->bordercolor_rgba[0] / 255;
++        ctx->bordercolor_converted_color.s[rgba_map[1]] = (float)ctx->bordercolor_rgba[1] / 255;
++        ctx->bordercolor_converted_color.s[rgba_map[2]] = (float)ctx->bordercolor_rgba[2] / 255;
++        ctx->bordercolor_converted_color.s[rgba_map[3]] = (float)ctx->bordercolor_rgba[3] / 255;
++
++        if(ctx->text) {
++            ctx->font_converted_color.s[rgba_map[0]] = (float)ctx->fontcolor.rgba[0] / 255;
++            ctx->font_converted_color.s[rgba_map[1]] = (float)ctx->fontcolor.rgba[1] / 255;
++            ctx->font_converted_color.s[rgba_map[2]] = (float)ctx->fontcolor.rgba[2] / 255;
++            ctx->font_converted_color.s[rgba_map[3]] = (float)ctx->fontcolor.rgba[3] / 255;
++        }
++    } else {
++        ctx->bordercolor_converted_color.s[0] = (float)RGB_TO_Y_BT709(ctx->bordercolor_rgba[0],
++                                                                      ctx->bordercolor_rgba[1], 
++                                                                      ctx->bordercolor_rgba[2]) / 255;
++        ctx->bordercolor_converted_color.s[1] = (float)RGB_TO_U_BT709(ctx->bordercolor_rgba[0],
++                                                                      ctx->bordercolor_rgba[1],
++                                                                      ctx->bordercolor_rgba[2],
++                                                                      0) / 255;
++        ctx->bordercolor_converted_color.s[2] = (float)RGB_TO_V_BT709(ctx->bordercolor_rgba[0],
++                                                                      ctx->bordercolor_rgba[1],
++                                                                      ctx->bordercolor_rgba[2],
++                                                                      0) / 255;
++        ctx->bordercolor_converted_color.s[3] = (float)ctx->bordercolor_rgba[3] / 255;
++
++        if(ctx->text) {
++            ctx->font_converted_color.s[0] = (float)RGB_TO_Y_BT709(ctx->fontcolor.rgba[0],
++                                                                ctx->fontcolor.rgba[1], 
++                                                                ctx->fontcolor.rgba[2]) / 255;
++            ctx->font_converted_color.s[1] = (float)RGB_TO_U_BT709(ctx->fontcolor.rgba[0],
++                                                                ctx->fontcolor.rgba[1],
++                                                                ctx->fontcolor.rgba[2],
++                                                                0) / 255;
++            ctx->font_converted_color.s[2] = (float)RGB_TO_V_BT709(ctx->fontcolor.rgba[0],
++                                                                ctx->fontcolor.rgba[1],
++                                                                ctx->fontcolor.rgba[2],
++                                                                0) / 255;
++            ctx->font_converted_color.s[3] = (float)ctx->fontcolor.rgba[3] / 255;   
++        }
++    }
 +
 +    err = ff_opencl_filter_load_program(avctx, &source, 1);
 +    if (err < 0)
@@ -358,88 +1517,22 @@ new file mode 100644
 +    }
 +
 +    if (main_planes != overlay_planes ||
-+        main_desc->nb_components == overlay_desc->nb_components) {
++        main_desc->nb_components != overlay_desc->nb_components) {
 +        av_log(avctx, AV_LOG_ERROR, "Overlay %s format over %s is not supported (alfa channel conflict).\n",
 +               overlay_desc->name, main_desc->name);
 +        return AVERROR(EINVAL);
 +    }
 +
-+    scalex = FFMAX((float) ctx->src_w / ctx->width, 1);
-+    scaley = FFMAX((float) ctx->src_h / ctx->height, 1);
-+    filterw = ceil(2 * LANCZOS_RADIUS * scalex);
-+    filterh = ceil(2 * LANCZOS_RADIUS * scaley);
-+
-+    filterw = FFMIN(filterw, ctx->src_w - 2);
-+    filterw = FFMAX(filterw, 1);
-+    filterh = FFMIN(filterh, ctx->src_h - 2);
-+    filterh = FFMAX(filterh, 1);
-+
-+    ctx->flt_size.s[0] = filterw;
-+    ctx->flt_size.s[1] = filterh;
-+
-+    av_log(avctx, AV_LOG_INFO, "filter size: %d %d.\n", filterw, filterh);
-+
-+    cx = av_malloc_array(ctx->width * filterw, sizeof(cl_float));
-+    cy = av_malloc_array(ctx->height * filterh, sizeof(cl_float));
-+
-+    if (!cx || !cy) {
-+        err = AVERROR(ENOMEM);
++    err = create_lanczos_weights(avctx);
++    if (err < 0)
 +        goto fail;
-+    }
 +
-+    for (i = 0; i < ctx->width; ++i) {
-+        float s_x = (i + 0.5) * ctx->src_w / ctx->width - 0.5;
-+        float t = s_x - floor(s_x);  // fract
-+
-+        float sum = 0;
-+        for (j = 0; j < filterw; ++j) {
-+            int x = filterw/2 - j;
-+            sum += cx[i * filterw + j] = lanczos((x - t) / scalex, LANCZOS_RADIUS);
-+        }
-+
-+        for (j = 0; j < filterw; ++j)
-+            cx[i * filterw + j] /= sum;
-+    }
-+
-+    for (i = 0; i < ctx->height; ++i) {
-+        float s_y = (i + 0.5) * ctx->src_h / ctx->height - 0.5;
-+        float t = s_y - floor(s_y);  // fract
-+
-+        float sum = 0;
-+        for (j = 0; j < filterh; ++j) {
-+            int y = filterh/2 - j;
-+            sum += cy[i * filterh + j] = lanczos((y - t) / scaley, LANCZOS_RADIUS);
-+        }
-+
-+        for (j = 0; j < filterh; ++j)
-+            cy[i * filterh + j] /= sum;
-+    }
-+
-+    ctx->cx = clCreateBuffer(ctx->ocf.hwctx->context,
-+                                CL_MEM_READ_ONLY     |
-+                                CL_MEM_COPY_HOST_PTR |
-+                                CL_MEM_HOST_NO_ACCESS,
-+                                ctx->width * filterw * sizeof(cl_float),
-+                                cx,
-+                                &cle);
-+
-+    ctx->cy = clCreateBuffer(ctx->ocf.hwctx->context,
-+                                CL_MEM_READ_ONLY     |
-+                                CL_MEM_COPY_HOST_PTR |
-+                                CL_MEM_HOST_NO_ACCESS,
-+                                ctx->height * filterh * sizeof(cl_float),
-+                                cy,
-+                                &cle);
-+    av_free(cx);
-+    av_free(cy);
-+    if (!ctx->cx || !ctx->cy) {
-+        av_log(avctx, AV_LOG_ERROR, "Failed to create weights buffer: %d.\n", cle);
-+        err = AVERROR(EIO);
-+        goto fail;
-+    }
-+
-+    if (ctx->dir == NO_TRANSPOSE)
++    if (ctx->dir == NO_TRANSPOSE && !ctx->text)
++        kernel = "overlay_no_transpose_no_mask";
++    else if (ctx->dir == NO_TRANSPOSE)
 +        kernel = "overlay_no_transpose";
++    else if (!ctx->text)
++        kernel = "overlay_no_mask";
 +    else
 +        kernel = "overlay";
 +
@@ -455,14 +1548,82 @@ new file mode 100644
 +        clReleaseCommandQueue(ctx->command_queue);
 +    if (ctx->kernel)
 +        clReleaseKernel(ctx->kernel);
-+    if (ctx->cx)
-+        clReleaseMemObject(ctx->cx);
-+    if (ctx->cy)
-+        clReleaseMemObject(ctx->cy);
-+    if (cx)
-+        av_free(cx);
-+    if (cy)
-+        av_free(cy);
++    return err;
++}
++
++static int prepare_text_mask(AVFilterContext *avctx, AVBufferRef *hw_device_ref)
++{
++    int err;
++    AVFrame *text_sw = NULL;
++    AVBufferRef *hw_frames_ref = NULL;
++    size_t size;
++    AVHWFramesContext *frames_ctx;
++    SvParticipantOpenCLContext *ctx = avctx->priv;
++
++    text_sw = av_frame_alloc();
++    if (!text_sw) {
++        err = AVERROR(ENOMEM);
++        goto fail;
++    }
++
++    text_sw->format = AV_PIX_FMT_GRAY8;
++    text_sw->width  = ctx->width;
++    text_sw->height = ctx->height;
++    if (av_frame_get_buffer(text_sw, 32) < 0) {
++        err = AVERROR(ENOMEM);
++        goto fail;
++    }
++    size = text_sw->linesize[0] * text_sw->height;
++    memset(text_sw->data[0], 0, size);
++    
++    draw_text(avctx, text_sw);
++
++    hw_frames_ref  = av_hwframe_ctx_alloc(hw_device_ref);
++    if (!hw_frames_ref) { 
++        err = AVERROR(ENOMEM);
++        goto fail;
++    }
++    frames_ctx = (AVHWFramesContext*)hw_frames_ref->data;
++    frames_ctx->format = AV_PIX_FMT_OPENCL;
++    frames_ctx->sw_format = AV_PIX_FMT_GRAY8;
++    frames_ctx->width = text_sw->width;
++    frames_ctx->height = text_sw->height;
++    frames_ctx->initial_pool_size = 20;
++
++    err = av_hwframe_ctx_init(hw_frames_ref);
++    if (err < 0) {
++        goto fail;
++    }
++
++    ctx->hw_font_mask = av_frame_alloc();
++    if (!ctx->hw_font_mask) {
++        av_log(ctx, AV_LOG_ERROR, "Failed to allocate frame to upload to.\n");
++        err = AVERROR(ENOMEM);
++        goto fail;
++    }
++    if ((err = av_hwframe_get_buffer(hw_frames_ref, ctx->hw_font_mask, 0)) < 0) {
++        goto fail;
++    }
++
++    err = av_hwframe_transfer_data(ctx->hw_font_mask, text_sw, 0);
++    if (err < 0) {
++        av_log(ctx, AV_LOG_ERROR, "Failed to upload frame: %d.\n", err);
++        goto fail;
++    }
++
++    err = av_frame_copy_props(ctx->hw_font_mask, text_sw);
++    if (err < 0) {
++        goto fail;
++    }
++
++    av_buffer_unref(&hw_frames_ref);
++    av_frame_free(&text_sw);
++    return 0;
++
++fail:
++    av_buffer_unref(&hw_frames_ref);
++    av_frame_free(&ctx->hw_font_mask);
++    av_frame_free(&text_sw);
 +    return err;
 +}
 +
@@ -472,10 +1633,12 @@ new file mode 100644
 +    AVFilterLink     *outlink = avctx->outputs[0];
 +    SvParticipantOpenCLContext *ctx = avctx->priv;
 +    AVFrame *input_main, *input_overlay;
-+    AVFrame *output;
++    AVFrame *output = NULL;
 +    cl_mem mem;
 +    cl_int cle;
-+    cl_int2 overlay_loc, overlay_size;
++    cl_int4 overlay_box;
++    cl_int2 overlay_offset, overlay_target_size;
++    cl_int2 src_subsampling;
 +    size_t global_work[2];
 +    int kernel_arg = 0;
 +    int err, plane;
@@ -495,6 +1658,12 @@ new file mode 100644
 +            (AVHWFramesContext*)input_main->hw_frames_ctx->data;
 +        AVHWFramesContext *overlay_fc =
 +            (AVHWFramesContext*)input_overlay->hw_frames_ctx->data;
++
++        
++        if (ctx->text) {
++            if (err = prepare_text_mask(avctx, main_fc->device_ref) < 0)
++                return err;
++        }
 +
 +        err = sv_participant_opencl_load(avctx, main_fc->sw_format,
 +                                         overlay_fc->sw_format);
@@ -523,20 +1692,72 @@ new file mode 100644
 +        CL_SET_KERNEL_ARG(ctx->kernel, kernel_arg, cl_mem, &mem);
 +        kernel_arg++;
 +
++        if(ctx->text) {
++            mem = (cl_mem)ctx->hw_font_mask->data[0];
++            CL_SET_KERNEL_ARG(ctx->kernel, kernel_arg, cl_mem, &mem);
++            kernel_arg++;
++            
++            cl_float4 font_color;
++            if (plane == 0) {
++                font_color.s[0] = ctx->font_converted_color.s[0];
++                font_color.s[1] = ctx->font_converted_color.s[1];
++                font_color.s[2] = ctx->font_converted_color.s[2];
++                font_color.s[3] = ctx->font_converted_color.s[3];
++            }
++            else {
++                font_color.s[0] = ctx->font_converted_color.s[1];
++                font_color.s[1] = ctx->font_converted_color.s[2];
++                font_color.s[2] = ctx->font_converted_color.s[3];
++                font_color.s[3] = 1;
++            }
++            CL_SET_KERNEL_ARG(ctx->kernel, kernel_arg, cl_float4, &font_color);
++            kernel_arg++;
++
++            src_subsampling.s[0] = plane == 0 ? 1 : ctx->x_subsample;
++            src_subsampling.s[1] = plane == 0 ? 1 : ctx->y_subsample;
++
++            CL_SET_KERNEL_ARG(ctx->kernel, kernel_arg, cl_int2, &src_subsampling);
++            kernel_arg++;
++        }
++
++        overlay_box.s[0] = ctx->x / (plane == 0 ? 1 : ctx->x_subsample);
++        overlay_box.s[1] = ctx->y / (plane == 0 ? 1 : ctx->y_subsample);
++        overlay_box.s[2] = ctx->width / (plane == 0 ? 1 : ctx->x_subsample);
++        overlay_box.s[3] = ctx->height / (plane == 0 ? 1 : ctx->y_subsample);
++
++        CL_SET_KERNEL_ARG(ctx->kernel, kernel_arg, cl_int4, &overlay_box);
++        kernel_arg++;
++
++        overlay_offset.s[0] = ctx->overlay_inner_offset_x / (plane == 0 ? 1 : ctx->x_subsample);
++        overlay_offset.s[1] = ctx->overlay_inner_offset_y / (plane == 0 ? 1 : ctx->y_subsample);
++
++        CL_SET_KERNEL_ARG(ctx->kernel, kernel_arg, cl_int2, &overlay_offset);
++        kernel_arg++;
 +        
-+        overlay_loc.s[0] = ctx->x / (plane == 0 ? 1 : ctx->x_subsample);
-+        overlay_loc.s[1] = ctx->y / (plane == 0 ? 1 : ctx->y_subsample);
++        overlay_target_size.s[0] = ctx->scaled_width / (plane == 0 ? 1 : ctx->x_subsample);
++        overlay_target_size.s[1] = ctx->scaled_height / (plane == 0 ? 1 : ctx->y_subsample);
 +
-+        CL_SET_KERNEL_ARG(ctx->kernel, kernel_arg, cl_int2, &overlay_loc);
++        CL_SET_KERNEL_ARG(ctx->kernel, kernel_arg, cl_int2, &overlay_target_size);
 +        kernel_arg++;
 +
-+        overlay_size.s[0] = ctx->width / (plane == 0 ? 1 : ctx->x_subsample);
-+        overlay_size.s[1] = ctx->height / (plane == 0 ? 1 : ctx->y_subsample);
-+
-+        CL_SET_KERNEL_ARG(ctx->kernel, kernel_arg, cl_int2, &overlay_loc);
++        cl_int border_width = ctx->border_w / (plane == 0 ? 1 : ctx->x_subsample);
++        CL_SET_KERNEL_ARG(ctx->kernel, kernel_arg, cl_int, &border_width);
 +        kernel_arg++;
 +
-+        CL_SET_KERNEL_ARG(ctx->kernel, kernel_arg, cl_float4, &ctx->bordercolor_rgba_float);
++        cl_float4 border_color;
++        if (plane == 0) {
++            border_color.s[0] = ctx->bordercolor_converted_color.s[0];
++            border_color.s[1] = ctx->bordercolor_converted_color.s[1];
++            border_color.s[2] = ctx->bordercolor_converted_color.s[2];
++            border_color.s[3] = ctx->bordercolor_converted_color.s[3];
++        }
++        else {
++            border_color.s[0] = ctx->bordercolor_converted_color.s[1];
++            border_color.s[1] = ctx->bordercolor_converted_color.s[2];
++            border_color.s[2] = ctx->bordercolor_converted_color.s[3];
++            border_color.s[3] = 1;
++        }
++        CL_SET_KERNEL_ARG(ctx->kernel, kernel_arg, cl_float4, &border_color);
 +        kernel_arg++;
 +
 +        if(ctx->dir != NO_TRANSPOSE) {
@@ -544,9 +1765,9 @@ new file mode 100644
 +            kernel_arg++;
 +        }
 +
-+        CL_SET_KERNEL_ARG(ctx->kernel, kernel_arg, cl_mem, &ctx->cx);
++        CL_SET_KERNEL_ARG(ctx->kernel, kernel_arg, cl_mem, &ctx->cx[plane]);
 +        kernel_arg++;
-+        CL_SET_KERNEL_ARG(ctx->kernel, kernel_arg, cl_mem, &ctx->cy);
++        CL_SET_KERNEL_ARG(ctx->kernel, kernel_arg, cl_mem, &ctx->cy[plane]);
 +        kernel_arg++;
 +        CL_SET_KERNEL_ARG(ctx->kernel, kernel_arg, cl_int2, &ctx->flt_size);
 +        kernel_arg++;
@@ -571,6 +1792,7 @@ new file mode 100644
 +           av_get_pix_fmt_name(output->format),
 +           output->width, output->height, output->pts);
 +
++
 +    return ff_filter_frame(outlink, output);
 +
 +fail:
@@ -594,10 +1816,62 @@ new file mode 100644
 +    var_values[VAR_IN_H]  = var_values[VAR_IH] = inlink->h;
 +    var_values[VAR_OUT_W] = var_values[VAR_OW] = NAN;
 +    var_values[VAR_OUT_H] = var_values[VAR_OH] = NAN;
++    var_values[VAR_TEXT_X] = NAN;
++    var_values[VAR_TEXT_Y] = NAN;
 +    var_values[VAR_A]     = (double) inlink->w / inlink->h;
 +    var_values[VAR_SAR]   = inlink->sample_aspect_ratio.num ?
 +        (double) inlink->sample_aspect_ratio.num / inlink->sample_aspect_ratio.den : 1;
 +    var_values[VAR_DAR]   = var_values[VAR_A] * var_values[VAR_SAR];
++
++    ctx->src_w = inlink->w;
++    ctx->src_h = inlink->h;
++
++    if(ctx->text) {
++        ret = ff_draw_init(&ctx->dc, AV_PIX_FMT_GRAY8, FF_DRAW_PROCESS_ALPHA);
++        if (ret < 0) {
++            av_log(ctx, AV_LOG_ERROR, "Failed to initialize FFDrawContext\n");
++            return ret;
++        }
++
++        ff_draw_color(&ctx->dc, &ctx->black,  (uint8_t[]){ 255, 255, 255, 255} );
++
++        if ((ret = av_expr_parse_and_eval(&res, (expr = ctx->fontsize_expr),
++                                      var_names, var_values,
++                                      NULL, NULL, NULL, NULL, NULL, 0, ctx)) < 0)
++            return ret;
++
++        if (!isnan(res)) {
++            double roundedsize = round(res);
++            // test for overflow before cast
++            if (!(roundedsize > INT_MIN && roundedsize < INT_MAX)) {
++                av_log(ctx, AV_LOG_ERROR, "fontsize overflow\n");
++                return AVERROR(EINVAL);
++            }
++            ctx->fontsize = roundedsize;
++        }
++
++        if (ctx->fontsize == 0)
++            ctx->fontsize = 1;
++
++        if ((err = load_font(avctx)) < 0)
++            return err;
++
++        if ((err = FT_Set_Pixel_Sizes(ctx->face, 0, ctx->fontsize))) {
++            av_log(ctx, AV_LOG_ERROR, "Could not set font size to %d pixels: %s\n",
++                ctx->fontsize, FT_ERRMSG(err));
++            return AVERROR(EINVAL);
++        }
++
++        /* load the fallback glyph with code 0 */
++        load_glyph(avctx, NULL, 0, 0, 0);
++
++        if ((ret = measure_text(avctx, &ctx->metrics)) < 0) {
++            return ret;
++        }
++
++        var_values[VAR_TW] = var_values[VAR_TEXT_W] = ctx->metrics.width;
++        var_values[VAR_TH] = var_values[VAR_TEXT_H] = ctx->metrics.height;
++    }
 +
 +    av_expr_parse_and_eval(&res, (expr = ctx->w_expr),
 +                           var_names, var_values,
@@ -635,9 +1909,26 @@ new file mode 100644
 +                                      var_names, var_values,
 +                                      NULL, NULL, NULL, NULL, NULL, 0, ctx)) < 0)
 +        return ret;
-+
-+    ctx->src_w = inlink->w;
-+    ctx->src_h = inlink->h;
++    ctx->x = var_values[VAR_X] = res;
++    
++    if (ctx->text) {
++        /* evaluate text_x and text_y */
++        av_expr_parse_and_eval(&res, (expr = ctx->text_x_expr),
++                            var_names, var_values,
++                            NULL, NULL, NULL, NULL, NULL, 0, ctx);
++        ctx->text_x = var_values[VAR_TEXT_X] = res;
++        if ((ret = av_expr_parse_and_eval(&res, (expr = ctx->text_y_expr),
++                                        var_names, var_values,
++                                        NULL, NULL, NULL, NULL, NULL, 0, ctx)) < 0)
++            return ret;
++        ctx->text_y = var_values[VAR_TEXT_Y] = res;
++        /* evaluate text_x again, as it may depend on the evaluated text_y value */
++        if ((ret = av_expr_parse_and_eval(&res, (expr = ctx->text_x_expr),
++                                        var_names, var_values,
++                                        NULL, NULL, NULL, NULL, NULL, 0, ctx)) < 0)
++            return ret;
++        ctx->text_x = var_values[VAR_TEXT_X] = res;
++    }
 +
 +    if (((int64_t) ctx->height * inlink->w) > INT_MAX  ||
 +        ((int64_t) ctx->width * inlink->h) > INT_MAX)
@@ -662,13 +1953,38 @@ new file mode 100644
 +
 +static av_cold int sv_participant_opencl_init(AVFilterContext *avctx)
 +{
++    int err;
 +    SvParticipantOpenCLContext *ctx = avctx->priv;
 +
-+    for (int i = 0; i < 4; ++i) {
-+        ctx->bordercolor_rgba_float.s[i] = (float)ctx->bordercolor_rgba[i] / 255.0;
-+    }
-+
 +    ctx->fs.on_event = &sv_participant_opencl_blend;
++
++    if (ctx->text) {
++        ctx->fontsize = 0;
++        ctx->default_fontsize = 16;
++
++        if (!ctx->fontfile && !CONFIG_LIBFONTCONFIG) {
++            av_log(ctx, AV_LOG_ERROR, "No font filename provided\n");
++            return AVERROR(EINVAL);
++        }
++
++#if CONFIG_LIBFRIBIDI
++        if (s->text_shaping)
++            if ((err = shape_text(ctx)) < 0)
++                return err;
++#endif
++
++        if ((err = FT_Init_FreeType(&(ctx->library)))) {
++            av_log(ctx, AV_LOG_ERROR,
++                "Could not load FreeType: %s\n", FT_ERRMSG(err));
++            return AVERROR(EINVAL);
++        }
++
++        av_bprint_init(&ctx->expanded_fontcolor, 0, AV_BPRINT_SIZE_UNLIMITED);
++    }
++    else {
++        av_log(ctx, AV_LOG_INFO,
++               "Text, a valid file, a timecode or text source is not provided. Text will not be drawn.\n");
++    }
 +
 +    return ff_opencl_filter_init(avctx);
 +}
@@ -678,6 +1994,20 @@ new file mode 100644
 +    SvParticipantOpenCLContext *ctx = avctx->priv;
 +
 +    return ff_framesync_activate(&ctx->fs);
++}
++
++static int glyph_enu_free(void *opaque, void *elem)
++{
++    Glyph *glyph = elem;
++
++    FT_Done_Glyph(glyph->glyph);
++    for (int t = 0; t < 16; ++t) {
++        if (glyph->bglyph[t] != NULL) {
++            FT_Done_Glyph((FT_Glyph)glyph->bglyph[t]);
++        }
++    }
++    av_free(elem);
++    return 0;
 +}
 +
 +static av_cold void sv_participant_opencl_uninit(AVFilterContext *avctx)
@@ -699,6 +2029,39 @@ new file mode 100644
 +                   "command queue: %d.\n", cle);
 +    }
 +
++    if (ctx->cx) {
++        for (int plane = 0; plane < ctx->nb_planes; plane++) {
++            cle = clReleaseMemObject(ctx->cx[plane]);
++            if (cle != CL_SUCCESS)
++                av_log(avctx, AV_LOG_ERROR, "Failed to release "
++                "weights buffer: %d.\n", cle);
++        }
++        av_freep(&ctx->cx);
++    }
++
++    if (ctx->cy) {
++        for (int plane = 0; plane < ctx->nb_planes; plane++) {
++            cle = clReleaseMemObject(ctx->cy[plane]);
++            if (cle != CL_SUCCESS)
++                av_log(avctx, AV_LOG_ERROR, "Failed to release "
++                "weights buffer: %d.\n", cle);
++        }
++        av_freep(&ctx->cy);
++    }
++
++    ctx->text_x_expr = ctx->text_y_expr = ctx->fontsize_expr = NULL;
++
++    av_tree_enumerate(ctx->glyphs, NULL, NULL, glyph_enu_free);
++    av_tree_destroy(ctx->glyphs);
++    ctx->glyphs = NULL;
++
++    FT_Done_Face(ctx->face);
++    FT_Done_FreeType(ctx->library);
++
++    av_bprint_finalize(&ctx->expanded_fontcolor, NULL);
++
++    av_frame_free(&ctx->hw_font_mask);
++
 +    ff_opencl_filter_uninit(avctx);
 +
 +    ff_framesync_uninit(&ctx->fs);
@@ -714,22 +2077,35 @@ new file mode 100644
 +    { "w",        "set the width for the overlayed image",   OFFSET(w_expr), AV_OPT_TYPE_STRING, {.str = "iw"}, 0, 0, TFLAGS },
 +    { "height",   "set the height for the overlayed image",  OFFSET(h_expr), AV_OPT_TYPE_STRING, {.str = "ih"}, 0, 0, TFLAGS },
 +    { "h",        "set the height for the overlayed image",  OFFSET(h_expr), AV_OPT_TYPE_STRING, {.str = "ih"}, 0, 0, TFLAGS },
-+    { "crop_sar", "desired aspect ratio for overlayed image after cropping",  OFFSET(cropped_sar), AV_OPT_TYPE_RATIONAL, {.dbl = 0}, 0, INT_MAX, FLAGS },
++    { "no_black_fields", "scale overalay image to remove black borders", OFFSET(no_black_fields), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS},
 +    { "b_width", "desired border width",  OFFSET(border_w), AV_OPT_TYPE_INT, {.i64 = 1}, 0, INT_MAX, FLAGS },
 +    { "b_color", "desired border color",  OFFSET(bordercolor_rgba), AV_OPT_TYPE_COLOR, {.str="blue"}, 0, 0, FLAGS },
-+    { "dir", "set transpose direction", OFFSET(dir), AV_OPT_TYPE_INT, { .i64 = NO_TRANSPOSE }, -1, 3, FLAGS, .unit = "dir" },
++    { "dir", "set transpose direction", OFFSET(dir), AV_OPT_TYPE_INT, { .i64 = NO_TRANSPOSE }, -1, 7, FLAGS, .unit = "dir" },
 +        { "cclock_flip", "rotate counter-clockwise with vertical flip", 0, AV_OPT_TYPE_CONST, { .i64 = TRANSPOSE_CCLOCK_FLIP }, .flags=FLAGS, .unit = "dir" },
 +        { "clock",       "rotate clockwise",                            0, AV_OPT_TYPE_CONST, { .i64 = TRANSPOSE_CLOCK       }, .flags=FLAGS, .unit = "dir" },
 +        { "cclock",      "rotate counter-clockwise",                    0, AV_OPT_TYPE_CONST, { .i64 = TRANSPOSE_CCLOCK      }, .flags=FLAGS, .unit = "dir" },
 +        { "clock_flip",  "rotate clockwise with vertical flip",         0, AV_OPT_TYPE_CONST, { .i64 = TRANSPOSE_CLOCK_FLIP  }, .flags=FLAGS, .unit = "dir" },
-+// #if CONFIG_LIBFONTCONFIG
-+//     { "font",        "Font name",            OFFSET(font),               AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS },
-+// #endif
-+//     {"fontfile",       "set font file",         OFFSET(fontfile),           AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
-+//     {"text",           "set text",              OFFSET(text),               AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, TFLAGS},
-+//     {"fontcolor",      "set foreground color",  OFFSET(fontcolor.rgba),     AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, TFLAGS},
-+//     {"fontsize",       "set font size",         OFFSET(fontsize_expr),      AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, TFLAGS},
-+//     { NULL }
++#if CONFIG_LIBFONTCONFIG
++    { "font",        "Font name",            OFFSET(font),               AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS },
++#endif
++    {"fontfile",       "set font file",         OFFSET(fontfile),           AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, FLAGS},
++    {"text",           "set text",              OFFSET(text),               AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, TFLAGS},
++    {"fontcolor",      "set foreground color",  OFFSET(fontcolor.rgba),     AV_OPT_TYPE_COLOR,  {.str="black"}, 0, 0, TFLAGS},
++    {"line_spacing",   "set line spacing in pixels", OFFSET(line_spacing),  AV_OPT_TYPE_INT,    {.i64=0},     INT_MIN, INT_MAX, TFLAGS},
++    {"fontsize",       "set font size",         OFFSET(fontsize_expr),      AV_OPT_TYPE_STRING, {.str=NULL},  0, 0, TFLAGS},
++    {"text_x",         "set text x expression", OFFSET(text_x_expr),        AV_OPT_TYPE_STRING, {.str="0"},   0, 0, TFLAGS},
++    {"text_y",         "set text y expression", OFFSET(text_y_expr),        AV_OPT_TYPE_STRING, {.str="0"},   0, 0, TFLAGS},
++#if CONFIG_LIBFONTCONFIG
++    { "font",        "Font name",            OFFSET(font),               AV_OPT_TYPE_STRING, { .str = "Sans" },           .flags = FLAGS },
++#endif
++    {"y_align",   "set the y alignment",    OFFSET(y_align), AV_OPT_TYPE_INT,  {.i64=YA_TEXT}, 0, 2, TFLAGS, .unit = "y_align"},
++        {"text",     "y is referred to the top of the first text line", OFFSET(y_align), AV_OPT_TYPE_CONST, {.i64=YA_TEXT},     0, 0, FLAGS, .unit = "y_align"},
++        {"baseline", "y is referred to the baseline of the first line", OFFSET(y_align), AV_OPT_TYPE_CONST, {.i64=YA_BASELINE}, 0, 0, FLAGS, .unit = "y_align"},
++        {"font",     "y is referred to the font defined line metrics",  OFFSET(y_align), AV_OPT_TYPE_CONST, {.i64=YA_FONT},     0, 0, FLAGS, .unit = "y_align"},
++#if CONFIG_LIBFRIBIDI
++    {"text_shaping", "attempt to shape text before drawing", OFFSET(text_shaping), AV_OPT_TYPE_BOOL, {.i64=1}, 0, 1, FLAGS},
++#endif
++    { NULL }
 +};
 +
 +AVFILTER_DEFINE_CLASS(sv_participant_opencl);

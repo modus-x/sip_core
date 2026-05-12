@@ -228,22 +228,25 @@ private:
                        int index,
                        bool isActive);
 
-    bool initBorderFilter(MediaFilter& filter,
-                          std::string inputName,
-                          int format,
-                          int x,
-                          int y,
-                          int width,
-                          int height,
-                          bool active,
-                          bool withText);
+    bool initBorderFilterSoftware(MediaFilter& filter,
+                                  std::string inputName,
+                                  int format,
+                                  int x,
+                                  int y,
+                                  int width,
+                                  int height,
+                                  bool active);
 #ifdef RING_ACCEL
-    bool initHardwareSnPFilter(MediaFilter& filter,
+    bool initMainFilterHardware(MediaFilter& filter,
+                               std::string inputName,
                                int format,
                                int x,
                                int y,
                                int w,
-                               int h);
+                               int h,
+                               int dir,
+                               bool remove_borders,
+                               bool active);
 
     int getHWFrame(const std::shared_ptr<VideoFrame>& input, std::shared_ptr<VideoFrame>& output);
     std::shared_ptr<VideoFrame> getUnlinkedHWFrame(const VideoFrame& input);
@@ -292,6 +295,7 @@ private:
     std::vector<std::shared_ptr<VideoInput>> localInputs_ {};
     void stopInput(const std::shared_ptr<VideoFrameActiveWriter>& input);
 
+    std::mutex scaler_mutex_;
     VideoScaler scaler_;
 
     ThreadLoop loop_; // as to be last member

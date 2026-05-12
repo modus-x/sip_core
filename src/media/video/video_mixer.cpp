@@ -52,11 +52,8 @@ struct VideoMixer::VideoMixerSource
 {
     Observable<std::shared_ptr<MediaFrame>>* source {nullptr};
     int rotation {0};
-    std::unique_ptr<MediaFilter> transposeFilter {nullptr};
-#ifdef RING_ACCEL
-    std::unique_ptr<MediaFilter> hardwareScaleAndPadFilter {nullptr};
-#endif
-    std::unique_ptr<MediaFilter> bordersFilter {nullptr};
+    std::unique_ptr<MediaFilter> mainFilter {nullptr};
+    std::unique_ptr<MediaFilter> postprocessFilter {nullptr};
     std::shared_ptr<VideoFrame> render_frame;
     void atomic_copy(const VideoFrame& other)
     {
@@ -395,7 +392,7 @@ VideoMixer::update(Observable<std::shared_ptr<MediaFrame>>* ob,
 #ifdef RING_ACCEL
             std::shared_ptr<VideoFrame> frame;
             if (getHWFrame(std::static_pointer_cast<VideoFrame>(frame_p), frame) < 0) {
-                SIP_CORE_ERR("Fail to get hardware frame");
+                SIP_CORE_ERR("[mixer:%s] VideoFrame::failed to transfer hardware frame", id_.c_str());
                 return;
             }
             if(frame)
@@ -499,6 +496,18 @@ VideoMixer::process()
     {
         std::shared_lock lock(rwMutex_);
 
+#ifdef RING_ACCEL
+        if (accel_) {
+            if (auto hw_frame = getHWFrameFromSWFrame(output)) {
+                output.copyFrom(*hw_frame);
+            }
+            else {
+                SIP_CORE_ERR("[mixer:%s] VideoFrame::main hardware buffer allocation failed", id_.c_str());
+                return;
+            }
+        }
+#endif
+
         // does current frame is SUCCESSFULLY rendered?
         bool layoutRendered = audioOnlySources_.size() != 0 && sources_.size() == 0;
 
@@ -529,6 +538,18 @@ VideoMixer::process()
                 
             std::shared_ptr<VideoFrame> audioFrame = std::make_shared<VideoFrame>();
             audioFrame->reserve(format_, 640, 480);
+
+#ifdef RING_ACCEL
+            if (accel_) {
+                if (auto hw_frame = getHWFrameFromSWFrame(*audioFrame)) {
+                    audioFrame->copyFrom(*hw_frame);
+                }
+                else {
+                    SIP_CORE_ERR("[mixer:%s] VideoFrame::failed to transfer hardware frame", id_.c_str());
+                    return;
+                }
+            }
+#endif
 
             auto audioSource = std::make_unique<VideoMixer::VideoMixerSource>();
             audioSource->hasVideo = false;
@@ -573,7 +594,6 @@ VideoMixer::process()
             // make rendered frame temporarily unavailable for update()
             // to avoid concurrent access.
             std::shared_ptr<VideoFrame> input = x->getRenderFrame();
-            bool geometryChanged = false;
             if (input->height() and input->width()) {
                 if (input->width() != x->lastLayoutFrameWidth
                         || input->height() != x->lastLayoutFrameHeight
@@ -630,6 +650,13 @@ VideoMixer::process()
                                              static_cast<AVRounding>(AV_ROUND_NEAR_INF
                                                                      | AV_ROUND_PASS_MINMAX));
     lastTimestamp_ = output.pointer()->pts;
+
+#ifdef RING_ACCEL
+        auto frame = getUnlinkedHWFrame(output);
+        if (frame) {
+            output.copyFrom(*frame.get());
+        }
+#endif
     publishFrame();
 }
 
@@ -675,69 +702,76 @@ VideoMixer::render_frame(VideoFrame& output,
     if (!width_ or !height_ or !input->pointer() or input->pointer()->format == -1)
         return false;
 
-    int cell_width = source->w;
-    int cell_height = source->h;
-    int xoff = source->x.load();
-    int yoff = source->y.load();
-
-    int angle = input->getOrientation();
-    const constexpr char filterIn[] = "mixin";
-    if (angle != source->rotation || positionChanged) {
-        // calculate width and height for cropping
-        int width = 0, height = 0;
-        if(remove_black_borders_ && not source->isBig) {
-            // calculte cropping according to aspects
-            if(grid_aspect_ > input->width() / input->height()) {
-                width = input->width();
-                height = width / grid_aspect_;
-            }
-            else {
-                height = input->height();
-                width = height * grid_aspect_;
-            }
-        }
-        source->transposeFilter = video::getTransposeFilterWithCrop(filterIn,
-                                                                    angle,
-                                                                    width,
-                                                                    height,
-                                                                    input->format());
-        source->rotation = angle;
-    }
-    std::shared_ptr<VideoFrame> frame;
-    if (source->transposeFilter) {
-        source->transposeFilter->feedInput(input->pointer(), filterIn);
-        frame = std::static_pointer_cast<VideoFrame>(
-            std::shared_ptr<MediaFrame>(source->transposeFilter->readOutput()));
-    } else {
-        frame = input;
-    }
-
 #ifdef RING_ACCEL
     std::lock_guard lock(accelMtx_);
     if(accel_) {
-        if(source->hardwareScaleAndPadFilter) {
-            source->hardwareScaleAndPadFilter->feedInput(output.pointer(), hardwareScaleAndPadFilterName_);
-            std::unique_ptr<MediaFrame> clone = source->hardwareScaleAndPadFilter->readOutput();
+        if(source->mainFilter) {
+            source->mainFilter->feedInput(input->pointer(), "overlay");
+            output.pointer()->pts = input->pointer()->pts; // for correct framesync
+            source->mainFilter->feedInput(output.pointer(), "main");
+            std::unique_ptr<MediaFrame> clone = source->mainFilter->readOutput();
             if(clone.get())
                 output.copyFrom(*std::static_pointer_cast<VideoFrame>(
-                    std::shared_ptr<MediaFrame>(clone.get())
-                ));
-            else {
-                enableAccel_ = false;
-                accel_.reset();
-            }
+                                    std::shared_ptr<MediaFrame>(clone.release())));
+            // else {
+            //     enableAccel_ = false;
+            //     accel_.reset();
+            //     source->mainFilter.release();
+            //     return false;
+            // }
         }
-    } else
+    } else {
 #endif
-        scaler_.scale_and_pad(*frame, output, xoff, yoff, cell_width, cell_height, true);
+        int cell_width = source->w;
+        int cell_height = source->h;
+        int xoff = source->x.load();
+        int yoff = source->y.load();
 
-    if (source->bordersFilter) {
-        source->bordersFilter->feedInput(output.pointer(), borderFilterName_);
-        std::unique_ptr<MediaFrame> clone = source->bordersFilter->readOutput();
-        if (clone.get())
-            output.copyFrom(*std::static_pointer_cast<VideoFrame>(
-                std::shared_ptr<MediaFrame>(clone.release())));
+        int angle = input->getOrientation();
+        const constexpr char filterIn[] = "mixin";
+        if (angle != source->rotation || positionChanged) {
+            // calculate width and height for cropping
+            int width = 0, height = 0;
+            if(remove_black_borders_ && not source->isBig) {
+                // calculte cropping according to aspects
+                if(grid_aspect_ > input->width() / input->height()) {
+                    width = input->width();
+                    height = width / grid_aspect_;
+                }
+                else {
+                    height = input->height();
+                    width = height * grid_aspect_;
+                }
+            }
+            source->mainFilter = video::getTransposeFilterWithCrop(filterIn,
+                                                                        angle,
+                                                                        width,
+                                                                        height,
+                                                                        input->format());
+            source->rotation = angle;
+        }
+        std::shared_ptr<VideoFrame> frame;
+        if (source->mainFilter) {
+            source->mainFilter->feedInput(input->pointer(), filterIn);
+            frame = std::static_pointer_cast<VideoFrame>(
+                std::shared_ptr<MediaFrame>(source->mainFilter->readOutput()));
+        } else {
+            frame = input;
+        }
+        if (frame)
+            scaler_.scale_and_pad(*frame, output, xoff, yoff, cell_width, cell_height, true);
+
+        if (source->postprocessFilter) {
+            source->postprocessFilter->feedInput(output.pointer(), borderFilterName_);
+            std::unique_ptr<MediaFrame> clone = source->postprocessFilter->readOutput();
+            if (clone.get())
+                output.copyFrom(*std::static_pointer_cast<VideoFrame>(
+                    std::shared_ptr<MediaFrame>(clone.release())));
+        }
+
+#ifdef RING_ACCEL
     }
+#endif
 
     return true;
 }
@@ -770,45 +804,53 @@ VideoMixer::calc_position(std::unique_ptr<VideoMixerSource>& source,
 #ifdef RING_ACCEL
     std::lock_guard lock(accelMtx_);
     if(accel_) {
-        source->hardwareScaleAndPadFilter = std::unique_ptr<MediaFilter>(new MediaFilter());
-        if(!initHardwareSnPFilter(*source->hardwareScaleAndPadFilter,
+        if (!source->w || !source->h)
+            return;
+
+        std::string display = getCallDisplayName(source);
+        source->mainFilter = std::unique_ptr<MediaFilter>(new MediaFilter());
+        if(!initMainFilterHardware(*source->mainFilter,
+                                   display,
                                    input->format(),
                                    source->x.load(),
                                    source->y.load(),
                                    source->w,
-                                   source->h)) 
+                                   source->h,
+                                   input->getOrientation(),
+                                   remove_black_borders_ && not source->isBig,
+                                   isActive))
         {
             this->enableAccel_ = false;
             accel_.reset();
-            source->hardwareScaleAndPadFilter.release();
+            source->mainFilter.release();
         }
     }
     else {
 #endif
     // Update border filter
     std::string display = getCallDisplayName(source);
-    source->bordersFilter = std::unique_ptr<MediaFilter>(new MediaFilter());
-    if (initBorderFilter(*source->bordersFilter.get(),
-                          display,
-                          input->format(),
-                          source->x.load(),
-                          source->y.load(),
-                          source->w,
-                          source->h,
-                          isActive, true))
+    source->postprocessFilter = std::unique_ptr<MediaFilter>(new MediaFilter());
+    if (initBorderFilterSoftware(*source->postprocessFilter.get(),
+                                 display,
+                                 input->format(),
+                                 source->x.load(),
+                                 source->y.load(),
+                                 source->w,
+                                 source->h,
+                                 isActive))
         return;
 
     // If textdraw failed - try without it...
-    source->bordersFilter.reset(new MediaFilter());
-    if (!initBorderFilter(*source->bordersFilter.get(),
-                          display,
-                          input->format(),
-                          source->x.load(),
-                          source->y.load(),
-                          source->w,
-                          source->h,
-                          isActive, false))
-        source->bordersFilter.release();
+    source->postprocessFilter.reset(new MediaFilter());
+    if (!initBorderFilterSoftware(*source->postprocessFilter.get(),
+                                  "",
+                                  input->format(),
+                                  source->x.load(),
+                                  source->y.load(),
+                                  source->w,
+                                  source->h,
+                                  isActive))
+        source->postprocessFilter.release();
 #ifdef RING_ACCEL
     }
 #endif
@@ -1005,15 +1047,14 @@ VideoMixer::calc_position_fixed(std::unique_ptr<VideoMixerSource>& source,
 }
 
 bool
-VideoMixer::initBorderFilter(MediaFilter& filter,
+VideoMixer::initBorderFilterSoftware(MediaFilter& filter,
                              std::string inputName,
                              int format,
                              int x,
                              int y,
                              int width,
                              int height,
-                             bool active,
-                             bool withText)
+                             bool active)
 {
     if(border_size_ <= 0)
         return false;
@@ -1025,7 +1066,7 @@ VideoMixer::initBorderFilter(MediaFilter& filter,
        << ":color=" << (active ? active_border_color_ : inactive_border_color_)
        << ":t=" << border_size_;
 
-    if(withText) { 
+    if(!inputName.empty()) { 
         const int text_height = height / 15;
         constexpr int text_padding = 10;
         ss << ",drawtext=text='" << inputName << "'"
@@ -1049,25 +1090,66 @@ VideoMixer::initBorderFilter(MediaFilter& filter,
 
 #ifdef RING_ACCEL
 bool
-VideoMixer::initHardwareSnPFilter(MediaFilter& filter,
-                                  int format,
-                                  int x,
-                                  int y,
-                                  int w,
-                                  int h)
+VideoMixer::initMainFilterHardware(MediaFilter& filter,
+                                   std::string inputName,
+                                   int format,
+                                   int x,
+                                   int y,
+                                   int w,
+                                   int h,
+                                   int dir,
+                                   bool remove_borders,
+                                   bool active)
 {
     std::stringstream ss;
     ss << " [main][overlay]";
-    ss << "sv_participant_opencl=x=" << x << ":y=" << y << ":width=" << w << ":height=" << h;
+    ss << "sv_participant_opencl=x=" << x << ":y=" << y 
+                                     << ":width=" << w << ":height=" << h
+                                     << ":b_width=" << border_size_ 
+                                     << ":b_color=" << (active ? active_border_color_ : inactive_border_color_);
+
+    if(!inputName.empty()) { 
+        const int text_height = h / 15;
+        constexpr int text_padding = 10;
+        ss << ":text='" << inputName << "'"
+           << ":fontcolor=white:fontsize=" << text_height
+           << ":text_x=(" << w << "-text_w)/2"
+           << ":text_y=" << h - text_padding << "-text_h";
+    }
+
+    switch (dir) {
+    case 0: break;
+    case 90:
+    case -270:
+        ss << ":dir=2";
+        break;
+    case 180:
+    case -180:
+        ss << ":dir=6";
+        break;
+    case 270:
+    case -90:
+        ss << ":dir=1";
+        break;
+    default:
+        SIP_CORE_WARN("Unsupported rotation value");
+    }
+    
+    if (remove_borders)
+        ss << ":no_black_fields=1";
 
     constexpr auto one = rational<int>(1);
     std::vector<MediaStream> msv;
     msv.emplace_back("main", AV_PIX_FMT_OPENCL, one, width_, height_, 0, one);
-    accel_->linkFilter(msv.back());
+    accel_->linkFilter(msv.back(), width_, height_);
     msv.emplace_back("overlay", AV_PIX_FMT_OPENCL, one, w, h, 0, one);
-    accel_->linkFilter(msv.back());
+    accel_->linkFilter(msv.back(), w, h);
     auto ret = filter.initialize(ss.str(), msv);
     if (ret < 0) {
+        for (auto m : msv) {
+            av_buffer_unref(&m.deviceRef);
+            av_buffer_unref(&m.frameRef);
+        }
         SIP_CORE_ERR() << "filter init fail";
         return false;
     }
@@ -1114,6 +1196,7 @@ VideoMixer::getUnlinkedHWFrame(const VideoFrame& input)
 {
     std::shared_ptr<VideoFrame> framePtr;
     if (!accel_) {
+        std::lock_guard<std::mutex> lock(scaler_mutex_);
         framePtr = scaler_.convertFormat(input, format_);
     } else {
         framePtr = accel_->transfer(input);
@@ -1127,6 +1210,7 @@ VideoMixer::getHWFrameFromSWFrame(const VideoFrame& input)
     std::shared_ptr<VideoFrame> framePtr;
     auto pix = accel_->getSoftwareFormat();
     if (input.format() != pix) {
+        std::lock_guard<std::mutex> lock(scaler_mutex_);
         framePtr = scaler_.convertFormat(input, pix);
         framePtr = accel_->transfer(*framePtr);
     } else {

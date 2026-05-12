@@ -160,7 +160,15 @@ public:
      *
      * This serves to skip transferring a decoded frame back to main memory before encoding.
      */
-    void linkFilter(MediaStream& ms);
+    void linkFilter(MediaStream& ms, int width, int height);
+
+    /**
+     * @brief Links given VideoFrame context with current HardwareAccel.
+     *  
+     *
+     * This serves to be able to allocate new VideoFrame with given hw format.
+     */
+    bool reserveFrame(AVFrame* frame);
 
     static std::list<HardwareAccel> getCompatibleAccel(AVCodecID id,
                                                        int width,

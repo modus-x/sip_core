@@ -368,7 +368,6 @@ HardwareAccel::transfer(const VideoFrame& frame)
             throw std::runtime_error("Cannot transfer frame with invalid format");
         }
 
-        auto out = std::make_unique<VideoFrame>();
         if (desc->flags & AV_PIX_FMT_FLAG_HWACCEL) {
             if (input->format != format_) {
                 SIP_CORE_ERR() << "Frame format mismatch: expected " << av_get_pix_fmt_name(format_)
@@ -390,22 +389,49 @@ HardwareAccel::transfer(const VideoFrame& frame)
             auto framePtr = std::make_unique<VideoFrame>();
             auto hwFrame = framePtr->pointer();
 
-            if ((ret = av_hwframe_get_buffer(framesCtx_, hwFrame, 0)) < 0) {
+            if (!deviceCtx_) {
+                SIP_CORE_ERR() << "Cannot initialize hardware frames without a valid hardware device";
+                return false;
+            }
+
+            AVBufferRef* framesCtx = av_hwframe_ctx_alloc(deviceCtx_);
+            if (!framesCtx)
+                return false;
+
+            auto ctx = reinterpret_cast<AVHWFramesContext*>(framesCtx->data);
+            ctx->format = format_;
+            ctx->sw_format = swFormat_;
+            ctx->width = input->width;
+            ctx->height = input->height;
+            ctx->initial_pool_size = 20; // TODO try other values
+
+            if ((ret = av_hwframe_ctx_init(framesCtx)) < 0) {
+                SIP_CORE_ERR("Failed to initialize hardware frame context: %s (%d)",
+                        libav_utils::getError(ret).c_str(),
+                        ret);
+                av_buffer_unref(&framesCtx);
+            }
+
+            if ((ret = av_hwframe_get_buffer(framesCtx, hwFrame, 0)) < 0) {
                 SIP_CORE_ERR() << "Failed to allocate hardware buffer: "
                         << libav_utils::getError(ret).c_str();
+                av_buffer_unref(&framesCtx);
                 return nullptr;
             }
 
             if (!hwFrame->hw_frames_ctx) {
                 SIP_CORE_ERR() << "Failed to allocate hardware buffer: Cannot allocate memory";
+                av_buffer_unref(&framesCtx);
                 return nullptr;
             }
 
             if ((ret = av_hwframe_transfer_data(hwFrame, input, 0)) < 0) {
                 SIP_CORE_ERR() << "Failed to push frame to GPU: " << libav_utils::getError(ret).c_str();
+                av_buffer_unref(&framesCtx);
                 return nullptr;
             }
 
+            av_buffer_unref(&framesCtx);
             hwFrame->pts = input->pts; // transfer does not copy timestamp
             return framePtr;
         }
@@ -479,10 +505,57 @@ HardwareAccel::linkHardware(AVBufferRef* framesCtx)
 }
 
 void
-HardwareAccel::linkFilter(MediaStream& ms)
+HardwareAccel::linkFilter(MediaStream& ms, int width, int height)
 {
+    if (!deviceCtx_) {
+        SIP_CORE_ERR() << "Cannot link filter without a valid hardware device";
+        return;
+    }
+
+    AVBufferRef* framesCtx;
+    if (width == width_ && height == height_ && framesCtx_) {
+        ms.deviceRef = av_buffer_ref(deviceCtx_);
+        ms.frameRef = av_buffer_ref(framesCtx_);
+        return;
+    }
+
+    framesCtx = av_hwframe_ctx_alloc(deviceCtx_);
+    if (!framesCtx)
+        return;
+
+    auto ctx = reinterpret_cast<AVHWFramesContext*>(framesCtx->data);
+    ctx->format = format_;
+    ctx->sw_format = swFormat_;
+    ctx->width = width;
+    ctx->height = height;
+    ctx->initial_pool_size = 20; // TODO try other values
+
+    int ret;
+    if ((ret = av_hwframe_ctx_init(framesCtx)) < 0) {
+        SIP_CORE_ERR("Failed to initialize hardware frame context: %s (%d)",
+                 libav_utils::getError(ret).c_str(),
+                 ret);
+        av_buffer_unref(&framesCtx);
+    }
+
     ms.deviceRef = av_buffer_ref(deviceCtx_);
-    ms.frameRef = av_buffer_ref(framesCtx_);
+    ms.frameRef = av_buffer_ref(framesCtx);
+}
+
+bool
+HardwareAccel::reserveFrame(AVFrame* frame)
+{
+    if(!framesCtx_ && !initFrame())
+        return false;
+
+    int ret;
+    if ((ret = av_hwframe_get_buffer(framesCtx_, frame, 0)) < 0) {
+        SIP_CORE_ERR() << "Failed to allocate hardware buffer: "
+                    << libav_utils::getError(ret).c_str();
+        return false;
+    }
+
+    return true;
 }
 
 std::unique_ptr<VideoFrame>
@@ -528,6 +601,10 @@ HardwareAccel::initAPI(bool linkable, AVBufferRef* framesCtx)
         bool link = false;
         if (linkable && framesCtx)
             link = linkHardware(framesCtx);
+        if (type_ == CODEC_NONE) {
+            initFrame();
+            return 0;
+        }
         // we don't need frame context for videotoolbox and decoders
         if (hwType_ == AV_HWDEVICE_TYPE_VIDEOTOOLBOX ||
                 type_ == CODEC_DECODER || link || initFrame()) {
