@@ -2560,12 +2560,12 @@ SIPAccount::addCachedDigestAuth(pjsip_tx_data* tdata)
             pj_strdup(tdata->pool, &digest.qop, &AUTH_QOP_AUTH);
             pj_str_t cachedCnonce = CONST_PJ_STR(cached.cnonce);
             pj_strdup(tdata->pool, &digest.cnonce, &cachedCnonce);
-            pj_str_t nonceCountValue {nonceCountBuffer.data(), 0};
-            nonceCountValue.slen = pj_ansi_snprintf(nonceCountValue.ptr,
-                                                    nonceCountBuffer.size(),
-                                                    "%08u",
-                                                    nextNonceCount);
-            pj_strdup(tdata->pool, &digest.nc, &nonceCountValue);
+            digest.nc.ptr = nonceCountBuffer.data();
+            digest.nc.slen = pj_ansi_snprintf(digest.nc.ptr,
+                                              nonceCountBuffer.size(),
+                                              "%08u",
+                                              nextNonceCount);
+            pj_strdup(tdata->pool, &digest.nc, &digest.nc);
             nonceCount = &digest.nc;
             cnonce = &digest.cnonce;
             qop = const_cast<pj_str_t*>(&AUTH_QOP_AUTH);
