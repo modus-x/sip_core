@@ -73,12 +73,9 @@
 #include <chrono>
 #include <ctime>
 #include <charconv>
-#include <cctype>
 
-#include "pj/guid.h"
 #include "pj/string.h"
 #include <pjsip.h>
-#include <pjsip/sip_auth_parser.h>
 #include <pjsip/sip_config.h>
 
 #ifdef _WIN32
@@ -106,10 +103,6 @@ static constexpr uint32_t ACTIVE_NO_ROUTE_FAST_PROBE_INTERVAL_SEC = 1;
 
 // keep-alive const values
 static constexpr pj_str_t KA_DATA = CONST_PJ_STR("");
-static constexpr pj_str_t AUTH_DIGEST = CONST_PJ_STR("digest");
-static constexpr pj_str_t AUTH_QOP_AUTH = CONST_PJ_STR("auth");
-static constexpr pj_str_t AUTH_ALGORITHM_MD5 = CONST_PJ_STR("MD5");
-static constexpr pj_str_t AUTH_ALGORITHM_SHA256 = CONST_PJ_STR("SHA-256");
 
 static pjsip_transport_type_e
 transportTypeFromConfig(libsip_core::TransportType transportType)
@@ -135,44 +128,6 @@ randomSvAuthString(int length)
     }
     result[length] = '\0'; // Add null terminator
     return result;
-}
-
-static std::string
-pjStringToStdString(const pj_str_t& str)
-{
-    if (str.ptr == nullptr || str.slen <= 0)
-        return {};
-    return {str.ptr, static_cast<size_t>(str.slen)};
-}
-
-static bool
-digestQopAllowsAuth(const std::string& qop)
-{
-    if (qop.empty())
-        return false;
-
-    std::string lowered = qop;
-    std::transform(lowered.begin(), lowered.end(), lowered.begin(), [](unsigned char c) {
-        return static_cast<char>(std::tolower(c));
-    });
-
-    size_t start = 0;
-    while (start < lowered.size()) {
-        const auto end = lowered.find(',', start);
-        auto token = lowered.substr(start,
-                                    end == std::string::npos ? std::string::npos : end - start);
-        token.erase(std::remove_if(token.begin(),
-                                   token.end(),
-                                   [](unsigned char c) { return std::isspace(c) || c == '"'; }),
-                    token.end());
-        if (token == "auth")
-            return true;
-        if (end == std::string::npos)
-            break;
-        start = end + 1;
-    }
-
-    return false;
 }
 
 /* Keep alive timer callback */
@@ -698,8 +653,6 @@ registration_cb(pjsip_regc_cbparam* param)
 
     account->onRegister(param);
 }
-
-static void tsx_cb(struct pjsip_regc_tsx_cb_param* param);
 
 SIPAccount::SIPAccount(const std::string& accountID, bool presenceEnabled)
     : SIPAccountBase(accountID)
@@ -2392,7 +2345,6 @@ SIPAccount::SIPStartCall(std::shared_ptr<SIPCall>& call)
 
     // Add user-agent header
     sip_utils::addUserAgentHeader(getUserAgentName(), tdata);
-    addCachedDigestAuth(tdata);
 
     if (pjsip_inv_send_msg(call->inviteSession_.get(), tdata) != PJ_SUCCESS) {
         SIP_CORE_ERR("Unable to send invite message for this call");
@@ -2402,222 +2354,6 @@ SIPAccount::SIPStartCall(std::shared_ptr<SIPCall>& call)
     call->setState(Call::CallState::ACTIVE, Call::ConnectionState::PROGRESSING);
 
     return true;
-}
-
-void
-SIPAccount::updateCachedDigestAuth(pjsip_rx_data* rdata)
-{
-    if (!rdata || !rdata->msg_info.msg || rdata->msg_info.msg->type != PJSIP_RESPONSE_MSG)
-        return;
-
-    const auto status = rdata->msg_info.msg->line.status.code;
-    if (status != PJSIP_SC_UNAUTHORIZED && status != PJSIP_SC_PROXY_AUTHENTICATION_REQUIRED)
-        return;
-
-    std::lock_guard<std::mutex> lock(cachedDigestAuthMutex_);
-    auto* hdr = rdata->msg_info.msg->hdr.next;
-    while (hdr != &rdata->msg_info.msg->hdr) {
-        if (hdr->type != PJSIP_H_WWW_AUTHENTICATE && hdr->type != PJSIP_H_PROXY_AUTHENTICATE) {
-            hdr = hdr->next;
-            continue;
-        }
-
-        auto* challenge = reinterpret_cast<pjsip_www_authenticate_hdr*>(hdr);
-        if (pj_stricmp(&challenge->scheme, &AUTH_DIGEST) != 0) {
-            hdr = hdr->next;
-            continue;
-        }
-
-        const auto& digest = challenge->challenge.digest;
-        const auto qop = pjStringToStdString(digest.qop);
-        if (!qop.empty() && !digestQopAllowsAuth(qop)) {
-            SIP_CORE_WARN("Ignoring digest challenge with unsupported qop '%s'", qop.c_str());
-            hdr = hdr->next;
-            continue;
-        }
-
-        auto algorithm = pjStringToStdString(digest.algorithm);
-        pj_str_t pjAlgorithm = CONST_PJ_STR(algorithm);
-        if (!algorithm.empty() && pj_stricmp(&pjAlgorithm, &AUTH_ALGORITHM_MD5) != 0
-            && pj_stricmp(&pjAlgorithm, &AUTH_ALGORITHM_SHA256) != 0) {
-            SIP_CORE_WARN("Ignoring digest challenge with unsupported algorithm '%s'",
-                          algorithm.c_str());
-            hdr = hdr->next;
-            continue;
-        }
-
-        const auto realm = pjStringToStdString(digest.realm);
-        const auto nonce = pjStringToStdString(digest.nonce);
-        const bool isProxy = hdr->type == PJSIP_H_PROXY_AUTHENTICATE;
-        auto it = std::find_if(cachedDigestAuth_.begin(),
-                               cachedDigestAuth_.end(),
-                               [&](const CachedDigestAuth& cached) {
-                                   return cached.isProxy == isProxy && cached.realm == realm;
-                               });
-
-        if (it == cachedDigestAuth_.end()) {
-            cachedDigestAuth_.push_back({});
-            it = std::prev(cachedDigestAuth_.end());
-        }
-
-        const bool sameNonce = it->nonce == nonce;
-        it->isProxy = isProxy;
-        it->realm = realm;
-        it->nonce = nonce;
-        it->opaque = pjStringToStdString(digest.opaque);
-        it->algorithm = std::move(algorithm);
-        it->qop = qop;
-        if (!sameNonce) {
-            it->nonceCount = 0;
-            it->cnonce.clear();
-        }
-
-        SIP_CORE_DBG("Cached %s digest challenge for realm '%s'",
-                     isProxy ? "proxy" : "server",
-                     realm.c_str());
-        hdr = hdr->next;
-    }
-}
-
-void
-SIPAccount::addCachedDigestAuth(pjsip_tx_data* tdata)
-{
-    if (!tdata || !tdata->msg || tdata->msg->type != PJSIP_REQUEST_MSG || !hasCredentials())
-        return;
-
-    char uriBuffer[PJSIP_MAX_URL_SIZE];
-    pj_str_t uri {uriBuffer, 0};
-    uri.slen = pjsip_uri_print(PJSIP_URI_IN_REQ_URI,
-                               tdata->msg->line.req.uri,
-                               uri.ptr,
-                               sizeof(uriBuffer));
-    if (uri.slen < 1 || uri.slen >= static_cast<pj_ssize_t>(sizeof(uriBuffer))) {
-        SIP_CORE_WARN("Unable to add cached digest auth: request URI is too long");
-        return;
-    }
-
-    std::lock_guard<std::mutex> lock(cachedDigestAuthMutex_);
-    for (auto& cached : cachedDigestAuth_) {
-        const pjsip_cred_info* credential = nullptr;
-        for (auto& cred : cred_) {
-            if (pj_stricmp(&cred.scheme, &AUTH_DIGEST) != 0)
-                continue;
-
-            const auto credRealm = pjStringToStdString(cred.realm);
-            if (credRealm == cached.realm || credRealm == "*") {
-                credential = &cred;
-                break;
-            }
-        }
-
-        if (!credential)
-            continue;
-
-        if ((credential->data_type & PJSIP_CRED_DATA_EXT_AKA) == PJSIP_CRED_DATA_EXT_AKA) {
-            SIP_CORE_WARN("Skipping cached digest auth for AKA credentials");
-            continue;
-        }
-
-        const bool hasQop = !cached.qop.empty();
-        if (hasQop && !digestQopAllowsAuth(cached.qop))
-            continue;
-
-        pj_str_t algorithm = CONST_PJ_STR(cached.algorithm);
-        const bool useSha256 = algorithm.slen > 0
-                               && pj_stricmp(&algorithm, &AUTH_ALGORITHM_SHA256) == 0;
-        if (algorithm.slen > 0 && !useSha256 && pj_stricmp(&algorithm, &AUTH_ALGORITHM_MD5) != 0) {
-            continue;
-        }
-
-        if (hasQop && cached.cnonce.empty()) {
-            pj_str_t cnonce;
-            pj_create_unique_string(tdata->pool, &cnonce);
-            cached.cnonce = pjStringToStdString(cnonce);
-        }
-
-        auto* header = cached.isProxy ? pjsip_proxy_authorization_hdr_create(tdata->pool)
-                                      : pjsip_authorization_hdr_create(tdata->pool);
-        pj_strdup(tdata->pool, &header->scheme, &AUTH_DIGEST);
-
-        auto& digest = header->credential.digest;
-        pj_strdup(tdata->pool, &digest.username, &credential->username);
-
-        pj_str_t realm = CONST_PJ_STR(cached.realm);
-        pj_str_t nonce = CONST_PJ_STR(cached.nonce);
-        pj_str_t opaque = CONST_PJ_STR(cached.opaque);
-        pj_strdup(tdata->pool, &digest.realm, &realm);
-        pj_strdup(tdata->pool, &digest.nonce, &nonce);
-        pj_strdup(tdata->pool, &digest.uri, &uri);
-        pj_strdup(tdata->pool, &digest.algorithm, &algorithm);
-        pj_strdup(tdata->pool, &digest.opaque, &opaque);
-
-        pj_str_t* nonceCount = nullptr;
-        pj_str_t* cnonce = nullptr;
-        pj_str_t* qop = nullptr;
-        std::array<char, 16> nonceCountBuffer {};
-        const auto nextNonceCount = cached.nonceCount + 1;
-        if (hasQop) {
-            pj_strdup(tdata->pool, &digest.qop, &AUTH_QOP_AUTH);
-            pj_str_t cachedCnonce = CONST_PJ_STR(cached.cnonce);
-            pj_strdup(tdata->pool, &digest.cnonce, &cachedCnonce);
-            digest.nc.ptr = nonceCountBuffer.data();
-            digest.nc.slen = pj_ansi_snprintf(digest.nc.ptr,
-                                              nonceCountBuffer.size(),
-                                              "%08u",
-                                              nextNonceCount);
-            pj_strdup(tdata->pool, &digest.nc, &digest.nc);
-            nonceCount = &digest.nc;
-            cnonce = &digest.cnonce;
-            qop = const_cast<pj_str_t*>(&AUTH_QOP_AUTH);
-        }
-
-        digest.response.slen = useSha256 ? PJSIP_SHA256STRLEN : PJSIP_MD5STRLEN;
-        digest.response.ptr = static_cast<char*>(pj_pool_alloc(tdata->pool, digest.response.slen));
-
-        pj_status_t status = PJ_SUCCESS;
-#if PJSIP_AUTH_HAS_DIGEST_SHA256
-        if (useSha256) {
-            status = pjsip_auth_create_digestSHA256(&digest.response,
-                                                    &digest.nonce,
-                                                    nonceCount,
-                                                    cnonce,
-                                                    qop,
-                                                    &uri,
-                                                    &digest.realm,
-                                                    credential,
-                                                    &tdata->msg->line.req.method.name);
-        } else
-#endif
-        {
-            if (useSha256) {
-                SIP_CORE_WARN("Unable to add cached SHA-256 digest auth: PJSIP support disabled");
-                continue;
-            }
-            status = pjsip_auth_create_digest(&digest.response,
-                                              &digest.nonce,
-                                              nonceCount,
-                                              cnonce,
-                                              qop,
-                                              &uri,
-                                              &digest.realm,
-                                              credential,
-                                              &tdata->msg->line.req.method.name);
-        }
-
-        if (status != PJ_SUCCESS) {
-            SIP_CORE_WARN("Unable to create cached digest auth header: %s",
-                          sip_utils::sip_strerror(status).c_str());
-            continue;
-        }
-
-        if (hasQop)
-            cached.nonceCount = nextNonceCount;
-
-        pjsip_msg_add_hdr(tdata->msg, reinterpret_cast<pjsip_hdr*>(header));
-        SIP_CORE_DBG("Added cached %s digest auth for realm '%s'",
-                     cached.isProxy ? "proxy" : "server",
-                     cached.realm.c_str());
-    }
 }
 
 void
@@ -3626,7 +3362,6 @@ SIPAccount::sendRegister()
     const pjsip_tpselector tp_sel = getTransportSelector();
     if (pjsip_regc_set_transport(regc, &tp_sel) != PJ_SUCCESS)
         throw VoipLinkException("Unable to set transport");
-    pjsip_regc_set_reg_tsx_cb(regc, tsx_cb);
 
     std::string activeRoute = getActiveServiceRoute();
     if (!activeRoute.empty())
@@ -3970,9 +3705,7 @@ static void
 tsx_cb(struct pjsip_regc_tsx_cb_param* param)
 {
     SIP_CORE_DBG() << "regc_tsx_cb -> " << param->cbparam.code << " " << param->cbparam.status;
-    auto account = static_cast<SIPAccount*>(param->cbparam.token);
-    if (account)
-        account->updateCachedDigestAuth(param->cbparam.rdata);
+    // auto account = static_cast<SIPAccount*>(param->cbparam.token);
 }
 
 void
