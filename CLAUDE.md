@@ -1,10 +1,10 @@
+@AGENTS.md
+
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 Shared contributor conventions (structure, style, commits) live in [AGENTS.md](AGENTS.md). Read that first — the notes below only cover what Claude needs in addition.
-
-@AGENTS.md
 
 ## Build
 
