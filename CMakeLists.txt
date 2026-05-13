@@ -2,10 +2,27 @@ cmake_minimum_required(VERSION 3.25)
 
 cmake_policy(VERSION 3.25...3.31)
 
+# Single source of truth: VERSION file at repo root.
+# Format: BASE[-SUFFIX] e.g. "0.18.14" or "0.18.14-test".
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" SIP_CORE_VERSION_FULL
+     LIMIT_COUNT 1)
+string(STRIP "${SIP_CORE_VERSION_FULL}" SIP_CORE_VERSION_FULL)
+
+string(REGEX MATCH "^([0-9]+\\.[0-9]+\\.[0-9]+)(.*)$" _ "${SIP_CORE_VERSION_FULL}")
+set(SIP_CORE_VERSION_BASE "${CMAKE_MATCH_1}")
+set(SIP_CORE_VERSION_SUFFIX "${CMAKE_MATCH_2}")
+
+if(NOT SIP_CORE_VERSION_BASE)
+  message(FATAL_ERROR "Could not parse VERSION file content '${SIP_CORE_VERSION_FULL}'. Expected X.Y.Z[-suffix].")
+endif()
+
 project(
   sip_core
-  VERSION 0.18.14
+  VERSION ${SIP_CORE_VERSION_BASE}
   LANGUAGES C CXX)
+
+# Re-expose full version (with suffix) for downstream consumers.
+set(SIP_CORE_VERSION_FULL "${SIP_CORE_VERSION_BASE}${SIP_CORE_VERSION_SUFFIX}")
 
 set(BUILD_NUMBER 1)
 
