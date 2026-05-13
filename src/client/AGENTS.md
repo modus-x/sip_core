@@ -47,6 +47,6 @@ On Android, the call is synchronous to interop with JNI thread attachment.
 ## Dependencies
 
 - **Internal**: every public header in `sip_core/`, plus `manager.h`, `account_factory.h`, `call_factory.h`, `scheduled_executor.h`.
-- **External**: PJSIP types appear in some signatures (e.g. `pjsip_evsub_state`).
+- **External**: PJSIP types are not used directly in `client/` implementation files. Note that `pjsip_evsub_state` appears in the public `CallSignal::TransferStateChange` callback signature (in `sip_core/callmanager_interface.h`), so consumers building against these headers need PJSIP on their include path.
 
 <!-- MANUAL: -->

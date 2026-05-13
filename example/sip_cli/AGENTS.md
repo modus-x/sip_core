@@ -13,7 +13,7 @@ example/sip_cli/
 ├── CMakeLists.txt          (FetchContent SDL3 + link sip_core)
 ├── include/
 │   ├── CallController.h    (wraps libsip_core lifecycle + signal registration)
-│   ├── SignalHandlers.h    (each handler is a free function)
+│   ├── SignalHandlers.h    (abstract ISignals interface — CallController implements it)
 │   └── SDLVideoRenderer.h  (SinkTarget glue → SDL window)
 └── src/
     ├── main.cpp            (REPL command loop)

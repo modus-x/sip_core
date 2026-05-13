@@ -28,10 +28,11 @@ Incoming MESSAGE flow:
 
 ```
 PJSIP MESSAGE module callback (SIPVoIPLink registers it)
-  -> SIPAccount::onIncomingMessage
-  -> instant_messaging:: parse body
-  -> if in-call: emitSignal<CallSignal::IncomingMessage>
-     if out-of-call: emitSignal<ConfigurationSignal::IncomingAccountMessage>
+  -> SIPAccountBase::onTextMessage
+  -> instant_messaging:: parse body (via handleMessage)
+  -> emitSignal<ConfigurationSignal::IncomingAccountMessage>
+     (in-call text messages are delivered via emitSignal<CallSignal::IncomingMessage>
+      dispatched from Manager::incomingMessage in manager.cpp)
 ```
 
 ## Read receipts

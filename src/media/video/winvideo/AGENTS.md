@@ -22,6 +22,6 @@ Capture via DirectShow on classic Win32 (non-UWP). For UWP, see [`../uwpvideo/`]
 ## Dependencies
 
 - **Internal**: `media/video/video_device.h`.
-- **External**: `strmiids.lib`, `winmm.lib`, `ole32.lib`, `oleaut32.lib` (link added in CMakeLists when targeting Windows).
+- **External**: DirectShow headers (`dshow.h`, `strmif.h`); `strmiids.lib`, `ole32.lib`, `oleaut32.lib` are standard Windows SDK libs implicitly available — they are **not** explicitly listed in `winvideo/CMakeLists.txt`.
 
 <!-- MANUAL: -->

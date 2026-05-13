@@ -150,7 +150,7 @@ If you’re unsure which thread you’re on, dump it via the logger; do not assu
 | `src/im/`                     | SIP MESSAGE / instant-messaging engine.                                   | [src/im/AGENTS.md](src/im/AGENTS.md)       |
 | `compat/`                     | Cross-platform shims (MSVC mostly).                                       | [compat/AGENTS.md](compat/AGENTS.md)       |
 | `contrib/`                    | Third-party dep recipes (per-triplet build outputs).                      | [contrib/AGENTS.md](contrib/AGENTS.md)     |
-| `example/sip_cli/`            | Console example using the public API + SDL3 for video preview.            | [example/AGENTS.md](example/AGENTS.md)     |
+| `example/sip_cli/`            | Console example using the public API + SDL3 for video preview.            | [example/sip_cli/AGENTS.md](example/sip_cli/AGENTS.md) |
 | `tests/`                      | Unit/integration test sources (not yet wired into CTest).                 | [tests/AGENTS.md](tests/AGENTS.md)         |
 | `scripts/`                    | Misc dev/diag scripts (e.g. slice-thread counter).                        | [scripts/AGENTS.md](scripts/AGENTS.md)     |
 | `specs/`                      | ABI / protocol specs (binding contract is here).                          | [specs/AGENTS.md](specs/AGENTS.md)         |

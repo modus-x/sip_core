@@ -9,16 +9,16 @@ Video capture, encoding, RTP transport, decoding, scaling, mixing (for conferenc
 | File                              | Role                                                                                            |
 |-----------------------------------|-------------------------------------------------------------------------------------------------|
 | `video_base.h/cpp`                | Shared video plumbing: `VideoFrameActiveWriter`, observer interfaces, generator base class.     |
-| `video_device.h`                  | Abstract `VideoDeviceImpl` — implemented by each per-OS subdirectory.                           |
+| `video_device.h`                  | `VideoDevice` — the public copyable device handle (pimpl: holds `shared_ptr<VideoDeviceImpl>`). `VideoDeviceImpl` is the abstract interface implemented by each per-OS subdirectory. |
 | `video_device_monitor.h/cpp`      | Watches the system for camera add/remove events; maintains the active device list.              |
 | `video_input.h/cpp`               | Captures from a `VideoDeviceImpl` (or a file via FFmpeg) into a frame stream.                   |
 | `video_source_utils.h/cpp`        | Helpers for resolving input strings (`camera://...`, `file://...`, `display://...`).            |
-| `video_sender.h/cpp`              | Encoder + RTP packetizer pipeline. Reads from a `VideoFrameActiveWriter`, writes to a socket pair. |
+| `video_sender.h/cpp`              | Encoder + RTP packetizer pipeline. `VideoSender` is a `VideoFramePassiveReader` — it subscribes to a `VideoFrameActiveWriter` source and pushes encoded packets to a socket pair. |
 | `video_receive_thread.h/cpp`      | RTP depacketizer + FFmpeg decoder pipeline.                                                     |
 | `video_rtp_session.h/cpp`         | Concrete `RtpSession` for video. Wires sender, receive thread, recorder. Drives `CongestionControl`. |
 | `video_mixer.h/cpp`               | Conference video mixer. Composes multiple `VideoFrameActiveWriter`s into a single output stream, respecting layout. |
 | `video_scaler.h/cpp`              | libswscale wrapper — pixel-format + size conversion.                                            |
-| `accel.h/cpp`                     | Hardware-acceleration selection (VideoToolbox, VAAPI, NVENC/NVDEC, AMF, MediaFoundation). Gated by `HW_ACCEL=ON`. |
+| `accel.h/cpp`                     | Hardware-acceleration selection (VideoToolbox, VAAPI, NVENC/NVDEC via CUDA, VDPAU, QSV). Gated by `HW_ACCEL=ON`. AMF and MediaFoundation are **not** currently implemented. |
 | `filter_transpose.h/cpp`          | FFmpeg filter for rotating/flipping frames according to device orientation.                     |
 | `sinkclient.h/cpp`                | `SinkClient` — the consumer-facing handle for a video stream. Holds shared memory (`shm_*`) and/or a callback `SinkTarget` registered via `registerSinkTarget(...)`. |
 | `shm_header.h`                    | Header struct for the shared-memory ring used to ship frames to clients without copying.        |
@@ -28,11 +28,11 @@ Video capture, encoding, RTP transport, decoding, scaling, mixing (for conferenc
 | Dir              | Platform                       | Notes                                                                                                |
 |------------------|--------------------------------|------------------------------------------------------------------------------------------------------|
 | `osxvideo/`      | macOS                          | AVFoundation — `.mm` files (Objective-C++).                                                          |
-| `iosvideo/`      | iOS                            | AVFoundation; daemon-side stub — actual capture happens host-side, frames are pushed in via JNI-like glue. |
+| `iosvideo/`      | iOS                            | Daemon-side stub — actual capture happens host-side (AVFoundation in the app); frames pushed in via `getNewFrame` / `publishFrame` public API. |
 | `v4l2/`          | Linux                          | Video4Linux2 ioctl-based capture; webcam + V4L2 loopback.                                            |
 | `winvideo/`      | Windows                        | DirectShow (`capture_graph_interfaces.h`).                                                           |
-| `uwpvideo/`      | Windows UWP                    | UWP MediaCapture API.                                                                                |
-| `androidvideo/`  | Android                        | Daemon-side stub — host pushes frames via `addVideoDevice` / `captureVideoFrame` JNI glue.           |
+| `uwpvideo/`      | Windows UWP                    | Daemon-side stub — host owns `Windows.Media.Capture`; capability info and frames pushed via public API. |
+| `androidvideo/`  | Android                        | Daemon-side stub — host pushes frames via `captureVideoFrame` / `captureVideoPacket` public C API (Camera2 / MediaCodec host-side). |
 
 Each platform subdir implements two classes: `VideoDeviceImpl` (device handle: open/close/capabilities/settings) and `VideoDeviceMonitorImpl` (hot-plug listener). See individual subdirectory AGENTS.md.
 

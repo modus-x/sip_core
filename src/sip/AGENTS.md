@@ -79,7 +79,7 @@ If you see `kaTarget`, `kaMainRoute`, `kaBackupRoute`, `mainRouteFastProbeEnable
 
 - `sipThread_` runs `pjsip_endpt_handle_events` forever; do not block it.
 - `Manager::scheduler()` is the off-thread scheduler — use it for slow work, then come back via `runOnMainThread`.
-- `SIPCall` has multiple mutexes: `callMutex_` (base), `transportMtx_`, `mediaLifecycleMtx_`, `setupSuccessMutex_`. Most fields are atomics where lock-free is safe.
+- `SIPCall` has multiple mutexes: `callMutex_` (defined on the `Call` base class in `call.h`; recursive), `transportMtx_`, `mediaLifecycleMtx_`, `setupSuccessMutex_` (all on `SIPCall`). Most fields are atomics where lock-free is safe.
 
 ## Dependencies
 

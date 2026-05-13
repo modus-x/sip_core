@@ -8,8 +8,8 @@ Daemon-side stub for iOS video. **Actual capture happens host-side** because iOS
 
 | File                                | Role                                                                                              |
 |-------------------------------------|---------------------------------------------------------------------------------------------------|
-| `video_device_impl.cpp`             | `VideoDeviceImpl` — bookkeeping only. Frames arrive via `publishFrame()` / `getNewFrame()` (`videomanager_interface.h`). |
-| `video_device_monitor_impl.cpp`     | `VideoDeviceMonitorImpl` — bookkeeping only. Hot-plug is driven by the host calling `addVideoDevice` / `removeVideoDevice`. |
+| `video_device_impl.cpp`             | `VideoDeviceImpl` — bookkeeping only. Stores size/rate/format info supplied by the host. On `setDeviceParams`, emits `VideoSignal::ParametersChanged` to notify the daemon pipeline of new settings. Frames themselves arrive via the `getNewFrame()` / `publishFrame()` free functions in `videomanager_interface.h`. |
+| `video_device_monitor_impl.cpp`     | `VideoDeviceMonitorImpl` — stub with an empty `run()`. Hot-plug is driven entirely by the host calling `addVideoDevice(node, devInfo)` / `removeVideoDevice(node)` from `videomanager_interface.h`. |
 
 ## How host integration works
 

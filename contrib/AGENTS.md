@@ -53,7 +53,6 @@ From the root `CMakeLists.txt`:
 | `vpx`                        | VP8/VP9 codec.                                                |
 | `bcg729`                     | G.729 codec.                                                  |
 | `webrtc-audio-processing`    | NS/AEC/AGC (audio-processing/webrtc.cpp).                     |
-| `speex`, `speexdsp`          | Speex codec + DSP fallback.                                   |
 | `yaml-cpp`                   | YAML config parsing.                                          |
 | `jsoncpp`                    | Conference protocol JSON.                                     |
 | `fmt`                        | Logging.                                                      |
@@ -62,6 +61,8 @@ From the root `CMakeLists.txt`:
 | `iconv`, `zlib`, `lzma`, `xml2`, `brotli`, `freetype2`, `harfbuzz`, `fontconfig`, `libpng` | Transitive (FFmpeg / video text overlays). |
 | `lttng-ust`, `liburcu`       | LTTng tracing (optional).                                     |
 | `pthreads`                   | Windows pthreads-win32.                                       |
+
+> **Note:** `speex`/`speexdsp` tarballs remain in `contrib/tarballs/` but their recipe directories have been removed and these deps are no longer built. Do not restore them without updating the root `CMakeLists.txt`.
 
 ## Working here
 
