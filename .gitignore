@@ -144,3 +144,5 @@ html-output/
 clang-tidy-report.txt
 sonar-project.properties.save
 compile_commands.json
+
+.omc/
