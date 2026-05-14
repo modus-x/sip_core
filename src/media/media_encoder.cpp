@@ -437,11 +437,22 @@ MediaEncoder::writeContainerToRtp(const uint8_t* buf, int buf_size)
         stream->avg_frame_rate = encoderCtx->framerate;
 
 #ifdef RQM
+        // The RTP output stream carries raw fragmented MP4 chunks (each call to
+        // writeContainerToRtp delivers one mp4-muxer IO buffer's worth of bytes).
+        // We MUST NOT let ffmpeg's RTP muxer interpret those bytes as H.264 NAL
+        // units — it would call ff_rtp_send_h264_hevc(), look for NAL start
+        // codes, and chop the fmp4 box stream apart. Setting codec_id to
+        // AV_CODEC_ID_NONE makes rtp_write_packet's switch fall to the default
+        // branch (rtp_send_raw), which emits pkt->data verbatim as RTP payload.
+        // rtp_dtmf.patch already removed the is_supported() gate in
+        // rtp_write_header(), so AV_CODEC_ID_NONE is accepted at muxer-open time.
+        stream->codecpar->codec_id = AV_CODEC_ID_NONE;
+        stream->codecpar->codec_tag = 0;
 
         avcodec_parameters_from_context(mp4Stream_->codecpar, encoderCtx);
 
-    // framerate is not copied from encoderCtx to stream
-    mp4Stream_->avg_frame_rate = encoderCtx->framerate;
+        // framerate is not copied from encoderCtx to stream
+        mp4Stream_->avg_frame_rate = encoderCtx->framerate;
 
 #endif
 #ifdef ENABLE_VIDEO
