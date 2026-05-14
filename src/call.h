@@ -449,6 +449,12 @@ public:
     }
 
     std::unique_ptr<AudioDeviceGuard> audioGuard;
+    // Capture-side guard pinned for the call's lifetime so the OS capture
+    // stream (e.g. PulseAudio xrdp-source) is not destroyed and recreated
+    // when AudioRtpSession::stop() drops its own AudioInput across a
+    // re-invite. xrdp's virtual source can stop delivering audio for many
+    // seconds after such a rapid destroy/create cycle.
+    std::unique_ptr<AudioDeviceGuard> audioCaptureGuard;
     void sendConfOrder(const Json::Value& root);
     void sendConfInfo(const std::string& json);
     void sendVoiceActivity(const std::string& json);
