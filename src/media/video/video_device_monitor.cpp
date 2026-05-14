@@ -120,27 +120,49 @@ string
 VideoDeviceMonitor::getDefaultDevice() const
 {
     std::lock_guard<std::mutex> l(lock_);
+#ifdef RQM
+    // RQM mode: the daemon records the desktop ONLY. Never a camera. Bypass
+    // the regular selection — including the "skip if desktop" guard below —
+    // and unconditionally return the desktop device id. Without this the
+    // recorder ends up with no video source, x11grab is never opened, and
+    // every recording is solid-black frames.
+    return DEVICE_DESKTOP;
+#else
     if (defaultDevice_.empty())
         return {};
     const auto it = findDeviceById(defaultDevice_);
     if (it == std::end(devices_) || it->getDeviceId() == DEVICE_DESKTOP)
         return {};
     return it->getDeviceId();
+#endif
 }
 
 std::string
 VideoDeviceMonitor::getMRLForDefaultDevice() const
 {
     std::lock_guard<std::mutex> l(lock_);
+    static const std::string sep = libsip_core::Media::VideoProtocolPrefix::SEPARATOR;
+#ifdef RQM
+    // RQM mode: always return the screen-capture MRL so video_input routes
+    // through x11grab on Linux. The MRL's suffix is fed verbatim to x11grab
+    // as the X display URL — so it MUST be a real X server reference
+    // (e.g. ":10.0"), not the device alias "desktop". We resolve $DISPLAY
+    // here; the systemd --user unit imports it from the active GUI session
+    // via ExecStartPre. If DISPLAY is unset we still return a valid-shaped
+    // URL (":0") so x11grab fails with a clear "Cannot open display :0"
+    // rather than the cryptic "Cannot open display desktop".
+    const char* envDisplay = std::getenv("DISPLAY");
+    const std::string xDisplay = (envDisplay && *envDisplay) ? envDisplay : ":0";
+    return std::string(libsip_core::Media::VideoProtocolPrefix::DISPLAY) + sep + xDisplay;
+#else
     if (defaultDevice_.empty())
         return {};
     const auto it = findDeviceById(defaultDevice_);
     if (it == std::end(devices_) || it->getDeviceId() == DEVICE_DESKTOP)
         return {};
 
-    static const std::string sep = libsip_core::Media::VideoProtocolPrefix::SEPARATOR;
-
     return libsip_core::Media::VideoProtocolPrefix::CAMERA + sep + it->getDeviceId();
+#endif
 }
 
 bool
