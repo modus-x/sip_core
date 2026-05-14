@@ -128,21 +128,19 @@ AudioInput::readFromDevice()
     auto& bufferPool = Manager::instance().getRingBufferPool();
     auto audioFrame = bufferPool.getData(id_);
 
-    // Track consecutive empty frames to detect broken/non-functional audio device
-    // If we get too many empty frames in a row, the device is likely broken
-    // and we should send silence to keep the RTP stream alive
+    // Track consecutive empty frames so we can flag forceMuteNoDevice_ when
+    // a device that is present has stopped producing audio. The flag is
+    // diagnostic only — silence is synthesized below regardless of the
+    // counter, so outgoing RTP never stalls.
     if (not audioFrame) {
         consecutiveEmptyFrames_++;
         if (consecutiveEmptyFrames_ == BROKEN_DEVICE_THRESHOLD) {
             SIP_CORE_WARN("Audio Input: no data for %u consecutive frames, "
-                         "device may be broken - sending silence to keep RTP alive",
+                         "device may be broken",
                          BROKEN_DEVICE_THRESHOLD);
-            // Re-check whether the capture device is still present so we
-            // correctly enter forceMuteNoDevice_ state and can recover later.
             updateMuteStateForDeviceAvailability();
         }
     } else {
-        // Reset counter when we get valid audio
         if (consecutiveEmptyFrames_ >= BROKEN_DEVICE_THRESHOLD) {
             SIP_CORE_INFO("Audio Input: device recovered, received audio data again");
             // Reset BEFORE re-checking so updateMuteStateForDeviceAvailability
@@ -153,20 +151,14 @@ AudioInput::readFromDevice()
         consecutiveEmptyFrames_ = 0;
     }
 
-    // Send silence frames in these cases:
-    // 1. User explicitly muted (muteState_ == true)
-    // 2. No capture device available (forceMuteNoDevice_ == true)
-    // 3. Device appears broken (many consecutive empty frames)
-    // This ensures RTP packets are always sent to prevent server kicking us
-    bool shouldSendSilence = muteState_ || forceMuteNoDevice_ ||
-                             (not audioFrame && consecutiveEmptyFrames_ >= BROKEN_DEVICE_THRESHOLD);
-
     if (not audioFrame) {
-        if (!shouldSendSilence) {
-            // Still waiting for device to provide data, don't send anything yet
-            return;
-        }
-        // Create silence frame
+        // No frame from the capture device this tick — synthesize silence
+        // unconditionally so the outgoing RTP stream keeps ticking. The
+        // capture source can take seconds to start producing samples after
+        // a re-invite restarts the PulseAudio stream (observed on Linux
+        // over xrdp where xrdp-source idles for >5 s after re-creation);
+        // pausing RTP during that window makes peers treat the media path
+        // as dead and they stop sending audio back.
         audioFrame = std::make_shared<AudioFrame>(bufferPool.getInternalAudioFormat(), frameSize_);
         libav_utils::fillWithSilence(audioFrame->pointer());
         audioFrame->has_voice = false;
