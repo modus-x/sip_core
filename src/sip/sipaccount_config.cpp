@@ -127,6 +127,11 @@ SipAccountConfig::unserialize(const YAML::Node& node)
     SipAccountBaseConfig::unserialize(node);
     parseValueOptional(node, Conf::USERNAME_KEY, username);
     parseValueOptional(node, Conf::PASSWORD_KEY, password);
+#ifdef RQM
+    // Opt-in destination for the local fmp4 mirror. Empty/unset = no
+    // local file written. See SipAccountConfig::localDesktopRecords.
+    parseValueOptional(node, "localDesktopRecords", localDesktopRecords);
+#endif
     parseValueOptional(node, Conf::BIND_ADDRESS_KEY, bindAddress);
     parseValueOptional(node, Conf::PORT_KEY, localPort);
     parseValueOptional(node, Conf::PUBLISH_PORT_KEY, publishedPort);

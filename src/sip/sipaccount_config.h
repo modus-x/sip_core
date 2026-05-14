@@ -112,6 +112,22 @@ struct SipAccountConfig : public SipAccountBaseConfig {
      */
     std::string password {};
 
+#ifdef RQM
+    /**
+     * Optional directory path. When set (non-empty), the MediaEncoder's
+     * fragmented-MP4 local mirror writes ftyp+moov+moof+mdat bytes to a
+     * file at "<localDesktopRecords>/rqm-<epoch>.mp4" so the daemon's
+     * host always has a playable recording independent of the RTP wire.
+     *
+     * When unset/empty, NO local mp4 mirror is written. This is the
+     * default — RQM only writes a local copy when the operator opts in
+     * via the account config.
+     *
+     * Parsed from YAML key "localDesktopRecords" on the account.
+     */
+    std::string localDesktopRecords {};
+#endif
+
     /**
      * Map of credential for this account
      */
