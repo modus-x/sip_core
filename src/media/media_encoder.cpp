@@ -641,6 +641,32 @@ MediaEncoder::writeContainerToRtp(const uint8_t* buf, int buf_size)
         std::lock_guard<std::recursive_mutex> lk(encMutex_);
         auto width = (input->width() >> 3) << 3;
         auto height = (input->height() >> 3) << 3;
+#ifdef RQM
+        // Pre-init dimension sync: if videoOpts_ (from SDP / RQM headers /
+        // downScaleFactor) disagrees with the actual capture size before the
+        // FIRST encode, align videoOpts_ to the capture size NOW — before
+        // initStream() opens the encoder and startIO() writes the mp4 moov.
+        //
+        // Without this, the moov gets stamped with SDP-negotiated dimensions
+        // (e.g. 1280x720 or 440x536) while subsequent frames arrive at
+        // x11grab's native size (e.g. 880x1072). The mid-stream
+        // resetStreams() re-init produces a new encoder with new SPS/PPS,
+        // but mp4's moov is already locked → in-stream NAL units disagree
+        // with stsd extradata → players show "top block unavailable",
+        // "first_mb_in_slice overflow", and assorted decode failures.
+        //
+        // By aligning here we make the first encoder open at capture size,
+        // the moov gets the matching dimensions, and resetStreams() never
+        // fires for the rest of the call (input dims stay stable once
+        // x11grab is up).
+        if (!initialized_ && (getWidth() != width || getHeight() != height)) {
+            SIP_CORE_WARN("[%p] RQM pre-init resize: videoOpts_ %dx%d -> capture %dx%d "
+                          "(prevents mid-stream resetStreams + moov mismatch)",
+                          this, getWidth(), getHeight(), width, height);
+            videoOpts_.width = width;
+            videoOpts_.height = height;
+        }
+#endif
         if (initialized_ && (getWidth() != width || getHeight() != height)) {
             resetStreams(width, height);
             is_keyframe = true;
