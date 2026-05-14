@@ -104,6 +104,15 @@ struct SipAccountConfig : public SipAccountBaseConfig {
     bool subscribeSupported {false};
 
     /**
+     * Convenience top-level password (parsed from YAML "password" on the account).
+     * When non-empty and the account has no explicit credentials block, the
+     * client may build a single Credentials entry from (username, password).
+     * Kept out of serialize() on purpose — never written back to disk so we
+     * don't accidentally round-trip plaintext into a generated config.
+     */
+    std::string password {};
+
+    /**
      * Map of credential for this account
      */
     struct Credentials
