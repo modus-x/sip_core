@@ -54,6 +54,9 @@ option(BUILD_DEPS "Build deps" ON)
 option(CONFERENCE_METADATA
        "Send conference metadata over SIP and disable conference border text overlays"
        ON)
+option(ENABLE_RQM
+       "Stream fragmented MP4 over RTP (payload 111) instead of plain H.264 — used by the RQM recording flow"
+       OFF)
 
 set(PREBUILD_DEPS_PATHS
     ""
@@ -446,6 +449,10 @@ endif()
 
 if(HW_ACCEL)
   target_compile_definitions(${PROJECT_NAME} PUBLIC RING_ACCEL)
+endif()
+
+if(ENABLE_RQM)
+  target_compile_definitions(${PROJECT_NAME} PUBLIC RQM)
 endif()
 
 if(ANDROID)

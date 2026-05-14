@@ -79,14 +79,16 @@ namespace sip_core {
         // }
 
 #ifdef RQM
-        // flush fragments as fast as possible
-    mp4Ctx_->flags = AVFMT_FLAG_NOBUFFER | AVFMT_FLAG_FLUSH_PACKETS;
-
-    auto buf = static_cast<uint8_t*>(av_malloc(MP4_IO_BUFFER_SIZE));
+    avformat_alloc_output_context2(&mp4Ctx_, NULL, "mp4", NULL);
 
     if (!mp4Ctx_) {
         SIP_CORE_ERR() << "mp4_error: cannot create mp4Ctx_";
+    } else {
+        // flush fragments as fast as possible
+        mp4Ctx_->flags = AVFMT_FLAG_NOBUFFER | AVFMT_FLAG_FLUSH_PACKETS;
     }
+
+    auto buf = static_cast<uint8_t*>(av_malloc(MP4_IO_BUFFER_SIZE));
 
     mp4IOCtx_ = avio_alloc_context(
         buf,
@@ -94,7 +96,7 @@ namespace sip_core {
         true,
         reinterpret_cast<void*>(this),
         NULL,
-        [](void* me, uint8_t* buf, int len) {
+        [](void* me, const uint8_t* buf, int len) {
             // SIP_CORE_ERR() << "writeContainerToRtp " << len;
             return static_cast<MediaEncoder*>(me)->writeContainerToRtp(buf, len);
         },
@@ -103,9 +105,6 @@ namespace sip_core {
     if (!mp4IOCtx_) {
         SIP_CORE_ERR() << "mp4_error: cannot create mp4IOCtx_";
     }
-
-
-    avformat_alloc_output_context2(&mp4Ctx_, NULL, "mp4", NULL);
 #endif
 
         SIP_CORE_DBG("[%p] New instance created", this);
@@ -114,7 +113,7 @@ namespace sip_core {
 
 #ifdef RQM
     int
-MediaEncoder::writeContainerToRtp(uint8_t* buf, int buf_size)
+MediaEncoder::writeContainerToRtp(const uint8_t* buf, int buf_size)
 {
 
     // Ensure file is still open
@@ -129,7 +128,7 @@ MediaEncoder::writeContainerToRtp(uint8_t* buf, int buf_size)
     AVPacket pkt;
     av_init_packet(&pkt);
 
-    pkt.data = buf;
+    pkt.data = const_cast<uint8_t*>(buf);
 
     pkt.size = buf_size;
     pkt.dts = mp4SentPackets_;
@@ -606,7 +605,7 @@ MediaEncoder::writeContainerToRtp(uint8_t* buf, int buf_size)
         // for mp4 stream, we need to set pts to the same value as input frame (to preserve the original timestamp)
     avframe->pts = input->pointer()->pts;
     avframe->pkt_dts = input->pointer()->pkt_dts;
-    avframe->pkt_duration = input->pointer()->pkt_duration;
+    avframe->duration = input->pointer()->duration;
 #endif
 
         AVCodecContext* enc = encoders_[currentStreamIdx_];

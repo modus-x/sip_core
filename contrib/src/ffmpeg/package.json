@@ -15,6 +15,7 @@
     "patches": [
         "windows-configure.patch",
         "rtp_dtmf.patch",
+        "rtp_any_payload.patch",
         "opus-rtp-marker.patch"
     ],
     "win_patches": [

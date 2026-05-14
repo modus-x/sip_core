@@ -124,7 +124,7 @@
      bool isDynPacketLossSupported(AVCodecID codecid);
      void initAccel(AVCodecContext* encoderCtx, uint64_t br);
  #ifdef RQM
-     int writeContainerToRtp(uint8_t* buf, int buf_size);
+     int writeContainerToRtp(const uint8_t* buf, int buf_size);
  #endif
  
  #ifdef ENABLE_VIDEO
