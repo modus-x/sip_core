@@ -1552,6 +1552,16 @@ Manager::addAudio(Call& call)
         auto oldGuard = std::move(call.audioGuard);
         call.audioGuard = startAudioStream(AudioDeviceType::PLAYBACK);
 
+        // Pin the capture stream for the call's lifetime. AudioRtpSession::stop()
+        // (called on every re-invite via stopAllMedia/startAllMedia) drops the
+        // AudioInput, which drops its own AudioDeviceGuard(CAPTURE). Without
+        // this anchor the user count would hit 0, PulseLayer::stopStream(CAPTURE)
+        // would tear the xrdp-source stream down, and on xrdp the recreated
+        // stream silently fails to deliver samples for many seconds. Holding
+        // a second guard here keeps the count >=1 across stop()/start().
+        auto oldCaptureGuard = std::move(call.audioCaptureGuard);
+        call.audioCaptureGuard = startAudioStream(AudioDeviceType::CAPTURE);
+
         std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
         if (!pimpl_->audiodriver_) {
             SIP_CORE_ERR("Audio driver not initialized");
@@ -1569,6 +1579,7 @@ Manager::removeAudio(Call& call)
     SIP_CORE_DBG("[call:%s] Remove local audio", callId.c_str());
     getRingBufferPool().unBindAll(callId);
     call.audioGuard.reset();
+    call.audioCaptureGuard.reset();
 }
 
 ScheduledExecutor&
