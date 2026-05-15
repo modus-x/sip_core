@@ -31,10 +31,10 @@ if [ "$#" -ne 1 ]; then
   exit 1
 fi
 
-NEW_VERSION.txt="$1"
+NEW_VERSION="$1"
 
-if ! [[ "${NEW_VERSION.txt}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.+][[:alnum:].]+)?$ ]]; then
-  echo "Invalid version '${NEW_VERSION.txt}'. Expected X.Y.Z[-suffix]." >&2
+if ! [[ "${NEW_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.+][[:alnum:].]+)?$ ]]; then
+  echo "Invalid version '${NEW_VERSION}'. Expected X.Y.Z[-suffix]." >&2
   exit 1
 fi
 
@@ -55,15 +55,15 @@ bump_repo() {
     fi
     local old
     old="$(tr -d '[:space:]' < VERSION.txt)"
-    if [ "${old}" = "${NEW_VERSION.txt}" ]; then
-      echo "${kind}: already at ${NEW_VERSION.txt}, skipping commit"
+    if [ "${old}" = "${NEW_VERSION}" ]; then
+      echo "${kind}: already at ${NEW_VERSION}, skipping commit"
       return 0
     fi
-    printf '%s\n' "${NEW_VERSION.txt}" > VERSION.txt
+    printf '%s\n' "${NEW_VERSION}" > VERSION.txt
     git add VERSION.txt
-    git commit -m "chore: bump version to v${NEW_VERSION.txt}"
-    git tag -a "v${NEW_VERSION.txt}" -m "Release v${NEW_VERSION.txt}"
-    echo "${kind}: ${old} -> ${NEW_VERSION.txt}"
+    git commit -m "chore: bump version to v${NEW_VERSION}"
+    git tag -a "v${NEW_VERSION}" -m "Release v${NEW_VERSION}"
+    echo "${kind}: ${old} -> ${NEW_VERSION}"
   )
 }
 
@@ -71,13 +71,13 @@ bump_repo "${REPO_ROOT}" "sip_core"
 bump_repo "${SIBLING_GLUE}" "sip_core_ffi_glue"
 
 if [ "${PUSH:-1}" = "1" ]; then
-  (cd "${REPO_ROOT}" && git push origin HEAD && git push origin "v${NEW_VERSION.txt}")
-  (cd "${SIBLING_GLUE}" && git push origin HEAD && git push origin "v${NEW_VERSION.txt}")
+  (cd "${REPO_ROOT}" && git push origin HEAD && git push origin "v${NEW_VERSION}")
+  (cd "${SIBLING_GLUE}" && git push origin HEAD && git push origin "v${NEW_VERSION}")
 fi
 
 cat <<EOM
 
-Synchronised both repos to v${NEW_VERSION.txt}.
+Synchronised both repos to v${NEW_VERSION}.
 
 Next steps:
   1. On each build machine (linux, windows, macos):
@@ -87,5 +87,5 @@ Next steps:
        #   linux/windows:  cmake --workflow {linux|windows}
        #   macos:          scripts/publish-darwin.sh   (after cmake --workflow darwin)
   2. Back here, in dart_sip_core:
-       scripts/bump-bindings.sh ${NEW_VERSION.txt}
+       scripts/bump-bindings.sh ${NEW_VERSION}
 EOM
