@@ -1375,6 +1375,52 @@ MediaEncoder::enableAccel(bool enableAccel)
     void
     MediaEncoder::initH264(AVCodecContext* encoderCtx, uint64_t br)
     {
+#ifdef RQM
+        // RQM: static-desktop MAX-quality preset, established by the empirical
+        // encoder bench in
+        // rqm-desktop-recorder/.omc/research/encoder-bench-report.md.
+        //
+        // Treat this as the ceiling: X-RQM-Video-Quality / X-RQM-Video-Compression
+        // headers downscale from here (raise CRF, drop preset) — they never raise
+        // quality above this baseline.
+        //
+        // Deltas vs. the non-RQM defaults below:
+        //   crf 28 -> 23           — higher quality ceiling (still ~5× smaller
+        //                             than CBR 600k while >SSIM 0.998 on static
+        //                             desktop per bench).
+        //   preset "medium"        — kept (best size/CPU tradeoff on bench).
+        //   tune  "zerolatency"    — added; required for live SIP wire (disables
+        //                             b-frames, sliced threads, no lookahead).
+        //   qmin/qmax dropped      — let CRF dictate quantizer freely; the bench
+        //                             showed bounded qp wastes bits on static
+        //                             frames that could otherwise be near-empty.
+        //   no-scenecut dropped    — was inflating bytes on real motion; for
+        //                             truly static content it is byte-identical
+        //                             either way (bench: g=300 == g=900).
+        //   intra-refresh dropped  — single biggest size win (1.5–2× on static
+        //                             content). Recovery semantics are covered
+        //                             by libsip_core's IDR-on-NACK path and the
+        //                             KEY_FRAME_PERIOD periodic IDR.
+        //   maxrate/bufsize kept   — caps the worst-case scroll/window-open
+        //                             burst at 1.5 Mbit/s with 1 Mbit VBV.
+        int crf = 23;
+        int64_t maxrate = 1500000;
+        int64_t bufsize = 1000000;
+        const char* preset = "medium";
+        const char* tune   = "zerolatency";
+
+        av_opt_set_int(encoderCtx, "crf", crf, AV_OPT_SEARCH_CHILDREN);
+        av_opt_set_int(encoderCtx, "maxrate", maxrate, AV_OPT_SEARCH_CHILDREN);
+        av_opt_set_int(encoderCtx, "bufsize", bufsize, AV_OPT_SEARCH_CHILDREN);
+        av_opt_set(encoderCtx, "preset", preset, AV_OPT_SEARCH_CHILDREN);
+        av_opt_set(encoderCtx, "tune",   tune,   AV_OPT_SEARCH_CHILDREN);
+
+        SIP_CORE_DEBUG("H264 RQM init: br=%" PRIu64
+                    ", crf=%d, maxrate=%" PRIu64
+                    ", bufsize=%" PRIu64
+                    ", preset=%s, tune=%s",
+                    br, crf, maxrate, bufsize, preset, tune);
+#else
         // Use capped‐CRF (quality + rate constraints) to get “normal” quality
 
         // Choose a CRF that gives good quality without too heavy data
@@ -1412,6 +1458,7 @@ MediaEncoder::enableAccel(bool enableAccel)
                     ", bufsize=%" PRIu64
                     ", qmin=%d, qmax=%d, preset=%s",
                     br, crf, maxrate, bufsize, qmin, qmax, preset);
+#endif
     }
 
     void
