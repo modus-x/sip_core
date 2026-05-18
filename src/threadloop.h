@@ -55,9 +55,18 @@ public:
     void join();
     void waitForCompletion(); // thread will stop itself
 
+    // Wait up to `timeout` for the thread to finish. If it does, join and
+    // return true. If not, detach the thread and return false: the thread
+    // and its captures live on (mainloop holds copies of the user callbacks
+    // and a shared_ptr to State, so reading state_ remains safe). Callers
+    // that opt into joinFor are responsible for keeping any `this` referenced
+    // by the user callbacks alive past the timeout, typically by capturing a
+    // shared_from_this()/weak_ptr in those callbacks.
+    bool joinFor(std::chrono::milliseconds timeout);
+
     bool isRunning() const noexcept;
     bool isJoinable() const noexcept;
-    bool isStopping() const noexcept { return state_ == ThreadState::STOPPING; }
+    bool isStopping() const noexcept { return state_->state == ThreadState::STOPPING; }
     std::thread::id get_id() const noexcept { return threadId_; }
 
 private:
@@ -78,12 +87,25 @@ private:
     std::function<void()> process_;
     std::function<void()> cleanup_;
 
-    void mainloop(std::thread::id& tid,
-                  const std::function<bool()> setup,
-                  const std::function<void()> process,
-                  const std::function<void()> cleanup);
+    // Shared between the ThreadLoop instance and the worker thread's
+    // captured copy. Putting state on the heap (via shared_ptr) lets the
+    // worker keep reading it even if the owning ThreadLoop is destroyed
+    // after a joinFor() timeout + detach.
+    struct State
+    {
+        std::atomic<ThreadState> state {ThreadState::READY};
+        std::mutex doneMutex;
+        std::condition_variable doneCv;
+        std::atomic_bool done {true};
+    };
 
-    std::atomic<ThreadState> state_ {ThreadState::READY};
+    static void mainloop(std::shared_ptr<State> state,
+                         std::function<bool()> setup,
+                         std::function<void()> process,
+                         std::function<void()> cleanup,
+                         const ThreadLoop* ownerForLogging);
+
+    std::shared_ptr<State> state_ {std::make_shared<State>()};
     std::thread::id threadId_;
     std::thread thread_;
     mutable std::mutex threadMutex_;
