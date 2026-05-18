@@ -876,6 +876,17 @@ if(BUILD_TESTING)
   add_executable(media_recorder_tests tests/media_recorder_tests.cpp)
   target_link_libraries(media_recorder_tests PRIVATE ${PROJECT_NAME})
   add_test(NAME media_recorder_tests COMMAND media_recorder_tests)
+
+  if(APPLE AND NOT IOS)
+    # Pure-logic unit tests for the CoreAudio device-change snapshot helpers
+    # that suppress VoiceProcessingIO's VPAggregate churn (root cause of the
+    # 3-5 s audio startup delay at call establishment).
+    add_executable(coreaudio_device_filter_tests
+                   tests/coreaudio_device_filter_tests.cpp
+                   src/media/audio/coreaudio/osx/device_signature.cpp)
+    target_include_directories(coreaudio_device_filter_tests PRIVATE src)
+    add_test(NAME coreaudio_device_filter_tests COMMAND coreaudio_device_filter_tests)
+  endif()
 endif()
 
 # install

@@ -631,15 +631,27 @@ Manager::ManagerPimpl::hasActiveConference() const
 Manager&
 Manager::instance()
 {
-    // Meyers singleton
-    static Manager instance;
+    // Leak-on-exit singleton (not a Meyers singleton): a plain
+    // `static Manager instance` is destroyed during `__cxa_finalize_ranges`
+    // at process exit, but other globals (notably `bindings::ClientImpl` and
+    // its owned `InstanceHandler<DirectRenderer>` map) are finalised AFTER
+    // us and still call `Manager::getSinkClient()` / similar from their
+    // destructors. Touching the already-destroyed `callSinksMap_` (or any
+    // other member) dereferences zeroed memory and the macOS app crashes on
+    // every Cmd-Q.
+    //
+    // Allocate once on the heap and never free. The singleton outlives every
+    // atexit handler, so late destructors can still reach Manager safely.
+    // The OS reclaims memory at process exit anyway. Same pattern as the
+    // `common_glue::TypeRepository` leak-on-exit fix.
+    static Manager* instance = new Manager();
 
     // This will give a warning that can be ignored the first time instance()
     // is called...subsequent warnings are more serious
     if (not Manager::initialized)
         SIP_CORE_DBG("Not initialized");
 
-    return instance;
+    return *instance;
 }
 
 Manager::Manager()

@@ -22,8 +22,11 @@
 #define CORE_LAYER_H_
 
 #include "audio/audiolayer.h"
+#include "device_signature.h"
 #include <AudioToolbox/AudioToolbox.h>
 #include <atomic>
+#include <cstdint>
+#include <string>
 
 #define checkErr(err) \
     if (err) { \
@@ -175,7 +178,26 @@ private:
     std::string captureDeviceName_;
     std::string playbackDeviceName_;
 
+    /** Hash of the user-visible device topology captured at the end of the
+     *  most recent successful startStream lambda. Device-change callbacks
+     *  compare against this to suppress spurious events that CoreAudio
+     *  raises when VoiceProcessingIO creates/destroys its internal
+     *  VPAUAggregateAudioDevice.
+     *
+     *  Stored as a single atomic so the writer (audio configuration queue)
+     *  and the readers (CoreAudio HAL listener thread) need no further
+     *  synchronisation. A sentinel value of 0 means "no valid snapshot";
+     *  real hashes always have the low bit forced to 1 to avoid colliding
+     *  with the sentinel. */
+    static constexpr std::uint64_t kNoDeviceSignature = 0;
+    std::atomic<std::uint64_t> deviceSignatureHash_ {kNoDeviceSignature};
+
     std::vector<AudioDevice> getDeviceList(bool getCapture) const;
+
+    /** Compute the current user-visible device signature hash by
+     *  enumerating capture and playback devices and filtering internal
+     *  helpers. Always returns a non-sentinel value. */
+    std::uint64_t computeDeviceSignatureHash() const;
 };
 
 } // namespace sip_core

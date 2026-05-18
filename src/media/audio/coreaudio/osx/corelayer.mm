@@ -21,7 +21,9 @@
 #include "corelayer.h"
 #include "manager.h"
 #include "audiodevice.h"
+#include "device_signature.h"
 #include <Accelerate/Accelerate.h>
+#include <functional>
 
 namespace sip_core {
 
@@ -428,7 +430,22 @@ CoreLayer::startStream(AudioDeviceType stream)
         if (inputError || outputError) {
             status_ = Status::Idle;
             destroyAudioLayer();
+            deviceSignatureHash_.store(kNoDeviceSignature, std::memory_order_release);
+            restartingAudio_ = false;
+            return;
         }
+
+        // Snapshot the user-visible device topology *after* the AudioUnit
+        // is up. VoiceProcessingIO has by now created its internal
+        // VPAUAggregateAudioDevice — getDeviceList() filters that out, so
+        // the resulting hash represents only what the user actually sees.
+        // devicesChangedCallback uses it to suppress spurious change
+        // notifications fired by VPAggregate lifecycle events that arrive
+        // after restartingAudio_ has been cleared (the main contributor to
+        // the 3-5 s audio startup delay). The hash is a single atomic so
+        // the HAL listener thread can read it without further locking.
+        deviceSignatureHash_.store(computeDeviceSignatureHash(),
+                                   std::memory_order_release);
 
         restartingAudio_ = false;
     });
@@ -458,6 +475,7 @@ CoreLayer::destroyAudioLayer()
 
     inputDeviceID_ = 0;
     playbackDeviceID_ = 0;
+    deviceSignatureHash_.store(kNoDeviceSignature, std::memory_order_release);
 }
 
 void
@@ -488,6 +506,12 @@ CoreLayer::deviceIsAliveCallback(AudioObjectID inObjectID,
         return kAudioServicesNoError;
     if (self->restartingAudio_.load())
         return kAudioServicesNoError;
+    // Defence in depth: if VoiceProcessingIO momentarily flickers the
+    // underlying device's alive flag while spinning up VPAggregate, the
+    // user-visible device set is unchanged. Skip the restart in that case.
+    auto stored = self->deviceSignatureHash_.load(std::memory_order_acquire);
+    if (stored != kNoDeviceSignature && stored == self->computeDeviceSignatureHash())
+        return kAudioServicesNoError;
     self->stopStream();
     self->startStream();
     return kAudioServicesNoError;
@@ -506,8 +530,17 @@ CoreLayer::devicesChangedCallback(AudioObjectID inObjectID,
     // creates/destroys a VPAUAggregateAudioDevice which fires this callback.
     if (self->restartingAudio_.load())
         return kAudioServicesNoError;
-    // Restart the audio stream so the AudioUnit reinitializes with the
-    // current set of devices (a new mic/speaker may have been plugged in).
+    // Snapshot-based filter: VPAggregate creation/destruction during AU
+    // lifecycle can fire kAudioHardwarePropertyDevices changes *after*
+    // restartingAudio_ has been cleared. Comparing the user-visible device
+    // signatures collapses those spurious events into a no-op and avoids
+    // the cascading stopStream/startStream/recoverAudioDevices() restart
+    // chain that previously produced a 3-5 s audio startup delay.
+    auto stored = self->deviceSignatureHash_.load(std::memory_order_acquire);
+    if (stored != kNoDeviceSignature && stored == self->computeDeviceSignatureHash())
+        return kAudioServicesNoError;
+    // Real device topology change — restart the audio stream so the
+    // AudioUnit reinitialises with the current set of devices.
     self->stopStream();
     self->startStream();
     self->devicesChanged();
@@ -671,11 +704,12 @@ CoreLayer::getDeviceList(bool getCapture) const
     for (int i = 0; i < nDevices; ++i) {
         auto dev = AudioDevice {devids[i], getCapture};
         if (dev.channels_ > 0) { // Channels < 0 if inactive.
-            // There is additional stream under the built-in device - the raw streams enabled by AUVP.
-            if (dev.name_.find("VPAUAggregateAudioDevice") != std::string::npos) {
-                // ignore VPAUAggregateAudioDevice
+            // VoiceProcessingIO creates an internal aggregate device — keep
+            // the filter in lockstep with the device-change snapshot logic
+            // (see device_signature.h) so notifications about VPAggregate
+            // appearing/disappearing don't show up as a topology change.
+            if (coreaudio::shouldIgnoreDeviceName(dev.name_))
                 continue;
-            }
             // for input device check if it not speaker
             // since the speaker device has input stream for echo cancellation.
             if (getCapture) {
@@ -690,4 +724,15 @@ CoreLayer::getDeviceList(bool getCapture) const
     }
     return ret;
 }
+
+std::uint64_t
+CoreLayer::computeDeviceSignatureHash() const
+{
+    auto sig = coreaudio::makeDeviceSignature(getCaptureDeviceList(), getPlaybackDeviceList());
+    auto h = std::hash<std::string> {}(sig);
+    // Force the low bit so a legitimate hash can never collide with the
+    // kNoDeviceSignature sentinel (0).
+    return static_cast<std::uint64_t>(h) | 1ULL;
+}
+
 } // namespace sip_core
