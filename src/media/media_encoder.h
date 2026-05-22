@@ -180,7 +180,20 @@
      //   * always having a playable recording on the daemon's host machine.
      // Set to NULL when the env var isn't configured.
      FILE*                mp4LocalFile_ {nullptr};
- 
+     // Path of the file pointed to by mp4LocalFile_. Kept so startIO() can
+     // unlink an unplayable artifact if the muxer rejected our movflags
+     // (e.g. an older libavformat that doesn't know +frag_every_frame
+     // would also reject +empty_moov as collateral, leaving us with a
+     // ftyp-only file that no player will accept).
+     std::string          mp4LocalFilePath_;
+
+     // Tracks whether avformat_write_header(mp4Ctx_) succeeded. Unlike
+     // outputCtx_'s write_header (which throws on failure), the mp4
+     // muxer's write_header is treated as soft-fail and only logged.
+     // The destructor gates av_write_trailer(mp4Ctx_) on this so we
+     // never invoke trailer on a half-initialised muxer.
+     bool                 mp4HeaderWritten_ {false};
+
      // stream for mp4
      AVStream *mp4Stream_ = NULL;
  

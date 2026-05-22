@@ -116,6 +116,7 @@ namespace sip_core {
                           static_cast<long>(std::time(nullptr)));
             mp4LocalFile_ = std::fopen(path, "wb");
             if (mp4LocalFile_) {
+                mp4LocalFilePath_ = path;
                 SIP_CORE_WARN("[%p] RQM local mp4 mirror: %s", this, path);
             } else {
                 SIP_CORE_ERR("[%p] RQM local mp4 mirror failed to open %s",
@@ -166,6 +167,21 @@ MediaEncoder::writeContainerToRtp(const uint8_t* buf, int buf_size)
 
     MediaEncoder::~MediaEncoder()
     {
+#ifdef RQM
+        // Flush the mp4 trailer FIRST, while outputCtx_ is still alive.
+        // The mp4 muxer's AVIO callback (writeContainerToRtp) forwards
+        // every byte through send(outputCtx_) for the RTP wire, so tearing
+        // outputCtx_ down before av_write_trailer(mp4Ctx_) would crash on
+        // a freed context. With +empty_moov the trailer is mostly a no-op
+        // for the playable-file aspect — but it still flushes any
+        // half-built moof and drains the avio buffer to mp4LocalFile_, so
+        // the on-disk recording ends on a complete fragment boundary
+        // instead of being truncated mid-moof.
+        if (mp4Ctx_ && mp4Ctx_->pb && mp4HeaderWritten_) {
+            av_write_trailer(mp4Ctx_);
+        }
+#endif
+
         if (outputCtx_) {
             if (outputCtx_->priv_data && outputCtx_->pb)
                 av_write_trailer(outputCtx_);
@@ -585,8 +601,29 @@ MediaEncoder::writeContainerToRtp(const uint8_t* buf, int buf_size)
         }
 
 #ifdef RQM
-        // as in OBS studio
-    libav_utils::setDictValue(&mp4Opts_, "movflags", "+empty_moov+separate_moof+frag_every_frame");
+    // Configure the fmp4 init segment + per-frame fragmentation.
+    //
+    // We MUST split these into two independent dict entries instead of one
+    // movflags string. FFmpeg's AV_OPT_TYPE_FLAGS parser is all-or-nothing:
+    // if ANY +token in the string is unknown to the muxer, the WHOLE string
+    // is silently rejected and no flag is applied (libavutil/opt.c::
+    // set_string_number). +frag_every_frame only exists from FFmpeg 4.0
+    // (commit c87d2c0, April 2018), so on any older libavformat shipped
+    // by a distro (e.g. some Astra Linux + ALT Linux builds), the original
+    // single string "+empty_moov+separate_moof+frag_every_frame" got
+    // dropped wholesale — losing +empty_moov as collateral, leaving the
+    // moov deferred to write_trailer (never called when the daemon is
+    // killed by SIGTERM), producing a ftyp+fragments file with no moov
+    // that no player can open.
+    //
+    // The split + frag_size=1 combo below is portable to every libavformat
+    // since FFmpeg 2.4 (Aug 2014): +empty_moov writes the init segment up
+    // front, +separate_moof gives each fragment its own moof, and
+    // frag_size=1 causes the muxer to open a new fragment as soon as the
+    // current one has ≥1 byte — i.e. once per av_write_frame call, which
+    // is exactly what +frag_every_frame did.
+    libav_utils::setDictValue(&mp4Opts_, "movflags", "+empty_moov+separate_moof");
+    libav_utils::setDictValue(&mp4Opts_, "frag_size", "1");
 #endif
 
         // av_dict_set_int(&mp4Opts_, "frag_size", 1152, AV_OPT_SEARCH_CHILDREN);
@@ -622,12 +659,48 @@ MediaEncoder::writeContainerToRtp(const uint8_t* buf, int buf_size)
         if (avformat_write_header(mp4Ctx_, &mp4Opts_)) {
             SIP_CORE_ERR(
                 "mp4_error: could not write header for output mp4... check codec parameters");
+        } else {
+            mp4HeaderWritten_ = true;
         }
         avio_flush(mp4IOCtx_);
         capturingInitSegment_ = false;
         SIP_CORE_WARN("[%p] RQM init segment captured + emitted: %zu bytes",
                       this,
                       initSegment_.size());
+
+        // Defense-in-depth: confirm +empty_moov actually took effect on this
+        // libavformat. The mov muxer would otherwise silently fall back to
+        // "moov at trailer" — and our daemon almost never gets to write a
+        // trailer (SIGTERM mid-call), producing a ftyp-only file plus a
+        // long string of fragments that no player accepts. If the flag
+        // didn't stick, the local mirror is doomed to be unplayable; close
+        // and unlink it now so the user sees a missing file (clear
+        // failure) instead of 2 MB of garbage (silent failure).
+        if (mp4LocalFile_) {
+            int64_t mov_flags_applied = 0;
+            // FF_MOV_FLAG_EMPTY_MOOV = 0x10 in libavformat/movenc.h since
+            // forever; the bit value has never been renumbered.
+            constexpr int64_t FF_MOV_FLAG_EMPTY_MOOV = 0x10;
+            if (av_opt_get_int(mp4Ctx_->priv_data,
+                               "movflags",
+                               AV_OPT_SEARCH_CHILDREN,
+                               &mov_flags_applied) < 0
+                || !(mov_flags_applied & FF_MOV_FLAG_EMPTY_MOOV)) {
+                SIP_CORE_ERR("[%p] RQM mp4 mirror: +empty_moov not applied "
+                             "(movflags=0x%llx) — libav too old or muxer "
+                             "rejected our options. Closing+removing '%s' "
+                             "to avoid producing an unplayable file.",
+                             this,
+                             static_cast<unsigned long long>(mov_flags_applied),
+                             mp4LocalFilePath_.c_str());
+                std::fclose(mp4LocalFile_);
+                mp4LocalFile_ = nullptr;
+                if (!mp4LocalFilePath_.empty()) {
+                    std::remove(mp4LocalFilePath_.c_str());
+                    mp4LocalFilePath_.clear();
+                }
+            }
+        }
     }
 #endif
     }
