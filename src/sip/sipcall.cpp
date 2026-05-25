@@ -1042,7 +1042,20 @@ SIPCall::reinviteOnConnectivityChange()
 void
 SIPCall::sendSIPInfo(std::string_view body, std::string_view subtype)
 {
-    if (subtype != "media_control+xml" && subtype != "dtmf-relay") {
+    // Allowed application/<subtype> bodies for SIP INFO:
+    //   media_control+xml — RFC 5168 picture-fast-update / recording-state.
+    //   dtmf-relay        — RFC 2833-style DTMF over INFO.
+    //   json              — rqm-desktop-recorder window-interaction events
+    //                       (foreground-window title/process/rect, see
+    //                       rqm-desktop-recorder src/main.cpp
+    //                       windowChangedCallback). Dropped here in
+    //                       5532cf12 ("conference voice activity") which
+    //                       tightened to just media_control+xml/dtmf-relay
+    //                       and silently killed window-event reporting on
+    //                       both Linux and Windows recorders.
+    if (subtype != "media_control+xml"
+        && subtype != "dtmf-relay"
+        && subtype != "json") {
         return;
     }
     std::lock_guard<std::recursive_mutex> lk {callMutex_};
