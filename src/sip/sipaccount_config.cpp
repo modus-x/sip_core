@@ -131,6 +131,10 @@ SipAccountConfig::unserialize(const YAML::Node& node)
     // Opt-in destination for the local fmp4 mirror. Empty/unset = no
     // local file written. See SipAccountConfig::localDesktopRecords.
     parseValueOptional(node, "localDesktopRecords", localDesktopRecords);
+
+    // Opt-in pre-init-segment grace period in seconds. 0/unset = no
+    // delay (default). See SipAccountConfig::desktopStreamStartupDelaySec.
+    parseValueOptional(node, "desktopStreamStartupDelaySec", desktopStreamStartupDelaySec);
 #endif
     parseValueOptional(node, Conf::BIND_ADDRESS_KEY, bindAddress);
     parseValueOptional(node, Conf::PORT_KEY, localPort);

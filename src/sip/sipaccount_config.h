@@ -126,6 +126,31 @@ struct SipAccountConfig : public SipAccountBaseConfig {
      * Parsed from YAML key "localDesktopRecords" on the account.
      */
     std::string localDesktopRecords {};
+
+    /**
+     * Optional startup grace period, in seconds, applied immediately
+     * before the fmp4 init segment (ftyp+moov) is emitted onto the RTP
+     * wire. When > 0, MediaEncoder::startIO() sleeps for this many
+     * seconds at the point just before avformat_write_header(mp4Ctx_)
+     * runs, so the receiving RTP server has time to bind its UDP
+     * socket and open the .rsf file before the init packet(s) arrive.
+     *
+     * Diagnostic/workaround for the symptom where the prod-side .rsf
+     * starts with `ftyp + moof + mdat...` (no moov) because the
+     * receiver missed the init burst — the bytes were on the wire but
+     * landed on a not-yet-bound socket. See changelog 0.8.7.
+     *
+     * 0 (default) = no delay; behaviour unchanged from prior releases.
+     * Any positive value adds exactly that many seconds of latency to
+     * the first encoded frame and every subsequent frame, so leave at
+     * 0 in normal operation; only set on prod boxes that exhibit the
+     * missing-moov symptom.
+     *
+     * Parsed from YAML key "desktopStreamStartupDelaySec" on the
+     * account. main.cpp bridges this field to the environment variable
+     * RQM_FMP4_STARTUP_DELAY_SEC, which is what MediaEncoder reads.
+     */
+    unsigned desktopStreamStartupDelaySec {0};
 #endif
 
     /**

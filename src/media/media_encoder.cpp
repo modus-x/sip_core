@@ -643,6 +643,29 @@ MediaEncoder::writeContainerToRtp(const uint8_t* buf, int buf_size)
 
 #ifdef RQM
         if (writeToMp4) {
+        // Optional pre-init grace period for the receiving RTP server.
+        // Some prod RTP recorders bind their UDP socket / open their .rsf
+        // file LATER than this encoder fires its first packet, so the
+        // init burst (ftyp+moov as a single ~750-byte UDP datagram)
+        // lands on a not-yet-bound socket and is silently dropped.
+        // Subsequent fragments arrive fine, leaving a .rsf that begins
+        // with `ftyp + moof + mdat ...` and is unplayable by every
+        // standard demuxer ("could not find corresponding trex (id 1)").
+        // Opt in by setting RQM_FMP4_STARTUP_DELAY_SEC > 0; the env var
+        // is bridged from SipAccountConfig::desktopStreamStartupDelaySec
+        // by the rqm-desktop-recorder daemon at startup. Default 0 =
+        // no delay, behaviour unchanged.
+        if (const char* d = std::getenv("RQM_FMP4_STARTUP_DELAY_SEC")) {
+            int sec = std::atoi(d);
+            if (sec > 0) {
+                SIP_CORE_WARN("[%p] RQM_FMP4_STARTUP_DELAY_SEC=%d — "
+                              "sleeping before emitting fmp4 init segment "
+                              "to let the RTP receiver bind its socket",
+                              this, sec);
+                std::this_thread::sleep_for(std::chrono::seconds(sec));
+            }
+        }
+
         // Streaming fmp4 init segment: let mov_write_header write its
         // ftyp + empty-moov directly into the streaming mp4IOCtx_, then force
         // a flush. The flush callback runs writeContainerToRtp once per
