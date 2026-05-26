@@ -135,11 +135,20 @@ namespace sip_core {
 MediaEncoder::writeContainerToRtp(const uint8_t* buf, int buf_size)
 {
     // During startIO, this callback is driven by avio_flush(mp4IOCtx_) right
-    // after avformat_write_header(mp4Ctx_) — that's the init segment. We
-    // capture it so the local-file mirror below has the same bytes the RTP
-    // wire just received.
+    // after avformat_write_header(mp4Ctx_) — that's the init segment. Buffer
+    // the bytes into initSegment_ and mirror them to the local file, but do
+    // NOT push them onto the RTP wire yet: startIO() will emit the full
+    // ftyp+moov as a single combined RTP packet once mp4 muxer is done
+    // writing the header. See the call site for the rationale (avoids the
+    // 2-packet line-rate burst at stream start that consistently loses the
+    // moov-bearing packet on the customer's prod network).
     if (capturingInitSegment_) {
         initSegment_.insert(initSegment_.end(), buf, buf + buf_size);
+        if (mp4LocalFile_) {
+            std::fwrite(buf, 1, buf_size, mp4LocalFile_);
+            std::fflush(mp4LocalFile_);
+        }
+        return buf_size;
     }
 
     // Mirror everything (init + fragments) to the local .mp4 file when
@@ -667,12 +676,13 @@ MediaEncoder::writeContainerToRtp(const uint8_t* buf, int buf_size)
         }
 
         // Streaming fmp4 init segment: let mov_write_header write its
-        // ftyp + empty-moov directly into the streaming mp4IOCtx_, then force
-        // a flush. The flush callback runs writeContainerToRtp once per
-        // buffered chunk, which (a) sends the bytes onto the RTP wire as
-        // their own packet(s) and (b) — because capturingInitSegment_ is
-        // true at this point — captures them into initSegment_ so the
-        // local-file mirror has the same init bytes as the RTP stream.
+        // ftyp + empty-moov directly into the streaming mp4IOCtx_, then
+        // force a flush. The flush callback runs writeContainerToRtp once
+        // per buffered chunk; while capturingInitSegment_ is true, that
+        // callback accumulates bytes into initSegment_ and mirrors them
+        // to the local file but does NOT push them onto the RTP wire.
+        // We then emit the accumulated init segment as a SINGLE combined
+        // RTP packet below — see the comment on the send() call.
         //
         // The mov_write_header here MUST see a non-seekable AVIO; that's why
         // we use mp4IOCtx_ (seek=NULL) and not a dyn_buf. With a seekable
@@ -687,9 +697,50 @@ MediaEncoder::writeContainerToRtp(const uint8_t* buf, int buf_size)
         }
         avio_flush(mp4IOCtx_);
         capturingInitSegment_ = false;
-        SIP_CORE_WARN("[%p] RQM init segment captured + emitted: %zu bytes",
+        SIP_CORE_WARN("[%p] RQM init segment captured: %zu bytes",
                       this,
                       initSegment_.size());
+
+        // Emit the accumulated ftyp+moov as ONE combined RTP packet.
+        //
+        // Before this change, mov_write_header's avio_flush produced TWO
+        // separate avio chunks (ftyp ~36 B, moov ~753 B), each sent as
+        // its own RTP packet (seq=1 ftyp, seq=2 moov) at line rate within
+        // microseconds of each other. Customer prod dual-endpoint pcaps
+        // showed seq=2 (moov) lost on the wire 2/2 times — almost certainly
+        // a cold-UDP-socket-buffer overflow at the receiver: seq=1 wakes
+        // the kernel path, seq=2 arrives while seq=1 is still being copied
+        // to userspace and overflows the recv queue. After the first two
+        // packets, the encoder produces fragments at ~83 ms intervals so
+        // the socket has time to drain and no further losses occur.
+        //
+        // Coalescing ftyp+moov into a single ~789-byte sub-MTU UDP
+        // datagram eliminates the 2-packet burst pattern entirely — the
+        // moov is no longer a separate packet that can be lost in
+        // isolation. ftyp+moov is ~789 bytes, well below the 1460-byte
+        // RTP-payload MTU, so this packet does NOT trigger IP-layer
+        // fragmentation.
+        //
+        // If we still occasionally lose this single combined packet to
+        // genuine random UDP loss (~0.05% per packet on the customer's
+        // LAN), the .rsf will still be unplayable for that call. The
+        // follow-up mitigation is to additionally duplicate this packet
+        // N times with the same RTP sequence number (Path A), but that
+        // depends on the receiver doing RFC 3550 §8.2 dedup and is
+        // tracked separately.
+        if (!initSegment_.empty()) {
+            AVPacket pkt;
+            av_init_packet(&pkt);
+            pkt.data = initSegment_.data();
+            pkt.size = static_cast<int>(initSegment_.size());
+            pkt.dts = mp4SentPackets_;
+            pkt.pts = mp4SentPackets_;
+            mp4SentPackets_++;
+            send(pkt, currentStreamIdx_);
+            SIP_CORE_WARN("[%p] RQM init segment emitted as single "
+                          "combined RTP packet: %zu bytes",
+                          this, initSegment_.size());
+        }
 
         // Defense-in-depth: confirm +empty_moov actually took effect on this
         // libavformat. The mov muxer would otherwise silently fall back to
