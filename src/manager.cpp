@@ -901,6 +901,12 @@ Manager::finish() noexcept
             account->cancelKeepAliveTimer();
             account->cancelMainRouteKeepAliveTimer();
             account->cancelBackupRouteKeepAliveTimer();
+            // Cancel the auto-reregistration timer here too, while the PJSIP
+            // endpoint is still alive. Otherwise ~SIPAccount (step 8, after the
+            // endpoint is destroyed in step 7) would call
+            // cancelAutoReregistrationTimer() -> pjsip_endpt_cancel_timer() on a
+            // NULL/destroyed endpoint and crash (SIGSEGV in pjsip_endpt_cancel_timer).
+            account->cancelAutoReregistrationTimer();
         }
 
         // 3. Hangup all remaining active calls
