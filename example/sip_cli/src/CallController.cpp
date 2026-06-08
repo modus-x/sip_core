@@ -462,6 +462,19 @@ CallController::moveParticipant(size_t from_index, size_t to_index)
 }
 
 bool
+CallController::playDTMF(const std::string& dtmfEvents, double duration, uint16_t volume)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
+    if(!hasActiveCall())
+        return false;
+
+    for(auto it = m_activeCalls.begin(); it != m_activeCalls.end(); it++) {
+        libsip_core::playDTMF(m_accountId, it->second, dtmfEvents, duration, volume);
+    }
+    return true;
+}
+
+bool
 CallController::isCaptureInProgress()
 {
     return libsip_core::getIsRecording(m_accountId, getActiveCall());

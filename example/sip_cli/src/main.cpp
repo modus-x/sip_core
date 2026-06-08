@@ -43,7 +43,7 @@ main()
     std::cout << "SIP core Console App" << std::endl;
     std::cout << "Available commands:\n\tcall <callee>,\n\tadd <callee>,\n\tdel <callee>,\n\tmove <from> <to>,\n\t"
                  "conf <callee1> ... <calleeN>,\n\tswitch <device>,\n\thold,\n\tresume,\n\thangup,\n\tcapOn,\n\t"
-                 "capOff,\n\tvideo,\n\treregister,\n\tunregister,\n\tsubscribe,\n\tunsubscribe,\n\tpublish,\n\texit"
+                 "capOff,\n\tvideo,\n\treregister,\n\tunregister,\n\tsubscribe,\n\tunsubscribe,\n\tpublish,\n\tdtmf\n\texit"
               << std::endl;
 
     CallController controller(ACCOUNT_ID);
@@ -335,6 +335,18 @@ main()
             } else {
                 std::cout << "Reregister successfully sent" << std::endl;
             }
+        } else if (command == "dtmf") {
+            if(tokens.size() != 2) {
+                std::cerr << "Error: Usage - dtmf <dtmf code>."
+                          << std::endl;
+                continue;
+            }
+            if(!controller.playDTMF(tokens[1], 0.1, 0)) {
+                std::cerr << "Error: failed to play dtmf." << std::endl;
+                continue;
+            }
+            
+            std::cout << "Dtmf sent." << std::endl;
         } else {
             std::cerr << "Error: Unknown command. \nFull list of commands:\n call <callee> - "
                          "initiates call with given ID,\n add <callee> - adds new participant to "
@@ -348,6 +360,7 @@ main()
                          "transfer.\n info - get current call infos.\n reregister - force "
                          "reregistration.\n unregister - unregister user.\n subscribe <uri1>... - "
                          "subscribe to events.\n unsubscribe <uri1>... - unsubscribe from events.\n"
+                         "dtmf <dtmf code> - send dtmf code for active call.\n"
                          "exit - exit program." << std::endl;
         }
     }

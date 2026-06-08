@@ -39,6 +39,7 @@ public:
     bool removeParticipant(const std::string& participant);
     bool createConfirence(const std::vector<std::string>& participantsList);
     bool moveParticipant(size_t from_index, size_t to_index);
+    bool playDTMF(const std::string& dtmfEvents, double duration, uint16_t volume);
 
     bool isCaptureInProgress();
     bool startCallCapture();
