@@ -1043,7 +1043,7 @@ invite_session_state_changed_cb(pjsip_inv_session* inv, pjsip_event* ev)
 
                 // we have some route to retry
                 if (sipAccount
-                    && (sipAccount->hasServiceRoute() || sipAccount->hasBackServiceRoute())) {
+                    && (sipAccount->hasServiceRoute() || sipAccount->hasBackServiceRoutes())) {
                     if (sipCall->getInitialServiceRoute() == sipAccount->getActiveServiceRoute()) {
                         const bool switchToBackup = !sipAccount->isUsingBackupRoute();
                         sipAccount->switchRouteAndReregister(switchToBackup,

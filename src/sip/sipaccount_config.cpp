@@ -103,7 +103,8 @@ SipAccountConfig::serialize(YAML::Emitter& out) const
 
     out << YAML::Key << Conf::REGISTRATION_EXPIRE << YAML::Value << registrationExpire;
     out << YAML::Key << Conf::SERVICE_ROUTE_KEY << YAML::Value << serviceRoute;
-    out << YAML::Key << Conf::BACK_SERVICE_ROUTE_KEY << YAML::Value << backServiceRoute;
+    out << YAML::Key << Conf::BACK_SERVICE_ROUTE_KEY << YAML::Value
+        << string_join(backServiceRoutes, "/"sv);
     out << YAML::Key << Conf::ALLOW_IP_AUTO_REWRITE << YAML::Value << allowIPAutoRewrite;
 
     if (serializeCredentials) {
@@ -137,7 +138,9 @@ SipAccountConfig::unserialize(const YAML::Node& node)
     parseValueOptional(node, Conf::REGISTRATION_EXPIRE, registrationExpire);
     registrationExpire = std::max(MIN_REGISTRATION_TIME, registrationExpire);
     parseValueOptional(node, Conf::SERVICE_ROUTE_KEY, serviceRoute);
-    parseValueOptional(node, Conf::BACK_SERVICE_ROUTE_KEY, backServiceRoute);
+    std::string routes;
+    if (parseValueOptional(node, Conf::BACK_SERVICE_ROUTE_KEY, routes))
+        backServiceRoutes = string_split_vec(routes, "/"sv);
     parseValueOptional(node, Conf::ALLOW_IP_AUTO_REWRITE, allowIPAutoRewrite);
 
     parseValueOptional(node, Conf::PRESENCE_MODULE_ENABLED_KEY, presenceEnabled);
@@ -178,7 +181,7 @@ SipAccountConfig::toMap() const
     a.emplace(Conf::CONFIG_KEEP_ALIVE_INTERVAL, std::to_string(keepAliveInterval));
     a.emplace(Conf::CONFIG_KEEP_ALIVE_TYPE, getKeepAliveTypeName(keepAliveType));
     a.emplace(Conf::CONFIG_ACCOUNT_ROUTESET, serviceRoute);
-    a.emplace(Conf::CONFIG_ACCOUNT_BACK_ROUTESET, backServiceRoute);
+    a.emplace(Conf::CONFIG_ACCOUNT_BACK_ROUTESET, string_join(backServiceRoutes, "/"sv));
     a.emplace(Conf::CONFIG_ACCOUNT_REGISTRATION_EXPIRE, std::to_string(registrationExpire));
 
     std::string password {};
@@ -207,7 +210,9 @@ SipAccountConfig::fromMap(const std::map<std::string, std::string>& details)
     parseInt(details, Conf::CONFIG_LOCAL_PORT, localPort);
     parseString(details, Conf::CONFIG_BIND_ADDRESS, bindAddress);
     parseString(details, Conf::CONFIG_ACCOUNT_ROUTESET, serviceRoute);
-    parseString(details, Conf::CONFIG_ACCOUNT_BACK_ROUTESET, backServiceRoute);
+    std::string routes;
+    parseString(details, Conf::CONFIG_ACCOUNT_BACK_ROUTESET, routes);
+    backServiceRoutes = string_split_vec(routes, "/"sv);
     parseBool(details, Conf::CONFIG_ACCOUNT_IP_AUTO_REWRITE, allowIPAutoRewrite);
     parseString(details, Conf::CONFIG_LOCAL_INTERFACE, interface);
     parseBool(details, Conf::CONFIG_PUBLISHED_SAMEAS_LOCAL, publishedSameasLocal);

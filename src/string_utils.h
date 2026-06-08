@@ -170,8 +170,10 @@ void string_replace(std::string& str, const std::string& from, const std::string
 std::string_view string_remove_suffix(std::string_view str, char separator);
 
 std::string string_join(const std::set<std::string>& set, std::string_view separator = "/");
+std::string string_join(const std::vector<std::string>& set, std::string_view separator = "/");
 
 std::set<std::string> string_split_set(std::string& str, std::string_view separator = "/");
+std::vector<std::string> string_split_vec(std::string& str, std::string_view separator = "/");
 
 } // namespace sip_core
 

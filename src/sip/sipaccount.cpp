@@ -384,8 +384,8 @@ backup_route_keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
         return;
     }
 
-    if (!acc->hasBackServiceRoute()) {
-        SIP_CORE_DBG("Backup route KA: no backup route configured");
+    if (!acc->hasBackServiceRoutes()) {
+        SIP_CORE_DBG("Backup route KA: no backup routes configured");
         return;
     }
 
@@ -943,7 +943,7 @@ SIPAccount::startBackupKeepAliveAfterRegister()
 bool
 SIPAccount::sendBackupRouteKeepAlive()
 {
-    if (!hasBackServiceRoute()) {
+    if (!hasBackServiceRoutes()) {
         return false;
     }
 
@@ -956,7 +956,7 @@ SIPAccount::sendBackupRouteKeepAlive()
         return false;
     }
 
-    auto backupIp = getBackServiceRouteIp();
+    auto backupIp = getActiveBackServiceRoute().second;
     if (!backupIp) {
         SIP_CORE_DBG("Backup route KA: backup route address not resolved yet");
         return false;
@@ -1254,7 +1254,7 @@ SIPAccount::getMainRouteProbeIntervalSec() const
 bool
 SIPAccount::isNoRouteKeepAliveMode() const
 {
-    return !hasServiceRoute() && !hasBackServiceRoute();
+    return !hasServiceRoute() && !hasBackServiceRoutes();
 }
 
 bool
@@ -2205,7 +2205,7 @@ SIPAccount::setAccountDetails(const std::map<std::string, std::string>& details)
     KeepAliveType oldKeepAliveType = defaults.keepAliveType;
     uint32_t oldKeepAliveInterval = defaults.keepAliveInterval;
     std::string oldServiceRoute;
-    std::string oldBackServiceRoute;
+    std::vector<std::string> oldBackServiceRoutes;
     bool wasEnabled = defaults.enabled;
 
     {
@@ -2215,7 +2215,7 @@ SIPAccount::setAccountDetails(const std::map<std::string, std::string>& details)
             oldKeepAliveType = cfg.keepAliveType;
             oldKeepAliveInterval = cfg.keepAliveInterval;
             oldServiceRoute = cfg.serviceRoute;
-            oldBackServiceRoute = cfg.backServiceRoute;
+            oldBackServiceRoutes = cfg.backServiceRoutes;
             wasEnabled = cfg.enabled;
         }
     }
@@ -2225,7 +2225,7 @@ SIPAccount::setAccountDetails(const std::map<std::string, std::string>& details)
     KeepAliveType newKeepAliveType;
     uint32_t newKeepAliveInterval;
     std::string newServiceRoute;
-    std::string newBackServiceRoute;
+    std::vector<std::string> newBackServiceRoutes;
     bool isEnabled;
     {
         std::lock_guard<std::recursive_mutex> lock(configurationMutex_);
@@ -2233,14 +2233,14 @@ SIPAccount::setAccountDetails(const std::map<std::string, std::string>& details)
         newKeepAliveType = cfg.keepAliveType;
         newKeepAliveInterval = cfg.keepAliveInterval;
         newServiceRoute = cfg.serviceRoute;
-        newBackServiceRoute = cfg.backServiceRoute;
+        newBackServiceRoutes = cfg.backServiceRoutes;
         isEnabled = cfg.enabled;
     }
 
     const bool keepAliveChanged = (oldKeepAliveType != newKeepAliveType)
                                   || (oldKeepAliveInterval != newKeepAliveInterval);
     const bool routeConfigChanged = oldServiceRoute != newServiceRoute
-                                    || oldBackServiceRoute != newBackServiceRoute;
+                                    || oldBackServiceRoutes != newBackServiceRoutes;
     if (!keepAliveChanged && wasEnabled == isEnabled && !routeConfigChanged)
         return;
 
@@ -2264,7 +2264,7 @@ SIPAccount::setAccountDetails(const std::map<std::string, std::string>& details)
         registerKeepAliveTimer();
         if (restoreActiveNoRouteFastProbe)
             enableActiveNoRouteFastProbe("set-account-details-keepalive-refresh");
-        if (hasBackServiceRoute()) {
+        if (hasBackServiceRoutes()) {
             if (isUsingBackupRoute()) {
                 registerMainRouteKeepAliveTimer();
                 if (restoreMainRouteFastProbe)
@@ -2440,7 +2440,7 @@ SIPAccount::doRegister1_()
     const auto resolveTransportType = transportTypeFromConfig(config().transport);
 
     // pre-resolve of proxy OR backup proxy
-    if (hasServiceRoute() || hasBackServiceRoute()) {
+    if (hasServiceRoute() || hasBackServiceRoutes()) {
         if (hasServiceRoute()) {
             link_.resolveSrvName(config().serviceRoute,
                                  resolveTransportType,
@@ -2459,22 +2459,27 @@ SIPAccount::doRegister1_()
                                      }
                                  });
         }
-        if (hasBackServiceRoute()) {
-            link_.resolveSrvName(config().backServiceRoute,
-                                 resolveTransportType,
-                                 [w = weak()](std::vector<IpAddr> host_ips) {
-                                     if (auto acc = w.lock()) {
-                                         std::lock_guard<std::recursive_mutex> lock(
-                                             acc->configurationMutex_);
-                                         if (host_ips.empty()) {
-                                             return;
+        backServiceRouteIps_.clear();
+        if (!config().backServiceRoutes.empty()) {
+            for(auto route : config().backServiceRoutes){
+                link_.resolveSrvName(route,
+                                     resolveTransportType,
+                                     [w = weak()](std::vector<IpAddr> host_ips) {
+                                         if (auto acc = w.lock()) {
+                                             std::lock_guard<std::recursive_mutex> lock(
+                                                 acc->configurationMutex_);
+                                             if (host_ips.empty()) {
+                                                 acc->backServiceRouteIps_.emplace_back("");
+                                                 return;
+                                             }
+                                             acc->backServiceRouteIps_.emplace_back(host_ips[0]);
+                                             if (acc->pendingBackupKeepAliveStart_.exchange(false)) {
+                                                 acc->startBackupKeepAliveAfterRegister();
+                                             }
                                          }
-                                         acc->backServiceRouteIp_ = host_ips[0];
-                                         if (acc->pendingBackupKeepAliveStart_.exchange(false)) {
-                                             acc->startBackupKeepAliveAfterRegister();
-                                         }
-                                     }
-                                 });
+                                     });
+
+            }
         }
 
     } else {
@@ -2502,8 +2507,8 @@ SIPAccount::doRegister1_()
 const IpAddr&
 SIPAccount::getActualIpAddress() const
 {
-    if (usingBackupRoute_ && hasBackServiceRoute()) {
-        return backServiceRouteIp_;
+    if (isUsingBackupRoute() && hasBackServiceRoutes()) {
+        return activeBackupRoute_.second;
     }
 
     if (hasServiceRoute()) {
@@ -2549,7 +2554,7 @@ SIPAccount::isOptionsKeepAliveMode() const
 SIPAccount::KeepAliveTopology
 SIPAccount::getKeepAliveTopology() const
 {
-    return resolveKeepAliveTopology(hasServiceRoute(), hasBackServiceRoute());
+    return resolveKeepAliveTopology(hasServiceRoute(), hasBackServiceRoutes());
 }
 
 bool
@@ -2586,7 +2591,7 @@ SIPAccount::getServerUriForTarget(const std::string& target) const
 std::string
 SIPAccount::getActiveKeepAliveUri() const
 {
-    if (isUsingBackupRoute() && hasBackServiceRoute())
+    if (isUsingBackupRoute() && hasBackServiceRoutes())
         return getBackupRouteKeepAliveUri();
     if (hasServiceRoute())
         return getMainRouteKeepAliveUri();
@@ -2602,7 +2607,7 @@ SIPAccount::getMainRouteKeepAliveUri() const
 std::string
 SIPAccount::getBackupRouteKeepAliveUri() const
 {
-    return hasBackServiceRoute() ? getServerUriForTarget(config().backServiceRoute)
+    return hasBackServiceRoutes() ? getServerUriForTarget(activeBackupRoute_.first)
                                  : getServerUri();
 }
 
@@ -3483,7 +3488,7 @@ SIPAccount::onRegister(pjsip_regc_cbparam* param)
         }
 
         // Try backup route if not already using it
-        if (dualRouteOptionsMode && !isUsingBackupRoute() && hasBackServiceRoute()) {
+        if (dualRouteOptionsMode && !isUsingBackupRoute() && hasBackServiceRoutes()) {
             SIP_CORE_WARN("Registration failed, trying backup route");
             mainRouteAvailable_.store(false);
             switchRouteAndReregister(true, "registration-failed-main-route");
@@ -3513,7 +3518,7 @@ SIPAccount::onRegister(pjsip_regc_cbparam* param)
         case PJSIP_SC_SERVICE_UNAVAILABLE:
         case PJSIP_SC_NOT_FOUND:
             shouldRetryBackup = dualRouteOptionsMode && !isUsingBackupRoute()
-                                && hasBackServiceRoute();
+                                && hasBackServiceRoutes();
             break;
         }
 
@@ -3785,8 +3790,13 @@ SIPAccount::hostnameMatch(std::string_view hostname) const
 bool
 SIPAccount::proxyMatch(std::string_view hostname) const
 {
-    if (hostname == config().serviceRoute || hostname == config().backServiceRoute)
+    if (hostname == config().serviceRoute)
         return true;
+
+    for(auto route : config().backServiceRoutes) {
+        if (hostname == route)
+            return true;
+    }
     const auto a = ip_utils::getAddrList(hostname);
     const auto b = ip_utils::getAddrList(config().hostname);
     return ip_utils::haveCommonAddr(a, b);
@@ -3885,8 +3895,8 @@ SIPAccount::getServerUri() const
 std::string
 SIPAccount::getActiveServiceRoute() const
 {
-    if (usingBackupRoute_ && hasBackServiceRoute()) {
-        return config().backServiceRoute;
+    if (isUsingBackupRoute() && hasBackServiceRoutes()) {
+        return activeBackupRoute_.first;
     }
     return config().serviceRoute;
 }
@@ -3894,20 +3904,20 @@ SIPAccount::getActiveServiceRoute() const
 void
 SIPAccount::switchToBackupRoute()
 {
-    if (!hasBackServiceRoute()) {
-        SIP_CORE_WARN("No backup service route available");
+    if (!hasBackServiceRoutes()) {
+        SIP_CORE_WARN("No backup service routes available");
         return;
     }
 
-    if (usingBackupRoute_) {
+    if (isUsingBackupRoute()) {
         SIP_CORE_DBG("Already using backup service route");
         return;
     }
 
     markTransportRebindRequired("switch-to-backup-route");
+    iterateActiveBackServiceRoute();
 
-    SIP_CORE_WARN("Switching to backup service route: %s", config().backServiceRoute.c_str());
-    usingBackupRoute_ = true;
+    SIP_CORE_WARN("Switching to backup service route: %s", getActiveBackServiceRoute().first.c_str());
     mainRouteAvailable_.store(false);
 
     // Stop backup route keep-alive since backup becomes active route
@@ -3924,7 +3934,7 @@ SIPAccount::switchToBackupRoute()
 void
 SIPAccount::switchToMainRoute()
 {
-    if (!usingBackupRoute_) {
+    if (!isUsingBackupRoute()) {
         SIP_CORE_DBG("Already using main service route");
         return;
     }
@@ -3932,7 +3942,7 @@ SIPAccount::switchToMainRoute()
     markTransportRebindRequired("switch-to-main-route");
 
     SIP_CORE_WARN("Switching back to main service route: %s", config().serviceRoute.c_str());
-    usingBackupRoute_ = false;
+    activeBackupRoute_ = {};
     disableActiveNoRouteFastProbe("switch-to-main-route");
 
     disableMainRouteFastProbe("switch-to-main-route");
@@ -3940,6 +3950,23 @@ SIPAccount::switchToMainRoute()
 
     // Stop the main route keep-alive timer
     cancelMainRouteKeepAliveTimer();
+}
+
+void
+SIPAccount::iterateActiveBackServiceRoute()
+{
+    if(config().backServiceRoutes.size() == 0 
+        || config().backServiceRoutes.size() != backServiceRouteIps_.size())
+        return;
+
+    activeBackupRouteIdx_++;
+    if(config().backServiceRoutes.size() <= activeBackupRouteIdx_)
+        activeBackupRouteIdx_ = 0;
+
+    activeBackupRoute_ = { 
+        config().backServiceRoutes[activeBackupRouteIdx_], 
+        backServiceRouteIps_[activeBackupRouteIdx_] 
+    };
 }
 
 IpAddr
@@ -4157,10 +4184,15 @@ SIPAccount::supportPresence(int function, bool enabled)
 MatchRank
 SIPAccount::matches(std::string_view userName, std::string_view server) const
 {
-    SIP_CORE_DBG("calling matches: current serviceRoute is %s, current backServiceRoute is %s, "
+    std::string routes;
+    for(auto r: config().backServiceRoutes) {
+        routes += r + "/";
+    }
+    routes.pop_back();
+    SIP_CORE_DBG("calling matches: current serviceRoute is %s, current backServiceRoutes are %s, "
                  "username is %s",
                  config().serviceRoute.c_str(),
-                 config().backServiceRoute.c_str(),
+                 routes.c_str(),
                  config().username.c_str());
     if (fullMatch(userName, server)) {
         SIP_CORE_DBG("Matching account id in request is a fullmatch %.*s@%.*s",

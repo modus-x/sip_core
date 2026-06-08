@@ -152,6 +152,12 @@ string_join(const std::set<std::string>& set, std::string_view separator)
     return fmt::format("{}", fmt::join(set, separator));
 }
 
+std::string
+string_join(const std::vector<std::string>& vec, std::string_view separator)
+{
+    return fmt::format("{}", fmt::join(vec, separator));
+}
+
 std::set<std::string>
 string_split_set(std::string& str, std::string_view separator)
 {
@@ -160,6 +166,18 @@ string_split_set(std::string& str, std::string_view separator)
         second = std::find_first_of(first, last, std::cbegin(separator), std::cend(separator));
         if (first != second)
             output.emplace(first, second - first);
+    }
+    return output;
+}
+
+std::vector<std::string>
+string_split_vec(std::string& str, std::string_view separator)
+{
+    std::vector<std::string> output;
+    for (auto first = str.data(), second = str.data(), last = first + str.size(); second != last && first != last; first = second + 1) {
+        second = std::find_first_of(first, last, std::cbegin(separator), std::cend(separator));
+        if (first != second)
+            output.emplace_back(first, second - first);
     }
     return output;
 }

@@ -287,9 +287,12 @@ public:
 
     bool hasServiceRoute() const { return not config().serviceRoute.empty(); }
 
-    std::string getBackServiceRoute() const { return config().backServiceRoute; }
+    std::vector<std::string> getBackServiceRoutes() const { return config().backServiceRoutes; }
 
-    bool hasBackServiceRoute() const { return not config().backServiceRoute.empty(); }
+    bool hasBackServiceRoutes() const { return not config().backServiceRoutes.empty(); }
+
+    std::pair<std::string, IpAddr> getActiveBackServiceRoute() const { return activeBackupRoute_; }
+    void iterateActiveBackServiceRoute();
 
     const IpAddr& getActualIpAddress() const;
     enum class KeepAliveTopology {
@@ -313,7 +316,7 @@ public:
     /**
      * Check if currently using backup service route
      */
-    bool isUsingBackupRoute() const { return usingBackupRoute_; }
+    bool isUsingBackupRoute() const { return !activeBackupRoute_.first.empty(); }
 
     /**
      * Switch to backup service route
@@ -613,7 +616,7 @@ public:
     bool setUpTransmissionData(pjsip_tx_data* tdata, const IpAddr& ip);
 
     const IpAddr& getServiceRouteIp() { return serviceRouteIp_; };
-    const IpAddr& getBackServiceRouteIp() { return backServiceRouteIp_; };
+    const std::vector<IpAddr>& getBackServiceRouteIps() { return backServiceRouteIps_; };
 
     std::atomic<bool> needsResubscribe_ {false};
     std::atomic<bool> needsRepublish_ {false};
@@ -782,7 +785,7 @@ private:
     /**
      * Resolved IP of backServiceRoute_ (for registration)
      */
-    IpAddr backServiceRouteIp_;
+    std::vector<IpAddr> backServiceRouteIps_;
 
     /**
      * The pjsip client registration information
@@ -879,9 +882,12 @@ private:
     pj_uint16_t publishedPortUsed_ {sip_utils::DEFAULT_SIP_PORT};
 
     /**
-     * Flag indicating if backup service route is currently being used
+     * If usingBackupRoute_ flag is set, this string 
+     * represends current <backRoute, ip>, otherwise empty
      */
-    bool usingBackupRoute_ {false};
+
+     std::pair<std::string, IpAddr> activeBackupRoute_;
+     int activeBackupRouteIdx_ = -1;
 };
 
 } // namespace sip_core

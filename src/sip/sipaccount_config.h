@@ -83,9 +83,9 @@ struct SipAccountConfig : public SipAccountBaseConfig {
     std::string serviceRoute;
 
     /**
-     * Backup Outbound Proxy Server Address
+     * Backup Outbound Proxy Server Address List
      */
-    std::string backServiceRoute;
+    std::vector<std::string> backServiceRoutes;
 
     /**
      * Determine if the softphone should fallback on non secured media channel if SRTP negotiation

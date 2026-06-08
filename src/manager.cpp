@@ -711,7 +711,7 @@ Manager::setKeepAliveInterval(const std::string& accountId, int interval)
                 sipAccount->registerKeepAliveTimer();
                 if (restoreActiveNoRouteFastProbe)
                     sipAccount->enableActiveNoRouteFastProbe("manager-keepalive-interval-refresh");
-                if (sipAccount->hasBackServiceRoute()) {
+                if (sipAccount->hasBackServiceRoutes()) {
                     if (sipAccount->isUsingBackupRoute()) {
                         sipAccount->registerMainRouteKeepAliveTimer();
                         if (restoreMainRouteFastProbe)
