@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+#
+# Orchestrates a synchronised version bump across the two source-side repos:
+#   - sip_core (this repo)              — canonical VERSION.txt
+#   - sip_core_ffi_glue (sibling)       — mirrors the VERSION.txt so its CMakeLists
+#                                         and podspec keep working stand-alone
+#
+# Usage:
+#   scripts/bump-version <new-version>
+#
+# Where <new-version> follows X.Y.Z[-suffix], e.g. 0.18.14 or 0.18.14-test.
+#
+# Side effects:
+#   - rewrites sip_core/VERSION.txt and sip_core_ffi_glue/VERSION.txt
+#   - commits both with "chore: bump version to v<new-version>"
+#   - creates annotated tag v<new-version> in both repos
+#   - pushes commits + tags to origin (unless PUSH=0)
+#
+# Downstream consumers (dart_sip_core) should run their own
+# `scripts/bump-bindings.sh <new-version>` AFTER the build machines have
+# uploaded their artifacts to Nexus, since that step needs the published
+# .sha256 files.
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SIBLING_GLUE="${SIP_CORE_FFI_GLUE_LOCAL_PATH:-${REPO_ROOT}/../sip_core_ffi_glue}"
+
+if [ "$#" -ne 1 ]; then
+  echo "Usage: $0 <new-version>" >&2
+  exit 1
+fi
+
+NEW_VERSION="$1"
+
+if ! [[ "${NEW_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.+][[:alnum:].]+)?$ ]]; then
+  echo "Invalid version '${NEW_VERSION}'. Expected X.Y.Z[-suffix]." >&2
+  exit 1
+fi
+
+if [ ! -d "${SIBLING_GLUE}/.git" ]; then
+  echo "sip_core_ffi_glue sibling not found at ${SIBLING_GLUE}" >&2
+  echo "Set SIP_CORE_FFI_GLUE_LOCAL_PATH to its location." >&2
+  exit 1
+fi
+
+bump_repo() {
+  local repo="$1"
+  local kind="$2"
+  (
+    cd "${repo}"
+    if [ ! -f VERSION.txt ]; then
+      echo "VERSION.txt file missing in ${repo}" >&2
+      exit 1
+    fi
+    local old
+    old="$(tr -d '[:space:]' < VERSION.txt)"
+    if [ "${old}" = "${NEW_VERSION}" ]; then
+      echo "${kind}: already at ${NEW_VERSION}, skipping commit"
+      return 0
+    fi
+    printf '%s\n' "${NEW_VERSION}" > VERSION.txt
+    git add VERSION.txt
+    git commit -m "chore: bump version to v${NEW_VERSION}"
+    git tag -a "v${NEW_VERSION}" -m "Release v${NEW_VERSION}"
+    echo "${kind}: ${old} -> ${NEW_VERSION}"
+  )
+}
+
+bump_repo "${REPO_ROOT}" "sip_core"
+bump_repo "${SIBLING_GLUE}" "sip_core_ffi_glue"
+
+if [ "${PUSH:-1}" = "1" ]; then
+  (cd "${REPO_ROOT}" && git push origin HEAD && git push origin "v${NEW_VERSION}")
+  (cd "${SIBLING_GLUE}" && git push origin HEAD && git push origin "v${NEW_VERSION}")
+fi
+
+cat <<EOM
+
+Synchronised both repos to v${NEW_VERSION}.
+
+Next steps:
+  1. On each build machine (linux, windows, macos):
+       cd ~/code/sip_core           && git pull
+       cd ~/code/sip_core_ffi_glue  && git pull
+       # then:
+       #   linux/windows:  cmake --workflow {linux|windows}
+       #   macos:          scripts/publish-darwin.sh   (after cmake --workflow darwin)
+  2. Back here, in dart_sip_core:
+       scripts/bump-bindings.sh ${NEW_VERSION}
+EOM

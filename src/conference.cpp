@@ -819,10 +819,24 @@ Conference::setLayout(int layout)
 std::vector<std::map<std::string, std::string>>
 ConfInfo::toVectorMapStringString() const
 {
+    // Inject canvas dimensions (the host mixer's total width/height) into
+    // every participant entry. The OnConferenceInfosUpdated signal is the
+    // only channel that crosses into Dart for both host- and remote-side
+    // conference state — denormalising `cw`/`ch` onto every row lets the
+    // UI lay tiles out against the host's canvas rather than guessing it
+    // from the bounding box of participant rects (which collapses any
+    // host-authored padding around the grid). The values are identical
+    // for all rows since they describe the conference canvas, not a tile.
+    const auto cw = std::to_string(w);
+    const auto ch = std::to_string(h);
     std::vector<std::map<std::string, std::string>> infos;
     infos.reserve(size());
-    for (const auto& info : *this)
-        infos.emplace_back(info.toMap());
+    for (const auto& info : *this) {
+        auto entry = info.toMap();
+        entry["cw"] = cw;
+        entry["ch"] = ch;
+        infos.emplace_back(std::move(entry));
+    }
     return infos;
 }
 

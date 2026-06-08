@@ -4,6 +4,8 @@ LIBHARFBUZZ_URL := https://nexus.svetlocal.ru/repository/github-artifacts/harfbu
 
 PKGS += harfbuzz
 
+DEPS_harfbuzz = freetype2
+
 HBZ_CMAKECONF = -DBUILD_SHARED_LIBS=OFF \
 				-DHB_HAVE_FREETYPE=ON \
 				-DCMAKE_POSITION_INDEPENDENT_CODE=ON

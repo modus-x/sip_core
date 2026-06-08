@@ -213,6 +213,12 @@ AccountAudioCodecInfo::isG729() const
     return systemCodecInfo.avcodecId == AV_CODEC_ID_G729;
 }
 
+bool
+AccountAudioCodecInfo::isOpus() const
+{
+    return systemCodecInfo.avcodecId == AV_CODEC_ID_OPUS;
+}
+
 AccountVideoCodecInfo::AccountVideoCodecInfo(const SystemVideoCodecInfo& sysCodecInfo)
     : AccountCodecInfo(sysCodecInfo)
     , frameRate(sysCodecInfo.frameRate)

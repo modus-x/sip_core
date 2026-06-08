@@ -344,8 +344,12 @@ resolveLocalCodecSpec(const std::shared_ptr<AccountCodecInfo>& accountCodec,
         auto accountAudioCodec = std::static_pointer_cast<AccountAudioCodecInfo>(accountCodec);
         spec.payload = accountAudioCodec->payloadType;
         spec.encName = accountAudioCodec->systemCodecInfo.name;
-        if (accountAudioCodec->audioformat.nb_channels > 1)
+        if (accountAudioCodec->isOpus()) {
+            // RFC 7587 §7: Opus rtpmap MUST advertise channels=2 regardless of mono/stereo.
+            spec.channels = 2;
+        } else if (accountAudioCodec->audioformat.nb_channels > 1) {
             spec.channels = accountAudioCodec->audioformat.nb_channels;
+        }
 
         // G722 requires G722/8000 media description even though it's @ 16000 Hz.
         if (accountAudioCodec->isPCMG722() || accountAudioCodec->isG729())
@@ -490,8 +494,12 @@ Sdp::addMediaDescription(const MediaAttribute& mediaAttr, const pjmedia_sdp_medi
             rc.payload = accountAudioCodec->payloadType;
             rc.enc_name = accountAudioCodec->systemCodecInfo.name;
 
-            if (accountAudioCodec->audioformat.nb_channels > 1)
+            if (accountAudioCodec->isOpus()) {
+                // RFC 7587 §7: Opus rtpmap MUST be "opus/48000/2" regardless of mono/stereo.
+                rc.channels = 2;
+            } else if (accountAudioCodec->audioformat.nb_channels > 1) {
                 rc.channels = accountAudioCodec->audioformat.nb_channels;
+            }
 
             // G722 requires G722/8000 media description even though it's @ 16000 Hz
             // See http://tools.ietf.org/html/rfc3551#section-4.5.2
@@ -545,6 +553,82 @@ Sdp::addMediaDescription(const MediaAttribute& mediaAttr, const pjmedia_sdp_medi
         }
 
         resolved.push_back(std::move(rc));
+    }
+
+    // Mid-call codec change to codecs we support at the system level but that were not in the
+    // active account codec list (e.g. peer re-INVITEs PCMU -> G729 right after 200 OK). Without
+    // this fallback we'd answer with port=0 and the call's audio would die. Adopt every offered
+    // format that we can actually encode/decode so the call keeps flowing — RFC 3264 lets us
+    // pick any subset of the offer.
+    if (answering && type == MediaType::MEDIA_AUDIO && resolved.empty() && remoteMedia
+        && remoteMedia->desc.fmt_count > 0) {
+        static constexpr pj_str_t STR_RTPMAP_LOCAL {sip_utils::CONST_PJ_STR("rtpmap")};
+
+        auto sysContainer = sip_core::getSystemCodecContainer();
+
+        auto adoptSystemCodec = [&](const std::shared_ptr<SystemCodecInfo>& sysInfo,
+                                    unsigned offerPt) {
+            if (!sysInfo || !(sysInfo->mediaType & MEDIA_AUDIO))
+                return;
+            for (const auto& r : resolved) {
+                if (r.codec && r.codec->systemCodecInfo.id == sysInfo->id)
+                    return;
+            }
+            auto sysAudio = std::static_pointer_cast<SystemAudioCodecInfo>(sysInfo);
+            auto accCodec = std::make_shared<AccountAudioCodecInfo>(*sysAudio);
+            accCodec->isActive = true;
+
+            ResolvedCodec rc;
+            rc.codec = accCodec;
+            rc.payload = offerPt;
+            rc.enc_name = accCodec->systemCodecInfo.name;
+            rc.channels = 0;
+            if (accCodec->isOpus())
+                rc.channels = 2;
+            else if (accCodec->audioformat.nb_channels > 1)
+                rc.channels = accCodec->audioformat.nb_channels;
+            if (accCodec->isPCMG722() || accCodec->isG729())
+                rc.clock_rate = 8000;
+            else
+                rc.clock_rate = accCodec->audioformat.sample_rate;
+
+            // Persist into audio_codec_list_ so that subsequent findCodecBySpec lookups
+            // (used by getMediaDescriptions when the negotiation completes) can resolve
+            // the newly adopted codec back to an AccountCodecInfo.
+            audio_codec_list_.push_back(accCodec);
+            resolved.push_back(std::move(rc));
+
+            SIP_CORE_WARN("[sdp] Adopting system-supported audio codec %s (PT %u) from offer; "
+                          "not in active codec list but required to keep media alive across "
+                          "this re-INVITE",
+                          accCodec->systemCodecInfo.name.c_str(),
+                          offerPt);
+        };
+
+        // Static PTs (PCMU=0, PCMA=8, G722=9, G729=18, ...): match by RFC 3551 payload.
+        for (unsigned i = 0; i < remoteMedia->desc.fmt_count; ++i) {
+            unsigned pt = pj_strtoul(&remoteMedia->desc.fmt[i]);
+            if (pt >= 96)
+                continue;
+            adoptSystemCodec(sysContainer->searchCodecByPayload(pt, MEDIA_AUDIO), pt);
+        }
+
+        // Dynamic PTs (>=96): match the rtpmap encoding name.
+        for (unsigned i = 0; i < remoteMedia->attr_count; ++i) {
+            const auto* attr = remoteMedia->attr[i];
+            if (pj_stricmp(&attr->name, &STR_RTPMAP_LOCAL) != 0)
+                continue;
+            pjmedia_sdp_rtpmap rtpmap;
+            if (pjmedia_sdp_attr_get_rtpmap(attr, &rtpmap) != PJ_SUCCESS)
+                continue;
+            unsigned pt = pj_strtoul(&rtpmap.pt);
+            if (pt < 96)
+                continue;
+            std::string encName(rtpmap.enc_name.ptr, rtpmap.enc_name.slen);
+            if (encName == "telephone-event")
+                continue; // handled by setTelephoneEventRtpmap()
+            adoptSystemCodec(sysContainer->searchCodecByName(encName, MEDIA_AUDIO), pt);
+        }
     }
 
     // If we are answering and no local codec overlapped with the offer, build a syntactically

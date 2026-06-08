@@ -9,7 +9,7 @@ Default Windows `AudioLayer`. PortAudio brokers WASAPI (preferred), WDM-KS, or D
 | File                                | Role                                                                                          |
 |-------------------------------------|-----------------------------------------------------------------------------------------------|
 | `portaudiolayer.h/cpp`              | `PortAudioLayer` — derives from `AudioLayer`. Opens capture + playback streams, polls the device list, handles default-device changes via `Pa_GetDefaultInput/OutputDevice`. |
-| `CMakeLists.txt`                    | Builds the source set when `WIN32` is true. PortAudio itself is built by `contrib/src/portaudio`. |
+| `CMakeLists.txt`                    | Builds the source set when `MSVC` is true. PortAudio itself is built by `contrib/src/portaudio`. |
 
 ## Behavior
 
@@ -19,9 +19,9 @@ Default Windows `AudioLayer`. PortAudio brokers WASAPI (preferred), WDM-KS, or D
 
 ## Build
 
-PortAudio is built from `contrib/src/portaudio/` (Unix-style `rules.mak` on Linux/macOS, `package.json` on Windows). The library lands in `contrib/<triplet>/lib/`.
+PortAudio is built from `contrib/src/portaudio/` via `package.json` (Windows/MSVC build). The library lands in `contrib/<triplet>/lib/`.
 
-`CMakeLists.txt` here is included from the parent on Windows builds.
+`CMakeLists.txt` here is included from the parent only on MSVC builds (`if(MSVC)` in `src/media/audio/CMakeLists.txt`).
 
 ## Gotchas
 

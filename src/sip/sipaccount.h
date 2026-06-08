@@ -430,6 +430,11 @@ public:
     void cancelBackupRouteKeepAliveTimer();
 
     /**
+     * Cancels the automatic re-registration timer.
+     */
+    void cancelAutoReregistrationTimer();
+
+    /**
      * Check if we should switch back to main route when calls end.
      * Called when a call is detached from the account.
      */
@@ -731,7 +736,6 @@ private:
     std::pair<std::string, pj_uint16_t> currentLocalBinding() const;
     void resetViaTransport();
     void resetNetworkRuntimeStateForConnectivityChange();
-    void cancelAutoReregistrationTimer();
     void resetOptionsRecoveryWindow();
     bool shouldSuppressOptionsRecovery();
     void resetRawKeepAliveRecoveryWindow();

@@ -10,7 +10,7 @@ The daemon's persistent state (accounts, preferences, audio/video settings) is a
 |-----------------------------------|---------------------------------------------------------------------------------------------------|
 | `yamlparser.h/cpp`                | Helpers around yaml-cpp: `parseValue(node, key, T&)`, `parseValueOptional`, `parsePath`, `parseVector`, `parseVectorMap`. Used by every `*_config.cpp` to read fields. |
 | `serializable.h`                  | `Serializable` interface — every config object implements `unserialize(YAML::Node)` / `serialize(YAML::Emitter)`. |
-| `account_config_utils.h`          | Helpers shared between account-config implementations (default codecs, type names).               |
+| `account_config_utils.h`          | Serialization helpers: `serializeValue<T>(out, key, value, default)` (skips writing if value equals default) and two macros `SERIALIZE_CONFIG` / `SERIALIZE_PATH` used in `serialize()` implementations to reduce boilerplate. |
 
 ## Where each config schema lives
 

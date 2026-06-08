@@ -1042,7 +1042,20 @@ SIPCall::reinviteOnConnectivityChange()
 void
 SIPCall::sendSIPInfo(std::string_view body, std::string_view subtype)
 {
-    if (subtype != "media_control+xml" && subtype != "dtmf-relay") {
+    // Allowed application/<subtype> bodies for SIP INFO:
+    //   media_control+xml — RFC 5168 picture-fast-update / recording-state.
+    //   dtmf-relay        — RFC 2833-style DTMF over INFO.
+    //   json              — rqm-desktop-recorder window-interaction events
+    //                       (foreground-window title/process/rect, see
+    //                       rqm-desktop-recorder src/main.cpp
+    //                       windowChangedCallback). Dropped here in
+    //                       5532cf12 ("conference voice activity") which
+    //                       tightened to just media_control+xml/dtmf-relay
+    //                       and silently killed window-event reporting on
+    //                       both Linux and Windows recorders.
+    if (subtype != "media_control+xml"
+        && subtype != "dtmf-relay"
+        && subtype != "json") {
         return;
     }
     std::lock_guard<std::recursive_mutex> lk {callMutex_};
@@ -3117,10 +3130,31 @@ SIPCall::updateMediaStream(const MediaAttribute& newMediaAttr, size_t streamIdx)
     auto const& mediaAttr = rtpStream.mediaAttribute_;
     assert(mediaAttr);
 
-    bool notifyMute = false;
-    const bool notifyHold = newMediaAttr.onHold_ != mediaAttr->onHold_;
+#ifdef RQM
+    // RQM mode: the daemon ONLY records the desktop, and recording must
+    // start as soon as the call is accepted. Override every "muted=true"
+    // request that arrives for a video stream so we never sit silently on
+    // a muted video while the SIP peer thinks it's recording.
+    MediaAttribute rqmAttr = newMediaAttr;
+    if (rqmAttr.type_ == MediaType::MEDIA_VIDEO && rqmAttr.muted_) {
+        SIP_CORE_DBG("[call:%s] RQM: unmuting incoming video attribute for [%s]",
+                     getCallId().c_str(), rqmAttr.label_.c_str());
+        rqmAttr.muted_ = false;
+    }
+    if (mediaAttr->type_ == MediaType::MEDIA_VIDEO && mediaAttr->muted_) {
+        SIP_CORE_DBG("[call:%s] RQM: clearing local muted flag on [%s]",
+                     getCallId().c_str(), mediaAttr->label_.c_str());
+        mediaAttr->muted_ = false;
+    }
+    const MediaAttribute& effectiveNewAttr = rqmAttr;
+#else
+    const MediaAttribute& effectiveNewAttr = newMediaAttr;
+#endif
 
-    if (newMediaAttr.muted_ == mediaAttr->muted_) {
+    bool notifyMute = false;
+    const bool notifyHold = effectiveNewAttr.onHold_ != mediaAttr->onHold_;
+
+    if (effectiveNewAttr.muted_ == mediaAttr->muted_) {
         // Nothing to do. Already in the desired state.
         SIP_CORE_DBG("[call:%s] [%s] already %s",
                      getCallId().c_str(),
@@ -3129,7 +3163,7 @@ SIPCall::updateMediaStream(const MediaAttribute& newMediaAttr, size_t streamIdx)
 
     } else {
         // Update
-        mediaAttr->muted_ = newMediaAttr.muted_;
+        mediaAttr->muted_ = effectiveNewAttr.muted_;
         notifyMute = true;
         SIP_CORE_DBG("[call:%s] %s [%s]",
                      getCallId().c_str(),
@@ -3216,17 +3250,32 @@ SIPCall::updateAllMediaStreams(const std::vector<MediaAttribute>& mediaAttrList,
                         getCallId().c_str(),
                         normalizedAttr.label_.c_str(),
                         normalizedAttr.muted_ ? "true" : "false");
-                } else if (!normalizedAttr.muted_) {
-                    SIP_CORE_DBG(
-                        "[call:%s] New negotiated video stream [%s] forced muted by default policy",
-                        getCallId().c_str(),
-                        normalizedAttr.label_.c_str());
-                    normalizedAttr.muted_ = true;
                 } else {
-                    SIP_CORE_DBG("[call:%s] New negotiated video stream [%s] is kept muted "
-                                 "(default policy)",
-                                 getCallId().c_str(),
-                                 normalizedAttr.label_.c_str());
+#ifdef RQM
+                    // RQM: never auto-mute video. The daemon must start capturing
+                    // the desktop immediately so the SIP peer gets real frames
+                    // instead of a muted placeholder.
+                    if (normalizedAttr.muted_) {
+                        SIP_CORE_DBG(
+                            "[call:%s] RQM: forcing new video stream [%s] to UNMUTED",
+                            getCallId().c_str(),
+                            normalizedAttr.label_.c_str());
+                        normalizedAttr.muted_ = false;
+                    }
+#else
+                    if (!normalizedAttr.muted_) {
+                        SIP_CORE_DBG(
+                            "[call:%s] New negotiated video stream [%s] forced muted by default policy",
+                            getCallId().c_str(),
+                            normalizedAttr.label_.c_str());
+                        normalizedAttr.muted_ = true;
+                    } else {
+                        SIP_CORE_DBG("[call:%s] New negotiated video stream [%s] is kept muted "
+                                     "(default policy)",
+                                     getCallId().c_str(),
+                                     normalizedAttr.label_.c_str());
+                    }
+#endif
                 }
             }
             addMediaStream(normalizedAttr);

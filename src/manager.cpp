@@ -294,6 +294,14 @@ struct Manager::ManagerPimpl
     /** Audio layer */
     std::shared_ptr<AudioLayer> audiodriver_ {nullptr};
     std::array<std::atomic_uint, 3> audioStreamUsers_ {};
+    // Per-stream pending stop task: scheduled when the user count drops
+    // to 0, cancelled when a new guard reclaims the stream within the
+    // linger window. Lets us coalesce rapid destroy/recreate cycles that
+    // would otherwise stall PulseAudio's virtual xrdp-source (Linux over
+    // xrdp on Astra 1.8): the source accepts the new connection but its
+    // read callback never fires when destroyed and recreated within ms.
+    std::array<std::shared_ptr<Task>, 3> audioStreamStopTask_ {};
+    std::mutex audioStreamMutex_ {};
 
     // Main thread
     std::unique_ptr<DTMF> dtmfKey_;
@@ -631,15 +639,27 @@ Manager::ManagerPimpl::hasActiveConference() const
 Manager&
 Manager::instance()
 {
-    // Meyers singleton
-    static Manager instance;
+    // Leak-on-exit singleton (not a Meyers singleton): a plain
+    // `static Manager instance` is destroyed during `__cxa_finalize_ranges`
+    // at process exit, but other globals (notably `bindings::ClientImpl` and
+    // its owned `InstanceHandler<DirectRenderer>` map) are finalised AFTER
+    // us and still call `Manager::getSinkClient()` / similar from their
+    // destructors. Touching the already-destroyed `callSinksMap_` (or any
+    // other member) dereferences zeroed memory and the macOS app crashes on
+    // every Cmd-Q.
+    //
+    // Allocate once on the heap and never free. The singleton outlives every
+    // atexit handler, so late destructors can still reach Manager safely.
+    // The OS reclaims memory at process exit anyway. Same pattern as the
+    // `common_glue::TypeRepository` leak-on-exit fix.
+    static Manager* instance = new Manager();
 
     // This will give a warning that can be ignored the first time instance()
     // is called...subsequent warnings are more serious
     if (not Manager::initialized)
         SIP_CORE_DBG("Not initialized");
 
-    return instance;
+    return *instance;
 }
 
 Manager::Manager()
@@ -881,6 +901,12 @@ Manager::finish() noexcept
             account->cancelKeepAliveTimer();
             account->cancelMainRouteKeepAliveTimer();
             account->cancelBackupRouteKeepAliveTimer();
+            // Cancel the auto-reregistration timer here too, while the PJSIP
+            // endpoint is still alive. Otherwise ~SIPAccount (step 8, after the
+            // endpoint is destroyed in step 7) would call
+            // cancelAutoReregistrationTimer() -> pjsip_endpt_cancel_timer() on a
+            // NULL/destroyed endpoint and crash (SIGSEGV in pjsip_endpt_cancel_timer).
+            account->cancelAutoReregistrationTimer();
         }
 
         // 3. Hangup all remaining active calls
@@ -1731,6 +1757,16 @@ Manager::addAudio(Call& call)
         auto oldGuard = std::move(call.audioGuard);
         call.audioGuard = startAudioStream(AudioDeviceType::PLAYBACK);
 
+        // Pin the capture stream for the call's lifetime. AudioRtpSession::stop()
+        // (called on every re-invite via stopAllMedia/startAllMedia) drops the
+        // AudioInput, which drops its own AudioDeviceGuard(CAPTURE). Without
+        // this anchor the user count would hit 0, PulseLayer::stopStream(CAPTURE)
+        // would tear the xrdp-source stream down, and on xrdp the recreated
+        // stream silently fails to deliver samples for many seconds. Holding
+        // a second guard here keeps the count >=1 across stop()/start().
+        auto oldCaptureGuard = std::move(call.audioCaptureGuard);
+        call.audioCaptureGuard = startAudioStream(AudioDeviceType::CAPTURE);
+
         std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
         if (!pimpl_->audiodriver_) {
             SIP_CORE_ERR("Audio driver not initialized");
@@ -1748,6 +1784,7 @@ Manager::removeAudio(Call& call)
     SIP_CORE_DBG("[call:%s] Remove local audio", callId.c_str());
     getRingBufferPool().unBindAll(callId);
     call.audioGuard.reset();
+    call.audioCaptureGuard.reset();
 }
 
 ScheduledExecutor&
@@ -2392,19 +2429,52 @@ AudioDeviceGuard::AudioDeviceGuard(Manager& manager, AudioDeviceType type)
     auto streamId = (unsigned) type;
     if (streamId >= manager_.pimpl_->audioStreamUsers_.size())
         throw std::invalid_argument("Invalid audio device type");
+    std::lock_guard<std::mutex> lk(manager_.pimpl_->audioStreamMutex_);
     if (manager_.pimpl_->audioStreamUsers_[streamId]++ == 0) {
-        if (auto layer = manager_.getAudioDriver())
+        // If a deferred stop is pending the underlying device stream is
+        // still alive — cancel the task and reuse it without touching
+        // PulseAudio (xrdp-source on Astra 1.8 silently stalls when
+        // destroyed and recreated within the same instant, e.g. on the
+        // hold→outgoing→hangup→unhold cycle). Otherwise the stream is
+        // really stopped and must be started from scratch.
+        if (auto& pending = manager_.pimpl_->audioStreamStopTask_[streamId]) {
+            pending->cancel();
+            pending.reset();
+        } else if (auto layer = manager_.getAudioDriver()) {
             layer->startStream(type);
+        }
     }
 }
 
 AudioDeviceGuard::~AudioDeviceGuard()
 {
     auto streamId = (unsigned) type_;
-    if (--manager_.pimpl_->audioStreamUsers_[streamId] == 0) {
-        if (auto layer = manager_.getAudioDriver())
-            layer->stopStream(type_);
-    }
+    std::lock_guard<std::mutex> lk(manager_.pimpl_->audioStreamMutex_);
+    if (--manager_.pimpl_->audioStreamUsers_[streamId] != 0)
+        return;
+
+    // Defer the actual stopStream so a fresh guard within the linger
+    // window can reuse the existing device stream. The hold→outgoing→
+    // hangup→unhold path tears the capture guard down and re-acquires
+    // it within ~2 ms; PulseAudio's xrdp-source enters a deaf state in
+    // that window. A 750 ms linger comfortably covers re-invite media
+    // renegotiation and call-to-call transitions.
+    auto& manager = manager_;
+    auto streamType = type_;
+    auto streamIdx = streamId;
+    manager_.pimpl_->audioStreamStopTask_[streamId] = manager.scheduleTaskIn(
+        [&manager, streamType, streamIdx]() {
+            std::lock_guard<std::mutex> lk(manager.pimpl_->audioStreamMutex_);
+            // Clear the slot first so a re-entrant ctor on this same
+            // thread doesn't try to cancel a now-firing task.
+            manager.pimpl_->audioStreamStopTask_[streamIdx].reset();
+            if (manager.pimpl_->audioStreamUsers_[streamIdx].load() != 0)
+                return; // a new guard reclaimed the stream
+            if (auto layer = manager.getAudioDriver())
+                layer->stopStream(streamType);
+        },
+        std::chrono::milliseconds(750),
+        __FILE__, __LINE__);
 }
 
 bool

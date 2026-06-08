@@ -124,7 +124,7 @@
      bool isDynPacketLossSupported(AVCodecID codecid);
      void initAccel(AVCodecContext* encoderCtx, uint64_t br);
  #ifdef RQM
-     int writeContainerToRtp(uint8_t* buf, int buf_size);
+     int writeContainerToRtp(const uint8_t* buf, int buf_size);
  #endif
  
  #ifdef ENABLE_VIDEO
@@ -143,15 +143,57 @@
  #ifdef RQM
      // output to mp4. only local file url
      AVFormatContext* mp4Ctx_ = NULL;
- 
+
      // bytes with mp4 will be written here
      AVIOContext *mp4IOCtx_ = NULL;
- 
+
      unsigned int mp4SentPackets_ {1};
- 
+
+     // Monotonic per-frame counter used to compute correct pkt.pts/dts/duration
+     // in stream time-base before feeding fragments to the mp4 muxer.
+     // See the override block in encode() for why this is necessary.
+     int64_t mp4FramesEncoded_ {0};
+
+     // Wall-clock anchor for the first encoded frame. Each subsequent frame's
+     // pts is derived from (steady_clock::now() - mp4RecordingStart_), so
+     // the file's timeline matches the real recording duration even when
+     // x11grab can't keep up with the configured framerate.
+     std::chrono::steady_clock::time_point mp4RecordingStart_ {};
+     int64_t mp4LastFramePts_ {0};
+
      // codec for mp4
      AVCodecContext* mp4CodecContext_ = NULL;
- 
+
+     // Captured fmp4 init segment (ftyp + moov). Filled while
+     // capturingInitSegment_ is true and avio_flush() drains the mp4 muxer's
+     // initial write into our writeContainerToRtp callback. Kept around so
+     // the local-file mirror (mp4LocalFile_) can include the same init bytes
+     // as the RTP stream, even though they're emitted only once at startIO.
+     std::vector<uint8_t> initSegment_;
+     bool                 capturingInitSegment_ {false};
+
+     // Optional local-file mirror of the fmp4 stream. When the env var
+     // RQM_LOCAL_RECORDING_DIR is set, the same bytes that go onto the RTP
+     // wire (ftyp+moov init segment plus every moof+mdat fragment) also get
+     // appended to a local .mp4 file in that directory. Useful for:
+     //   * diagnosing RTP-server drops (compare local vs received .rsf),
+     //   * always having a playable recording on the daemon's host machine.
+     // Set to NULL when the env var isn't configured.
+     FILE*                mp4LocalFile_ {nullptr};
+     // Path of the file pointed to by mp4LocalFile_. Kept so startIO() can
+     // unlink an unplayable artifact if the muxer rejected our movflags
+     // (e.g. an older libavformat that doesn't know +frag_every_frame
+     // would also reject +empty_moov as collateral, leaving us with a
+     // ftyp-only file that no player will accept).
+     std::string          mp4LocalFilePath_;
+
+     // Tracks whether avformat_write_header(mp4Ctx_) succeeded. Unlike
+     // outputCtx_'s write_header (which throws on failure), the mp4
+     // muxer's write_header is treated as soft-fail and only logged.
+     // The destructor gates av_write_trailer(mp4Ctx_) on this so we
+     // never invoke trailer on a half-initialised muxer.
+     bool                 mp4HeaderWritten_ {false};
+
      // stream for mp4
      AVStream *mp4Stream_ = NULL;
  

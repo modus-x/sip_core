@@ -79,14 +79,16 @@ namespace sip_core {
         // }
 
 #ifdef RQM
-        // flush fragments as fast as possible
-    mp4Ctx_->flags = AVFMT_FLAG_NOBUFFER | AVFMT_FLAG_FLUSH_PACKETS;
-
-    auto buf = static_cast<uint8_t*>(av_malloc(MP4_IO_BUFFER_SIZE));
+    avformat_alloc_output_context2(&mp4Ctx_, NULL, "mp4", NULL);
 
     if (!mp4Ctx_) {
         SIP_CORE_ERR() << "mp4_error: cannot create mp4Ctx_";
+    } else {
+        // flush fragments as fast as possible
+        mp4Ctx_->flags = AVFMT_FLAG_NOBUFFER | AVFMT_FLAG_FLUSH_PACKETS;
     }
+
+    auto buf = static_cast<uint8_t*>(av_malloc(MP4_IO_BUFFER_SIZE));
 
     mp4IOCtx_ = avio_alloc_context(
         buf,
@@ -94,8 +96,7 @@ namespace sip_core {
         true,
         reinterpret_cast<void*>(this),
         NULL,
-        [](void* me, uint8_t* buf, int len) {
-            // SIP_CORE_ERR() << "writeContainerToRtp " << len;
+        [](void* me, const uint8_t* buf, int len) {
             return static_cast<MediaEncoder*>(me)->writeContainerToRtp(buf, len);
         },
         NULL);
@@ -104,8 +105,25 @@ namespace sip_core {
         SIP_CORE_ERR() << "mp4_error: cannot create mp4IOCtx_";
     }
 
-
-    avformat_alloc_output_context2(&mp4Ctx_, NULL, "mp4", NULL);
+    // Local-file mirror of the fmp4 stream (init + fragments). Opt-in via the
+    // RQM_LOCAL_RECORDING_DIR env var. Filename is "rqm-<epoch>.mp4" so it
+    // never collides with a previous recording on the same daemon.
+    if (const char* dir = std::getenv("RQM_LOCAL_RECORDING_DIR")) {
+        if (dir && *dir) {
+            char path[1024];
+            std::snprintf(path, sizeof(path),
+                          "%s/rqm-%ld.mp4", dir,
+                          static_cast<long>(std::time(nullptr)));
+            mp4LocalFile_ = std::fopen(path, "wb");
+            if (mp4LocalFile_) {
+                mp4LocalFilePath_ = path;
+                SIP_CORE_WARN("[%p] RQM local mp4 mirror: %s", this, path);
+            } else {
+                SIP_CORE_ERR("[%p] RQM local mp4 mirror failed to open %s",
+                             this, path);
+            }
+        }
+    }
 #endif
 
         SIP_CORE_DBG("[%p] New instance created", this);
@@ -114,22 +132,37 @@ namespace sip_core {
 
 #ifdef RQM
     int
-MediaEncoder::writeContainerToRtp(uint8_t* buf, int buf_size)
+MediaEncoder::writeContainerToRtp(const uint8_t* buf, int buf_size)
 {
+    // During startIO, this callback is driven by avio_flush(mp4IOCtx_) right
+    // after avformat_write_header(mp4Ctx_) — that's the init segment. Buffer
+    // the bytes into initSegment_ and mirror them to the local file, but do
+    // NOT push them onto the RTP wire yet: startIO() will emit the full
+    // ftyp+moov as a single combined RTP packet once mp4 muxer is done
+    // writing the header. See the call site for the rationale (avoids the
+    // 2-packet line-rate burst at stream start that consistently loses the
+    // moov-bearing packet on the customer's prod network).
+    if (capturingInitSegment_) {
+        initSegment_.insert(initSegment_.end(), buf, buf + buf_size);
+        if (mp4LocalFile_) {
+            std::fwrite(buf, 1, buf_size, mp4LocalFile_);
+            std::fflush(mp4LocalFile_);
+        }
+        return buf_size;
+    }
 
-    // Ensure file is still open
-    // if (mp4FileStream_.is_open()) {
-    //     mp4FileStream_.write(reinterpret_cast<const char*>(buf), buf_size);
-    //     if (!mp4FileStream_) {
-    //         throw std::runtime_error("Error writing to file");
-    //     }
-    //     mp4FileStream_.flush();  // Ensure data is written to disk
-    // }
+    // Mirror everything (init + fragments) to the local .mp4 file when
+    // configured, so the user has a playable recording even if the RTP
+    // path is unreliable.
+    if (mp4LocalFile_) {
+        std::fwrite(buf, 1, buf_size, mp4LocalFile_);
+        std::fflush(mp4LocalFile_);
+    }
 
     AVPacket pkt;
     av_init_packet(&pkt);
 
-    pkt.data = buf;
+    pkt.data = const_cast<uint8_t*>(buf);
 
     pkt.size = buf_size;
     pkt.dts = mp4SentPackets_;
@@ -143,6 +176,21 @@ MediaEncoder::writeContainerToRtp(uint8_t* buf, int buf_size)
 
     MediaEncoder::~MediaEncoder()
     {
+#ifdef RQM
+        // Flush the mp4 trailer FIRST, while outputCtx_ is still alive.
+        // The mp4 muxer's AVIO callback (writeContainerToRtp) forwards
+        // every byte through send(outputCtx_) for the RTP wire, so tearing
+        // outputCtx_ down before av_write_trailer(mp4Ctx_) would crash on
+        // a freed context. With +empty_moov the trailer is mostly a no-op
+        // for the playable-file aspect — but it still flushes any
+        // half-built moof and drains the avio buffer to mp4LocalFile_, so
+        // the on-disk recording ends on a complete fragment boundary
+        // instead of being truncated mid-moof.
+        if (mp4Ctx_ && mp4Ctx_->pb && mp4HeaderWritten_) {
+            av_write_trailer(mp4Ctx_);
+        }
+#endif
+
         if (outputCtx_) {
             if (outputCtx_->priv_data && outputCtx_->pb)
                 av_write_trailer(outputCtx_);
@@ -161,6 +209,11 @@ MediaEncoder::writeContainerToRtp(uint8_t* buf, int buf_size)
 #ifdef RQM
         if (mp4Ctx_) {
         avformat_free_context(mp4Ctx_);
+    }
+    if (mp4LocalFile_) {
+        std::fflush(mp4LocalFile_);
+        std::fclose(mp4LocalFile_);
+        mp4LocalFile_ = nullptr;
     }
 #endif
         av_dict_free(&options_);
@@ -438,11 +491,30 @@ MediaEncoder::writeContainerToRtp(uint8_t* buf, int buf_size)
         stream->avg_frame_rate = encoderCtx->framerate;
 
 #ifdef RQM
+        // The RTP output stream carries raw fragmented MP4 chunks (each call to
+        // writeContainerToRtp delivers one mp4-muxer IO buffer's worth of bytes).
+        // We MUST NOT let ffmpeg's RTP muxer interpret those bytes as H.264 NAL
+        // units — it would call ff_rtp_send_h264_hevc(), look for NAL start
+        // codes, and chop the fmp4 box stream apart. Setting codec_id to
+        // AV_CODEC_ID_NONE makes rtp_write_packet's switch fall to the default
+        // branch (rtp_send_raw), which emits pkt->data verbatim as RTP payload.
+        // rtp_dtmf.patch already removed the is_supported() gate in
+        // rtp_write_header(), so AV_CODEC_ID_NONE is accepted at muxer-open time.
+        stream->codecpar->codec_id = AV_CODEC_ID_NONE;
+        stream->codecpar->codec_tag = 0;
 
         avcodec_parameters_from_context(mp4Stream_->codecpar, encoderCtx);
 
-    // framerate is not copied from encoderCtx to stream
-    mp4Stream_->avg_frame_rate = encoderCtx->framerate;
+        // framerate is not copied from encoderCtx to stream
+        mp4Stream_->avg_frame_rate = encoderCtx->framerate;
+
+        // Defensive: if anything (re-init after resetStreams in particular)
+        // clobbered mp4Stream_->time_base back to 0/0, restore the pinned
+        // 1/90000 base. av_rescale_q with a 0-denom destination returns
+        // INT64_MIN and every subsequent pts becomes AV_NOPTS_VALUE.
+        if (mp4Stream_->time_base.num == 0 || mp4Stream_->time_base.den == 0) {
+            mp4Stream_->time_base = AVRational{1, 90000};
+        }
 
 #endif
 #ifdef ENABLE_VIDEO
@@ -538,8 +610,29 @@ MediaEncoder::writeContainerToRtp(uint8_t* buf, int buf_size)
         }
 
 #ifdef RQM
-        // as in OBS studio
-    libav_utils::setDictValue(&mp4Opts_, "movflags", "+empty_moov+separate_moof+frag_every_frame");
+    // Configure the fmp4 init segment + per-frame fragmentation.
+    //
+    // We MUST split these into two independent dict entries instead of one
+    // movflags string. FFmpeg's AV_OPT_TYPE_FLAGS parser is all-or-nothing:
+    // if ANY +token in the string is unknown to the muxer, the WHOLE string
+    // is silently rejected and no flag is applied (libavutil/opt.c::
+    // set_string_number). +frag_every_frame only exists from FFmpeg 4.0
+    // (commit c87d2c0, April 2018), so on any older libavformat shipped
+    // by a distro (e.g. some Astra Linux + ALT Linux builds), the original
+    // single string "+empty_moov+separate_moof+frag_every_frame" got
+    // dropped wholesale — losing +empty_moov as collateral, leaving the
+    // moov deferred to write_trailer (never called when the daemon is
+    // killed by SIGTERM), producing a ftyp+fragments file with no moov
+    // that no player can open.
+    //
+    // The split + frag_size=1 combo below is portable to every libavformat
+    // since FFmpeg 2.4 (Aug 2014): +empty_moov writes the init segment up
+    // front, +separate_moof gives each fragment its own moof, and
+    // frag_size=1 causes the muxer to open a new fragment as soon as the
+    // current one has ≥1 byte — i.e. once per av_write_frame call, which
+    // is exactly what +frag_every_frame did.
+    libav_utils::setDictValue(&mp4Opts_, "movflags", "+empty_moov+separate_moof");
+    libav_utils::setDictValue(&mp4Opts_, "frag_size", "1");
 #endif
 
         // av_dict_set_int(&mp4Opts_, "frag_size", 1152, AV_OPT_SEARCH_CHILDREN);
@@ -559,9 +652,128 @@ MediaEncoder::writeContainerToRtp(uint8_t* buf, int buf_size)
 
 #ifdef RQM
         if (writeToMp4) {
+        // Optional pre-init grace period for the receiving RTP server.
+        // Some prod RTP recorders bind their UDP socket / open their .rsf
+        // file LATER than this encoder fires its first packet, so the
+        // init burst (ftyp+moov as a single ~750-byte UDP datagram)
+        // lands on a not-yet-bound socket and is silently dropped.
+        // Subsequent fragments arrive fine, leaving a .rsf that begins
+        // with `ftyp + moof + mdat ...` and is unplayable by every
+        // standard demuxer ("could not find corresponding trex (id 1)").
+        // Opt in by setting RQM_FMP4_STARTUP_DELAY_SEC > 0; the env var
+        // is bridged from SipAccountConfig::desktopStreamStartupDelaySec
+        // by the rqm-desktop-recorder daemon at startup. Default 0 =
+        // no delay, behaviour unchanged.
+        if (const char* d = std::getenv("RQM_FMP4_STARTUP_DELAY_SEC")) {
+            int sec = std::atoi(d);
+            if (sec > 0) {
+                SIP_CORE_WARN("[%p] RQM_FMP4_STARTUP_DELAY_SEC=%d — "
+                              "sleeping before emitting fmp4 init segment "
+                              "to let the RTP receiver bind its socket",
+                              this, sec);
+                std::this_thread::sleep_for(std::chrono::seconds(sec));
+            }
+        }
+
+        // Streaming fmp4 init segment: let mov_write_header write its
+        // ftyp + empty-moov directly into the streaming mp4IOCtx_, then
+        // force a flush. The flush callback runs writeContainerToRtp once
+        // per buffered chunk; while capturingInitSegment_ is true, that
+        // callback accumulates bytes into initSegment_ and mirrors them
+        // to the local file but does NOT push them onto the RTP wire.
+        // We then emit the accumulated init segment as a SINGLE combined
+        // RTP packet below — see the comment on the send() call.
+        //
+        // The mov_write_header here MUST see a non-seekable AVIO; that's why
+        // we use mp4IOCtx_ (seek=NULL) and not a dyn_buf. With a seekable
+        // sink mov_write_header writes a different init segment shape that
+        // expects a later write_trailer to patch it.
+        capturingInitSegment_ = true;
         if (avformat_write_header(mp4Ctx_, &mp4Opts_)) {
             SIP_CORE_ERR(
                 "mp4_error: could not write header for output mp4... check codec parameters");
+        } else {
+            mp4HeaderWritten_ = true;
+        }
+        avio_flush(mp4IOCtx_);
+        capturingInitSegment_ = false;
+        SIP_CORE_WARN("[%p] RQM init segment captured: %zu bytes",
+                      this,
+                      initSegment_.size());
+
+        // Emit the accumulated ftyp+moov as ONE combined RTP packet.
+        //
+        // Before this change, mov_write_header's avio_flush produced TWO
+        // separate avio chunks (ftyp ~36 B, moov ~753 B), each sent as
+        // its own RTP packet (seq=1 ftyp, seq=2 moov) at line rate within
+        // microseconds of each other. Customer prod dual-endpoint pcaps
+        // showed seq=2 (moov) lost on the wire 2/2 times — almost certainly
+        // a cold-UDP-socket-buffer overflow at the receiver: seq=1 wakes
+        // the kernel path, seq=2 arrives while seq=1 is still being copied
+        // to userspace and overflows the recv queue. After the first two
+        // packets, the encoder produces fragments at ~83 ms intervals so
+        // the socket has time to drain and no further losses occur.
+        //
+        // Coalescing ftyp+moov into a single ~789-byte sub-MTU UDP
+        // datagram eliminates the 2-packet burst pattern entirely — the
+        // moov is no longer a separate packet that can be lost in
+        // isolation. ftyp+moov is ~789 bytes, well below the 1460-byte
+        // RTP-payload MTU, so this packet does NOT trigger IP-layer
+        // fragmentation.
+        //
+        // If we still occasionally lose this single combined packet to
+        // genuine random UDP loss (~0.05% per packet on the customer's
+        // LAN), the .rsf will still be unplayable for that call. The
+        // follow-up mitigation is to additionally duplicate this packet
+        // N times with the same RTP sequence number (Path A), but that
+        // depends on the receiver doing RFC 3550 §8.2 dedup and is
+        // tracked separately.
+        if (!initSegment_.empty()) {
+            AVPacket pkt;
+            av_init_packet(&pkt);
+            pkt.data = initSegment_.data();
+            pkt.size = static_cast<int>(initSegment_.size());
+            pkt.dts = mp4SentPackets_;
+            pkt.pts = mp4SentPackets_;
+            mp4SentPackets_++;
+            send(pkt, currentStreamIdx_);
+            SIP_CORE_WARN("[%p] RQM init segment emitted as single "
+                          "combined RTP packet: %zu bytes",
+                          this, initSegment_.size());
+        }
+
+        // Defense-in-depth: confirm +empty_moov actually took effect on this
+        // libavformat. The mov muxer would otherwise silently fall back to
+        // "moov at trailer" — and our daemon almost never gets to write a
+        // trailer (SIGTERM mid-call), producing a ftyp-only file plus a
+        // long string of fragments that no player accepts. If the flag
+        // didn't stick, the local mirror is doomed to be unplayable; close
+        // and unlink it now so the user sees a missing file (clear
+        // failure) instead of 2 MB of garbage (silent failure).
+        if (mp4LocalFile_) {
+            int64_t mov_flags_applied = 0;
+            // FF_MOV_FLAG_EMPTY_MOOV = 0x10 in libavformat/movenc.h since
+            // forever; the bit value has never been renumbered.
+            constexpr int64_t FF_MOV_FLAG_EMPTY_MOOV = 0x10;
+            if (av_opt_get_int(mp4Ctx_->priv_data,
+                               "movflags",
+                               AV_OPT_SEARCH_CHILDREN,
+                               &mov_flags_applied) < 0
+                || !(mov_flags_applied & FF_MOV_FLAG_EMPTY_MOOV)) {
+                SIP_CORE_ERR("[%p] RQM mp4 mirror: +empty_moov not applied "
+                             "(movflags=0x%llx) — libav too old or muxer "
+                             "rejected our options. Closing+removing '%s' "
+                             "to avoid producing an unplayable file.",
+                             this,
+                             static_cast<unsigned long long>(mov_flags_applied),
+                             mp4LocalFilePath_.c_str());
+                std::fclose(mp4LocalFile_);
+                mp4LocalFile_ = nullptr;
+                if (!mp4LocalFilePath_.empty()) {
+                    std::remove(mp4LocalFilePath_.c_str());
+                    mp4LocalFilePath_.clear();
+                }
+            }
         }
     }
 #endif
@@ -576,6 +788,32 @@ MediaEncoder::writeContainerToRtp(uint8_t* buf, int buf_size)
         std::lock_guard<std::recursive_mutex> lk(encMutex_);
         auto width = (input->width() >> 3) << 3;
         auto height = (input->height() >> 3) << 3;
+#ifdef RQM
+        // Pre-init dimension sync: if videoOpts_ (from SDP / RQM headers /
+        // downScaleFactor) disagrees with the actual capture size before the
+        // FIRST encode, align videoOpts_ to the capture size NOW — before
+        // initStream() opens the encoder and startIO() writes the mp4 moov.
+        //
+        // Without this, the moov gets stamped with SDP-negotiated dimensions
+        // (e.g. 1280x720 or 440x536) while subsequent frames arrive at
+        // x11grab's native size (e.g. 880x1072). The mid-stream
+        // resetStreams() re-init produces a new encoder with new SPS/PPS,
+        // but mp4's moov is already locked → in-stream NAL units disagree
+        // with stsd extradata → players show "top block unavailable",
+        // "first_mb_in_slice overflow", and assorted decode failures.
+        //
+        // By aligning here we make the first encoder open at capture size,
+        // the moov gets the matching dimensions, and resetStreams() never
+        // fires for the rest of the call (input dims stay stable once
+        // x11grab is up).
+        if (!initialized_ && (getWidth() != width || getHeight() != height)) {
+            SIP_CORE_WARN("[%p] RQM pre-init resize: videoOpts_ %dx%d -> capture %dx%d "
+                          "(prevents mid-stream resetStreams + moov mismatch)",
+                          this, getWidth(), getHeight(), width, height);
+            videoOpts_.width = width;
+            videoOpts_.height = height;
+        }
+#endif
         if (initialized_ && (getWidth() != width || getHeight() != height)) {
             resetStreams(width, height);
             is_keyframe = true;
@@ -606,7 +844,7 @@ MediaEncoder::writeContainerToRtp(uint8_t* buf, int buf_size)
         // for mp4 stream, we need to set pts to the same value as input frame (to preserve the original timestamp)
     avframe->pts = input->pointer()->pts;
     avframe->pkt_dts = input->pointer()->pkt_dts;
-    avframe->pkt_duration = input->pointer()->pkt_duration;
+    avframe->duration = input->pointer()->duration;
 #endif
 
         AVCodecContext* enc = encoders_[currentStreamIdx_];
@@ -693,13 +931,104 @@ MediaEncoder::writeContainerToRtp(uint8_t* buf, int buf_size)
 
             if (pkt.size) {
 #ifdef RQM
+                // NOTE: do NOT re-emit the cached init segment per keyframe.
+                // The RTP server concatenates all payloads into one .rsf file;
+                // a valid fmp4 stream must contain exactly one ftyp+moov,
+                // followed only by moof+mdat fragments. A second ftyp later
+                // makes most demuxers (VLC, ffmpeg, MSE) think the file is two
+                // concatenated streams and stop at the first one — resulting
+                // in a 0-second playable duration. Init segment is emitted
+                // once at the start (avio_flush right after write_header).
+
                 // Rescale the packet's timestamps from encoder time base to output stream's time base
             pkt.pts = av_rescale_q(pkt.pts, encoderCtx->time_base, mp4Stream_->time_base);
             pkt.dts = av_rescale_q(pkt.dts, encoderCtx->time_base, mp4Stream_->time_base);
             pkt.duration = av_rescale_q(pkt.duration, encoderCtx->time_base, mp4Stream_->time_base);
 
+            // Override with frame-rate-derived timing.
+            //
+            // Why this is necessary:
+            //   x264 with intra-refresh=1 (and sometimes without) leaves
+            //   pkt.duration = 0 or 1 in encoder ticks. After the rescale
+            //   above this becomes 0 or 1 in mp4Stream_->time_base (typically
+            //   1/90000), so the mp4 muxer writes tfhd default_sample_duration
+            //   = 1 — making each fragment 1/90000 ≈ 11 μs long. ffprobe then
+            //   reports the entire file as ~4 ms and players refuse to play.
+            //
+            // The fix: force per-frame duration to (1 / framerate) expressed
+            // in mp4Stream_->time_base units, and rebase pts/dts off the
+            // explicit frame_number so they progress monotonically by exactly
+            // that duration.
+            // Wall-clock-based fmp4 timestamps.
+            //
+            // x11grab on Astra/XRDP can't always deliver the configured frame
+            // rate — capture is best-effort. If we stamped each frame at a
+            // uniform 1/configured_fps spacing, the resulting file's claimed
+            // duration would diverge from the real recording duration (the
+            // observed bug: 35 captured frames stamped as 30 fps → file
+            // claims 1.17 s when the actual call was 5 s, playback is "fast
+            // as hell").
+            //
+            // Anchor the first encoded frame at t=0 and derive every
+            // subsequent pts from the elapsed steady_clock time, expressed
+            // in mp4Stream_->time_base ticks (typically 1/90000 sec). Each
+            // frame's pkt.duration is the delta since the previous frame's
+            // pts — so the mp4 muxer writes per-frame sample durations that
+            // sum to the real recording length. The first frame uses
+            // 1/configured_fps as a one-time default since there is no
+            // previous frame to compute an interval from.
+            const auto now = std::chrono::steady_clock::now();
+            if (mp4FramesEncoded_ == 0) {
+                mp4RecordingStart_ = now;
+                mp4LastFramePts_   = 0;
+            }
+            const int64_t elapsed_us =
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    now - mp4RecordingStart_)
+                    .count();
+            const int64_t this_pts =
+                av_rescale_q(elapsed_us,
+                             AVRational{1, 1000000},
+                             mp4Stream_->time_base);
+
+            int64_t this_dur;
+            if (mp4FramesEncoded_ == 0) {
+                AVRational fr{
+                    static_cast<int>(videoOpts_.frameRate.numerator()),
+                    static_cast<int>(videoOpts_.frameRate.denominator())
+                };
+                if (fr.num <= 0 || fr.den <= 0) { fr.num = 30; fr.den = 1; }
+                this_dur = av_rescale_q(1, av_inv_q(fr), mp4Stream_->time_base);
+                if (this_dur <= 0)
+                    this_dur = 3000;
+            } else {
+                this_dur = this_pts - mp4LastFramePts_;
+                if (this_dur <= 0)
+                    this_dur = 1; // monotonicity guard; never happens with steady_clock
+            }
+
+            if (mp4FramesEncoded_ < 5 || (mp4FramesEncoded_ % 30) == 0) {
+                SIP_CORE_WARN(
+                    "[%p] RQM frame #%lld: elapsed_us=%lld pts=%lld dur=%lld "
+                    "(videoOpts_.frameRate=%d/%d, mp4Stream_->time_base=%d/%d)",
+                    this,
+                    (long long) mp4FramesEncoded_,
+                    (long long) elapsed_us,
+                    (long long) this_pts,
+                    (long long) this_dur,
+                    videoOpts_.frameRate.numerator(),
+                    videoOpts_.frameRate.denominator(),
+                    mp4Stream_->time_base.num, mp4Stream_->time_base.den);
+            }
+
+            pkt.pts      = this_pts;
+            pkt.dts      = this_pts;
+            pkt.duration = this_dur;
+            mp4LastFramePts_ = this_pts;
+
             // write packet to format, it will be written to mp4 buffer, and ONLY THEN sent to rtp
             if (av_write_frame(mp4Ctx_, &pkt) == 0) {
+                mp4FramesEncoded_++;
                 break;
             } else {
                 SIP_CORE_ERR() << "mp4_error:Failed to write frame: " << libav_utils::getError(ret);
@@ -810,12 +1139,43 @@ MediaEncoder::writeContainerToRtp(uint8_t* buf, int buf_size)
             encoderCtx->time_base = av_inv_q(encoderCtx->framerate);
 
 #ifdef RQM
-            // this will create new stream
-        mp4Stream_ = avformat_new_stream(mp4Ctx_, NULL);
+            // Create mp4Stream_ EXACTLY ONCE per MediaEncoder instance.
+            //
+            // Why the guard: prepareEncoderContext() runs on every call to
+            // initStream(). initStream() in turn is called both at first call
+            // setup AND every time encode(VideoFrame*) detects a resolution
+            // mismatch and triggers resetStreams() (which is normal for
+            // x11grab whose first-frame size rarely matches the SIP-
+            // negotiated videoOpts_.width/height of 1280x720). Without this
+            // guard:
+            //   1. First initStream() creates mp4Stream_ #0 in mp4Ctx_;
+            //      startIO() runs avformat_write_header(mp4Ctx_) which sets
+            //      stream #0's time_base to 1/90000 (mp4 muxer default).
+            //   2. resetStreams() fires, frees the encoder, sets
+            //      initialized_=false but leaves mp4Stream_ pointing at #0.
+            //   3. Second initStream() blindly allocates mp4Stream_ #1 in
+            //      the same mp4Ctx_, overwriting the pointer; startIO()
+            //      sees outputCtx_->pb already set so it SKIPS the second
+            //      avformat_write_header(mp4Ctx_); new stream's time_base
+            //      stays 0/0.
+            //   4. From frame #1 onward av_rescale_q(..., {0,0}) returns
+            //      INT64_MIN → pkt.pts is AV_NOPTS_VALUE → mp4 muxer warns
+            //      "Timestamps are unset" and writes per-fragment
+            //      pts/duration = 1/90000 ticks (≈11μs each). File claims
+            //      0:00 duration; player cannot play.
+            //
+            // Pinning time_base to 1/90000 at creation also makes the value
+            // deterministic before avformat_write_header() runs — the mp4
+            // muxer will accept this and use it as the tkhd timescale.
+            if (!mp4Stream_) {
+                mp4Stream_ = avformat_new_stream(mp4Ctx_, NULL);
 
-        if (!mp4Stream_) {
-            SIP_CORE_ERR() << "mp4_error: cannot create mp4Stream_";
-        }
+                if (!mp4Stream_) {
+                    SIP_CORE_ERR() << "mp4_error: cannot create mp4Stream_";
+                } else {
+                    mp4Stream_->time_base = AVRational{1, 90000};
+                }
+            }
 #else
             // Fri Jul 22 11:37:59 EDT 2011:tmatth:XXX: DON'T set this, we want our
             // pps and sps to be sent in-band for RTP
@@ -1162,6 +1522,52 @@ MediaEncoder::enableAccel(bool enableAccel)
     void
     MediaEncoder::initH264(AVCodecContext* encoderCtx, uint64_t br)
     {
+#ifdef RQM
+        // RQM: static-desktop MAX-quality preset, established by the empirical
+        // encoder bench in
+        // rqm-desktop-recorder/.omc/research/encoder-bench-report.md.
+        //
+        // Treat this as the ceiling: X-RQM-Video-Quality / X-RQM-Video-Compression
+        // headers downscale from here (raise CRF, drop preset) — they never raise
+        // quality above this baseline.
+        //
+        // Deltas vs. the non-RQM defaults below:
+        //   crf 28 -> 23           — higher quality ceiling (still ~5× smaller
+        //                             than CBR 600k while >SSIM 0.998 on static
+        //                             desktop per bench).
+        //   preset "medium"        — kept (best size/CPU tradeoff on bench).
+        //   tune  "zerolatency"    — added; required for live SIP wire (disables
+        //                             b-frames, sliced threads, no lookahead).
+        //   qmin/qmax dropped      — let CRF dictate quantizer freely; the bench
+        //                             showed bounded qp wastes bits on static
+        //                             frames that could otherwise be near-empty.
+        //   no-scenecut dropped    — was inflating bytes on real motion; for
+        //                             truly static content it is byte-identical
+        //                             either way (bench: g=300 == g=900).
+        //   intra-refresh dropped  — single biggest size win (1.5–2× on static
+        //                             content). Recovery semantics are covered
+        //                             by libsip_core's IDR-on-NACK path and the
+        //                             KEY_FRAME_PERIOD periodic IDR.
+        //   maxrate/bufsize kept   — caps the worst-case scroll/window-open
+        //                             burst at 1.5 Mbit/s with 1 Mbit VBV.
+        int crf = 23;
+        int64_t maxrate = 1500000;
+        int64_t bufsize = 1000000;
+        const char* preset = "medium";
+        const char* tune   = "zerolatency";
+
+        av_opt_set_int(encoderCtx, "crf", crf, AV_OPT_SEARCH_CHILDREN);
+        av_opt_set_int(encoderCtx, "maxrate", maxrate, AV_OPT_SEARCH_CHILDREN);
+        av_opt_set_int(encoderCtx, "bufsize", bufsize, AV_OPT_SEARCH_CHILDREN);
+        av_opt_set(encoderCtx, "preset", preset, AV_OPT_SEARCH_CHILDREN);
+        av_opt_set(encoderCtx, "tune",   tune,   AV_OPT_SEARCH_CHILDREN);
+
+        SIP_CORE_DEBUG("H264 RQM init: br=%" PRIu64
+                    ", crf=%d, maxrate=%" PRIu64
+                    ", bufsize=%" PRIu64
+                    ", preset=%s, tune=%s",
+                    br, crf, maxrate, bufsize, preset, tune);
+#else
         // Use capped‐CRF (quality + rate constraints) to get “normal” quality
 
         // Choose a CRF that gives good quality without too heavy data
@@ -1199,6 +1605,7 @@ MediaEncoder::enableAccel(bool enableAccel)
                     ", bufsize=%" PRIu64
                     ", qmin=%d, qmax=%d, preset=%s",
                     br, crf, maxrate, bufsize, qmin, qmax, preset);
+#endif
     }
 
     void

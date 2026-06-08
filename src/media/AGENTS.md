@@ -11,11 +11,10 @@ Audio-specific code lives in [`audio/`](audio/AGENTS.md); video-specific code in
 | File                                | Role                                                                                                  |
 |-------------------------------------|-------------------------------------------------------------------------------------------------------|
 | `rtp_session.h`                     | Abstract `RtpSession` — base for `AudioRtpSession` (audio/) and `VideoRtpSession` (video/). Owns peer endpoint, mute state, the `MediaDescription` for send/recv. |
-| `media_codec.h/cpp`                 | `SystemCodecInfo` / `AccountCodecInfo` (system catalog + per-account overrides). `MediaType` and `CodecType` enums. |
-| `system_codec_container.h/cpp`      | Singleton catalog of every available codec on the system; populated at startup from FFmpeg + the bundled pjmedia codecs (opus, g729, etc.). |
+| `media_codec.h/cpp`                 | `SystemCodecInfo` / `AccountCodecInfo` (system catalog + per-account overrides). `MediaType` and `CodecType` enums. Codec parameter manipulation. |
+| `system_codec_container.h/cpp`      | Singleton catalog of every available codec on the system; populated at startup from FFmpeg + the bundled codecs (Opus, PCMU, PCMA, G.722, G.729 via bcg729). |
 | `media_attribute.h/cpp`             | `MediaAttribute` — wire-format-agnostic representation of a media stream (type, enabled, muted, sourceUri, label, secure). Mirrors what consumers see in `MediaMap`. |
 | `media_buffer.h/cpp`                | Owns `AVFrame` / `AVPacket` lifecycle for the daemon — the base behind the public `MediaFrame`.       |
-| `media_codec.h/cpp`, `media_codec.cpp` | Codec parameter manipulation.                                                                       |
 | `media_decoder.h/cpp`, `media_decoder_base.h` | FFmpeg-backed decoder; used by audio/video receive threads.                                    |
 | `media_encoder.h/cpp`, `media_encoder_base.h` | FFmpeg-backed encoder; used by senders.                                                          |
 | `media_device.h/cpp`                | `DeviceParams` for camera/mic device specs.                                                           |

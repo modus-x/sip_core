@@ -128,45 +128,31 @@ AudioInput::readFromDevice()
     auto& bufferPool = Manager::instance().getRingBufferPool();
     auto audioFrame = bufferPool.getData(id_);
 
-    // Track consecutive empty frames to detect broken/non-functional audio device
-    // If we get too many empty frames in a row, the device is likely broken
-    // and we should send silence to keep the RTP stream alive
+    // Diagnostic-only: log once when the capture source has been silent for
+    // a long stretch. Do NOT force-mute — outgoing RTP is kept alive by the
+    // silence synthesis below, and over xrdp the xrdp-source can idle for
+    // arbitrary durations after a re-invite; sticky mute would persist past
+    // the moment real samples finally arrive.
     if (not audioFrame) {
-        consecutiveEmptyFrames_++;
+        if (consecutiveEmptyFrames_ < BROKEN_DEVICE_THRESHOLD)
+            consecutiveEmptyFrames_++;
         if (consecutiveEmptyFrames_ == BROKEN_DEVICE_THRESHOLD) {
             SIP_CORE_WARN("Audio Input: no data for %u consecutive frames, "
-                         "device may be broken - sending silence to keep RTP alive",
+                         "capture source is idle (xrdp-source may stall on re-invite)",
                          BROKEN_DEVICE_THRESHOLD);
-            // Re-check whether the capture device is still present so we
-            // correctly enter forceMuteNoDevice_ state and can recover later.
-            updateMuteStateForDeviceAvailability();
         }
     } else {
-        // Reset counter when we get valid audio
-        if (consecutiveEmptyFrames_ >= BROKEN_DEVICE_THRESHOLD) {
-            SIP_CORE_INFO("Audio Input: device recovered, received audio data again");
-            // Reset BEFORE re-checking so updateMuteStateForDeviceAvailability
-            // correctly clears forceMuteNoDevice_.
-            consecutiveEmptyFrames_ = 0;
-            updateMuteStateForDeviceAvailability();
-        }
         consecutiveEmptyFrames_ = 0;
     }
 
-    // Send silence frames in these cases:
-    // 1. User explicitly muted (muteState_ == true)
-    // 2. No capture device available (forceMuteNoDevice_ == true)
-    // 3. Device appears broken (many consecutive empty frames)
-    // This ensures RTP packets are always sent to prevent server kicking us
-    bool shouldSendSilence = muteState_ || forceMuteNoDevice_ ||
-                             (not audioFrame && consecutiveEmptyFrames_ >= BROKEN_DEVICE_THRESHOLD);
-
     if (not audioFrame) {
-        if (!shouldSendSilence) {
-            // Still waiting for device to provide data, don't send anything yet
-            return;
-        }
-        // Create silence frame
+        // No frame from the capture device this tick — synthesize silence
+        // unconditionally so the outgoing RTP stream keeps ticking. The
+        // capture source can take seconds to start producing samples after
+        // a re-invite restarts the PulseAudio stream (observed on Linux
+        // over xrdp where xrdp-source idles for >5 s after re-creation);
+        // pausing RTP during that window makes peers treat the media path
+        // as dead and they stop sending audio back.
         audioFrame = std::make_shared<AudioFrame>(bufferPool.getInternalAudioFormat(), frameSize_);
         libav_utils::fillWithSilence(audioFrame->pointer());
         audioFrame->has_voice = false;
@@ -485,14 +471,9 @@ AudioInput::updateMuteStateForDeviceAvailability()
         hasCaptureDevice = !driver->getCaptureDeviceList().empty();
     }
 
-    const bool deviceBroken = hasCaptureDevice
-                              && consecutiveEmptyFrames_ >= BROKEN_DEVICE_THRESHOLD;
-    const bool newForceMute = !hasCaptureDevice || deviceBroken;
+    const bool newForceMute = !hasCaptureDevice;
     if (newForceMute && !forceMuteNoDevice_) {
-        if (deviceBroken)
-            SIP_CORE_WARN("Audio Input forcing mute: capture device present but not producing audio");
-        else
-            SIP_CORE_WARN("Audio Input forcing mute: no capture devices detected");
+        SIP_CORE_WARN("Audio Input forcing mute: no capture devices detected");
     } else if (!newForceMute && forceMuteNoDevice_) {
         SIP_CORE_INFO("Audio Input capture device detected; manual mute control restored");
     }

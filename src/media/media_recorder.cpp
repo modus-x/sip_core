@@ -69,7 +69,18 @@ struct MediaRecorder::StreamObserver : public Observer<std::shared_ptr<MediaFram
 
     ~StreamObserver()
     {
-        for (auto& obs : observablesFrames_) {
+        // Iterator-invalidation hazard: Observable::detach(this) calls back
+        // into Observer::detached(obs), which in this class erases `obs` from
+        // observablesFrames_ — mutating the set while the for-each loop above
+        // is iterating it. The next iterator increment then walks into freed
+        // memory and crashes with EXC_BAD_ACCESS on call hangup whenever
+        // ~Call drops the last reference on a worker thread.
+        //
+        // Drain the set into a local before the loop so detached() can erase
+        // its already-empty backing container harmlessly.
+        decltype(observablesFrames_) pending;
+        pending.swap(observablesFrames_);
+        for (auto* obs : pending) {
             obs->detach(this);
         }
     };

@@ -197,6 +197,7 @@ struct AccountAudioCodecInfo : AccountCodecInfo
     AudioFormat audioformat {AudioFormat::NONE()};
     bool isPCMG722() const;
     bool isG729() const;
+    bool isOpus() const;
 };
 
 struct AccountVideoCodecInfo : AccountCodecInfo

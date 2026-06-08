@@ -146,3 +146,4 @@ sonar-project.properties.save
 compile_commands.json
 
 .omc/
+dumps/

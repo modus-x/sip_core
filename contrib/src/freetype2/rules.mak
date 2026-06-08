@@ -4,7 +4,7 @@ FREETYPE_URL := https://nexus.svetlocal.ru/repository/github-artifacts/freetype2
 
 PKGS += freetype2
 
-DEPS_freetype2 = libpng harfbuzz zlib brotli
+DEPS_freetype2 = libpng zlib brotli
 
 FREETYPE_CMAKECONF := -DBUILD_SHARED_LIBS=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON
 

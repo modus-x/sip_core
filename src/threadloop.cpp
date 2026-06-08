@@ -53,26 +53,36 @@ joinThread(std::thread& thread, const ThreadLoop* owner, const char* action)
 }
 
 void
-ThreadLoop::mainloop(std::thread::id& tid,
-                     const std::function<bool()> setup,
-                     const std::function<void()> process,
-                     const std::function<void()> cleanup)
+ThreadLoop::mainloop(std::shared_ptr<State> state,
+                     std::function<bool()> setup,
+                     std::function<void()> process,
+                     std::function<void()> cleanup,
+                     const ThreadLoop* ownerForLogging)
 {
-    tid = std::this_thread::get_id();
+    // We do NOT write to a ThreadLoop member here. The owning ThreadLoop
+    // captures thread_.get_id() right after spawning us; that avoids a UAF
+    // race where joinFor() detaches before the worker runs and ThreadLoop
+    // is later destroyed while we still hold a pointer into it.
     try {
         if (setup()) {
-            while (state_ == ThreadState::RUNNING)
+            while (state->state == ThreadState::RUNNING)
                 process();
             cleanup();
         } else {
             SIP_CORE_ERR("setup failed");
         }
     } catch (const ThreadLoopException& e) {
-        SIP_CORE_ERR("[threadloop:%p] ThreadLoopException: %s", this, e.what());
+        SIP_CORE_ERR("[threadloop:%p] ThreadLoopException: %s", ownerForLogging, e.what());
     } catch (const std::exception& e) {
-        SIP_CORE_ERR("[threadloop:%p] Unwaited exception: %s", this, e.what());
+        SIP_CORE_ERR("[threadloop:%p] Unwaited exception: %s", ownerForLogging, e.what());
     }
-    stop();
+    if (state->state == ThreadState::RUNNING)
+        state->state = ThreadState::STOPPING;
+    {
+        std::lock_guard<std::mutex> lock(state->doneMutex);
+        state->done = true;
+    }
+    state->doneCv.notify_all();
 }
 
 ThreadLoop::ThreadLoop(const std::function<bool()>& setup,
@@ -98,7 +108,7 @@ void
 ThreadLoop::start()
 {
     std::lock_guard<std::mutex> lock(threadMutex_);
-    const auto s = state_.load();
+    const auto s = state_->state.load();
 
     if (s == ThreadState::RUNNING) {
         SIP_CORE_ERR("already started");
@@ -111,8 +121,14 @@ ThreadLoop::start()
         joinThread(thread_, this, "start");
     }
 
-    state_ = ThreadState::RUNNING;
-    thread_ = std::thread(&ThreadLoop::mainloop, this, std::ref(threadId_), setup_, process_, cleanup_);
+    state_->state = ThreadState::RUNNING;
+    state_->done.store(false);
+    thread_ = std::thread(&ThreadLoop::mainloop,
+                          state_,
+                          setup_,
+                          process_,
+                          cleanup_,
+                          this);
     threadId_ = thread_.get_id();
 
     // set priority if not default
@@ -123,8 +139,8 @@ ThreadLoop::start()
 void
 ThreadLoop::stop()
 {
-    if (state_ == ThreadState::RUNNING)
-        state_ = ThreadState::STOPPING;
+    if (state_->state == ThreadState::RUNNING)
+        state_->state = ThreadState::STOPPING;
 }
 
 void
@@ -133,6 +149,46 @@ ThreadLoop::join()
     std::lock_guard<std::mutex> lock(threadMutex_);
     stop();
     joinThread(thread_, this, "join");
+}
+
+bool
+ThreadLoop::joinFor(std::chrono::milliseconds timeout)
+{
+    std::unique_lock<std::mutex> lock(threadMutex_);
+    stop();
+
+    if (!thread_.joinable())
+        return true;
+
+    if (std::this_thread::get_id() == thread_.get_id()) {
+        SIP_CORE_WARN("[threadloop:%p] joinFor called from worker thread; detaching", this);
+        thread_.detach();
+        return false;
+    }
+
+    // Wait for the worker to signal completion. The worker doesn't take
+    // threadMutex_, only signals via state_->doneCv, so holding it here
+    // is safe.
+    auto state = state_;
+    bool joined;
+    {
+        std::unique_lock<std::mutex> doneLock(state->doneMutex);
+        joined = state->doneCv.wait_for(doneLock, timeout, [&state]() {
+            return state->done.load();
+        });
+    }
+
+    if (joined) {
+        thread_.join();
+        return true;
+    }
+
+    SIP_CORE_WARN(
+        "[threadloop:%p] joinFor timed out after %lld ms; detaching worker thread",
+        this,
+        static_cast<long long>(timeout.count()));
+    thread_.detach();
+    return false;
 }
 
 void
@@ -153,9 +209,9 @@ bool
 ThreadLoop::isRunning() const noexcept
 {
 #ifdef _WIN32
-    return state_ == ThreadState::RUNNING;
+    return state_->state == ThreadState::RUNNING;
 #else
-    if (state_ != ThreadState::RUNNING)
+    if (state_->state != ThreadState::RUNNING)
         return false;
 
     std::lock_guard<std::mutex> lock(threadMutex_);

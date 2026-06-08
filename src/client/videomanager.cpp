@@ -1089,6 +1089,8 @@ getVideoInput(const std::string& id, video::VideoInputMode inputMode)
 
     auto input = std::make_shared<video::VideoInput>(inputMode, id);
     vmgr.videoInputs[id] = input;
+    // initialize() needs shared_from_this(); must run after make_shared.
+    input->initialize(id);
     return input;
 }
 

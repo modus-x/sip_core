@@ -638,8 +638,29 @@ PulseLayer::waitForDeviceList()
     std::unique_lock<std::mutex> lock(readyMtx_);
     if (waitingDeviceList_.exchange(true))
         return;
-    if (streamStarter_.joinable())
-        streamStarter_.join();
+    if (streamStarter_.joinable()) {
+        // waitForDeviceList() runs both from contextStateChanged (initial
+        // PA_CONTEXT_READY) and from contextChanged (subscription events).
+        // The latter fires ON the PA mainloop thread. Joining
+        // streamStarter_ here from that thread deadlocks: the previous
+        // streamStarter_ may be inside stopStream()/startStream() holding
+        // pa_threaded_mainloop_lock, which in turn waits for the PA
+        // mainloop thread to leave its current callback — i.e. to leave
+        // this very function. The two threads then wait on each other
+        // forever. Observed reliably on Linux/xrdp during conference
+        // creation, where the unresponsive xrdp-source plus the extra
+        // CAPTURE start/stop churn from the call-lifetime capture guard
+        // both raise the chance of overlapping subscription events.
+        //
+        // From the PA mainloop thread, detach the prior streamStarter_
+        // so it can complete on its own once it reclaims the PA lock;
+        // from any other thread, keep the original join() so we don't
+        // leak overlapping device-restart work.
+        if (pa_threaded_mainloop_in_thread(mainloop_.get()))
+            streamStarter_.detach();
+        else
+            streamStarter_.join();
+    }
     streamStarter_ = std::thread([this]() mutable {
         bool playbackDeviceChanged, recordDeviceChanged;
 

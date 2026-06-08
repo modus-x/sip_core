@@ -8,7 +8,7 @@ Standard Linux camera/webcam capture via the `videodev2` ioctl interface.
 
 | File                                | Role                                                                                              |
 |-------------------------------------|---------------------------------------------------------------------------------------------------|
-| `video_device_impl.cpp`             | `VideoDeviceImpl` — opens `/dev/videoN`, queries capabilities (`VIDIOC_QUERYCAP`, `VIDIOC_ENUM_FMT`, `VIDIOC_ENUM_FRAMESIZES`, `VIDIOC_ENUM_FRAMEINTERVALS`), uses MMAP buffers (`VIDIOC_REQBUFS`/`VIDIOC_QBUF`/`VIDIOC_DQBUF`). Worker thread `select()`s on the device fd. |
+| `video_device_impl.cpp`             | `VideoDeviceImpl` — opens `/dev/videoN`, queries capabilities (`VIDIOC_QUERYCAP`, `VIDIOC_ENUM_FMT`, `VIDIOC_ENUM_FRAMESIZES`, `VIDIOC_ENUM_FRAMEINTERVALS`), uses MMAP buffers (`VIDIOC_REQBUFS`/`VIDIOC_QBUF`/`VIDIOC_DQBUF`). Worker thread `select()`s on the device fd. Internal helpers: `VideoV4l2Channel`, `VideoV4l2Size`, `VideoV4l2Rate` model the device capability tree. |
 | `video_device_monitor_impl.cpp`     | `VideoDeviceMonitorImpl` — watches udev for `add` / `remove` on `subsystem=video4linux`. Falls back to scanning `/dev/video*` if udev is unavailable. |
 
 ## Gotchas
@@ -16,7 +16,7 @@ Standard Linux camera/webcam capture via the `videodev2` ioctl interface.
 - **Permissions**: the user must be in the `video` group, or the host needs `cap_dac_override`. Failed open returns `EACCES`.
 - **Format negotiation**: `VIDIOC_TRY_FMT` then `VIDIOC_S_FMT`. Many webcams report YUYV by default; MJPEG is preferred when available to keep CPU low.
 - **V4L2 loopback** devices (e.g. OBS Virtual Camera) are picked up automatically. They sometimes lack frame-rate negotiation.
-- **Hot-plug** depends on `libudev` — listed in root `CMakeLists.txt` as `pkg_search_module(udev REQUIRED libudev)`.
+- **Hot-plug** depends on `libudev` — listed in root `CMakeLists.txt` as `pkg_search_module(udev REQUIRED IMPORTED_TARGET libudev)`.
 
 ## Dependencies
 

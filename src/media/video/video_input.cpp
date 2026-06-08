@@ -113,9 +113,35 @@ calculateScaledResolution(unsigned srcWidth,
 
 VideoInput::VideoInput(VideoInputMode inputMode, const std::string& id_)
     : VideoGenerator::VideoGenerator()
-    , loop_(std::bind(&VideoInput::setup, this),
-            std::bind(&VideoInput::process, this),
-            std::bind(&VideoInput::cleanup, this))
+    , threadGuard_(std::make_shared<ThreadGuard>())
+    , loop_(
+          // setup
+          [g = threadGuard_]() -> bool {
+              if (g->aborted.load())
+                  return false;
+              auto self = g->owner.lock();
+              if (!self)
+                  return false;
+              return self->setup();
+          },
+          // process
+          [g = threadGuard_]() {
+              if (g->aborted.load())
+                  return;
+              auto self = g->owner.lock();
+              if (!self)
+                  return;
+              self->process();
+          },
+          // cleanup
+          [g = threadGuard_]() {
+              if (g->aborted.load())
+                  return;
+              auto self = g->owner.lock();
+              if (!self)
+                  return;
+              self->cleanup();
+          })
 {
     inputMode_ = inputMode;
     if (inputMode_ == VideoInputMode::Undefined) {
@@ -132,11 +158,23 @@ VideoInput::VideoInput(VideoInputMode inputMode, const std::string& id_)
         sink_ = Manager::instance().createSinkClient(id_);
     }
 #endif
-    switchInput(id_);
+}
+
+void
+VideoInput::initialize(const std::string& id)
+{
+    threadGuard_->owner = std::weak_ptr<VideoInput>(shared_from_this());
+    switchInput(id);
 }
 
 VideoInput::~VideoInput()
 {
+    // Set aborted before stopInput so that if joinFor times out and detaches
+    // the worker, any later callback re-entry short-circuits before locking
+    // owner — covering the window where a callback has already obtained a
+    // strong self ref and is about to call into freed members.
+    if (threadGuard_)
+        threadGuard_->aborted.store(true);
     stopInput();
 }
 
@@ -634,6 +672,14 @@ VideoInput::deleteDecoder()
 }
 
 #ifndef VIDEO_CLIENT_INPUT
+// On macOS, FFmpeg's avfoundation demuxer init dispatch_sync's to the main
+// queue inside avformat_open_input. If the main thread is itself blocked
+// (e.g. a Flutter UI-isolate FFI call into hangUp), an unbounded
+// loop_.join() deadlocks the caller forever. joinFor() bounds the wait and
+// detaches on timeout; the threadGuard weak_ptr keeps any late callback
+// re-entry safe.
+static constexpr auto kStopJoinTimeout = std::chrono::milliseconds(2000);
+
 void
 VideoInput::stopInput()
 {
@@ -647,7 +693,10 @@ VideoInput::stopInput()
         clearStartupDeadline();
         return;
     }
-    loop_.join();
+    if (!loop_.joinFor(kStopJoinTimeout)) {
+        SIP_CORE_WARN("VideoInput::stopInput: capture thread did not join within %lld ms; detached",
+                      static_cast<long long>(kStopJoinTimeout.count()));
+    }
     clearStartupDeadline();
 
     clearOptions();
@@ -690,7 +739,11 @@ VideoInput::suspendForHold()
     notifyCaptureStopped();
     isStopped_ = true;
     startupAbortReason_.store(StartupAbortReason::StopRequested);
-    loop_.join();
+    if (!loop_.joinFor(kStopJoinTimeout)) {
+        SIP_CORE_WARN(
+            "VideoInput::suspendForHold: capture thread did not join within %lld ms; detached",
+            static_cast<long long>(kStopJoinTimeout.count()));
+    }
     clearStartupDeadline();
     captureStartPending_.store(false);
     suspendedForHold_.store(true);

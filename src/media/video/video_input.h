@@ -55,12 +55,19 @@ class SinkClient;
 
 enum class VideoInputMode { ManagedByClient, ManagedByDaemon, Undefined };
 
-class VideoInput : public VideoGenerator
+class VideoInput : public VideoGenerator,
+                   public std::enable_shared_from_this<VideoInput>
 {
 public:
     VideoInput(VideoInputMode inputMode = VideoInputMode::Undefined,
                const std::string& id_ = "local");
     ~VideoInput();
+
+    // Call exactly once on a freshly-constructed shared_ptr<VideoInput>.
+    // Installs the shared_from_this() backref the worker-thread lambdas
+    // need, then runs switchInput(id). Constructor cannot do this itself
+    // because shared_from_this() throws bad_weak_ptr inside the ctor.
+    void initialize(const std::string& id);
 
     // as VideoGenerator
     const std::string& getName() const { return currentResource_; }
@@ -178,6 +185,18 @@ private:
     void deleteDecoder();
     std::unique_ptr<MediaDecoder> decoder_;
     std::shared_ptr<SinkClient> sink_;
+
+    // Worker-thread lifetime guard. loop_ lambdas capture this by value, so
+    // it outlives ~VideoInput when the thread is detached after a joinFor()
+    // timeout. Each callback checks `aborted`, then locks `owner` to a strong
+    // shared_ptr<VideoInput> for the body of the call — preventing destruction
+    // mid-callback. Between callbacks the worker holds no strong ref.
+    struct ThreadGuard
+    {
+        std::weak_ptr<VideoInput> owner;
+        std::atomic_bool aborted {false};
+    };
+    std::shared_ptr<ThreadGuard> threadGuard_;
     ThreadLoop loop_;
 
     // for ThreadLoop

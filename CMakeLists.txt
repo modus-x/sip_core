@@ -2,10 +2,27 @@ cmake_minimum_required(VERSION 3.25)
 
 cmake_policy(VERSION 3.25...3.31)
 
+# Single source of truth: VERSION file at repo root.
+# Format: BASE[-SUFFIX] e.g. "0.18.14" or "0.18.14-test".
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION.txt" SIP_CORE_VERSION_FULL
+     LIMIT_COUNT 1)
+string(STRIP "${SIP_CORE_VERSION_FULL}" SIP_CORE_VERSION_FULL)
+
+string(REGEX MATCH "^([0-9]+\\.[0-9]+\\.[0-9]+)(.*)$" _ "${SIP_CORE_VERSION_FULL}")
+set(SIP_CORE_VERSION_BASE "${CMAKE_MATCH_1}")
+set(SIP_CORE_VERSION_SUFFIX "${CMAKE_MATCH_2}")
+
+if(NOT SIP_CORE_VERSION_BASE)
+  message(FATAL_ERROR "Could not parse VERSION file content '${SIP_CORE_VERSION_FULL}'. Expected X.Y.Z[-suffix].")
+endif()
+
 project(
   sip_core
-  VERSION 0.18.13
+  VERSION ${SIP_CORE_VERSION_BASE}
   LANGUAGES C CXX)
+
+# Re-expose full version (with suffix) for downstream consumers.
+set(SIP_CORE_VERSION_FULL "${SIP_CORE_VERSION_BASE}${SIP_CORE_VERSION_SUFFIX}")
 
 set(BUILD_NUMBER 1)
 
@@ -37,6 +54,9 @@ option(BUILD_DEPS "Build deps" ON)
 option(CONFERENCE_METADATA
        "Send conference metadata over SIP and disable conference border text overlays"
        ON)
+option(ENABLE_RQM
+       "Stream fragmented MP4 over RTP (payload 111) instead of plain H.264 — used by the RQM recording flow"
+       OFF)
 
 set(PREBUILD_DEPS_PATHS
     ""
@@ -429,6 +449,10 @@ endif()
 
 if(HW_ACCEL)
   target_compile_definitions(${PROJECT_NAME} PUBLIC RING_ACCEL)
+endif()
+
+if(ENABLE_RQM)
+  target_compile_definitions(${PROJECT_NAME} PUBLIC RQM)
 endif()
 
 if(ANDROID)
@@ -852,6 +876,17 @@ if(BUILD_TESTING)
   add_executable(media_recorder_tests tests/media_recorder_tests.cpp)
   target_link_libraries(media_recorder_tests PRIVATE ${PROJECT_NAME})
   add_test(NAME media_recorder_tests COMMAND media_recorder_tests)
+
+  if(APPLE AND NOT IOS)
+    # Pure-logic unit tests for the CoreAudio device-change snapshot helpers
+    # that suppress VoiceProcessingIO's VPAggregate churn (root cause of the
+    # 3-5 s audio startup delay at call establishment).
+    add_executable(coreaudio_device_filter_tests
+                   tests/coreaudio_device_filter_tests.cpp
+                   src/media/audio/coreaudio/osx/device_signature.cpp)
+    target_include_directories(coreaudio_device_filter_tests PRIVATE src)
+    add_test(NAME coreaudio_device_filter_tests COMMAND coreaudio_device_filter_tests)
+  endif()
 endif()
 
 # install

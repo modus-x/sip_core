@@ -38,7 +38,6 @@ One subdirectory per third-party library, containing:
 | `pjproject/`                       | The SIP stack. Patches: Android build, Windows VS+GnuTLS, iOS PointToPoint disable, iOS 16 fixes, presence improvements, evsub header cleanup, config-site injection, Unix bzero fix. |
 | `portaudio/`                       | Windows audio backend.                                                                           |
 | `pthreads/`                        | pthreads-win32 (Windows only).                                                                   |
-| `speex/`, `speexdsp/`              | Legacy DSP / codec.                                                                              |
 | `vpx/`                             | VP8/VP9 codecs.                                                                                  |
 | `webrtc-audio-processing/`         | NS/AEC/AGC.                                                                                      |
 | `x264/`                            | H.264 software encoder.                                                                          |

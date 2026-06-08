@@ -9,7 +9,7 @@ Objective-C++ implementation of camera capture and hot-plug for macOS.
 | File                                | Role                                                                                              |
 |-------------------------------------|---------------------------------------------------------------------------------------------------|
 | `video_device_impl.mm`              | `VideoDeviceImpl` — wraps `AVCaptureDevice` / `AVCaptureSession`. Opens the device, configures format (resolution + framerate), and pushes frames into the daemon's video pipeline via `AVCaptureVideoDataOutputSampleBufferDelegate`. |
-| `video_device_monitor_impl.mm`      | `VideoDeviceMonitorImpl` — observes `AVCaptureDevice` `NSNotificationCenter` notifications (`AVCaptureDeviceWasConnected/Disconnected`) and notifies `Manager` via `emitSignal<VideoSignal::DeviceAdded>`. |
+| `video_device_monitor_impl.mm`      | `VideoDeviceMonitorImpl` — observes `AVCaptureDeviceWasConnectedNotification` / `AVCaptureDeviceWasDisconnectedNotification` via `NSNotificationCenter` and calls `monitor_->addDevice()` / `monitor_->removeDevice()` on the owning `VideoDeviceMonitor`. Also registers a `desktop` device on start for screen-share. |
 
 `.mm` = Objective-C++; needed because AVFoundation is Objective-C.
 
