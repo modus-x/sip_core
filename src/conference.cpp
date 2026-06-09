@@ -63,8 +63,77 @@ Conference::Conference(const std::shared_ptr<Account>& account, const std::strin
 
 #ifdef ENABLE_VIDEO
     videoMixer_ = std::make_shared<video::VideoMixer>(id_);
-    videoMixer_->setOnSourcesUpdated([this](std::vector<video::SourceInfo>&& infos) {
-        runOnMainThread([w = weak(), infos = std::move(infos)] {
+    // NOTE: the VideoMixer onSourcesUpdated callback is registered separately in
+    // attachVideoMixerCallbacks(), called right after this Conference is owned by
+    // a shared_ptr. It captures weak_from_this() by value so the mixer process()
+    // thread never dereferences a raw `this` (the createSinks/teardown UAF). We
+    // cannot do it here because weak_from_this() is invalid in the constructor.
+
+    auto conf_res = split_string_to_unsigned(sip_core::Manager::instance()
+                                                 .videoPreferences.getConferenceResolution(),
+                                             'x');
+    const auto voiceInactiveHoldMs = sip_core::Manager::instance()
+                                         .videoPreferences.getConferenceVoiceInactiveHoldMs();
+    if (conf_res.size() == 2u) {
+#if defined(__APPLE__) && TARGET_OS_MAC
+        auto params = video::VideoMixer::Parameters {(int) conf_res[0],
+                                                     (int) conf_res[1],
+                                                     AV_PIX_FMT_NV12};
+#else
+        auto params = video::VideoMixer::Parameters {(int) conf_res[0], (int) conf_res[1]};
+#endif
+        params.voice_inactive_hold_ms = voiceInactiveHoldMs;
+        videoMixer_->setParameters(params);
+    } else {
+        SIP_CORE_ERR("Conference resolution is invalid");
+    }
+#endif
+
+    parser_.onVersion([&](uint32_t) {}); // TODO
+    parser_.onCheckAuthorization([&](std::string_view peerId) { return isModerator(peerId); });
+    parser_.onHangupParticipant([&](const auto& accountUri, const auto& deviceId) {
+        hangupParticipant(accountUri, deviceId);
+    });
+    parser_.onRaiseHand([&](const auto& deviceId, bool state) { setHandRaised(deviceId, state); });
+    parser_.onSetActiveStream(
+        [&](const auto& streamId, bool state) { setActiveStream(streamId, state); });
+    parser_.onMuteStreamAudio(
+        [&](const auto& accountUri, const auto& deviceId, const auto& streamId, bool state) {
+            muteStream(accountUri, deviceId, streamId, state);
+        });
+    // parser_.onSetLayout([&](int layout) { setLayout(layout); });
+
+    // Version 0, deprecated
+    parser_.onKickParticipant([&](const auto& participantId) { hangupParticipant(participantId); });
+    parser_.onSetActiveParticipant(
+        [&](const auto& participantId) { setActiveParticipant(participantId); });
+    parser_.onMuteParticipant(
+        [&](const auto& participantId, bool state) { muteParticipant(participantId, state); });
+    parser_.onRaiseHandUri([&](const auto& uri, bool state) {
+        if (auto call = std::dynamic_pointer_cast<SIPCall>(getCallFromPeerID(uri)))
+            if (auto transport = call->getTransport())
+                setHandRaised(std::string(transport->deviceId()), state);
+    });
+
+    parser_.onVoiceActivity(
+        [&](const auto& streamId, bool state) { setVoiceActivity(streamId, state); });
+    sip_core_tracepoint(conference_begin, id_.c_str());
+}
+
+void
+Conference::attachVideoMixerCallbacks()
+{
+#ifdef ENABLE_VIDEO
+    if (!videoMixer_)
+        return;
+    // Capture weak_from_this() BY VALUE. The outer lambda runs on the VideoMixer
+    // process() thread; evaluating weak() once here (after a shared_ptr owns this
+    // Conference) means that thread never dereferences a raw `this`. w.lock()
+    // inside the posted task is null-safe once the Conference has been destroyed,
+    // and the captured weak_ptr keeps the control block alive for the lock. This
+    // is the root-cause fix for the Conference::createSinks use-after-free.
+    videoMixer_->setOnSourcesUpdated([w = weak()](std::vector<video::SourceInfo>&& infos) {
+        runOnMainThread([w, infos = std::move(infos)] {
             auto shared = w.lock();
             if (!shared)
                 return;
@@ -186,56 +255,7 @@ Conference::Conference(const std::shared_ptr<Account>& account, const std::strin
             shared->updateConferenceInfo(std::move(newInfo));
         });
     });
-
-    auto conf_res = split_string_to_unsigned(sip_core::Manager::instance()
-                                                 .videoPreferences.getConferenceResolution(),
-                                             'x');
-    const auto voiceInactiveHoldMs = sip_core::Manager::instance()
-                                         .videoPreferences.getConferenceVoiceInactiveHoldMs();
-    if (conf_res.size() == 2u) {
-#if defined(__APPLE__) && TARGET_OS_MAC
-        auto params = video::VideoMixer::Parameters {(int) conf_res[0],
-                                                     (int) conf_res[1],
-                                                     AV_PIX_FMT_NV12};
-#else
-        auto params = video::VideoMixer::Parameters {(int) conf_res[0], (int) conf_res[1]};
 #endif
-        params.voice_inactive_hold_ms = voiceInactiveHoldMs;
-        videoMixer_->setParameters(params);
-    } else {
-        SIP_CORE_ERR("Conference resolution is invalid");
-    }
-#endif
-
-    parser_.onVersion([&](uint32_t) {}); // TODO
-    parser_.onCheckAuthorization([&](std::string_view peerId) { return isModerator(peerId); });
-    parser_.onHangupParticipant([&](const auto& accountUri, const auto& deviceId) {
-        hangupParticipant(accountUri, deviceId);
-    });
-    parser_.onRaiseHand([&](const auto& deviceId, bool state) { setHandRaised(deviceId, state); });
-    parser_.onSetActiveStream(
-        [&](const auto& streamId, bool state) { setActiveStream(streamId, state); });
-    parser_.onMuteStreamAudio(
-        [&](const auto& accountUri, const auto& deviceId, const auto& streamId, bool state) {
-            muteStream(accountUri, deviceId, streamId, state);
-        });
-    // parser_.onSetLayout([&](int layout) { setLayout(layout); });
-
-    // Version 0, deprecated
-    parser_.onKickParticipant([&](const auto& participantId) { hangupParticipant(participantId); });
-    parser_.onSetActiveParticipant(
-        [&](const auto& participantId) { setActiveParticipant(participantId); });
-    parser_.onMuteParticipant(
-        [&](const auto& participantId, bool state) { muteParticipant(participantId, state); });
-    parser_.onRaiseHandUri([&](const auto& uri, bool state) {
-        if (auto call = std::dynamic_pointer_cast<SIPCall>(getCallFromPeerID(uri)))
-            if (auto transport = call->getTransport())
-                setHandRaised(std::string(transport->deviceId()), state);
-    });
-
-    parser_.onVoiceActivity(
-        [&](const auto& streamId, bool state) { setVoiceActivity(streamId, state); });
-    sip_core_tracepoint(conference_begin, id_.c_str());
 }
 
 Conference::~Conference()
@@ -273,7 +293,7 @@ Conference::~Conference()
     });
     if (videoMixer_) {
         std::lock_guard<std::mutex> lk(sinksMtx_);
-        auto& sink = videoMixer_->getSink();
+        auto sink = videoMixer_->getSink(); // strong copy: keep the sink alive for the loop
         for (auto it = confSinksMap_.begin(); it != confSinksMap_.end();) {
             sink->detach(it->second.get());
             it->second->stop();
@@ -911,9 +931,18 @@ void
 Conference::createSinks(const ConfInfo& infos)
 {
     std::lock_guard<std::mutex> lk(sinksMtx_);
-    if (!videoMixer_)
+    // Pin the mixer and take a STRONG COPY of its sink for the duration of the
+    // call. getSink() returns a reference into VideoMixer::sink_; copying it
+    // keeps the SinkClient control block owned here (use_count >= 2) so the
+    // temporary vector's element can never become the last owner and dispatch
+    // _M_dispose() through a freed control block. Defense-in-depth alongside the
+    // weak_from_this()-captured mixer callback (see attachVideoMixerCallbacks()).
+    auto mixer = videoMixer_;
+    if (!mixer)
         return;
-    auto& sink = videoMixer_->getSink();
+    auto sink = mixer->getSink();
+    if (!sink)
+        return;
     Manager::instance().createSinkClients(getConfId(),
                                           infos,
                                           {std::static_pointer_cast<video::VideoFrameActiveWriter>(

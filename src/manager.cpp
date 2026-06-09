@@ -1553,6 +1553,10 @@ Manager::joinParticipant(const std::string& accountId,
     }
 
     auto conf = std::make_shared<Conference>(account, "");
+    // Register the mixer callback now that a shared_ptr owns the conference
+    // (weak_from_this() is valid). Done before account->attach so no CallSet
+    // lock is held while the mixer's rwMutex_ is taken.
+    conf->attachVideoMixerCallbacks();
 
     // Set the local playback mute flag BEFORE any bindings are established.
     // attachLocalParticipant() and bindParticipant() already respect this flag,
@@ -1603,6 +1607,10 @@ Manager::createConfFromParticipantList(const std::string& accountId,
     }
 
     auto conf = std::make_shared<Conference>(account);
+    // Register the mixer callback now that a shared_ptr owns the conference
+    // (weak_from_this() is valid; captured by value so the mixer thread never
+    // dereferences a raw `this`).
+    conf->attachVideoMixerCallbacks();
 
     unsigned successCounter = 0;
     for (const auto& numberaccount : participantList) {

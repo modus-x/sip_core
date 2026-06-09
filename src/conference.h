@@ -206,6 +206,16 @@ public:
     ~Conference();
 
     /**
+     * Register the VideoMixer onSourcesUpdated callback. MUST be called once,
+     * right after the Conference is owned by a shared_ptr, because the callback
+     * captures weak_from_this() by value: that is the only way the VideoMixer
+     * process() thread can reach back into this Conference without dereferencing
+     * a raw `this` (which would be a use-after-free during teardown).
+     * weak_from_this()/shared_from_this() is not valid inside the constructor.
+     */
+    void attachVideoMixerCallbacks();
+
+    /**
      * Return the conference id
      */
     const std::string& getConfId() const { return id_; }
