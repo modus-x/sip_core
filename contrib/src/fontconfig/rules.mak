@@ -6,8 +6,11 @@ PKGS += fontconfig
 
 DEPS_fontconfig = freetype2 iconv xml2
 
-ifdef HAVE_MACOSX
-# on macos, we must install it via brew
+# Any Darwin-family target (macOS desktop AND iOS device/simulator) is built
+# on a macOS host, where GNU libtoolize is Homebrew's glibtoolize. The old
+# HAVE_MACOSX guard missed iOS targets, whose autogen.sh then failed with
+# "You must have libtool 1.4 installed to compile Fontconfig."
+ifdef HAVE_DARWIN_OS
 HOSTVARS += LIBTOOLIZE=glibtoolize
 endif
 
