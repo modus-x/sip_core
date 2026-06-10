@@ -902,7 +902,9 @@ VideoInput::initX11(const std::string& display)
 }
 #endif
 
-#ifdef __APPLE__
+// Desktop-only: drives avfoundation "Capture screen N" with CoreGraphics
+// display metrics (CGMainDisplayID does not exist on iOS).
+#if defined(__APPLE__) && !(defined(TARGET_OS_IOS) && TARGET_OS_IOS)
 bool
 VideoInput::initAVFoundation(const std::string& display)
 {
@@ -1334,7 +1336,10 @@ VideoInput::switchInput(const std::string& resource)
     } else if (prefix == libsip_core::Media::VideoProtocolPrefix::DISPLAY) {
         recognized = true;
         /* X11 display name */
-#ifdef __APPLE__
+#if defined(TARGET_OS_IOS) && TARGET_OS_IOS
+        /* Screen sharing via display:// is not supported on iOS. */
+        ready = false;
+#elif defined(__APPLE__)
         ready = initAVFoundation(suffix);
 #elif defined(_WIN32) && defined(USE_DSHOW_SCREEN_CAPTURE)
         ready = initScreenCaptureRecorder(suffix);
