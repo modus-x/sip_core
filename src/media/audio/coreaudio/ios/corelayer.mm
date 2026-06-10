@@ -442,7 +442,7 @@ CoreLayer::write(AudioUnitRenderActionFlags* ioActionFlags,
 
     if (auto toPlay = getPlayback(currentOutFormat, inNumberFrames)) {
         const auto& frame = *toPlay->pointer();
-        for (int i = 0; i < frame.channels; ++i) {
+        for (int i = 0; i < frame.ch_layout.nb_channels; ++i) {
             std::copy_n((Float32*) frame.extended_data[i],
                         inNumberFrames,
                         (Float32*) ioData->mBuffers[i].mData);
