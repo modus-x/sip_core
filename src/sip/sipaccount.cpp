@@ -4188,7 +4188,8 @@ SIPAccount::matches(std::string_view userName, std::string_view server) const
     for(auto r: config().backServiceRoutes) {
         routes += r + "/";
     }
-    routes.pop_back();
+    if (!routes.empty())
+        routes.pop_back();
     SIP_CORE_DBG("calling matches: current serviceRoute is %s, current backServiceRoutes are %s, "
                  "username is %s",
                  config().serviceRoute.c_str(),
