@@ -262,10 +262,12 @@ Conference::~Conference()
 {
     SIP_CORE_INFO("Destroying conference %s", id_.c_str());
 
-    // Clear all playback-mute filters for participants of this conference.
+    // Clear all per-participant pool filters for this conference.
     auto& rbPool = Manager::instance().getRingBufferPool();
-    for (const auto& p : getParticipantList())
+    for (const auto& p : getParticipantList()) {
         rbPool.setLocalPlaybackMuted(p, false);
+        rbPool.setMicMuted(p, false);
+    }
 
 #ifdef ENABLE_VIDEO
     foreachCall([&](auto call) {
@@ -490,11 +492,9 @@ Conference::takeOverMediaSourceControl(const std::string& callId)
             // If it's the first participant, just use its mute state as local
             if (participants_.size() == 1) {
                 setLocalHostMuteState(iter->type_, iter->muted_);
-            } else {
-                // The best logic here is to set local state as muted only if: previous local state
-                // was muted AND call media is muted
-                setLocalHostMuteState(iter->type_, iter->muted_ and isMediaSourceMuted(iter->type_));
             }
+            // Otherwise leave the host mute state untouched: the mute flags
+            // of a joining call must not clear (or set) the host-wide mute.
         }
 
         // The call may still be in HOLD when ManagerPimpl::bindCallToConference()
@@ -955,8 +955,11 @@ void
 Conference::removeParticipant(const std::string& participant_id)
 {
     SIP_CORE_DEBUG("Remove call {:s} in conference {:s}", participant_id, id_);
-    // Clear the playback-mute filter for the departing participant.
-    Manager::instance().getRingBufferPool().setLocalPlaybackMuted(participant_id, false);
+    // Clear the per-participant pool filters for the departing participant
+    // so a follow-up 1:1 call on the same id is not affected.
+    auto& rbPool = Manager::instance().getRingBufferPool();
+    rbPool.setLocalPlaybackMuted(participant_id, false);
+    rbPool.setMicMuted(participant_id, false);
     {
         std::lock_guard<std::mutex> lk(participantsMtx_);
         if (!participants_.erase(participant_id))
@@ -990,9 +993,18 @@ Conference::attachLocalParticipant()
         setState(State::ACTIVE_ATTACHED);
 
         auto& rbPool = Manager::instance().getRingBufferPool();
+        const bool hostMuted = isMediaSourceMuted(MediaType::MEDIA_AUDIO) or isMuted("host"sv);
         for (const auto& participant : getParticipantList()) {
             if (auto call = Manager::instance().getCallFromCallID(participant)) {
-                if (localPlaybackMuted_ || isMuted(call->getCallId()))
+                rbPool.setMicMuted(participant, hostMuted);
+                const bool participantSilenced = localPlaybackMuted_
+                                                 || isMuted(call->getCallId());
+                if (hostMuted and participantSilenced) {
+                    // No direct audio either way; bindings are re-established
+                    // by bindHost() / bindParticipant() on un-mute.
+                } else if (hostMuted)
+                    rbPool.bindHalfDuplexOut(RingBufferPool::DEFAULT_ID, participant);
+                else if (participantSilenced)
                     rbPool.bindHalfDuplexOut(participant, RingBufferPool::DEFAULT_ID);
                 else
                     rbPool.bindCallID(participant, RingBufferPool::DEFAULT_ID);
@@ -1087,9 +1099,13 @@ Conference::bindParticipant(const std::string& participant_id)
     // Bind local participant to other participants only if the
     // local is attached to the conference.
     if (getState() == State::ACTIVE_ATTACHED) {
+        const bool hostMuted = isMediaSourceMuted(MediaType::MEDIA_AUDIO) or isMuted("host"sv);
+        // Keep the data-plane mic filter consistent for (re-)bound
+        // participants, including ones joining while the host is muted.
+        rbPool.setMicMuted(participant_id, hostMuted);
         if (localPlaybackMuted_)
             rbPool.bindHalfDuplexOut(participant_id, RingBufferPool::DEFAULT_ID);
-        else if (isMediaSourceMuted(MediaType::MEDIA_AUDIO))
+        else if (hostMuted)
             rbPool.bindHalfDuplexOut(RingBufferPool::DEFAULT_ID, participant_id);
         else
             rbPool.bindCallID(participant_id, RingBufferPool::DEFAULT_ID);
@@ -1113,6 +1129,8 @@ Conference::bindHost()
 
     for (const auto& item : getParticipantList()) {
         if (auto call = Manager::instance().getCallFromCallID(item)) {
+            // Clear the data-plane mic filter set by unbindHost().
+            rbPool.setMicMuted(item, false);
             if (isMuted(call->getCallId()))
                 continue;
             if (localPlaybackMuted_)
@@ -1128,7 +1146,20 @@ void
 Conference::unbindHost()
 {
     SIP_CORE_INFO("Unbind host from conference %s", id_.c_str());
-    Manager::instance().getRingBufferPool().unBindAllHalfDuplexOut(RingBufferPool::DEFAULT_ID);
+    auto& rbPool = Manager::instance().getRingBufferPool();
+    for (const auto& item : getParticipantList()) {
+        // Sever the participant→mic binding directly. Iterating the
+        // participant list (instead of unBindAllHalfDuplexOut(DEFAULT_ID),
+        // which derives the mic readers from the host's own read bindings)
+        // keeps this correct even when the bindings are asymmetric — e.g.
+        // local playback muted, a moderator host-mute, or a re-bind that
+        // raced a re-INVITE.
+        rbPool.unBindHalfDuplexOut(item, RingBufferPool::DEFAULT_ID);
+        // Race-proof data-plane mute (mirrors localPlaybackMutedIds_): even
+        // if an async re-bind re-attaches the capture buffer to this reader,
+        // its mix will not contain the host microphone.
+        rbPool.setMicMuted(item, true);
+    }
 }
 
 ParticipantSet
@@ -1683,6 +1714,12 @@ Conference::muteHost(bool state)
         if (not isMediaSourceMuted(MediaType::MEDIA_AUDIO)) {
             SIP_CORE_DBG("Mute host");
             unbindHost();
+        } else {
+            // Bindings already severed by muteLocalHost(); make sure the
+            // data-plane mic filter is set regardless.
+            auto& rbPool = Manager::instance().getRingBufferPool();
+            for (const auto& item : getParticipantList())
+                rbPool.setMicMuted(item, true);
         }
     } else if (not state and isHostMuted) {
         participantsMuted_.erase("host");
@@ -1690,6 +1727,8 @@ Conference::muteHost(bool state)
             SIP_CORE_DBG("Unmute host");
             bindHost();
         }
+        // When the media source is still muted, keep the filter set; it is
+        // cleared by bindHost() once muteLocalHost(false) runs.
     }
     updateMuted();
 }
@@ -1737,8 +1776,11 @@ Conference::muteLocalPlayback(bool muted)
         return;
 
     // Secondary: also adjust bindings for correctness when unmuting.
-    const bool hostAudioMuted = isMediaSourceMuted(MediaType::MEDIA_AUDIO);
+    const bool hostAudioMuted = isMediaSourceMuted(MediaType::MEDIA_AUDIO) or isMuted("host"sv);
     for (const auto& participantId : participants) {
+        // Authoritatively recompute the data-plane mic filter on every
+        // transition; the bindings below are a routing optimization only.
+        rbPool.setMicMuted(participantId, hostAudioMuted);
         rbPool.unBindHalfDuplexOut(RingBufferPool::DEFAULT_ID, participantId);
         if (!muted && !isMuted(participantId)) {
             if (hostAudioMuted)
@@ -1985,19 +2027,30 @@ void
 Conference::muteLocalHost(bool is_muted, const std::string& mediaType)
 {
     if (mediaType.compare(libsip_core::Media::Details::MEDIA_TYPE_AUDIO) == 0) {
-        if (is_muted == isMediaSourceMuted(MediaType::MEDIA_AUDIO)) {
+        const bool attached = getState() == State::ACTIVE_ATTACHED;
+        if (attached and is_muted == isMediaSourceMuted(MediaType::MEDIA_AUDIO)) {
             SIP_CORE_DEBUG("Local audio source already in [{:s}] state",
                            is_muted ? "muted" : "un-muted");
             return;
         }
 
         auto isHostMuted = isMuted("host"sv);
-        if (is_muted and not isMediaSourceMuted(MediaType::MEDIA_AUDIO) and not isHostMuted) {
-            SIP_CORE_DBG("Muting local audio source");
-            unbindHost();
-        } else if (not is_muted and isMediaSourceMuted(MediaType::MEDIA_AUDIO) and not isHostMuted) {
-            SIP_CORE_DBG("Un-muting local audio source");
-            bindHost();
+        if (attached and not isHostMuted) {
+            if (is_muted) {
+                SIP_CORE_DBG("Muting local audio source");
+                unbindHost();
+            } else {
+                SIP_CORE_DBG("Un-muting local audio source");
+                bindHost();
+            }
+        } else if (not attached) {
+            // Not attached (e.g. mute requested between ConferenceCreated and
+            // attachLocalParticipant): there are no host bindings to adjust,
+            // but record the data-plane filter so the mute survives the
+            // attach regardless of the bindings it sets up.
+            auto& rbPool = Manager::instance().getRingBufferPool();
+            for (const auto& item : getParticipantList())
+                rbPool.setMicMuted(item, is_muted);
         }
         setLocalHostMuteState(MediaType::MEDIA_AUDIO, is_muted);
         updateMuted();

@@ -290,6 +290,31 @@ RingBufferPool::setLocalPlaybackMuted(const std::string& id, bool muted)
         localPlaybackMutedIds_.erase(id);
 }
 
+void
+RingBufferPool::setMicMuted(const std::string& id, bool muted)
+{
+    std::lock_guard<std::recursive_mutex> lk(stateLock_);
+    if (muted)
+        micMutedIds_.insert(id);
+    else
+        micMutedIds_.erase(id);
+}
+
+bool
+RingBufferPool::skipMutedBuffer(const std::shared_ptr<RingBuffer>& rbuf,
+                                const std::string& call_id,
+                                bool filterPlayback,
+                                bool filterMic)
+{
+    if (filterPlayback && localPlaybackMutedIds_.count(rbuf->getId()))
+        return true;
+    if (filterMic && rbuf->getId() == DEFAULT_ID) {
+        rbuf->get(call_id); // consume and drop (see header comment)
+        return true;
+    }
+    return false;
+}
+
 std::shared_ptr<AudioFrame>
 RingBufferPool::getData(const std::string& call_id)
 {
@@ -300,11 +325,12 @@ RingBufferPool::getData(const std::string& call_id)
         return {};
 
     const bool filterPlayback = (call_id == DEFAULT_ID) && !localPlaybackMutedIds_.empty();
+    const bool filterMic = (call_id != DEFAULT_ID) && micMutedIds_.count(call_id);
 
     // No mixing
     if (bindings->size() == 1) {
         const auto& rbuf = *bindings->cbegin();
-        if (filterPlayback && localPlaybackMutedIds_.count(rbuf->getId()))
+        if (skipMutedBuffer(rbuf, call_id, filterPlayback, filterMic))
             return {};
         return rbuf->get(call_id);
     }
@@ -312,7 +338,7 @@ RingBufferPool::getData(const std::string& call_id)
     auto mixBuffer = std::make_shared<AudioFrame>(internalAudioFormat_);
     auto mixed = false;
     for (const auto& rbuf : *bindings) {
-        if (filterPlayback && localPlaybackMutedIds_.count(rbuf->getId()))
+        if (skipMutedBuffer(rbuf, call_id, filterPlayback, filterMic))
             continue;
         if (auto b = rbuf->get(call_id)) {
             mixed = true;
@@ -359,11 +385,12 @@ RingBufferPool::getAvailableData(const std::string& call_id)
         return 0;
 
     const bool filterPlayback = (call_id == DEFAULT_ID) && !localPlaybackMutedIds_.empty();
+    const bool filterMic = (call_id != DEFAULT_ID) && micMutedIds_.count(call_id);
 
     // No mixing
     if (bindings->size() == 1) {
         const auto& rbuf = *bindings->cbegin();
-        if (filterPlayback && localPlaybackMutedIds_.count(rbuf->getId()))
+        if (skipMutedBuffer(rbuf, call_id, filterPlayback, filterMic))
             return {};
         return rbuf->get(call_id);
     }
@@ -371,7 +398,9 @@ RingBufferPool::getAvailableData(const std::string& call_id)
     size_t availableFrames = std::numeric_limits<size_t>::max();
 
     for (const auto& rbuf : *bindings) {
-        if (filterPlayback && localPlaybackMutedIds_.count(rbuf->getId()))
+        // Also consumes pending capture frames for filtered readers, so the
+        // early return below cannot leave stale mic audio behind.
+        if (skipMutedBuffer(rbuf, call_id, filterPlayback, filterMic))
             continue;
         const auto available = rbuf->availableForGet(call_id);
         if (available != 0)
@@ -383,7 +412,7 @@ RingBufferPool::getAvailableData(const std::string& call_id)
 
     auto buf = std::make_shared<AudioFrame>(internalAudioFormat_);
     for (const auto& rbuf : *bindings) {
-        if (filterPlayback && localPlaybackMutedIds_.count(rbuf->getId()))
+        if (skipMutedBuffer(rbuf, call_id, filterPlayback, filterMic))
             continue;
         if (auto b = rbuf->get(call_id)) {
             buf->mix(*b);
