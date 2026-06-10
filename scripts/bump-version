@@ -85,7 +85,7 @@ Next steps:
        cd ~/code/sip_core_ffi_glue  && git pull
        # then:
        #   linux/windows:  cmake --workflow {linux|windows}
-       #   macos:          scripts/publish-darwin.sh   (after cmake --workflow darwin)
+       #   macos+ios:      scripts/publish-apple.sh   (parallel osx + ios-real + ios-sim)
   2. Back here, in dart_sip_core:
        scripts/bump-bindings.sh ${NEW_VERSION}
 EOM
