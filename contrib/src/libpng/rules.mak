@@ -24,6 +24,15 @@ LIBPNG_CMAKECONF = -DPNG_SHARED=OFF \
 # explicitly ($$PWD is the libpng source dir at recipe time via `cd $<`).
 ifdef HAVE_IOS
 LIBPNG_CMAKECONF += -DPNG_LIBCONF_HEADER=$$PWD/scripts/pnglibconf.h.prebuilt
+# Our toolchain.cmake reports CMAKE_SYSTEM_NAME=Darwin with no
+# CMAKE_SYSTEM_PROCESSOR / CMAKE_OSX_ARCHITECTURES, so libpng's
+# PNG_TARGET_ARCHITECTURE comes out empty and its ARM branch never adds the
+# NEON sources — while pngpriv.h still auto-enables PNG_ARM_NEON_OPT from
+# __ARM_NEON, leaving _png_*_neon symbols undefined in libpng16.a (first
+# seen as a failed ffmpeg fontconfig link test). Both iOS targets are
+# arm64-only, so pin the architecture; NEON sources then build with
+# PNG_ARM_NEON_OPT=2, matching the header.
+LIBPNG_CMAKECONF += -DCMAKE_OSX_ARCHITECTURES=arm64
 endif
 
 $(TARBALLS)/libpng-$(LIBPNG_VERSION).tar.gz:
