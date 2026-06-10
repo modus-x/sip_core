@@ -235,7 +235,17 @@ MediaEncoder::writeContainerToRtp(const uint8_t* buf, int buf_size)
             // if we have normal scale factor, scale it!
             int scaleFactor = opts.downScaleFactor;
 
+            // scaleFactor is a percentage of the native frame; 0 (unset) and
+            // 100 both mean "keep native size".
+            // In RQM builds X-RQM-Video-Compression maps to 20/25/30/40/50/75,
+            // so any explicit 1..99 must downscale. Non-RQM builds keep the
+            // historical "25 < factor" guard so camera/communicator callers
+            // that pass a sub-25 value see no behaviour change.
+#ifdef RQM
+            if (0 < scaleFactor && scaleFactor < 100) {
+#else
             if (25 < scaleFactor && scaleFactor < 100) {
+#endif
                 videoOpts_.width = std::round(videoOpts_.width * (scaleFactor / 100.0));
                 videoOpts_.height = std::round(videoOpts_.height * (scaleFactor / 100.0));
             }
@@ -1293,6 +1303,9 @@ MediaEncoder::writeContainerToRtp(const uint8_t* buf, int buf_size)
             case 4:
                 return 20;
             default:
+                // No (valid) X-RQM-Video-Quality header. NOTE: this 32 is the
+                // generic preset default; the RQM recording baseline is crf 23,
+                // applied in initH264 when videoOpts_.quality == 0.
                 return 32;
         }
     }
@@ -1527,9 +1540,11 @@ MediaEncoder::enableAccel(bool enableAccel)
         // encoder bench in
         // rqm-desktop-recorder/.omc/research/encoder-bench-report.md.
         //
-        // Treat this as the ceiling: X-RQM-Video-Quality / X-RQM-Video-Compression
-        // headers downscale from here (raise CRF, drop preset) — they never raise
-        // quality above this baseline.
+        // This baseline (sent when no X-RQM-Video-* headers are present) is the
+        // max-quality preset. X-RQM-Video-Quality picks the CRF via
+        // h264CrfFromQuality() (1->35, 2->30, 3->25, 4->20) and
+        // X-RQM-Video-Compression downscales the frame; absent a quality header
+        // (videoOpts_.quality == 0) the crf stays at the 23 baseline below.
         //
         // Deltas vs. the non-RQM defaults below:
         //   crf 28 -> 23           — higher quality ceiling (still ~5× smaller
@@ -1550,7 +1565,9 @@ MediaEncoder::enableAccel(bool enableAccel)
         //                             KEY_FRAME_PERIOD periodic IDR.
         //   maxrate/bufsize kept   — caps the worst-case scroll/window-open
         //                             burst at 1.5 Mbit/s with 1 Mbit VBV.
-        int crf = 23;
+        int crf = (videoOpts_.quality >= 1 && videoOpts_.quality <= 4)
+                      ? h264CrfFromQuality()
+                      : 23;
         int64_t maxrate = 1500000;
         int64_t bufsize = 1000000;
         const char* preset = "medium";
