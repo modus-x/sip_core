@@ -94,6 +94,9 @@ private:
     bool muteState_ = false;
     bool forceMuteNoDevice_ = false;
     unsigned int consecutiveEmptyFrames_ = 0;  // Track empty frames to detect broken device
+    // One audio-layer recovery attempt per capture-stall episode (macOS
+    // watchdog in readFromDevice); re-armed when frames flow again.
+    bool stallRecoveryAttempted_ = false;
     uint64_t sent_samples = 0;
     mutable std::mutex fmtMutex_ {};
     AudioFormat format_;

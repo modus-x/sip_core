@@ -33,6 +33,10 @@
 #include <future>
 #include <memory>
 
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
+
 namespace sip_core {
 
 static constexpr auto MS_PER_PACKET = std::chrono::milliseconds(20);
@@ -128,21 +132,39 @@ AudioInput::readFromDevice()
     auto& bufferPool = Manager::instance().getRingBufferPool();
     auto audioFrame = bufferPool.getData(id_);
 
-    // Diagnostic-only: log once when the capture source has been silent for
-    // a long stretch. Do NOT force-mute — outgoing RTP is kept alive by the
-    // silence synthesis below, and over xrdp the xrdp-source can idle for
-    // arbitrary durations after a re-invite; sticky mute would persist past
-    // the moment real samples finally arrive.
+    // Diagnostic: track how long the capture source has been silent. Do NOT
+    // force-mute — outgoing RTP is kept alive by the silence synthesis below,
+    // and over xrdp the xrdp-source can idle for arbitrary durations after a
+    // re-invite; sticky mute would persist past the moment real samples
+    // finally arrive.
     if (not audioFrame) {
-        if (consecutiveEmptyFrames_ < BROKEN_DEVICE_THRESHOLD)
-            consecutiveEmptyFrames_++;
-        if (consecutiveEmptyFrames_ == BROKEN_DEVICE_THRESHOLD) {
+        ++consecutiveEmptyFrames_;
+        // Log when the stall is first detected, then once per threshold
+        // interval (~5 s) so a persistent stall stays visible without
+        // flooding the log at frame rate.
+        if (consecutiveEmptyFrames_ % BROKEN_DEVICE_THRESHOLD == 0) {
             SIP_CORE_WARN("Audio Input: no data for %u consecutive frames, "
                          "capture source is idle (xrdp-source may stall on re-invite)",
-                         BROKEN_DEVICE_THRESHOLD);
+                         consecutiveEmptyFrames_);
         }
+#if defined(__APPLE__) && TARGET_OS_OSX
+        // Self-heal (macOS only): a CoreAudio unit that stops delivering
+        // input mid-call does not recover on its own. Recreate the audio
+        // layer exactly like a manual device switch in settings does —
+        // Manager::ManagerPimpl::initAudioDriver() then restarts the streams
+        // for every type still held by an AudioDeviceGuard. One attempt per
+        // stall episode, re-armed only after real samples have flowed again.
+        // (Not on Linux: over xrdp the source legitimately idles for long
+        // stretches and a restart would just re-trigger the stall.)
+        if (consecutiveEmptyFrames_ == BROKEN_DEVICE_THRESHOLD && !stallRecoveryAttempted_) {
+            stallRecoveryAttempted_ = true;
+            SIP_CORE_WARN("Audio Input: capture stalled for ~5 s, restarting audio layer");
+            Manager::instance().recoverAudioDevices();
+        }
+#endif
     } else {
         consecutiveEmptyFrames_ = 0;
+        stallRecoveryAttempted_ = false;
     }
 
     if (not audioFrame) {

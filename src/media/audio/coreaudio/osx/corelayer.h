@@ -101,6 +101,14 @@ public:
      */
     virtual void stopStream(AudioDeviceType stream = AudioDeviceType::ALL);
 
+    /**
+     * Tear down and re-create the AudioUnit for the currently active stream
+     * types, e.g. after a device topology change. Unlike stopStream() +
+     * startStream() this preserves activeStreamMask_, so per-type guard
+     * accounting in Manager stays consistent.
+     */
+    void restartStream();
+
 private:
     NON_COPYABLE(CoreLayer);
 
@@ -143,6 +151,13 @@ private:
     virtual void updatePreference(AudioPreference& pref, int index, AudioDeviceType type);
 
     /**
+     * Configure, initialize and start the AudioUnit for the stream types
+     * currently in activeStreamMask_. Must be called on the audio
+     * configuration queue with status_ == Idle.
+     */
+    bool startAudioUnit();
+
+    /**
      * Number of audio cards on which capture stream has been opened
      */
     int indexIn_;
@@ -167,6 +182,22 @@ private:
     /** Guard flag to prevent infinite restart loop caused by VoiceProcessingIO
      *  creating/destroying its internal VPAUAggregateAudioDevice. */
     std::atomic<bool> restartingAudio_ {false};
+
+    /** Bitmask of stream types (PLAYBACK / CAPTURE / RINGTONE) requested by
+     *  the per-type AudioDeviceGuard refcounts in Manager. All three logical
+     *  types share the single full-duplex VoiceProcessingIO unit, so the
+     *  unit may only be torn down once this mask drains to zero — stopping
+     *  just the RINGTONE type after a call is answered must NOT kill the
+     *  call's capture/playback. Confined to the audio configuration queue. */
+    unsigned activeStreamMask_ {0};
+
+    /** Stream types the running unit was configured to serve (device
+     *  selection scope at init time). When startStream() adds a type outside
+     *  this set — e.g. a call answering while the unit was built for
+     *  RINGTONE-only ringing — the unit is rebuilt so the capture device and
+     *  the call playback device get selected. Confined to the audio
+     *  configuration queue. */
+    unsigned configuredStreamMask_ {0};
 
     /** Stored device IDs so we can remove property listeners in destroyAudioLayer. */
     AudioDeviceID inputDeviceID_ {0};
