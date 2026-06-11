@@ -2322,7 +2322,11 @@ Manager::setAudioDevice(int index, AudioDeviceType type)
         SIP_CORE_ERR("Audio driver not initialized");
         return;
     }
-    if (pimpl_->getCurrentDeviceIndex(type) == index) {
+    // A stale preference (device renamed/removed) reports the default index
+    // to the UI while the dead name is still stored — re-selecting that index
+    // must still rewrite the preference and rebuild the driver.
+    if (pimpl_->getCurrentDeviceIndex(type) == index
+        && pimpl_->audiodriver_->isPreferredDeviceResolved(type)) {
         SIP_CORE_WARN("Audio device already selected ; doing nothing.");
         return;
     }

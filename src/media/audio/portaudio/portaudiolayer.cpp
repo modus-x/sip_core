@@ -41,6 +41,7 @@
 #ifdef _WIN32
 #include <windows.h>
 #include <dbt.h>
+#include <mmdeviceapi.h>
 #endif
 
 namespace sip_core {
@@ -88,6 +89,77 @@ registerAudioDeviceInterfaceToHwnd(HWND hWnd, const GUID& guid, HDEVNOTIFY* hDev
 
     return *hDeviceNotify != nullptr;
 }
+
+// WM_DEVICECHANGE only reports endpoint interface arrival/removal. Changing
+// the system default device (or enabling/disabling an endpoint) in Windows
+// sound settings is announced exclusively through IMMNotificationClient, and
+// PortAudio v19.6 snapshots the default device at Pa_Initialize — so without
+// this listener the "{{Default}}" entry keeps routing to a stale endpoint
+// until something is physically (un)plugged.
+class DefaultDeviceListener : public IMMNotificationClient
+{
+public:
+    explicit DefaultDeviceListener(std::function<void()>&& callback)
+        : callback_(std::move(callback))
+    {}
+
+    // IUnknown
+    ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&refCount_); }
+    ULONG STDMETHODCALLTYPE Release() override
+    {
+        ULONG count = InterlockedDecrement(&refCount_);
+        if (count == 0)
+            delete this;
+        return count;
+    }
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv) override
+    {
+        if (!ppv)
+            return E_POINTER;
+        if (riid == IID_IUnknown || riid == __uuidof(IMMNotificationClient)) {
+            *ppv = static_cast<IMMNotificationClient*>(this);
+            AddRef();
+            return S_OK;
+        }
+        *ppv = nullptr;
+        return E_NOINTERFACE;
+    }
+
+    // IMMNotificationClient
+    HRESULT STDMETHODCALLTYPE OnDefaultDeviceChanged(EDataFlow, ERole role, LPCWSTR) override
+    {
+        // eConsole is what Pa_GetDefault{Input,Output}Device resolves to;
+        // also react to eCommunications so comm-role changes refresh too.
+        if (role == eConsole || role == eCommunications) {
+            SIP_CORE_DBG() << "Windows default audio device changed";
+            if (callback_)
+                callback_();
+        }
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE OnDeviceStateChanged(LPCWSTR, DWORD) override
+    {
+        // Active/Disabled/Unplugged transitions invalidate the PortAudio
+        // device snapshot just like (un)plugging does.
+        SIP_CORE_DBG() << "Windows audio endpoint state changed";
+        if (callback_)
+            callback_();
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE OnDeviceAdded(LPCWSTR) override { return S_OK; }
+    HRESULT STDMETHODCALLTYPE OnDeviceRemoved(LPCWSTR) override { return S_OK; }
+    HRESULT STDMETHODCALLTYPE OnPropertyValueChanged(LPCWSTR, const PROPERTYKEY) override
+    {
+        return S_OK;
+    }
+
+private:
+    NON_COPYABLE(DefaultDeviceListener);
+    virtual ~DefaultDeviceListener() = default;
+
+    std::function<void()> callback_;
+    LONG refCount_ {1};
+};
 
 class WindowsAudioDeviceMonitor
 {
@@ -192,6 +264,44 @@ private:
 
     void run()
     {
+        // Default-device (role) changes and endpoint enable/disable are only
+        // observable via IMMNotificationClient — they never generate
+        // WM_DEVICECHANGE for the message window below.
+        const HRESULT comInit = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+        IMMDeviceEnumerator* enumerator {nullptr};
+        DefaultDeviceListener* defaultListener {nullptr};
+        if (SUCCEEDED(comInit)) {
+            if (SUCCEEDED(CoCreateInstance(__uuidof(MMDeviceEnumerator),
+                                           nullptr,
+                                           CLSCTX_ALL,
+                                           __uuidof(IMMDeviceEnumerator),
+                                           reinterpret_cast<void**>(&enumerator)))) {
+                defaultListener = new DefaultDeviceListener([this] { notifyDeviceChange(); });
+                if (FAILED(enumerator->RegisterEndpointNotificationCallback(defaultListener))) {
+                    SIP_CORE_ERR() << "Cannot register for default audio device notifications";
+                    defaultListener->Release();
+                    defaultListener = nullptr;
+                    enumerator->Release();
+                    enumerator = nullptr;
+                }
+            } else {
+                SIP_CORE_ERR() << "Cannot create MMDeviceEnumerator for audio notifications";
+            }
+        } else {
+            SIP_CORE_ERR() << "Cannot initialize COM for audio device notifications";
+        }
+
+        auto comCleanup = [&] {
+            if (enumerator) {
+                enumerator->UnregisterEndpointNotificationCallback(defaultListener);
+                enumerator->Release();
+            }
+            if (defaultListener)
+                defaultListener->Release();
+            if (SUCCEEDED(comInit))
+                CoUninitialize();
+        };
+
         static const wchar_t* className = L"SipCoreAudioDeviceNotifications";
         static const wchar_t* windowName = L"sip-core-audio-device-notifications";
         WNDCLASSEXW wx = {};
@@ -205,6 +315,7 @@ private:
         if (!classAtom && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
             SIP_CORE_ERR() << "Cannot register audio device monitor window class";
             notifyReady();
+            comCleanup();
             return;
         }
 
@@ -223,6 +334,7 @@ private:
         if (!hWnd_) {
             SIP_CORE_ERR() << "Cannot create audio device monitor window";
             notifyReady();
+            comCleanup();
             return;
         }
 
@@ -236,6 +348,8 @@ private:
                 DispatchMessageW(&msg);
             }
         }
+
+        comCleanup();
     }
 
     std::function<void()> callback_;
@@ -530,6 +644,26 @@ PortAudioLayer::stopStream(AudioDeviceType stream)
     flushMain();
 }
 
+bool
+PortAudioLayer::isPreferredDeviceResolved(AudioDeviceType type) const
+{
+    std::string_view pref = (type == AudioDeviceType::CAPTURE
+                                 ? pimpl_->deviceRecord_
+                                 : (type == AudioDeviceType::PLAYBACK ? pimpl_->devicePlayback_
+                                                                      : pimpl_->deviceRingtone_));
+    if (pref.empty())
+        return true; // explicit "default" selection always resolves
+
+    auto numDevices = Pa_GetDeviceCount();
+    for (int i = 0; i < numDevices; ++i) {
+        if (const auto deviceInfo = Pa_GetDeviceInfo(i)) {
+            if (deviceInfo->name == pref)
+                return true;
+        }
+    }
+    return false;
+}
+
 void
 PortAudioLayer::updatePreference(AudioPreference& preference, int index, AudioDeviceType type)
 {
@@ -737,20 +871,45 @@ PaDeviceIndex
 PortAudioLayer::PortAudioLayerImpl::getApiIndexByType(AudioDeviceType type)
 {
     auto numDevices = Pa_GetDeviceCount();
-    if (numDevices < 0)
+    if (numDevices < 0) {
         SIP_CORE_ERR("PortAudioLayer error : %s", Pa_GetErrorText(numDevices));
-    else {
-        std::string_view toMatch = (type == AudioDeviceType::CAPTURE
-                                        ? deviceRecord_
-                                        : (type == AudioDeviceType::PLAYBACK ? devicePlayback_
-                                                                             : deviceRingtone_));
-        if (toMatch.empty())
-            return type == AudioDeviceType::CAPTURE ? Pa_GetDefaultInputDevice()
-                                                    : Pa_GetDefaultOutputDevice();
+        return paNoDevice;
+    }
+
+    const bool isCapture = (type == AudioDeviceType::CAPTURE);
+    std::string_view toMatch = (isCapture
+                                    ? deviceRecord_
+                                    : (type == AudioDeviceType::PLAYBACK ? devicePlayback_
+                                                                         : deviceRingtone_));
+    if (!toMatch.empty()) {
         for (int i = 0; i < numDevices; ++i) {
             if (const auto deviceInfo = Pa_GetDeviceInfo(i)) {
                 if (deviceInfo->name == toMatch)
                     return i;
+            }
+        }
+        // The stored preference no longer matches any enumerated device
+        // (renamed/removed endpoint, RDP session change, ...). Fall through
+        // to the default device so the stream still opens instead of
+        // silently failing the whole call with paNoDevice.
+        SIP_CORE_WARN() << "PortAudioLayer: configured " << (isCapture ? "capture" : "playback")
+                        << " device '" << toMatch << "' not found, falling back to default";
+    }
+
+    auto defaultIndex = isCapture ? Pa_GetDefaultInputDevice() : Pa_GetDefaultOutputDevice();
+    if (defaultIndex != paNoDevice)
+        return defaultIndex;
+
+    // No default device in the PortAudio snapshot (e.g. the default endpoint
+    // is disabled) — pick the first device of the right type so a usable
+    // endpoint still opens.
+    for (int i = 0; i < numDevices; ++i) {
+        if (const auto deviceInfo = Pa_GetDeviceInfo(i)) {
+            auto channels = isCapture ? deviceInfo->maxInputChannels : deviceInfo->maxOutputChannels;
+            if (channels > 0) {
+                SIP_CORE_WARN() << "PortAudioLayer: no default " << (isCapture ? "capture" : "playback")
+                                << " device, using '" << deviceInfo->name << "'";
+                return i;
             }
         }
     }
@@ -1187,8 +1346,14 @@ openFullDuplexStream(PaStream** stream,
                      PaStreamCallback* callback,
                      void* user_data)
 {
+    *stream = nullptr;
+
     auto input_device_info = Pa_GetDeviceInfo(inputDeviceIndex);
     auto output_device_info = Pa_GetDeviceInfo(ouputDeviceIndex);
+    if (!input_device_info || !output_device_info) {
+        SIP_CORE_ERR("PortAudioLayer error : invalid device info for full-duplex stream");
+        return;
+    }
 
     PaStreamParameters inputParams;
     inputParams.device = inputDeviceIndex;
@@ -1217,8 +1382,11 @@ openFullDuplexStream(PaStream** stream,
                              callback,
                              user_data);
 
-    if (err != paNoError)
+    if (err != paNoError) {
         SIP_CORE_ERR("PortAudioLayer error : %s", Pa_GetErrorText(err));
+        // Pa_OpenStream leaves *stream undefined on failure
+        *stream = nullptr;
+    }
 }
 
 bool
@@ -1278,6 +1446,7 @@ PortAudioLayer::PortAudioLayerImpl::initInputStream(PortAudioLayer& parent)
                      parent.audioInputFormat_.nb_channels);
     } else {
         SIP_CORE_ERR("[PortAudio Input] Error: No valid input device (paNoDevice). There will be no mic.");
+        emitSignal<libsip_core::ConfigurationSignal::DeviceOpenError>("No valid input device", false);
         return false;
     }
 
@@ -1342,6 +1511,7 @@ PortAudioLayer::PortAudioLayerImpl::initOutputStream(PortAudioLayer& parent, boo
         SIP_CORE_INFO("[PortAudio Output]   - Channels: %d", parent.audioFormat_.nb_channels);
     } else {
         SIP_CORE_ERR("[PortAudio Output] Error: No valid output device (paNoDevice). There will be no sound.");
+        emitSignal<libsip_core::ConfigurationSignal::DeviceOpenError>("No valid output device", true);
         return false;
     }
 
@@ -1374,6 +1544,8 @@ PortAudioLayer::PortAudioLayerImpl::initFullDuplexStream(PortAudioLayer& parent)
     
     if (apiIndexRecord == paNoDevice || apiIndexPlayback == paNoDevice) {
         SIP_CORE_ERR("[PortAudio FullDuplex] Error: Invalid input/output devices (paNoDevice). There will be no audio.");
+        emitSignal<libsip_core::ConfigurationSignal::DeviceOpenError>("No valid input/output device",
+                                                                      apiIndexPlayback == paNoDevice);
         return false;
     }
 
@@ -1420,6 +1592,13 @@ PortAudioLayer::PortAudioLayerImpl::initFullDuplexStream(PortAudioLayer& parent)
                                                statusFlags);
         },
         &parent);
+
+    if (!stream) {
+        // Caller (startStream ALL) falls back to separate input/output
+        // streams, which negotiate format/rate per device.
+        SIP_CORE_ERR("[PortAudio FullDuplex] Failed to open full-duplex stream");
+        return false;
+    }
 
     SIP_CORE_INFO("[PortAudio FullDuplex] Starting PortAudio I/O Streams");
     auto err = Pa_StartStream(stream);

@@ -200,6 +200,15 @@ public:
     void notifyIncomingCall();
 
     virtual void updatePreference(AudioPreference& pref, int index, AudioDeviceType type) = 0;
+
+    /**
+     * Whether the configured device preference for this type resolves to an
+     * actual device. A stale preference (device renamed/removed) makes the
+     * layer report the default index to the UI while still trying to use the
+     * dead name — re-selecting that index must then not be treated as a no-op.
+     */
+    virtual bool isPreferredDeviceResolved(AudioDeviceType) const { return true; }
+
     void notifyDevicesChanged() { devicesChanged(); }
 
 protected:

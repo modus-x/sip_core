@@ -57,6 +57,8 @@ public:
 
     void updatePreference(AudioPreference& pref, int index, AudioDeviceType type) override;
 
+    bool isPreferredDeviceResolved(AudioDeviceType type) const override;
+
 private:
     NON_COPYABLE(PortAudioLayer);
 
