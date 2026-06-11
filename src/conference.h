@@ -383,7 +383,14 @@ public:
     void updateConferenceInfo(ConfInfo confInfo);
     void setModerator(const std::string& uri, const bool& state);
     void hangupParticipant(const std::string& accountUri, const std::string& deviceId = "");
-    void setHandRaised(const std::string& uri, const bool& state);
+    /**
+     * Raise/lower a participant's hand. The participant is resolved from the
+     * account uri (deviceId is vestigial over plain SIP); the state itself is
+     * keyed by the host-side call id ("host" for the local host).
+     */
+    void setHandRaised(const std::string& accountUri,
+                       const std::string& deviceId,
+                       const bool& state);
     void setVoiceActivity(const std::string& id, const bool& newState);
     void setVoiceActivityForCall(const std::string& callId, const bool& newState);
     void setVoiceActivity(const Json::Value& json);
@@ -454,7 +461,8 @@ private:
 
     static std::shared_ptr<Call> getCall(const std::string& callId);
     bool isModerator(std::string_view uri) const;
-    bool isHandRaised(std::string_view uri) const;
+    /** `id` is a host-side call id, or "host" for the local host. */
+    bool isHandRaised(std::string_view id) const;
     bool isVoiceActive(std::string_view uri) const;
     void updateModerators();
     void updateHandsRaised();
@@ -501,7 +509,6 @@ private:
     ConfInfo getConfInfoHostUri(std::string_view localHostURI, std::string_view destURI);
     std::string voiceActivivtyToString(const ConfInfo&);
     bool isHost(std::string_view uri) const;
-    bool isHostDevice(std::string_view deviceId) const;
 
     /**
      * If the local host is participating in the conference (attached

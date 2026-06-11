@@ -32,6 +32,27 @@
 namespace sip_core {
 
 /**
+ * Canonical builders for outgoing V1 confOrder payloads:
+ *   {"version": 1, "<accountUri>": {"devices": {"<deviceId>": {...}}}}
+ * Shared by the client API (callmanager) and SIPCall so the wire shape stays
+ * consistent and unit-testable.
+ */
+namespace ConfOrder {
+
+Json::Value raiseHand(const std::string& accountUri, const std::string& deviceId, bool state);
+Json::Value hangupParticipant(const std::string& accountUri, const std::string& deviceId);
+Json::Value muteAudio(const std::string& accountUri,
+                      const std::string& deviceId,
+                      const std::string& streamId,
+                      bool state);
+Json::Value setActiveStream(const std::string& accountUri,
+                            const std::string& deviceId,
+                            const std::string& streamId,
+                            bool state);
+
+} // namespace ConfOrder
+
+/**
  * Used to parse confOrder objects
  * @note the user of this class must initialize the different lambdas.
  */
@@ -53,7 +74,12 @@ public:
     {
         hangupParticipant_ = std::move(cb);
     }
-    void onRaiseHand(std::function<void(const std::string&, bool)>&& cb)
+    /**
+     * Callback receives (accountUri, deviceId, state). The account URI is
+     * required for participant resolution: over plain SIP the device id is
+     * always empty (see specs/conference-actions.md, identity model).
+     */
+    void onRaiseHand(std::function<void(const std::string&, const std::string&, bool)>&& cb)
     {
         raiseHand_ = std::move(cb);
     }
@@ -120,7 +146,7 @@ private:
 
     std::function<bool(std::string_view)> checkAuthorization_;
     std::function<void(const std::string&, const std::string&)> hangupParticipant_;
-    std::function<void(const std::string&, bool)> raiseHand_;
+    std::function<void(const std::string&, const std::string&, bool)> raiseHand_;
     std::function<void(const std::string&, bool)> setActiveStream_;
     std::function<void(const std::string&, const std::string&, const std::string&, bool)>
         muteStreamAudio_;

@@ -94,14 +94,16 @@ Conference::Conference(const std::shared_ptr<Account>& account, const std::strin
     parser_.onHangupParticipant([&](const auto& accountUri, const auto& deviceId) {
         hangupParticipant(accountUri, deviceId);
     });
-    parser_.onRaiseHand([&](const auto& deviceId, bool state) { setHandRaised(deviceId, state); });
+    parser_.onRaiseHand([&](const auto& accountUri, const auto& deviceId, bool state) {
+        setHandRaised(accountUri, deviceId, state);
+    });
     parser_.onSetActiveStream(
         [&](const auto& streamId, bool state) { setActiveStream(streamId, state); });
     parser_.onMuteStreamAudio(
         [&](const auto& accountUri, const auto& deviceId, const auto& streamId, bool state) {
             muteStream(accountUri, deviceId, streamId, state);
         });
-    // parser_.onSetLayout([&](int layout) { setLayout(layout); });
+    parser_.onSetLayout([&](int layout) { setLayout(layout); });
 
     // Version 0, deprecated
     parser_.onKickParticipant([&](const auto& participantId) { hangupParticipant(participantId); });
@@ -109,11 +111,7 @@ Conference::Conference(const std::shared_ptr<Account>& account, const std::strin
         [&](const auto& participantId) { setActiveParticipant(participantId); });
     parser_.onMuteParticipant(
         [&](const auto& participantId, bool state) { muteParticipant(participantId, state); });
-    parser_.onRaiseHandUri([&](const auto& uri, bool state) {
-        if (auto call = std::dynamic_pointer_cast<SIPCall>(getCallFromPeerID(uri)))
-            if (auto transport = call->getTransport())
-                setHandRaised(std::string(transport->deviceId()), state);
-    });
+    parser_.onRaiseHandUri([&](const auto& uri, bool state) { setHandRaised(uri, "", state); });
 
     parser_.onVoiceActivity(
         [&](const auto& streamId, bool state) { setVoiceActivity(streamId, state); });
@@ -163,9 +161,9 @@ Conference::attachVideoMixerCallbacks()
                         isPeerRecording = call->isPeerRecording();
                         deviceId = "";
                     }
-                    std::string_view peerId = string_remove_suffix(uri, '@');
+                    std::string_view peerId = sip_utils::stripSipUriPrefix(uri);
                     auto isModerator = shared->isModerator(peerId);
-                    auto isHandRaised = shared->isHandRaised(deviceId);
+                    auto isHandRaised = shared->isHandRaised(callId);
                     auto isModeratorMuted = shared->isMuted(callId);
                     auto isVoiceActive = shared->isVoiceActive(info.streamId);
                     if (auto videoMixer = shared->videoMixer_)
@@ -191,13 +189,15 @@ Conference::attachVideoMixerCallbacks()
                     // If not local
                     auto streamInfo = shared->videoMixer_->streamInfo(info.source);
                     std::string streamId = streamInfo.streamId;
+                    std::string callId;
                     if (!streamId.empty()) {
                         // Retrieve calls participants
                         // TODO: this is a first version, we assume that the peer is not
                         // a master of a conference and there is only one remote
                         // In the future, we should retrieve confInfo from the call
                         // To merge layout information
-                        isModeratorMuted = shared->isMuted(streamId);
+                        // participantsMuted_ is keyed by call id, not stream id.
+                        isModeratorMuted = shared->isMuted(streamInfo.callId);
                         if (auto videoMixer = shared->videoMixer_)
                             active = videoMixer->verifyActive(streamId);
                         if (auto call = std::dynamic_pointer_cast<SIPCall>(
@@ -206,13 +206,14 @@ Conference::attachVideoMixerCallbacks()
                             isLocalMuted = call->isPeerMuted();
                             isPeerRecording = call->isPeerRecording();
                             deviceId = "";
+                            callId = streamInfo.callId;
                         }
                     } else {
                         streamId = sip_utils::streamId("", sip_utils::DEFAULT_VIDEO_STREAMID);
                         if (auto videoMixer = shared->videoMixer_)
                             active = videoMixer->verifyActive(streamId);
                     }
-                    std::string_view peerId = string_remove_suffix(uri, '@');
+                    std::string_view peerId = sip_utils::stripSipUriPrefix(uri);
                     auto isModerator = shared->isModerator(peerId);
                     if (uri.empty() && !hostAdded) {
                         hostAdded = true;
@@ -220,7 +221,8 @@ Conference::attachVideoMixerCallbacks()
                         isLocalMuted = shared->isMediaSourceMuted(MediaType::MEDIA_AUDIO);
                         isPeerRecording = shared->isRecording();
                     }
-                    auto isHandRaised = shared->isHandRaised(deviceId);
+                    auto isHandRaised = shared->isHandRaised(uri.empty() ? "host"
+                                                                         : std::string_view(callId));
                     auto isVoiceActive = shared->isVoiceActive(streamId);
                     newInfo.emplace_back(ParticipantInfo {std::move(uri),
                                                           deviceId,
@@ -237,7 +239,7 @@ Conference::attachVideoMixerCallbacks()
                                                           isHandRaised,
                                                           isVoiceActive,
                                                           isPeerRecording,
-                                                          ""});
+                                                          callId});
                 }
             }
             if (auto videoMixer = shared->videoMixer_) {
@@ -966,10 +968,8 @@ Conference::removeParticipant(const std::string& participant_id)
             return;
     }
     if (auto call = std::dynamic_pointer_cast<SIPCall>(getCall(participant_id))) {
-        const auto& peerId = getRemoteId(call);
         participantsMuted_.erase(call->getCallId());
-        if (auto transport = call->getTransport())
-            handsRaised_.erase(std::string(transport->deviceId()));
+        handsRaised_.erase(call->getCallId());
 #ifdef ENABLE_VIDEO
         // TODO all streams
         if (videoMixer_->verifyActive(
@@ -1356,48 +1356,43 @@ Conference::isModerator(std::string_view uri) const
 }
 
 bool
-Conference::isHandRaised(std::string_view deviceId) const
+Conference::isHandRaised(std::string_view id) const
 {
-    return isHostDevice(deviceId) ? handsRaised_.find("host"sv) != handsRaised_.end()
-                                  : handsRaised_.find(deviceId) != handsRaised_.end();
+    // `id` is a host-side call id, or "host" for the local host.
+    return handsRaised_.find(id) != handsRaised_.end();
 }
 
 void
-Conference::setHandRaised(const std::string& deviceId, const bool& state)
+Conference::setHandRaised(const std::string& accountUri,
+                          const std::string& deviceId,
+                          const bool& state)
 {
-    if (isHostDevice(deviceId)) {
-        auto isPeerRequiringAttention = isHandRaised("host"sv);
-        if (state and not isPeerRequiringAttention) {
-            SIP_CORE_DBG("Raise host hand");
-            handsRaised_.emplace("host"sv);
-            updateHandsRaised();
-        } else if (not state and isPeerRequiringAttention) {
-            SIP_CORE_DBG("Lower host hand");
-            handsRaised_.erase("host");
-            updateHandsRaised();
-        }
+    // Hands are keyed by the host-side call id ("host" for the local host):
+    // it is the only unique participant key over plain SIP, where transport
+    // device ids are always empty and peer numbers may be duplicated
+    // (specs/conference-actions.md, D6).
+    const auto uri = std::string(sip_utils::stripSipUriPrefix(accountUri));
+    std::string key;
+    if (isHost(uri)) {
+        key = "host";
+    } else if (auto call = getCallWith(uri, deviceId)) {
+        key = call->getCallId();
+    } else if (auto call = getCallFromPeerID(uri)) {
+        key = call->getCallId();
     } else {
-        for (const auto& p : getParticipantList()) {
-            if (auto call = std::dynamic_pointer_cast<SIPCall>(getCall(p))) {
-                auto isPeerRequiringAttention = isHandRaised(deviceId);
-                std::string callDeviceId;
-                if (auto transport = call->getTransport())
-                    callDeviceId = transport->deviceId();
-                if (deviceId == callDeviceId) {
-                    if (state and not isPeerRequiringAttention) {
-                        SIP_CORE_DEBUG("Raise {:s} hand", deviceId);
-                        handsRaised_.emplace(deviceId);
-                        updateHandsRaised();
-                    } else if (not state and isPeerRequiringAttention) {
-                        SIP_CORE_DEBUG("Remove {:s} raised hand", deviceId);
-                        handsRaised_.erase(deviceId);
-                        updateHandsRaised();
-                    }
-                    return;
-                }
-            }
-        }
-        SIP_CORE_WARN("Fail to raise %s hand (participant not found)", deviceId.c_str());
+        SIP_CORE_WARN("Fail to raise %s hand (participant not found)", accountUri.c_str());
+        return;
+    }
+
+    auto isPeerRequiringAttention = isHandRaised(key);
+    if (state and not isPeerRequiringAttention) {
+        SIP_CORE_DEBUG("Raise {:s} hand", key);
+        handsRaised_.emplace(key);
+        updateHandsRaised();
+    } else if (not state and isPeerRequiringAttention) {
+        SIP_CORE_DEBUG("Remove {:s} raised hand", key);
+        handsRaised_.erase(key);
+        updateHandsRaised();
     }
 }
 
@@ -1584,8 +1579,9 @@ Conference::setVoiceInactiveHoldMs(int holdMs)
 }
 
 void
-Conference::setModerator(const std::string& participant_id, const bool& state)
+Conference::setModerator(const std::string& participant_uri, const bool& state)
 {
+    const auto participant_id = std::string(sip_utils::stripSipUriPrefix(participant_uri));
     for (const auto& p : getParticipantList()) {
         if (auto call = getCall(p)) {
             auto isPeerModerator = isModerator(participant_id);
@@ -1612,7 +1608,7 @@ Conference::updateModerators()
     {
         std::lock_guard<std::mutex> lk(confInfoMutex_);
         for (auto& info : confInfo_) {
-            info.isModerator = isModerator(string_remove_suffix(info.uri, '@'));
+            info.isModerator = isModerator(sip_utils::stripSipUriPrefix(info.uri));
         }
     }
     // Call sendConferenceInfos() outside the lock to avoid deadlocks
@@ -1626,7 +1622,8 @@ Conference::updateHandsRaised()
     {
         std::lock_guard<std::mutex> lk(confInfoMutex_);
         for (auto& info : confInfo_)
-            info.handRaised = isHandRaised(info.device);
+            info.handRaised = info.uri.empty() ? isHandRaised("host"sv)
+                                               : isHandRaised(info.callId);
     }
     // Call sendConferenceInfos() outside the lock to avoid deadlocks
     sendConferenceInfos();
@@ -1691,13 +1688,28 @@ Conference::isMuted(std::string_view callId) const
 void
 Conference::muteStream(const std::string& accountUri,
                        const std::string& deviceId,
-                       const std::string&,
+                       const std::string& streamId,
                        const bool& state)
 {
     if (auto acc = std::dynamic_pointer_cast<SIPAccount>(account_.lock())) {
-        if (accountUri == acc->getUsername()) {
+        const auto uri = std::string(sip_utils::stripSipUriPrefix(accountUri));
+        if (uri == acc->getUsername()
+            || (uri.empty() && streamId.rfind("host_", 0) == 0)) {
             muteHost(state);
-        } else if (auto call = getCallWith(accountUri, deviceId)) {
+            return;
+        }
+        // Participant streams are "<callId>_<label>" — the call id embedded
+        // in the stream id is the only unique addressing over plain SIP
+        // (device ids are empty, peer numbers may be duplicated, D7).
+        for (const auto& p : getParticipantList()) {
+            if (!streamId.empty() && streamId.rfind(p + "_", 0) == 0) {
+                muteCall(p, state);
+                return;
+            }
+        }
+        if (auto call = getCallWith(uri, deviceId)) {
+            muteCall(call->getCallId(), state);
+        } else if (auto call = getCallFromPeerID(uri)) {
             muteCall(call->getCallId(), state);
         } else {
             SIP_CORE_WARN("No call with %s - %s", accountUri.c_str(), deviceId.c_str());
@@ -1971,12 +1983,6 @@ Conference::isHost(std::string_view uri) const
     return false;
 }
 
-bool
-Conference::isHostDevice(std::string_view deviceId) const
-{
-    return false;
-}
-
 void
 Conference::updateConferenceInfo(ConfInfo confInfo)
 {
@@ -1989,9 +1995,10 @@ Conference::updateConferenceInfo(ConfInfo confInfo)
 }
 
 void
-Conference::hangupParticipant(const std::string& accountUri, const std::string& deviceId)
+Conference::hangupParticipant(const std::string& participantUri, const std::string& deviceId)
 {
     if (auto acc = std::dynamic_pointer_cast<SIPAccount>(account_.lock())) {
+        const auto accountUri = std::string(sip_utils::stripSipUriPrefix(participantUri));
         if (deviceId.empty()) {
             // If deviceId is empty, hangup all calls with device
             while (auto call = getCallFromPeerID(accountUri)) {
@@ -2208,6 +2215,7 @@ Conference::findHostforRemoteParticipant(std::string_view uri, std::string_view 
 std::shared_ptr<Call>
 Conference::getCallFromPeerID(std::string_view peerID)
 {
+    peerID = sip_utils::stripSipUriPrefix(peerID);
     for (const auto& p : getParticipantList()) {
         auto call = getCall(p);
         if (call && getRemoteId(call) == peerID) {
@@ -2220,11 +2228,15 @@ Conference::getCallFromPeerID(std::string_view peerID)
 std::shared_ptr<Call>
 Conference::getCallWith(const std::string& accountUri, const std::string& deviceId)
 {
+    // Strip both sides: confInfo publishes the raw peer number (possibly a
+    // full bracketed URI), so clients legitimately pass it back verbatim.
+    const auto uri = sip_utils::stripSipUriPrefix(accountUri);
     for (const auto& p : getParticipantList()) {
         if (auto call = std::dynamic_pointer_cast<SIPCall>(getCall(p))) {
             auto transport = call->getTransport();
-            if (accountUri == string_remove_suffix(call->getPeerNumber(), '@') && transport
-                && deviceId == transport->deviceId()) {
+            const auto callDeviceId = transport ? transport->deviceId() : std::string_view {};
+            if (uri == sip_utils::stripSipUriPrefix(call->getPeerNumber())
+                && deviceId == callDeviceId) {
                 return call;
             }
         }
@@ -2235,7 +2247,14 @@ Conference::getCallWith(const std::string& accountUri, const std::string& device
 std::string
 Conference::getRemoteId(const std::shared_ptr<sip_core::Call>& call) const
 {
-    return call->getCallId();
+    // The peer username (the user part of the peer URI) is the conference-
+    // protocol peer identity: it is what remote clients put as the account
+    // uri in confOrders and what the moderator preferences contain. Returning
+    // the call id here (as this used to) split the identity namespace and
+    // broke every uri-addressed action (specs/conference-actions.md, D5).
+    // getPeerNumber() may be a full bracketed URI ("<sip:009@dom>"), so the
+    // full stripper is required, not just the @domain suffix removal.
+    return std::string(sip_utils::stripSipUriPrefix(call->getPeerNumber()));
 }
 
 void

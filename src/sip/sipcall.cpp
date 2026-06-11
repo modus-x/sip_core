@@ -31,6 +31,7 @@
 #include "logger.h"
 #include "sdp.h"
 #include "manager.h"
+#include "conference_protocol.h"
 #include "string_utils.h"
 #include "connectivity/sip_utils.h"
 #include "audio/audio_rtp_session.h"
@@ -4012,20 +4013,8 @@ SIPCall::setActiveMediaStream(const std::string& accountUri,
 #endif
 
     if (Call::conferenceProtocolVersion() == 1) {
-        Json::Value sinkVal;
-        sinkVal["active"] = state;
-        Json::Value mediasObj;
-        mediasObj[remoteStreamId] = sinkVal;
-        Json::Value deviceVal;
-        deviceVal["medias"] = mediasObj;
-        Json::Value deviceObj;
-        deviceObj[deviceId] = deviceVal;
-        Json::Value accountVal;
-        deviceVal["devices"] = deviceObj;
-        Json::Value root;
-        root[accountUri] = deviceVal;
-        root["version"] = 1;
-        Call::sendConfOrder(root);
+        Call::sendConfOrder(
+            sip_core::ConfOrder::setActiveStream(accountUri, deviceId, remoteStreamId, state));
     } else if (Call::conferenceProtocolVersion() == 0) {
         Json::Value root;
         root["activeParticipant"] = accountUri;

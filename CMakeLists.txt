@@ -877,6 +877,10 @@ if(BUILD_TESTING)
   target_link_libraries(media_recorder_tests PRIVATE ${PROJECT_NAME})
   add_test(NAME media_recorder_tests COMMAND media_recorder_tests)
 
+  add_executable(conference_protocol_tests tests/conference_protocol_tests.cpp)
+  target_link_libraries(conference_protocol_tests PRIVATE ${PROJECT_NAME})
+  add_test(NAME conference_protocol_tests COMMAND conference_protocol_tests)
+
   if(APPLE AND NOT IOS)
     # Pure-logic unit tests for the CoreAudio device-change snapshot helpers
     # that suppress VoiceProcessingIO's VPAggregate churn (root cause of the

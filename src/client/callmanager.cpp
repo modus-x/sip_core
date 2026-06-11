@@ -32,6 +32,7 @@
 #include "sip/sipaccount.h"
 #include "audio/audiolayer.h"
 #include "media/media_attribute.h"
+#include "conference_protocol.h"
 #include "string_utils.h"
 
 #include "logger.h"
@@ -618,20 +619,8 @@ muteStream(const std::string& accountId,
             conf->muteStream(accountUri, deviceId, streamId, state);
         } else if (auto call = account->getCall(confId)) {
             if (call->conferenceProtocolVersion() == 1) {
-                Json::Value sinkVal;
-                sinkVal["muteAudio"] = state;
-                Json::Value mediasObj;
-                mediasObj[streamId] = sinkVal;
-                Json::Value deviceVal;
-                deviceVal["medias"] = mediasObj;
-                Json::Value deviceObj;
-                deviceObj[deviceId] = deviceVal;
-                Json::Value accountVal;
-                deviceVal["devices"] = deviceObj;
-                Json::Value root;
-                root[accountUri] = deviceVal;
-                root["version"] = 1;
-                call->sendConfOrder(root);
+                call->sendConfOrder(
+                    sip_core::ConfOrder::muteAudio(accountUri, deviceId, streamId, state));
             } else if (call->conferenceProtocolVersion() == 0) {
                 Json::Value root;
                 root["muteParticipant"] = accountUri;
@@ -690,16 +679,7 @@ hangupParticipant(const std::string& accountId,
         } else if (auto call = std::static_pointer_cast<sip_core::SIPCall>(
                        account->getCall(confId))) {
             if (call->conferenceProtocolVersion() == 1) {
-                Json::Value deviceVal;
-                deviceVal["hangup"] = sip_core::TRUE_STR;
-                Json::Value deviceObj;
-                deviceObj[deviceId] = deviceVal;
-                Json::Value accountVal;
-                deviceVal["devices"] = deviceObj;
-                Json::Value root;
-                root[accountUri] = deviceVal;
-                root["version"] = 1;
-                call->sendConfOrder(root);
+                call->sendConfOrder(sip_core::ConfOrder::hangupParticipant(accountUri, deviceId));
             } else if (call->conferenceProtocolVersion() == 0) {
                 Json::Value root;
                 root["hangupParticipant"] = accountUri;
@@ -718,11 +698,7 @@ raiseParticipantHand(const std::string& accountId,
     SIP_CORE_ERR() << "raiseParticipantHand is deprecated, please use raiseHand";
     if (const auto account = sip_core::Manager::instance().getAccount(accountId)) {
         if (auto conf = account->getConference(confId)) {
-            if (auto call = std::static_pointer_cast<sip_core::SIPCall>(
-                    conf->getCallFromPeerID(peerId))) {
-                if (auto transport = call->getTransport())
-                    conf->setHandRaised(std::string(transport->deviceId()), state);
-            }
+            conf->setHandRaised(peerId, "", state);
         } else if (auto call = account->getCall(confId)) {
             Json::Value root;
             root["handRaised"] = peerId;
@@ -742,23 +718,14 @@ raiseHand(const std::string& accountId,
     if (const auto account = sip_core::Manager::instance().getAccount<sip_core::SIPAccount>(
             accountId)) {
         if (auto conf = account->getConference(confId)) {
-            auto device = deviceId;
-            conf->setHandRaised(device, state);
+            conf->setHandRaised(accountUri.empty() ? account->getUsername() : accountUri,
+                                deviceId,
+                                state);
         } else if (auto call = std::static_pointer_cast<sip_core::SIPCall>(
                        account->getCall(confId))) {
             if (call->conferenceProtocolVersion() == 1) {
-                Json::Value deviceVal;
-                deviceVal["raiseHand"] = state;
-                Json::Value deviceObj;
-                std::string device = deviceId;
-                deviceObj[device] = deviceVal;
-                Json::Value accountVal;
-                deviceVal["devices"] = deviceObj;
-                Json::Value root;
                 std::string uri = accountUri.empty() ? account->getUsername() : accountUri;
-                root[uri] = deviceVal;
-                root["version"] = 1;
-                call->sendConfOrder(root);
+                call->sendConfOrder(sip_core::ConfOrder::raiseHand(uri, deviceId, state));
             } else if (call->conferenceProtocolVersion() == 0) {
                 Json::Value root;
                 root["handRaised"] = account->getUsername();
