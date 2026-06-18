@@ -23,6 +23,8 @@
 #include "config.h"
 #endif
 
+#include <map>
+#include <string>
 #include <string_view>
 #include <functional>
 #include <json/json.h>
@@ -51,6 +53,30 @@ Json::Value setActiveStream(const std::string& accountUri,
                             bool state);
 
 } // namespace ConfOrder
+
+/**
+ * Conference-control SIP body content-types (confInfo / confOrder /
+ * confVoiceActivity). These carry conference STATE between the host and the
+ * participants; unlike chat, a delivery failure must never tear the call down.
+ * @return true if @p payloads contains any conference-control part.
+ */
+bool isConferenceControlPayload(const std::map<std::string, std::string>& payloads);
+
+/**
+ * Pure form of confInfoOutOfDialogEnabled(): decide from a raw env value.
+ * @param envValue value of SIP_CORE_CONFINFO_IN_DIALOG (nullptr if unset).
+ * @return true (out-of-dialog) unless @p envValue is exactly "1".
+ */
+bool confInfoOutOfDialogEnabledFromEnv(const char* envValue);
+
+/**
+ * Whether conference-control payloads are delivered OUT-OF-DIALOG (default) so a
+ * delivery timeout cannot trigger RFC 3261 §12.2.1.2 and disconnect the call
+ * (the "in-dialog confInfo INFO 408 kicks a participant" bug). Reads
+ * SIP_CORE_CONFINFO_IN_DIALOG once; set it to "1" to restore the legacy
+ * in-dialog INFO path.
+ */
+bool confInfoOutOfDialogEnabled();
 
 /**
  * Used to parse confOrder objects
