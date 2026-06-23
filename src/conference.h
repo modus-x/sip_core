@@ -481,7 +481,14 @@ private:
     ConfInfo confInfo_ {};
 
     void sendConferenceInfos();
+    // Rate-limited entry point (called from updateVoiceActivity()). Voice state
+    // flips far faster than is useful to broadcast; flooding remote participants
+    // with confVoiceActivity INFO gets them dropped by strict SIP servers.
     void sendVoiceActivity();
+    // Actually emits the SIP INFO + client signal (the throttled work).
+    void doSendVoiceActivity();
+    // Trailing-edge send, runs on the Manager scheduler thread.
+    void flushVoiceActivity();
     std::shared_ptr<RingBuffer> ghostRingBuffer_;
 
 #ifdef ENABLE_VIDEO
@@ -500,6 +507,14 @@ private:
 
     // stream IDs
     std::set<std::string, std::less<>> streamsVoiceActive {};
+
+    // Voice-activity SIP INFO throttle (leading + trailing edge). The first
+    // change is sent immediately; bursts of flips within VOICE_ACTIVITY_MIN_INTERVAL
+    // collapse into a single trailing send carrying the latest state.
+    std::mutex voiceActivityMutex_ {};
+    std::chrono::steady_clock::time_point lastVoiceActivitySent_ {};
+    bool voiceActivitySendPending_ {false};
+    static constexpr std::chrono::milliseconds VOICE_ACTIVITY_MIN_INTERVAL {250};
 
     void initRecorder(std::shared_ptr<MediaRecorder>& rec);
     void deinitRecorder(std::shared_ptr<MediaRecorder>& rec);

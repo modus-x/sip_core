@@ -109,6 +109,12 @@ VideoReceiveThread::setup()
         },
         args_.width,
         args_.height));
+    // Drop-to-live on the RECEIVE path: skip rendering frames whose capture
+    // time has fallen behind wall-clock by >200ms, so a slow local pipeline
+    // catches up to live instead of accumulating an unbounded backlog (the
+    // ~10s latency bug). Mirrors the capture-side call in video_input.cpp;
+    // the drop logic itself lives in MediaDecoder::decode().
+    videoDecoder_->enableLateFrameDrop(std::chrono::milliseconds(200));
     videoDecoder_->setContextCallback([this]() {
         if (recorderCallback_)
             recorderCallback_(getInfo());

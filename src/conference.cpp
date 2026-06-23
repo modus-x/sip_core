@@ -907,6 +907,48 @@ Conference::sendConferenceInfos()
 void
 Conference::sendVoiceActivity()
 {
+    // Throttle: voice activity toggles many times per second (16+/s observed),
+    // and emitting a confVoiceActivity INFO per flip floods remote participants,
+    // tripping SIP-server flood protection (peer dropped ~30s in). Send the first
+    // change immediately for responsiveness, then coalesce subsequent flips into a
+    // single trailing send that carries the latest state.
+    const auto now = std::chrono::steady_clock::now();
+    {
+        std::lock_guard<std::mutex> lk(voiceActivityMutex_);
+        if (voiceActivitySendPending_)
+            return; // a trailing send is already scheduled; it will carry the latest state
+
+        const auto elapsed = now - lastVoiceActivitySent_;
+        if (elapsed < VOICE_ACTIVITY_MIN_INTERVAL) {
+            voiceActivitySendPending_ = true;
+            std::weak_ptr<Conference> w = weak_from_this();
+            Manager::instance().scheduleTaskIn(
+                [w] {
+                    if (auto shared = w.lock())
+                        shared->flushVoiceActivity();
+                },
+                VOICE_ACTIVITY_MIN_INTERVAL - elapsed);
+            return;
+        }
+        lastVoiceActivitySent_ = now;
+    }
+    doSendVoiceActivity();
+}
+
+void
+Conference::flushVoiceActivity()
+{
+    {
+        std::lock_guard<std::mutex> lk(voiceActivityMutex_);
+        voiceActivitySendPending_ = false;
+        lastVoiceActivitySent_ = std::chrono::steady_clock::now();
+    }
+    doSendVoiceActivity();
+}
+
+void
+Conference::doSendVoiceActivity()
+{
     // Inform calls that voiceActivity changed
     foreachCall([&](auto call) {
         // Produce specific JSON for each participant (2 separate accounts can host ...

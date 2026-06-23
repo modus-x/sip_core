@@ -36,7 +36,16 @@ public:
 
     void enableAutomaticGainControl(bool) override {};
 
-    void enableVoiceActivityDetection(bool) override {};
+    void enableVoiceActivityDetection(bool enabled) override { vadEnabled_ = enabled; };
+
+private:
+    // Energy/RMS voice-activity detection. webrtc-audio-processing is not built
+    // on macOS/iOS (Darwin is excluded from the contrib recipe), so the WebRTC
+    // VAD is unavailable there; this lightweight detector lets the conference
+    // "speaking" indicator work for both the local mic and each received stream.
+    bool computeRawVoice(const std::shared_ptr<AudioFrame>& frame) const;
+
+    std::atomic_bool vadEnabled_ {false};
 };
 
 } // namespace sip_core

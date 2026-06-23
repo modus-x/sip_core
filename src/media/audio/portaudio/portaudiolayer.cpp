@@ -877,6 +877,20 @@ PortAudioLayer::PortAudioLayerImpl::getApiIndexByType(AudioDeviceType type)
     }
 
     const bool isCapture = (type == AudioDeviceType::CAPTURE);
+
+    // A default endpoint is only usable if it actually exposes channels of the
+    // requested direction; a render-only "default" (or a disabled endpoint that
+    // PortAudio still reports) must be skipped so we never open a device that
+    // can't capture/play.
+    auto usableForType = [&](PaDeviceIndex index) -> bool {
+        if (index == paNoDevice)
+            return false;
+        const auto info = Pa_GetDeviceInfo(index);
+        if (!info)
+            return false;
+        return (isCapture ? info->maxInputChannels : info->maxOutputChannels) > 0;
+    };
+
     std::string_view toMatch = (isCapture
                                     ? deviceRecord_
                                     : (type == AudioDeviceType::PLAYBACK ? devicePlayback_
@@ -896,8 +910,21 @@ PortAudioLayer::PortAudioLayerImpl::getApiIndexByType(AudioDeviceType type)
                         << " device '" << toMatch << "' not found, falling back to default";
     }
 
+    // Empty preference ("{{Default}}") or an unresolved stored name: follow the
+    // Windows COMMUNICATIONS-role default endpoint (eCommunications). A VoIP app
+    // must track the "Default Communication Device", NOT the eConsole/multimedia
+    // "Default Device" returned by Pa_GetDefault{Input,Output}Device — on the
+    // many machines where the two roles differ, the eConsole default is a
+    // valid-but-wrong endpoint (often not the user's mic), so the call opens
+    // with no outgoing audio until the device is re-picked by name.
+    auto commIndex = isCapture ? Pa_GetDefaultCommInputDevice() : Pa_GetDefaultCommOutputDevice();
+    if (usableForType(commIndex))
+        return commIndex;
+
+    // No usable communications default (none configured for this role) — fall
+    // back to the regular eConsole default.
     auto defaultIndex = isCapture ? Pa_GetDefaultInputDevice() : Pa_GetDefaultOutputDevice();
-    if (defaultIndex != paNoDevice)
+    if (usableForType(defaultIndex))
         return defaultIndex;
 
     // No default device in the PortAudio snapshot (e.g. the default endpoint
@@ -923,9 +950,16 @@ PortAudioLayer::PortAudioLayerImpl::getApiDefaultDeviceName(AudioDeviceType type
     std::string deviceName {};
     PaDeviceIndex deviceIndex {paNoDevice};
     if (type == AudioDeviceType::CAPTURE) {
-        deviceIndex = Pa_GetDefaultInputDevice();
+        deviceIndex = commDevice ? Pa_GetDefaultCommInputDevice() : Pa_GetDefaultInputDevice();
+        // No communications-role default — name the eConsole default instead so
+        // the "{{Default}} - <name>" label still matches the endpoint that
+        // getApiIndexByType falls back to and opens.
+        if (commDevice && deviceIndex == paNoDevice)
+            deviceIndex = Pa_GetDefaultInputDevice();
     } else {
-        deviceIndex = Pa_GetDefaultOutputDevice();
+        deviceIndex = commDevice ? Pa_GetDefaultCommOutputDevice() : Pa_GetDefaultOutputDevice();
+        if (commDevice && deviceIndex == paNoDevice)
+            deviceIndex = Pa_GetDefaultOutputDevice();
     }
     if (const auto deviceInfo = Pa_GetDeviceInfo(deviceIndex)) {
         deviceName = deviceInfo->name;
