@@ -650,10 +650,10 @@ CallController::hangUp()
 }
 
 void
-CallController::proccesEvents()
+CallController::proccesEvents(int32_t timeout)
 {
     SDL_Event event;
-    while (SDL_PollEvent(&event)) {
+    while (SDL_WaitEventTimeout(&event, timeout)) {
         if (event.type == EVENT_FRAME_READY) {
             std::unique_ptr<std::string> args((std::string*) event.user.data1);
 

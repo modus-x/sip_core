@@ -29,10 +29,8 @@ std::string password = "12345";
 std::string domain = "192.168.92.43";
 
 std::atomic_bool g_needFinish(false);
-std::queue<std::vector<std::string>> g_command_queue;
-std::mutex g_queue_mutex;
 
-void consoleInputLoop();
+void consoleInputLoop(CallController&);
 std::string getPassword(const std::string& prompt);
 std::string getInput(const std::string& prompt);
 std::vector<std::string> split(const std::string& s);
@@ -47,7 +45,7 @@ main()
               << std::endl;
 
     CallController controller(ACCOUNT_ID);
-    std::thread input_thread(consoleInputLoop);
+    std::thread input_thread(consoleInputLoop, std::ref(controller));
 
     if (!controller.init()) {
         std::cerr << "Error: can't initialize sip." << std::endl;
@@ -97,17 +95,27 @@ main()
     }
 
     while (true) {
-        controller.proccesEvents();
+        controller.proccesEvents(500);
+    }
 
-        std::vector<std::string> tokens;
-        {
-            std::lock_guard<std::mutex> lock(g_queue_mutex);
-            if (g_command_queue.empty())
-                continue;
+    g_needFinish.store(true);
+    std::cout << "Press enter to exit..." << std::endl;
 
-            tokens = g_command_queue.front();
-            g_command_queue.pop();
-        }
+    if (input_thread.joinable())
+        input_thread.join();
+
+    return 0;
+}
+
+void
+consoleInputLoop(CallController& controller)
+{
+    std::string line;
+    while (!g_needFinish.load()) {
+        getline(std::cin, line);
+        std::vector<std::string> tokens = split(line);
+        if (tokens.empty())
+            continue;
 
         std::string command = tokens[0];
         transform(command.begin(), command.end(), command.begin(), ::tolower);
@@ -362,31 +370,6 @@ main()
                          "subscribe to events.\n unsubscribe <uri1>... - unsubscribe from events.\n"
                          "dtmf <dtmf code> - send dtmf code for active call.\n"
                          "exit - exit program." << std::endl;
-        }
-    }
-
-    g_needFinish.store(true);
-    std::cout << "Press enter to exit..." << std::endl;
-
-    if (input_thread.joinable())
-        input_thread.join();
-
-    return 0;
-}
-
-void
-consoleInputLoop()
-{
-    std::string line;
-    while (!g_needFinish.load()) {
-        getline(std::cin, line);
-        std::vector<std::string> tokens = split(line);
-        if (tokens.empty())
-            continue;
-
-        {
-            std::lock_guard<std::mutex> lock(g_queue_mutex);
-            g_command_queue.push(tokens);
         }
     }
 }

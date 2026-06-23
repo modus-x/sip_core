@@ -58,7 +58,7 @@ public:
     void setAudioCaptureDevice(int index);
     void setAudioPlaybackDevice(int index);
 
-    void proccesEvents();
+    void proccesEvents(int32_t timeout);
 
     // Presence testing helper
     void publishPresence(bool available, const std::string& note);
