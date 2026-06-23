@@ -223,12 +223,40 @@ SIPAccountBase::onTextMessage(const std::string& id,
     // missing match must not surface conference JSON as a chat message.
     if (confInfoOutOfDialogEnabled() && isConferenceControlPayload(payloads)) {
         std::shared_ptr<Call> target;
+        // A B2BUA in the path (e.g. RTC CallManager) can present a From that is
+        // NOT the call's recorded peer, so peerIdMatches fails even though the
+        // message belongs to our one live conference call. In-dialog INFO never
+        // had this problem (pjsip routed it by dialog tag); out-of-dialog MESSAGE
+        // must re-derive the call, so fall back to the sole live call.
+        // ponytail: single-live-call heuristic; with 2+ concurrent live calls and
+        // a failed peer-match we still drop -- re-add per-leg correlation (e.g. a
+        // sender-supplied call hint) only if that case actually appears.
+        std::shared_ptr<Call> soleLiveCall;
+        unsigned liveCallCount = 0;
         for (const auto& callId : getCallList()) {
             auto call = Manager::instance().getCallFromCallID(callId);
-            if (call && peerIdMatches(call->getPeerNumber(), from)) {
+            if (!call)
+                continue;
+            if (peerIdMatches(call->getPeerNumber(), from)) {
+                SIP_CORE_DBG("Out-of-dialog conference message from %s matched call %s by peer %s",
+                             from.c_str(),
+                             call->getCallId().c_str(),
+                             call->getPeerNumber().c_str());
                 target = call;
                 break;
             }
+            const auto st = call->getState();
+            if (st == Call::CallState::ACTIVE || st == Call::CallState::HOLD) {
+                ++liveCallCount;
+                soleLiveCall = call;
+            }
+        }
+        if (!target && liveCallCount == 1) {
+            SIP_CORE_DBG("Out-of-dialog conference message from %s: no peer match, "
+                         "delivering to sole live call %s",
+                         from.c_str(),
+                         soleLiveCall->getCallId().c_str());
+            target = soleLiveCall;
         }
         if (target) {
             // Mirror the in-dialog path (sipvoiplink transaction_request_cb): run
@@ -239,8 +267,10 @@ SIPAccountBase::onTextMessage(const std::string& id,
                 target->onTextMessage(std::move(copy));
             });
         } else {
-            SIP_CORE_WARN("Out-of-dialog conference message from %s: no matching call",
-                          from.c_str());
+            SIP_CORE_WARN("Out-of-dialog conference message from %s dropped: no peer match "
+                          "and %u live call(s) (need exactly 1 to fall back)",
+                          from.c_str(),
+                          liveCallCount);
         }
         return;
     }
