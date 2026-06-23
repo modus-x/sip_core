@@ -565,10 +565,6 @@ void Call::localVoice(bool state)
 
     } else {
         // we are in a one-to-one call
-        // send voice activity over SIP
-        // TODO: change the streamID once multiple streams are supported
-        // thisPtr->sendVoiceActivity("-1", voice);
-
         // TODO: maybe emit signal here for local voice activity
     }
 }

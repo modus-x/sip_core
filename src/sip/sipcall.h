@@ -376,7 +376,6 @@ private:
     void setupVoiceCallback(const std::shared_ptr<RtpSession>& rtpSession);
 
     void sendMuteState(bool state);
-    // void sendVoiceActivity(std::string_view streamId, bool state);
 
     /**
      * Send device orientation through SIP INFO

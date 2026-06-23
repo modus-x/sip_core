@@ -1154,31 +1154,6 @@ SIPCall::sendMuteState(bool state)
     }
 }
 
-// void
-// SIPCall::sendVoiceActivity(std::string_view streamId, bool state)
-// {
-//     // dont send streamId if it's -1
-//     std::string streamIdPart = "";
-//     if (streamId != "-1" && !streamId.empty()) {
-//         streamIdPart = fmt::format("<stream_id>{}</stream_id>", streamId);
-//     }
-
-//     std::string BODY = "<?xml version=\"1.0\" encoding=\"utf-8\" ?>"
-//                        "<media_control><vc_primitive>"
-//                        + streamIdPart
-//                        + "<to_encoder>"
-//                          "<voice_activity="
-//                        + std::to_string(state)
-//                        + "/>"
-//                          "</to_encoder></vc_primitive></media_control>";
-
-//     try {
-//         sendSIPInfo(BODY, "media_control+xml");
-//     } catch (const std::exception& e) {
-//         SIP_CORE_ERR("Error sending voice activity state: %s", e.what());
-//     }
-// }
-
 void
 SIPCall::setInviteSession(pjsip_inv_session* inviteSession)
 {
