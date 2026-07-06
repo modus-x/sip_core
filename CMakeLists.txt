@@ -883,10 +883,6 @@ if(BUILD_TESTING)
   target_link_libraries(conference_protocol_tests PRIVATE ${PROJECT_NAME})
   add_test(NAME conference_protocol_tests COMMAND conference_protocol_tests)
 
-  add_executable(confinfo_out_of_dialog_tests tests/confinfo_out_of_dialog_tests.cpp)
-  target_link_libraries(confinfo_out_of_dialog_tests PRIVATE ${PROJECT_NAME})
-  add_test(NAME confinfo_out_of_dialog_tests COMMAND confinfo_out_of_dialog_tests)
-
   if(APPLE AND NOT IOS)
     # Pure-logic unit tests for the CoreAudio device-change snapshot helpers
     # that suppress VoiceProcessingIO's VPAggregate churn (root cause of the

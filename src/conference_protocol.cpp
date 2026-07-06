@@ -22,8 +22,6 @@
 
 #include "string_utils.h"
 
-#include <cstdlib>
-
 namespace sip_core {
 
 namespace ProtocolKeys {
@@ -120,33 +118,6 @@ setActiveStream(const std::string& accountUri,
 }
 
 } // namespace ConfOrder
-
-bool
-isConferenceControlPayload(const std::map<std::string, std::string>& payloads)
-{
-    for (const auto& part : payloads) {
-        const auto& mime = part.first;
-        if (mime == "application/confInfo+json" || mime == "application/confOrder+json"
-            || mime == "application/confVoiceActivity+json")
-            return true;
-    }
-    return false;
-}
-
-bool
-confInfoOutOfDialogEnabledFromEnv(const char* envValue)
-{
-    // Out-of-dialog by default; only an explicit "1" restores legacy in-dialog.
-    return !(envValue && std::string_view(envValue) == "1");
-}
-
-bool
-confInfoOutOfDialogEnabled()
-{
-    static const bool enabled = confInfoOutOfDialogEnabledFromEnv(
-        std::getenv("SIP_CORE_CONFINFO_IN_DIALOG"));
-    return enabled;
-}
 
 void
 ConfProtocolParser::parse()

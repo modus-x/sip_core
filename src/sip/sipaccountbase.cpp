@@ -37,8 +37,6 @@
 #include "connectivity/sip_utils.h"
 #include "connectivity/utf8_utils.h"
 #include "uri.h"
-#include "call.h"
-#include "conference_protocol.h"
 
 #include "manager.h"
 
@@ -174,41 +172,6 @@ SIPAccountBase::reserveVideoSocketPair(uint16_t family) const
 }
 #endif
 
-namespace {
-
-// Reduce a SIP identity to a comparable form so an out-of-dialog conference
-// message (sent to a peer AOR) can be correlated back to its call regardless of
-// scheme / angle brackets / parameters.
-std::string
-normalizePeerId(std::string_view raw)
-{
-    auto s = sip_utils::stripSipUriPrefix(raw);
-    if (!s.empty() && s.back() == '>')
-        s.remove_suffix(1);
-    if (auto p = s.find_first_of(";?"); p != std::string_view::npos)
-        s = s.substr(0, p);
-    return std::string(s);
-}
-
-// Match two SIP identities: exact normalized form, else by user part (before
-// '@') to tolerate host-form differences.
-bool
-peerIdMatches(std::string_view a, std::string_view b)
-{
-    auto na = normalizePeerId(a);
-    auto nb = normalizePeerId(b);
-    if (na == nb)
-        return true;
-    auto userPart = [](const std::string& s) {
-        auto at = s.find('@');
-        return at == std::string::npos ? s : s.substr(0, at);
-    };
-    auto ua = userPart(na);
-    return !ua.empty() && ua == userPart(nb);
-}
-
-} // namespace
-
 void
 SIPAccountBase::onTextMessage(const std::string& id,
                               const std::string& from,
@@ -216,34 +179,6 @@ SIPAccountBase::onTextMessage(const std::string& id,
                               const std::map<std::string, std::string>& payloads)
 {
     SIP_CORE_DBG("Text message received from %s, %zu part(s)", from.c_str(), payloads.size());
-
-    // Conference-control payloads (confInfo/confOrder/confVoiceActivity) arrive
-    // out-of-dialog (see confInfoOutOfDialogEnabled). Route them to the call
-    // they belong to so they update the conference, NOT the chat inbox — and a
-    // missing match must not surface conference JSON as a chat message.
-    if (confInfoOutOfDialogEnabled() && isConferenceControlPayload(payloads)) {
-        std::shared_ptr<Call> target;
-        for (const auto& callId : getCallList()) {
-            auto call = Manager::instance().getCallFromCallID(callId);
-            if (call && peerIdMatches(call->getPeerNumber(), from)) {
-                target = call;
-                break;
-            }
-        }
-        if (target) {
-            // Mirror the in-dialog path (sipvoiplink transaction_request_cb): run
-            // the conference-info update (setConferenceInfo -> createSinks ->
-            // OnConferenceInfosUpdated) on the engine main thread, not the pjsip
-            // RX thread.
-            runOnMainThread([target, copy = payloads]() mutable {
-                target->onTextMessage(std::move(copy));
-            });
-        } else {
-            SIP_CORE_WARN("Out-of-dialog conference message from %s: no matching call",
-                          from.c_str());
-        }
-        return;
-    }
 
     emitSignal<libsip_core::ConfigurationSignal::IncomingAccountMessage>(accountID_,
                                                                          from,

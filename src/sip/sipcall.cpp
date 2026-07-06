@@ -2241,18 +2241,6 @@ SIPCall::sendTextMessage(const std::map<std::string, std::string>& messages, con
         for (auto& c : subcalls_)
             c->sendTextMessage(messages, from);
     } else {
-        // Conference-control payloads (confInfo/confOrder/confVoiceActivity) are
-        // delivered OUT-OF-DIALOG by default so a delivery timeout cannot trip
-        // RFC 3261 §12.2.1.2 and tear the call down (the "408 kicks a conference
-        // participant" bug). Routed to the peer AOR via the account, fire-and-
-        // forget (id=0: no message-engine tracking/retry/history).
-        if (confInfoOutOfDialogEnabled() && isConferenceControlPayload(messages)) {
-            if (auto account = getSIPAccount()) {
-                account->sendMessage(getPeerNumber(), messages, /*id*/ 0,
-                                     /*retryOnTimeout*/ false, /*onlyConnected*/ false);
-                return;
-            }
-        }
         if (inviteSession_) {
             try {
                 // Ignore if the peer does not allow "MESSAGE" SIP method
