@@ -645,19 +645,31 @@ struct WasapiLayer::Impl
 
     NON_COPYABLE(Impl);
 
-    // Enumerate active endpoints of a dataflow; returns raw UTF-8 friendly names.
-    std::vector<std::string> rawNames(EDataFlow flow) const;
-    std::string defaultCommName(EDataFlow flow) const;
+    // COM / Core Audio helpers. Every public entry point that touches WASAPI
+    // wraps its work in a ComScope and creates a short-lived enumerator, so the
+    // behavior never depends on whether the host thread happens to be
+    // COM-initialized (PortAudio cached device info and needed no COM at getter
+    // time). The device-monitor thread holds the process MTA alive for our whole
+    // lifetime, so these per-call enumerators and any opened IAudioClients stay
+    // valid across the capture/render worker threads.
+    static ComPtr<IMMDeviceEnumerator> makeEnumerator();
+    static std::string friendlyName(IMMDevice* dev);
+    static std::vector<std::string> rawNames(IMMDeviceEnumerator* e, EDataFlow flow);
+    static std::string defaultName(IMMDeviceEnumerator* e, EDataFlow flow);
+    static ComPtr<IMMDevice> firstActive(IMMDeviceEnumerator* e, EDataFlow flow);
+    // Resolve a stored preference (friendly name; empty = default) to an IMMDevice,
+    // with PortAudio's fallback chain: named -> eCommunications -> eConsole -> first active.
+    static ComPtr<IMMDevice> resolveDevice(IMMDeviceEnumerator* e,
+                                           EDataFlow flow,
+                                           const std::string& pref);
+
     std::vector<std::string> deviceList(AudioDeviceType type) const;
-    // Resolve a stored preference (friendly name; empty = default) to an IMMDevice.
-    ComPtr<IMMDevice> resolveDevice(EDataFlow flow, const std::string& pref) const;
+    bool prefResolved(EDataFlow flow, const std::string& pref) const;
 
     bool startCapture(WasapiLayer& parent);
     bool startRender(WasapiLayer& parent);
 
     WasapiLayer& parent_;
-    ComPtr<IMMDeviceEnumerator> enumerator_;
-    bool comInitialized_ {false};
     bool rdp_ {false};
 
     std::string deviceRecord_;
@@ -678,20 +690,12 @@ WasapiLayer::Impl::Impl(WasapiLayer& parent, const AudioPreference& pref)
     , devicePlayback_(pref.getPortAudioDevicePlayback())
     , deviceRingtone_(pref.getPortAudioDeviceRingtone())
 {
-    // The layer object itself lives on the Manager/event thread; keep a COM
-    // apartment alive for enumeration for the whole layer lifetime.
-    comInitialized_ = SUCCEEDED(CoInitializeEx(nullptr, COINIT_MULTITHREADED));
     rdp_ = isRemoteSession();
     SIP_CORE_INFO() << "WasapiLayer: prefs {rec=" << deviceRecord_ << ", play=" << devicePlayback_
                     << ", ring=" << deviceRingtone_ << "}, RDP=" << rdp_;
 
-    if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator),
-                                nullptr,
-                                CLSCTX_ALL,
-                                IID_PPV_ARGS(&enumerator_)))) {
-        SIP_CORE_ERR() << "WasapiLayer: failed to create MMDeviceEnumerator";
-    }
-
+    // The monitor thread holds a process-lifetime MTA CoInitializeEx, which
+    // keeps every Core Audio object we create valid across our worker threads.
     monitor_ = std::make_unique<WindowsAudioDeviceMonitor>(
         [scheduled = recoveryScheduled_] { scheduleWasapiDeviceRecovery(scheduled); });
     monitor_->start();
@@ -702,50 +706,25 @@ WasapiLayer::Impl::~Impl()
     monitor_.reset();
     capture_.stop();
     render_.stop();
-    enumerator_.Reset();
-    if (comInitialized_)
-        CoUninitialize();
 }
 
-std::vector<std::string>
-WasapiLayer::Impl::rawNames(EDataFlow flow) const
+ComPtr<IMMDeviceEnumerator>
+WasapiLayer::Impl::makeEnumerator()
 {
-    std::vector<std::string> names;
-    if (!enumerator_)
-        return names;
-    ComPtr<IMMDeviceCollection> collection;
-    if (FAILED(enumerator_->EnumAudioEndpoints(flow, DEVICE_STATE_ACTIVE, &collection)))
-        return names;
-    UINT count = 0;
-    collection->GetCount(&count);
-    for (UINT i = 0; i < count; ++i) {
-        ComPtr<IMMDevice> dev;
-        if (FAILED(collection->Item(i, &dev)))
-            continue;
-        ComPtr<IPropertyStore> props;
-        if (FAILED(dev->OpenPropertyStore(STGM_READ, &props)))
-            continue;
-        PROPVARIANT v;
-        PropVariantInit(&v);
-        if (SUCCEEDED(props->GetValue(PKEY_Device_FriendlyName, &v)) && v.vt == VT_LPWSTR)
-            names.push_back(utf16ToUtf8(v.pwszVal));
-        PropVariantClear(&v);
-    }
-    return names;
+    ComPtr<IMMDeviceEnumerator> e;
+    if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator),
+                                nullptr,
+                                CLSCTX_ALL,
+                                IID_PPV_ARGS(&e))))
+        SIP_CORE_ERR() << "WasapiLayer: failed to create MMDeviceEnumerator";
+    return e;
 }
 
 std::string
-WasapiLayer::Impl::defaultCommName(EDataFlow flow) const
+WasapiLayer::Impl::friendlyName(IMMDevice* dev)
 {
-    if (!enumerator_)
+    if (!dev)
         return {};
-    ComPtr<IMMDevice> dev;
-    // VoIP tracks the eCommunications role; fall back to eConsole.
-    if (FAILED(enumerator_->GetDefaultAudioEndpoint(flow, eCommunications, &dev))
-        || !dev) {
-        if (FAILED(enumerator_->GetDefaultAudioEndpoint(flow, eConsole, &dev)) || !dev)
-            return {};
-    }
     ComPtr<IPropertyStore> props;
     if (FAILED(dev->OpenPropertyStore(STGM_READ, &props)))
         return {};
@@ -759,38 +738,92 @@ WasapiLayer::Impl::defaultCommName(EDataFlow flow) const
 }
 
 std::vector<std::string>
-WasapiLayer::Impl::deviceList(AudioDeviceType type) const
+WasapiLayer::Impl::rawNames(IMMDeviceEnumerator* e, EDataFlow flow)
 {
-    const EDataFlow flow = (type == AudioDeviceType::CAPTURE) ? eCapture : eRender;
-    return wasapi::buildDeviceList(rawNames(flow), defaultCommName(flow));
+    std::vector<std::string> names;
+    ComPtr<IMMDeviceCollection> collection;
+    if (!e || FAILED(e->EnumAudioEndpoints(flow, DEVICE_STATE_ACTIVE, &collection)))
+        return names;
+    UINT count = 0;
+    collection->GetCount(&count);
+    for (UINT i = 0; i < count; ++i) {
+        ComPtr<IMMDevice> dev;
+        if (FAILED(collection->Item(i, &dev)))
+            continue;
+        auto name = friendlyName(dev.Get());
+        if (!name.empty())
+            names.push_back(std::move(name));
+    }
+    return names;
 }
 
 ComPtr<IMMDevice>
-WasapiLayer::Impl::resolveDevice(EDataFlow flow, const std::string& pref) const
+WasapiLayer::Impl::firstActive(IMMDeviceEnumerator* e, EDataFlow flow)
+{
+    ComPtr<IMMDevice> dev;
+    ComPtr<IMMDeviceCollection> collection;
+    if (e && SUCCEEDED(e->EnumAudioEndpoints(flow, DEVICE_STATE_ACTIVE, &collection))) {
+        UINT count = 0;
+        collection->GetCount(&count);
+        if (count > 0)
+            collection->Item(0, &dev);
+    }
+    return dev;
+}
+
+std::string
+WasapiLayer::Impl::defaultName(IMMDeviceEnumerator* e, EDataFlow flow)
+{
+    if (!e)
+        return {};
+    // VoIP tracks the eCommunications role; fall back to eConsole, then to the
+    // first active endpoint — matching the label to what resolveDevice opens.
+    ComPtr<IMMDevice> dev;
+    if (FAILED(e->GetDefaultAudioEndpoint(flow, eCommunications, &dev)) || !dev)
+        if (FAILED(e->GetDefaultAudioEndpoint(flow, eConsole, &dev)) || !dev)
+            dev = firstActive(e, flow);
+    return friendlyName(dev.Get());
+}
+
+std::vector<std::string>
+WasapiLayer::Impl::deviceList(AudioDeviceType type) const
+{
+    const EDataFlow flow = (type == AudioDeviceType::CAPTURE) ? eCapture : eRender;
+    ComScope com;
+    auto e = makeEnumerator();
+    return wasapi::buildDeviceList(rawNames(e.Get(), flow), defaultName(e.Get(), flow));
+}
+
+bool
+WasapiLayer::Impl::prefResolved(EDataFlow flow, const std::string& pref) const
+{
+    if (pref.empty())
+        return true;
+    ComScope com;
+    auto e = makeEnumerator();
+    for (const auto& n : rawNames(e.Get(), flow))
+        if (n == pref)
+            return true;
+    return false;
+}
+
+ComPtr<IMMDevice>
+WasapiLayer::Impl::resolveDevice(IMMDeviceEnumerator* e, EDataFlow flow, const std::string& pref)
 {
     ComPtr<IMMDevice> result;
-    if (!enumerator_)
+    if (!e)
         return result;
 
     if (!pref.empty()) {
         ComPtr<IMMDeviceCollection> collection;
-        if (SUCCEEDED(enumerator_->EnumAudioEndpoints(flow, DEVICE_STATE_ACTIVE, &collection))) {
+        if (SUCCEEDED(e->EnumAudioEndpoints(flow, DEVICE_STATE_ACTIVE, &collection))) {
             UINT count = 0;
             collection->GetCount(&count);
             for (UINT i = 0; i < count; ++i) {
                 ComPtr<IMMDevice> dev;
                 if (FAILED(collection->Item(i, &dev)))
                     continue;
-                ComPtr<IPropertyStore> props;
-                if (FAILED(dev->OpenPropertyStore(STGM_READ, &props)))
-                    continue;
-                PROPVARIANT v;
-                PropVariantInit(&v);
-                std::string name;
-                if (SUCCEEDED(props->GetValue(PKEY_Device_FriendlyName, &v)) && v.vt == VT_LPWSTR)
-                    name = utf16ToUtf8(v.pwszVal);
-                PropVariantClear(&v);
-                if (name == pref)
+                if (friendlyName(dev.Get()) == pref)
                     return dev;
             }
         }
@@ -798,16 +831,22 @@ WasapiLayer::Impl::resolveDevice(EDataFlow flow, const std::string& pref) const
                         << "' not found, falling back to default";
     }
 
-    // Empty preference or stale name: follow the communications-role default.
-    if (FAILED(enumerator_->GetDefaultAudioEndpoint(flow, eCommunications, &result)) || !result)
-        enumerator_->GetDefaultAudioEndpoint(flow, eConsole, &result);
+    // Empty preference or stale name: eCommunications -> eConsole -> first active,
+    // so a machine with active endpoints but no default role still opens audio.
+    if (FAILED(e->GetDefaultAudioEndpoint(flow, eCommunications, &result)) || !result)
+        if (FAILED(e->GetDefaultAudioEndpoint(flow, eConsole, &result)) || !result)
+            result = firstActive(e, flow);
     return result;
 }
 
 bool
 WasapiLayer::Impl::startCapture(WasapiLayer& parent)
 {
-    auto device = resolveDevice(eCapture, deviceRecord_);
+    // COM stays initialized for this whole scope: resolveDevice + the stream's
+    // Activate/Initialize all run here on the caller thread.
+    ComScope com;
+    auto e = makeEnumerator();
+    auto device = resolveDevice(e.Get(), eCapture, deviceRecord_);
     if (!device) {
         SIP_CORE_ERR() << "WasapiLayer: no capture device";
         emitSignal<libsip_core::ConfigurationSignal::DeviceOpenError>("No valid input device",
@@ -844,7 +883,9 @@ WasapiLayer::Impl::startCapture(WasapiLayer& parent)
 bool
 WasapiLayer::Impl::startRender(WasapiLayer& parent)
 {
-    auto device = resolveDevice(eRender, devicePlayback_);
+    ComScope com;
+    auto e = makeEnumerator();
+    auto device = resolveDevice(e.Get(), eRender, devicePlayback_);
     if (!device) {
         SIP_CORE_ERR() << "WasapiLayer: no playback device";
         emitSignal<libsip_core::ConfigurationSignal::DeviceOpenError>("No valid output device",
@@ -953,13 +994,8 @@ WasapiLayer::isPreferredDeviceResolved(AudioDeviceType type) const
                                   ? pimpl_->deviceRecord_
                                   : (type == AudioDeviceType::PLAYBACK ? pimpl_->devicePlayback_
                                                                        : pimpl_->deviceRingtone_);
-    if (pref.empty())
-        return true;
     const EDataFlow flow = (type == AudioDeviceType::CAPTURE) ? eCapture : eRender;
-    for (const auto& n : pimpl_->rawNames(flow))
-        if (n == pref)
-            return true;
-    return false;
+    return pimpl_->prefResolved(flow, pref);
 }
 
 void
