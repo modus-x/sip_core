@@ -667,6 +667,9 @@ if(MSVC)
       bcrypt.lib
       ncrypt.lib
       Crypt32.lib
+      # timeGetTime/timeBeginPeriod for webrtc-audio-processing; previously pulled
+      # in transitively by portaudio. PUBLIC so consumers (tests, sip_cli) resolve it.
+      Winmm.lib
       debug
       ${DEPS_DEBUG}/lib/avutil.lib
       debug
