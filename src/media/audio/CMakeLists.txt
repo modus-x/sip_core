@@ -50,9 +50,9 @@ if(APPLE)
 endif()
 
 if(MSVC)
-  add_subdirectory(portaudio)
-  set(Source_Files__media__audio__portaudio
-      ${Source_Files__media__audio__portaudio}
+  add_subdirectory(wasapi)
+  set(Source_Files__media__audio__wasapi
+      ${Source_Files__media__audio__wasapi}
       PARENT_SCOPE)
 endif()
 

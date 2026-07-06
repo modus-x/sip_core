@@ -36,7 +36,6 @@ One subdirectory per third-party library, containing:
 | `lzma/`                            | xz library — transitive.                                                                         |
 | `opus/`                            | Opus audio codec (also via FFmpeg, kept separate for direct linking).                            |
 | `pjproject/`                       | The SIP stack. Patches: Android build, Windows VS+GnuTLS, iOS PointToPoint disable, iOS 16 fixes, presence improvements, evsub header cleanup, config-site injection, Unix bzero fix. |
-| `portaudio/`                       | Windows audio backend.                                                                           |
 | `pthreads/`                        | pthreads-win32 (Windows only).                                                                   |
 | `vpx/`                             | VP8/VP9 codecs.                                                                                  |
 | `webrtc-audio-processing/`         | NS/AEC/AGC.                                                                                      |

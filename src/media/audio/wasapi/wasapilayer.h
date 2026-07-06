@@ -1,8 +1,9 @@
 /*
- *  Copyright (C) 2004-2022 Savoir-faire Linux Inc.
+ *  Copyright (C) 2004-2024 Savoir-faire Linux Inc.
  *
- *  Author: Edric Ladent-Milaret <edric.ladent-milaret@savoirfairelinux.com>
- *  Author: Guillaume Roguez <guillaume.roguez@savoirfairelinux.com>
+ *  Native Windows (WASAPI) audio backend. Replaces the PortAudio backend with a
+ *  direct Core Audio (WASAPI) implementation: shared-mode, event-driven capture
+ *  and render, RDP-safe. Minimum target OS: Windows 8.
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -13,10 +14,6 @@
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301 USA.
  */
 
 #pragma once
@@ -25,15 +22,14 @@
 #include "noncopyable.h"
 
 #include <memory>
-#include <array>
 
 namespace sip_core {
 
-class PortAudioLayer final : public AudioLayer
+class WasapiLayer final : public AudioLayer
 {
 public:
-    PortAudioLayer(const AudioPreference& pref);
-    ~PortAudioLayer();
+    WasapiLayer(const AudioPreference& pref);
+    ~WasapiLayer();
 
     std::vector<std::string> getCaptureDeviceList() const override;
     std::vector<std::string> getPlaybackDeviceList() const override;
@@ -43,16 +39,7 @@ public:
     int getIndexPlayback() const override;
     int getIndexRingtone() const override;
 
-    /**
-     * Start the capture stream and prepare the playback stream.
-     * The playback starts accordingly to its threshold
-     */
     void startStream(AudioDeviceType stream = AudioDeviceType::ALL) override;
-
-    /**
-     * Stop the playback and capture streams.
-     * Drops the pending frames and put the capture and playback handles to PREPARED state
-     */
     void stopStream(AudioDeviceType stream = AudioDeviceType::ALL) override;
 
     void updatePreference(AudioPreference& pref, int index, AudioDeviceType type) override;
@@ -60,10 +47,10 @@ public:
     bool isPreferredDeviceResolved(AudioDeviceType type) const override;
 
 private:
-    NON_COPYABLE(PortAudioLayer);
+    NON_COPYABLE(WasapiLayer);
 
-    struct PortAudioLayerImpl;
-    std::unique_ptr<PortAudioLayerImpl> pimpl_;
+    struct Impl;
+    std::unique_ptr<Impl> pimpl_;
 };
 
 } // namespace sip_core

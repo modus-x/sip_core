@@ -335,8 +335,8 @@ if(MSVC)
                  FILES ${Source_Files__media__video__uwpvideo})
   endif()
 
-  source_group("Source Files\\media\\audio\\portaudio"
-               FILES ${Source_Files__media__audio__portaudio})
+  source_group("Source Files\\media\\audio\\wasapi"
+               FILES ${Source_Files__media__audio__wasapi})
   source_group("Source Files\\media\\video\\winvideo"
                FILES ${Source_Files__media__video__winvideo})
 endif()
@@ -384,7 +384,7 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
        ${CMAKE_CURRENT_SOURCE_DIR}/src/media/audio/pulseaudio/audiostream.cpp
        ${CMAKE_CURRENT_SOURCE_DIR}/src/media/audio/pulseaudio/pulselayer.cpp)
 elseif(MSVC)
-  list(APPEND ALL_FILES ${ALL_FILES} "${Source_Files__media__audio__portaudio}"
+  list(APPEND ALL_FILES ${ALL_FILES} "${Source_Files__media__audio__wasapi}"
        "${Source_Files__media__video__uwpvideo}"
        "${Source_Files__media__video__winvideo}")
 elseif(APPLE)
@@ -495,7 +495,6 @@ if(MSVC)
       "${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/jsoncpp/include;"
       "${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/yaml-cpp/include;"
       "${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/webrtc-audio-processing;"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/portaudio/include;"
       $<$<CONFIG:Debug>:${DEPS_DEBUG}/include>
       $<$<CONFIG:Release>:${DEPS_RELEASE}/include>
       $<$<CONFIG:RelWithDebInfo>:${DEPS_RELEASE}/include>
@@ -581,6 +580,10 @@ if(MSVC)
             Strmiids.lib
             OleAut32.lib
             Shlwapi.lib
+            Mmdevapi.lib
+            Avrt.lib
+            Ksuser.lib
+            uuid.lib
             optimized
             ${DEPS_RELEASE}/lib/avcodec.lib
             optimized
@@ -617,8 +620,6 @@ if(MSVC)
             ${DEPS_RELEASE}/fmt.lib
             optimized
             ${DEPS_RELEASE}/webrtc-audio-processing.lib
-            optimized
-            ${DEPS_RELEASE}/portaudio_static_x64.lib
             optimized
             ${DEPS_RELEASE}/bcg729.lib
             debug
@@ -657,8 +658,6 @@ if(MSVC)
             ${DEPS_DEBUG}/fmtd.lib
             debug
             ${DEPS_DEBUG}/webrtc-audio-processing.lib
-            debug
-            ${DEPS_DEBUG}/portaudio_static_x64.lib
             debug
             ${DEPS_DEBUG}/bcg729.lib
             # this is for dependencies to work with frames emmitted by our

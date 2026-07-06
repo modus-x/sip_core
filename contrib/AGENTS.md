@@ -56,7 +56,6 @@ From the root `CMakeLists.txt`:
 | `yaml-cpp`                   | YAML config parsing.                                          |
 | `jsoncpp`                    | Conference protocol JSON.                                     |
 | `fmt`                        | Logging.                                                      |
-| `portaudio`                  | Windows audio backend.                                        |
 | `jack`                       | Optional JACK audio.                                          |
 | `iconv`, `zlib`, `lzma`, `xml2`, `brotli`, `freetype2`, `harfbuzz`, `fontconfig`, `libpng` | Transitive (FFmpeg / video text overlays). |
 | `lttng-ust`, `liburcu`       | LTTng tracing (optional).                                     |

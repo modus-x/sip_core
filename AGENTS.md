@@ -63,7 +63,7 @@ Events flow the other direction: subsystems call `emitSignal<CallSignal::StateCh
 | Add/modify a codec                          | `src/media/system_codec_container.cpp` + relevant `src/media/{audio,video}/*` encode/decode paths      |
 | Change conference behavior                  | `src/conference.cpp` + `src/conference_protocol.cpp` (over-SIP metadata) + signals                     |
 | Add a YAML config field                     | `src/config/*` + `src/{account_config.cpp, preferences.cpp, sip/sipaccount_config.cpp}`                |
-| Per-platform audio backend                  | `src/media/audio/{coreaudio,pulseaudio,portaudio,opensl,alsa,jack}/`                                   |
+| Per-platform audio backend                  | `src/media/audio/{coreaudio,pulseaudio,wasapi,opensl,alsa,jack}/`                                      |
 | Per-platform video backend                  | `src/media/video/{osxvideo,iosvideo,v4l2,winvideo,uwpvideo,androidvideo}/`                             |
 | Add a third-party dep                       | `contrib/src/<name>/{rules.mak, package.json}` + `CMakeLists.txt` find/link block                      |
 | Change build / CMake options                | `CMakeLists.txt` (root) + `CMakePresets.json` + per-dir `CMakeLists.txt`                               |

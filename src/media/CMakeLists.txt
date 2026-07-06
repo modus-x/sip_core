@@ -64,8 +64,8 @@ if(APPLE)
       PARENT_SCOPE)
 endif()
 if(MSVC)
-  set(Source_Files__media__audio__portaudio
-      ${Source_Files__media__audio__portaudio}
+  set(Source_Files__media__audio__wasapi
+      ${Source_Files__media__audio__wasapi}
       PARENT_SCOPE)
 endif()
 set(Source_Files__media__audio__sound

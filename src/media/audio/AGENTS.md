@@ -34,7 +34,7 @@ The audio mixer is **`RingBufferPool` + `AudioInput`**: capture devices, file pl
 | `sound/`               | Tone generation, DTMF generator, audio file (WAV) loader.                           | [sound/AGENTS.md](sound/AGENTS.md)                                   |
 | `coreaudio/`           | macOS + iOS backend (Core Audio).                                                   | [coreaudio/AGENTS.md](coreaudio/AGENTS.md)                           |
 | `pulseaudio/`          | Linux backend (PulseAudio).                                                         | [pulseaudio/AGENTS.md](pulseaudio/AGENTS.md)                         |
-| `portaudio/`           | Windows backend (PortAudio).                                                        | [portaudio/AGENTS.md](portaudio/AGENTS.md)                           |
+| `wasapi/`              | Windows backend (native WASAPI, Win8+).                                             | [wasapi/AGENTS.md](wasapi/AGENTS.md)                                 |
 | `opensl/`              | Android backend (OpenSL ES).                                                        | [opensl/AGENTS.md](opensl/AGENTS.md)                                 |
 | `alsa/`                | Optional Linux backend (ALSA direct). Mostly legacy.                                | [alsa/AGENTS.md](alsa/AGENTS.md)                                     |
 | `jack/`                | Optional JACK backend (Linux/macOS pro audio).                                      | [jack/AGENTS.md](jack/AGENTS.md)                                     |

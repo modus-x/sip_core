@@ -6,7 +6,6 @@
         "vpx",
         "ffmpeg",
         "pjproject",
-        "portaudio",
         "yaml-cpp",
         "jsoncpp",
         "fmt",

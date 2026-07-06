@@ -53,7 +53,7 @@ cmake --build out/build/darwin --target install
 
 ### Media (`src/media/`)
 - **Audio**: Platform backends in subdirectories:
-  - `coreaudio/` (macOS/iOS), `pulseaudio/` (Linux), `portaudio/` (Windows), `opensl/` (Android)
+  - `coreaudio/` (macOS/iOS), `pulseaudio/` (Linux), `wasapi/` (Windows), `opensl/` (Android)
   - `audio-processing/` - WebRTC audio processing (noise suppression, echo cancellation, AGC)
 - **Video**: Platform backends:
   - `osxvideo/`, `iosvideo/` (Apple), `v4l2/` (Linux), `winvideo/` (Windows), `androidvideo/`

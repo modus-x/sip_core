@@ -41,7 +41,7 @@ voipPreferences:
   playDtmf, playTones, pulseLength
 audio:                                                     # AudioPreference
   audioApi, captureMuted, playbackMuted,
-  alsa/pulse/portaudio: { ... },
+  alsa/pulse/portaudio: { ... },   # note: the Windows WASAPI backend reuses the `portaudio` submap key for config compatibility
   audioProcessor, noiseReduce, echoCancel,
   voiceActivityDetection, automaticGainControl
 video:                                                     # VideoPreferences

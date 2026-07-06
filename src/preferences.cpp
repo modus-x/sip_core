@@ -49,8 +49,8 @@
 #include "audio/coreaudio/osx/corelayer.h"
 #endif /* TARGET_OS_IOS */
 #endif /* HAVE_COREAUDIO */
-#if HAVE_PORTAUDIO
-#include "audio/portaudio/portaudiolayer.h"
+#if HAVE_WASAPI
+#include "audio/wasapi/wasapilayer.h"
 #endif
 #endif /* HAVE_OPENSL */
 
@@ -320,12 +320,12 @@ AudioPreference::createAudioLayer()
     }
 #endif
 
-#if HAVE_PORTAUDIO
+#if HAVE_WASAPI
     try {
-        audioApi_ = PORTAUDIO_API_STR;
-        return new PortAudioLayer(*this);
+        audioApi_ = WASAPI_API_STR;
+        return new WasapiLayer(*this);
     } catch (const std::runtime_error& e) {
-        SIP_CORE_WARN("Could not create PortAudio layer, trying another audio layers.");
+        SIP_CORE_WARN("Could not create WASAPI layer, trying another audio layers.");
     }
     return nullptr;
 #endif
@@ -377,8 +377,8 @@ AudioPreference::getSupportedAudioManagers()
 #if HAVE_COREAUDIO
             COREAUDIO_API_STR,
 #endif
-#if HAVE_PORTAUDIO
-            PORTAUDIO_API_STR,
+#if HAVE_WASAPI
+            WASAPI_API_STR,
 #endif
     };
 }

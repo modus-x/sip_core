@@ -107,8 +107,8 @@ if(MSVC)
         ${Source_Files__media__video__uwpvideo}
         PARENT_SCOPE)
   endif()
-  set(Source_Files__media__audio__portaudio
-      ${Source_Files__media__audio__portaudio}
+  set(Source_Files__media__audio__wasapi
+      ${Source_Files__media__audio__wasapi}
       PARENT_SCOPE)
   set(Source_Files__media__video__winvideo
       ${Source_Files__media__video__winvideo}

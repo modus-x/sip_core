@@ -79,8 +79,8 @@ if HAVE_IOS
 include ./media/audio/coreaudio/Makefile.am
 endif
 
-if HAVE_PORTAUDIO
-include ./media/audio/portaudio/Makefile.am
+if HAVE_WASAPI
+include ./media/audio/wasapi/Makefile.am
 endif
 
 libmedia_la_LIBADD += libaudio.la
