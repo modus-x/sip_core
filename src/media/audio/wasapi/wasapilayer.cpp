@@ -428,6 +428,14 @@ public:
                PullFn pull,
                PushFn push)
     {
+        // Idempotent: a joinable thread_ means this stream is already running.
+        // WasapiLayer maps RINGTONE and PLAYBACK onto one render stream, so a
+        // second startStream can reach here; move-assigning over a joinable
+        // std::thread (thread_ = std::thread(...)) calls std::terminate(). Treat
+        // a start on an already-running stream as a no-op success.
+        if (thread_.joinable())
+            return true;
+
         render_ = render;
         onInvalidated_ = std::move(onInvalidated);
         pull_ = std::move(pull);
@@ -714,6 +722,10 @@ struct WasapiLayer::Impl
 
     WasapiStream capture_;
     WasapiStream render_;
+    // RINGTONE and PLAYBACK are distinct Manager stream-users that share the one
+    // render_ stream; this counts how many are active so render_ is opened on the
+    // first and torn down only on the last. Guarded by WasapiLayer::mutex_.
+    int renderUsers_ {0};
 
     std::shared_ptr<std::atomic_bool> recoveryScheduled_ {
         std::make_shared<std::atomic_bool>(false)};
@@ -1040,19 +1052,26 @@ void
 WasapiLayer::startStream(AudioDeviceType stream)
 {
     std::lock_guard<std::mutex> lock(mutex_);
+    // Reference-count the shared render stream: open it for the first render user
+    // (PLAYBACK or RINGTONE), and just bump the count for later ones — so a second
+    // startStream never re-enters render_.start() on a live stream.
+    auto startRenderRef = [this] {
+        if (pimpl_->renderUsers_ > 0 || pimpl_->startRender(*this)) {
+            pimpl_->renderUsers_++;
+            status_.store(Status::Started);
+        }
+    };
     switch (stream) {
     case AudioDeviceType::ALL:
         pimpl_->startCapture(*this);
-        if (pimpl_->startRender(*this))
-            status_.store(Status::Started);
+        startRenderRef();
         break;
     case AudioDeviceType::CAPTURE:
         pimpl_->startCapture(*this);
         break;
     case AudioDeviceType::PLAYBACK:
     case AudioDeviceType::RINGTONE:
-        if (pimpl_->startRender(*this))
-            status_.store(Status::Started);
+        startRenderRef();
         break;
     }
 }
@@ -1066,9 +1085,19 @@ WasapiLayer::stopStream(AudioDeviceType stream)
     // (which lock their own mutexes), so no join-vs-lock deadlock is possible.
     std::lock_guard<std::mutex> lock(mutex_);
     bool stoppedRender = false, stoppedCapture = false;
+    // Only tear the shared render stream down when the LAST render user releases
+    // it; otherwise the deferred stopStream(RINGTONE) fired ~750 ms after answer
+    // would kill an active call's playback.
+    auto stopRenderRef = [&] {
+        if (pimpl_->renderUsers_ > 0 && --pimpl_->renderUsers_ == 0) {
+            pimpl_->render_.stop();
+            stoppedRender = true;
+        }
+    };
     switch (stream) {
     case AudioDeviceType::ALL:
         pimpl_->capture_.stop();
+        pimpl_->renderUsers_ = 0;
         pimpl_->render_.stop();
         stoppedCapture = stoppedRender = true;
         break;
@@ -1078,8 +1107,7 @@ WasapiLayer::stopStream(AudioDeviceType stream)
         break;
     case AudioDeviceType::PLAYBACK:
     case AudioDeviceType::RINGTONE:
-        pimpl_->render_.stop();
-        stoppedRender = true;
+        stopRenderRef();
         break;
     }
     if (stoppedRender && playbackStarted_) {
