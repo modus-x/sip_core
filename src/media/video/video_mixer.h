@@ -82,11 +82,11 @@ public:
         int width;
         int height;
         AVPixelFormat format {AV_PIX_FMT_YUV422P};
-        double grid_aspect {1.}; // = 0 to match mixer aspect
-        int padding {5};
+        double grid_aspect {16.0 / 9.0}; // rectangular tiles; = 0 to match mixer aspect
+        int padding {2};
         int border_size {8};
         std::string active_border_color {"CornflowerBlue@1"}; // ffmpeg compatible colors only
-        std::string inactive_border_color {"Blue@1"};         // ffmpeg compatible colors only
+        std::string inactive_border_color {"Blue@0"};         // invisible: only the active speaker is framed
         bool remove_black_borders {true};
         int voice_inactive_hold_ms {500};
     };
@@ -276,12 +276,12 @@ private:
     int width_ = 0;
     int height_ = 0;
     AVPixelFormat format_ = AV_PIX_FMT_YUV422P;
-    double grid_aspect_ {1.};
-    int padding_ {5};
+    double grid_aspect_ {16.0 / 9.0};
+    int padding_ {2};
     const std::string borderFilterName_ = "border";
     int border_size_ {8};
     std::string active_border_color_ {"CornflowerBlue@1"}; // ffmpeg declared colors only
-    std::string inactive_border_color_ {"Blue@1"};         // ffmpeg declared colors only
+    std::string inactive_border_color_ {"Blue@0"};         // invisible: only the active speaker is framed
     bool remove_black_borders_ {true};
     std::shared_mutex rwMutex_;
 

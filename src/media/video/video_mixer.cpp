@@ -1226,8 +1226,12 @@ VideoMixer::render_frame(VideoFrame& output,
         // calculate width and height for cropping
         int width = 0, height = 0;
         if (remove_black_borders_ && not source->isBig) {
-            // calculte cropping according to aspects
-            if (grid_aspect_ > input->width() / input->height()) {
+            // calculte cropping according to aspects.
+            // Use floating-point source aspect: integer input->width()/input->height()
+            // truncates (e.g. 16:9 -> 1), which mis-selects the crop branch and can
+            // compute a crop taller than the input for sources whose true aspect
+            // sits between grid_aspect_ and 2.0.
+            if (grid_aspect_ > static_cast<double>(input->width()) / input->height()) {
                 width = input->width();
                 height = width / grid_aspect_;
             } else {

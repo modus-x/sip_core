@@ -1025,7 +1025,8 @@ SIPAccount::newIncomingCall(const std::string& from UNUSED,
 
 std::shared_ptr<Call>
 SIPAccount::newOutgoingCall(std::string_view toUrl,
-                            const std::vector<libsip_core::MediaMap>& mediaList)
+                            const std::vector<libsip_core::MediaMap>& mediaList,
+                            const std::map<std::string, std::string>& headers)
 {
     std::string to;
     int family;
@@ -1048,6 +1049,10 @@ SIPAccount::newOutgoingCall(std::string_view toUrl,
 
     if (not call)
         throw std::runtime_error("Failed to create the call");
+
+    // Custom application-provided SIP headers to inject into the outgoing INVITE
+    if (not headers.empty())
+        call->setExtraSipHeaders(headers);
 
     to = toUrl;
     call->setSipTransport(transport_, getContactHeader());
@@ -2345,6 +2350,17 @@ SIPAccount::SIPStartCall(std::shared_ptr<SIPCall>& call)
 
     // Add user-agent header
     sip_utils::addUserAgentHeader(getUserAgentName(), tdata);
+
+    // Inject any custom application-provided headers into the INVITE
+    for (const auto& [name, value] : call->getExtraSipHeaders()) {
+        auto pjName = sip_utils::CONST_PJ_STR(name);
+        auto pjValue = sip_utils::CONST_PJ_STR(value);
+        auto* customHdr = pjsip_generic_string_hdr_create(tdata->pool, &pjName, &pjValue);
+        if (customHdr) {
+            SIP_CORE_DBG("Add custom header to INVITE: \"%s: %s\"", name.c_str(), value.c_str());
+            pjsip_msg_add_hdr(tdata->msg, reinterpret_cast<pjsip_hdr*>(customHdr));
+        }
+    }
 
     if (pjsip_inv_send_msg(call->inviteSession_.get(), tdata) != PJ_SUCCESS) {
         SIP_CORE_ERR("Unable to send invite message for this call");

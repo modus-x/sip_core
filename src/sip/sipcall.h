@@ -110,6 +110,7 @@ private:
 
 public:
     void setExtraSipHeaders(std::map<std::string, std::string> extraHeaders);
+    const std::map<std::string, std::string>& getExtraSipHeaders() const { return extraHeaders_; }
     void answer() override;
     void answer(const std::vector<libsip_core::MediaMap>& mediaList) override;
     bool checkMediaChangeRequest(const std::vector<libsip_core::MediaMap>& remoteMediaList) override;

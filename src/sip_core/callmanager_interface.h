@@ -40,12 +40,15 @@ namespace libsip_core {
     const std::map<std::string, std::shared_ptr<CallbackWrapperBase>>&);
 
 /* Call related methods */
-LIBSIP_CORE_PUBLIC std::string placeCall(const std::string& accountId, const std::string& to);
+LIBSIP_CORE_PUBLIC std::string placeCall(const std::string& accountId,
+                                         const std::string& to,
+                                         const std::map<std::string, std::string>& headers = {});
 
 LIBSIP_CORE_PUBLIC std::string placeCallWithMedia(
     const std::string& accountId,
     const std::string& to,
-    const std::vector<std::map<std::string, std::string>>& mediaList);
+    const std::vector<std::map<std::string, std::string>>& mediaList,
+    const std::map<std::string, std::string>& headers = {});
 LIBSIP_CORE_PUBLIC bool refuse(const std::string& accountId, const std::string& callId);
 LIBSIP_CORE_PUBLIC bool accept(const std::string& accountId, const std::string& callId);
 LIBSIP_CORE_PUBLIC bool hangUp(const std::string& accountId, const std::string& callId);

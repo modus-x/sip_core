@@ -156,7 +156,8 @@ public:
      */
     std::string outgoingCall(const std::string& accountId,
                              const std::string& callee,
-                             const std::vector<libsip_core::MediaMap>& mediaList = {});
+                             const std::vector<libsip_core::MediaMap>& mediaList = {},
+                             const std::map<std::string, std::string>& headers = {});
 
     /**
      * Functions which occur with a user's action
@@ -891,7 +892,8 @@ public:
      */
     std::shared_ptr<Call> newOutgoingCall(std::string_view toUrl,
                                           const std::string& accountId,
-                                          const std::vector<libsip_core::MediaMap>& mediaList);
+                                          const std::vector<libsip_core::MediaMap>& mediaList,
+                                          const std::map<std::string, std::string>& headers = {});
 
     CallFactory callFactory;
 

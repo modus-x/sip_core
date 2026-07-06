@@ -1059,7 +1059,8 @@ Manager::unregisterAccountsImmediate()
 std::string
 Manager::outgoingCall(const std::string& account_id,
                       const std::string& to,
-                      const std::vector<libsip_core::MediaMap>& mediaList)
+                      const std::vector<libsip_core::MediaMap>& mediaList,
+                      const std::map<std::string, std::string>& headers)
 {
     SIP_CORE_DBG() << "try outgoing call to '" << to << "'"
                    << " with account '" << account_id << "'";
@@ -1067,7 +1068,7 @@ Manager::outgoingCall(const std::string& account_id,
     std::shared_ptr<Call> call;
 
     try {
-        call = newOutgoingCall(trim(to), account_id, mediaList);
+        call = newOutgoingCall(trim(to), account_id, mediaList, headers);
     } catch (const std::exception& e) {
         SIP_CORE_ERR("%s", e.what());
         return {};
@@ -1639,16 +1640,39 @@ Manager::createConfFromParticipantList(const std::string& accountId,
 bool
 Manager::detachLocalParticipant(const std::shared_ptr<Conference>& conf)
 {
-    if (not conf)
-        return false;
+    auto detachOne = [this](const std::shared_ptr<Conference>& c) {
+        SIP_CORE_INFO("Detach local participant from conference %s", c->getConfId().c_str());
+        c->detachLocalParticipant();
+        emitSignal<libsip_core::CallSignal::ConferenceChanged>(c->getAccountId(),
+                                                               c->getConfId(),
+                                                               c->getStateStr());
+    };
 
-    SIP_CORE_INFO("Detach local participant from conference %s", conf->getConfId().c_str());
-    conf->detachLocalParticipant();
-    emitSignal<libsip_core::CallSignal::ConferenceChanged>(conf->getAccountId(),
-                                                           conf->getConfId(),
-                                                           conf->getStateStr());
-    pimpl_->unsetCurrentCall();
-    return true;
+    if (conf) {
+        detachOne(conf);
+        pimpl_->unsetCurrentCall();
+        return true;
+    }
+
+    // No conference passed: this is the no-arg public API
+    // (CallController::detachLocalParticipant). Resolve the current conference
+    // by detaching the local host from every attached conference. Without this
+    // the call was a silent no-op, which left the VideoMixer holding a strong
+    // ref to the local camera VideoInput after logout — keeping the capture
+    // device (and its "in use" LED) alive until full app exit.
+    bool detachedAny = false;
+    for (const auto& account : getAllAccounts()) {
+        for (const auto& confId : account->getConferenceList()) {
+            auto c = account->getConference(confId);
+            if (c && c->getState() == Conference::State::ACTIVE_ATTACHED) {
+                detachOne(c);
+                detachedAny = true;
+            }
+        }
+    }
+    if (detachedAny)
+        pimpl_->unsetCurrentCall();
+    return detachedAny;
 }
 
 bool
@@ -1752,11 +1776,31 @@ Manager::addAudio(Call& call)
     if (call.isConferenceParticipant()) {
         SIP_CORE_DBG("[conf:%s] Attach local audio", callId.c_str());
 
-        // bind to conference participant
-        /*auto iter = pimpl_->conferenceMap_.find(callId);
-        if (iter != pimpl_->conferenceMap_.end() and iter->second) {
-            iter->second->bindParticipant(callId);
-        }*/
+        // Ring-buffer bindings are owned by the conference (Conference::
+        // bindParticipant, which is mute/half-duplex aware) — do NOT
+        // bindCallID(callId, DEFAULT_ID) here or it would clobber the
+        // conference routing. But we MUST still pin the physical PortAudio
+        // PLAYBACK + CAPTURE device streams for this participant exactly like
+        // the 1:1 branch below. Every re-invite during a conference runs
+        // stopAllMedia()/startAllMedia(), which drops the AudioInput's CAPTURE
+        // guard; without a guard held here the device stream user-count can
+        // reach 0, the deferred stopStream() tears the streams down, and on
+        // Windows/PortAudio the conference-attach path never restarts them —
+        // leaving mic + speaker dead until the user switches audio device
+        // (which rebuilds the whole audio layer). Acquire-before-release keeps
+        // the count >= 1 so any pending deferred stop is cancelled and reused.
+        auto oldGuard = std::move(call.audioGuard);
+        call.audioGuard = startAudioStream(AudioDeviceType::PLAYBACK);
+        auto oldCaptureGuard = std::move(call.audioCaptureGuard);
+        call.audioCaptureGuard = startAudioStream(AudioDeviceType::CAPTURE);
+
+        std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
+        if (!pimpl_->audiodriver_) {
+            SIP_CORE_ERR("Audio driver not initialized");
+            return;
+        }
+        pimpl_->audiodriver_->flushUrgent();
+        getRingBufferPool().flushAllBuffers();
     } else {
         SIP_CORE_DBG("[call:%s] Attach audio", callId.c_str());
 
@@ -3553,7 +3597,8 @@ Manager::onVideoDevicesChanged()
 std::shared_ptr<Call>
 Manager::newOutgoingCall(std::string_view toUrl,
                          const std::string& accountId,
-                         const std::vector<libsip_core::MediaMap>& mediaList)
+                         const std::vector<libsip_core::MediaMap>& mediaList,
+                         const std::map<std::string, std::string>& headers)
 {
     auto account = getAccount(accountId);
     if (not account) {
@@ -3566,7 +3611,7 @@ Manager::newOutgoingCall(std::string_view toUrl,
         return {};
     }
 
-    return account->newOutgoingCall(toUrl, mediaList);
+    return account->newOutgoingCall(toUrl, mediaList, headers);
 }
 
 #ifdef ENABLE_VIDEO

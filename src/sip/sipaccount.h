@@ -501,7 +501,9 @@ public:
      * @return a shared pointer on the created call.
      */
     std::shared_ptr<Call> newOutgoingCall(
-        std::string_view toUrl, const std::vector<libsip_core::MediaMap>& mediaList) override;
+        std::string_view toUrl,
+        const std::vector<libsip_core::MediaMap>& mediaList,
+        const std::map<std::string, std::string>& headers = {}) override;
 
     /**
      * Create incoming SIPCall.

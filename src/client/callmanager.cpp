@@ -47,24 +47,27 @@ registerCallHandlers(const std::map<std::string, std::shared_ptr<CallbackWrapper
 }
 
 std::string
-placeCall(const std::string& accountId, const std::string& to)
+placeCall(const std::string& accountId,
+          const std::string& to,
+          const std::map<std::string, std::string>& headers)
 {
     // TODO. Remove ASAP.
     SIP_CORE_WARN("This API is deprecated, use placeCallWithMedia() instead");
-    return placeCallWithMedia(accountId, to, {});
+    return placeCallWithMedia(accountId, to, {}, headers);
 }
 
 std::string
 placeCallWithMedia(const std::string& accountId,
                    const std::string& to,
-                   const std::vector<libsip_core::MediaMap>& mediaList)
+                   const std::vector<libsip_core::MediaMap>& mediaList,
+                   const std::map<std::string, std::string>& headers)
 {
     // Check if a destination number is available
     if (to.empty()) {
         SIP_CORE_DBG("No number entered - Call aborted");
         return {};
     } else {
-        return sip_core::Manager::instance().outgoingCall(accountId, to, mediaList);
+        return sip_core::Manager::instance().outgoingCall(accountId, to, mediaList, headers);
     }
 }
 
