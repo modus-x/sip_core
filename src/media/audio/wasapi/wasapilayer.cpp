@@ -22,14 +22,17 @@
 #include "logger.h"
 
 #include <windows.h>
+#include <mmreg.h>
 #include <mmdeviceapi.h>
 #include <audioclient.h>
 #include <audiopolicy.h>
 #include <functiondiscoverykeys_devpkey.h>
+#include <ksmedia.h>
 #include <avrt.h>
 #include <dbt.h>
 #include <wrl/client.h>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
