@@ -51,6 +51,9 @@ namespace {
 // 100-ns reference-time units per millisecond.
 constexpr REFERENCE_TIME REFTIMES_PER_MS = 10000;
 // Larger buffer over RDP to absorb the redirection channel's network jitter.
+// This trades ~200 ms of mouth-to-ear latency for glitch-free playback over the
+// remote session — a deliberate choice for requirement 1.3; revisit if latency
+// complaints arise.
 constexpr REFERENCE_TIME RDP_BUFFER_DURATION = 200 * REFTIMES_PER_MS;
 constexpr REFERENCE_TIME LOCAL_MIN_BUFFER_DURATION = 30 * REFTIMES_PER_MS;
 constexpr auto DEVICE_CHANGE_DEBOUNCE = std::chrono::milliseconds(250);
@@ -135,8 +138,12 @@ scheduleWasapiDeviceRecovery(const std::shared_ptr<std::atomic_bool>& scheduled)
         return;
     Manager::instance().scheduleTaskIn(
         [scheduled] {
-            scheduled->store(false);
+            // Reopen the coalescing gate only AFTER the (slow) rebuild completes,
+            // so device events arriving during recovery — common in an RDP
+            // reconnect storm — stay coalesced instead of scheduling a second,
+            // redundant recovery (an extra audio interruption).
             Manager::instance().recoverAudioDevices();
+            scheduled->store(false);
         },
         DEVICE_CHANGE_DEBOUNCE);
 }
@@ -501,7 +508,13 @@ public:
                 return false;
         }
 
-        watchdogMs_ = rdp ? 400 : 100;
+        // The watchdog MUST be shorter than the buffer duration: on a lost event
+        // stream (RDP stall) the loop falls through to poll-and-refill before the
+        // buffer drains, so there is no underrun. Scale it to ~half the actual
+        // buffer (e.g. ~100 ms for the 200 ms RDP buffer, ~15 ms locally).
+        const DWORD bufMs = static_cast<DWORD>(static_cast<unsigned long long>(bufferFrameCount_)
+                                               * 1000ULL / (sampleRate_ ? sampleRate_ : 48000));
+        watchdogMs_ = std::max<DWORD>(5, bufMs / 2);
         if (FAILED(client_->Start())) {
             SIP_CORE_ERR() << "WASAPI: IAudioClient Start failed";
             return false;
@@ -548,7 +561,7 @@ private:
             if (stop_)
                 break;
             (void) w; // process on both signal and watchdog timeout
-            HRESULT hr = render_ ? serviceRender(scratch) : serviceCapture();
+            HRESULT hr = render_ ? serviceRender(scratch) : serviceCapture(scratch);
             if (hr == AUDCLNT_E_DEVICE_INVALIDATED || hr == AUDCLNT_E_RESOURCES_INVALIDATED) {
                 SIP_CORE_WARN() << "WASAPI: device invalidated, triggering recovery";
                 if (onInvalidated_)
@@ -587,14 +600,17 @@ private:
         return renderClient_->ReleaseBuffer(avail, AUDCLNT_BUFFERFLAGS_SILENT);
     }
 
-    HRESULT serviceCapture()
+    HRESULT serviceCapture(std::vector<int16_t>& scratch)
     {
         UINT32 packet = 0;
         HRESULT hr = captureClient_->GetNextPacketSize(&packet);
         if (FAILED(hr))
             return hr;
 
-        while (packet != 0) {
+        // Bound the drain loop so a misbehaving virtual/RDP endpoint that keeps
+        // reporting a non-zero packet size can't spin this real-time thread.
+        int guard = 0;
+        while (packet != 0 && ++guard <= 512) {
             BYTE* data = nullptr;
             UINT32 frames = 0;
             DWORD flags = 0;
@@ -608,9 +624,10 @@ private:
                 if (flags & AUDCLNT_BUFFERFLAGS_SILENT) {
                     push_(nullptr, frames);
                 } else {
-                    std::vector<int16_t> s16(static_cast<size_t>(frames) * channels_);
-                    wasapi::convertDeviceToS16(data, s16.data(), frames, channels_, waveType_);
-                    push_(s16.data(), frames);
+                    // Reuse the preallocated scratch (frames <= bufferFrameCount_)
+                    // so there is no heap allocation on the MMCSS real-time thread.
+                    wasapi::convertDeviceToS16(data, scratch.data(), frames, channels_, waveType_);
+                    push_(scratch.data(), frames);
                 }
             }
             captureClient_->ReleaseBuffer(frames);
@@ -1032,6 +1049,10 @@ WasapiLayer::startStream(AudioDeviceType stream)
 void
 WasapiLayer::stopStream(AudioDeviceType stream)
 {
+    // Lock hierarchy: this holds mutex_ across WasapiStream::stop()'s thread
+    // join. The worker threads must therefore NEVER take mutex_ — they only
+    // touch the ring buffers / audio processor via getPlayback/putRecorded
+    // (which lock their own mutexes), so no join-vs-lock deadlock is possible.
     std::lock_guard<std::mutex> lock(mutex_);
     bool stoppedRender = false, stoppedCapture = false;
     switch (stream) {
