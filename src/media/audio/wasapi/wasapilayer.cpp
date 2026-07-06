@@ -576,6 +576,13 @@ private:
 
     HRESULT serviceRender(std::vector<int16_t>& scratch)
     {
+        // stop()/device-recovery can Reset() the COM clients while this real-time
+        // worker is still between run()'s stop_ check and here — observed null
+        // client_ deref AV in serviceRender->GetCurrentPadding (dump
+        // communicator.exe.23276). Bail to silence rather than dereference a reset
+        // ComPtr; run()'s loop re-checks stop_ and exits promptly.
+        if (!client_ || !renderClient_)
+            return S_OK;
         UINT32 padding = 0;
         HRESULT hr = client_->GetCurrentPadding(&padding);
         if (FAILED(hr))
@@ -602,6 +609,10 @@ private:
 
     HRESULT serviceCapture(std::vector<int16_t>& scratch)
     {
+        // Same teardown race as serviceRender: the capture client can be reset
+        // under this worker thread. Guard before dereferencing it.
+        if (!client_ || !captureClient_)
+            return S_OK;
         UINT32 packet = 0;
         HRESULT hr = captureClient_->GetNextPacketSize(&packet);
         if (FAILED(hr))
