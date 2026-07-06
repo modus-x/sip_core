@@ -1013,6 +1013,16 @@ invite_session_state_changed_cb(pjsip_inv_session* inv, pjsip_event* ev)
         break;
 
     case PJSIP_INV_STATE_DISCONNECTED:
+        // Drop our shared invite-session reference here, on the pjsip callback
+        // thread where `inv` is still guaranteed valid (pjsip holds its own ref
+        // for the callback's duration). Every sub-case below is terminal for
+        // this INVITE, and the SIPCall handlers (onClosed/onBusyHere/onFailure)
+        // defer teardown to the main thread via runOnMainThread. Deferring the
+        // pjsip_inv_dec_ref there races pjsip's own destruction of the session:
+        // by the time the deferred deleter runs, `inv` and its pool may already
+        // be freed, so pjsip_inv_dec_ref -> pj_pool_release dereferences freed
+        // memory (use-after-free, c0000005). Releasing it now closes that race.
+        call->setInviteSession();
         switch (inv->cause) {
         // When a peer's device replies busy
         case PJSIP_SC_BUSY_HERE:
