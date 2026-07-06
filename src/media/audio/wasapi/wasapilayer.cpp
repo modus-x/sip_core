@@ -94,7 +94,8 @@ utf16ToUtf8(const wchar_t* w)
 }
 
 // Classify the shared-mode mix format. WASAPI shared mode is virtually always
-// 32-bit float; Pcm16/Pcm32 are defensive.
+// 32-bit float and always interleaved (no planar path needed); Pcm16/Pcm32 are
+// defensive. Non-16/32-bit PCM (e.g. 24-bit) -> Unsupported -> silence.
 wasapi::WaveSampleType
 classifyFormat(const WAVEFORMATEX* wf)
 {
@@ -439,9 +440,13 @@ public:
         channels_ = mix->nChannels;
         sampleRate_ = mix->nSamplesPerSec;
         if (waveType_ == wasapi::WaveSampleType::Unsupported) {
+            // Shared-mode GetMixFormat is effectively always 32-bit float, so
+            // this is near-unreachable; surface it rather than fail silently.
             SIP_CORE_WARN() << "WASAPI: unsupported mix format (bits="
                             << mix->wBitsPerSample << ", tag=" << mix->wFormatTag
                             << "), audio will be silent";
+            emitSignal<libsip_core::ConfigurationSignal::DeviceOpenError>(
+                "Unsupported WASAPI shared-mode format", render_);
         }
 
         // Win8+: hint the engine (and the RDP stack) that this is a VoIP stream.
@@ -562,7 +567,10 @@ private:
         HRESULT hr = client_->GetCurrentPadding(&padding);
         if (FAILED(hr))
             return hr;
-        UINT32 avail = bufferFrameCount_ - padding;
+        // A conformant driver never reports padding > buffer size; guard anyway
+        // so a misbehaving virtual/RDP endpoint can't wrap the unsigned subtract
+        // into a huge GetBuffer request.
+        UINT32 avail = (padding < bufferFrameCount_) ? (bufferFrameCount_ - padding) : 0;
         if (avail == 0)
             return S_OK;
 
@@ -899,6 +907,8 @@ WasapiLayer::Impl::startRender(WasapiLayer& parent)
         auto toPlay = parent.getPlayback(fmt, frames);
         if (!toPlay)
             return false;
+        // nb_samples is per-channel frames (not total samples); getToPlay resizes
+        // it to exactly `frames`, so copyFrames == frames in the normal path.
         auto n = static_cast<unsigned>(toPlay->pointer()->nb_samples);
         unsigned copyFrames = std::min(n, frames);
         std::memcpy(dst,
