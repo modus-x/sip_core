@@ -863,9 +863,22 @@ Conference::setLayout(int layout)
     }
     if (!videoMixer_)
         return;
+    // Read the active sharer OUTSIDE confInfoMutex_ to avoid a lock-order
+    // inversion with the mixer callback / onShareState.
+    std::string sharer;
+    {
+        std::lock_guard<std::mutex> lk(sharerMtx_);
+        sharer = activeSharerStreamId_;
+    }
     {
         std::lock_guard<std::mutex> lk(confInfoMutex_);
         confInfo_.layout = layout;
+        // Stamp isSharing synchronously so the IMMEDIATE send below already
+        // carries it to remotes. Otherwise this synchronous send races the
+        // async mixer-driven resend and remotes can latch a layout change with
+        // isSharing=false (host is unaffected — it reads the later local emit).
+        for (auto& pi : confInfo_)
+            pi.isSharing = (!sharer.empty() && pi.sinkId == sharer);
     }
     videoMixer_->setVideoLayout(static_cast<video::Layout>(layout));
     // Push metadata immediately so remote peers receive the layout change
@@ -998,8 +1011,17 @@ Conference::sendConferenceInfos()
         if (!account)
             return;
 
-        call->sendConfInfo(
-            getConfInfoHostUri(account->getUsername() + "@server", call->getPeerNumber()).toString());
+        auto ci = getConfInfoHostUri(account->getUsername() + "@server", call->getPeerNumber());
+        int shareCount = 0;
+        for (const auto& p : ci)
+            if (p.isSharing)
+                ++shareCount;
+        SIP_CORE_WARN("[sharedbg] host send confInfo to %s: participants=%zu sharing=%d layout=%d",
+                      call->getPeerNumber().c_str(),
+                      ci.size(),
+                      shareCount,
+                      ci.layout);
+        call->sendConfInfo(ci.toString());
     });
 #endif
 
@@ -1008,6 +1030,16 @@ Conference::sendConferenceInfos()
     createSinks(confInfo);
 #endif
 
+    {
+        int shareCount = 0;
+        for (const auto& p : confInfo)
+            if (p.isSharing)
+                ++shareCount;
+        SIP_CORE_WARN("[sharedbg] host local emit confInfo: participants=%zu sharing=%d layout=%d",
+                      confInfo.size(),
+                      shareCount,
+                      confInfo.layout);
+    }
     // Inform client that layout has changed
     sip_core::emitSignal<libsip_core::CallSignal::OnConferenceInfosUpdated>(
         id_, confInfo.toVectorMapStringString());

@@ -652,6 +652,8 @@ Call::setConferenceInfo(const std::string& msg)
                 newInfo.w = json["w"].asInt();
             if (json.isMember("h"))
                 newInfo.h = json["h"].asInt();
+            if (json.isMember("layout"))
+                newInfo.layout = json["layout"].asInt();
         } else {
             // old confInfo
             for (const auto& participantInfo : json) {
@@ -664,6 +666,17 @@ Call::setConferenceInfo(const std::string& msg)
         }
     }
 
+    {
+        int shareCount = 0;
+        for (const auto& p : newInfo)
+            if (p.isSharing)
+                ++shareCount;
+        SIP_CORE_WARN("[sharedbg] remote recv confInfo: participants=%zu sharing=%d layout=%d confParticipant=%d",
+                      newInfo.size(),
+                      shareCount,
+                      newInfo.layout,
+                      (int) isConferenceParticipant());
+    }
     {
         std::lock_guard<std::mutex> lk(confInfoMutex_);
         if (not isConferenceParticipant()) {
