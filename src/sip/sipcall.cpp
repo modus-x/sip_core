@@ -3298,6 +3298,20 @@ SIPCall::isReinviteRequired(const std::vector<MediaAttribute>& mediaAttrList)
     if (mediaAttrList.size() != rtpStreams_.size())
         return true;
 
+    // A REMOTE conference participant resuming its camera must announce it with
+    // a re-INVITE. The host learns a participant's video only from a SIP-
+    // signalled (re)negotiation — it attaches the participant's receive stream
+    // to its video mixer at enterConference / media-change / receiver-unhold,
+    // never from a bare local send-unmute. Because a plain mute/un-mute changes
+    // only `muted_` (checked below and normally NOT a re-invite trigger), the
+    // host is never told, never (re)attaches our stream to its mixer, and every
+    // client keeps rendering us as an avatar even though our camera icon is lit.
+    // Force the re-invite so Conference::handleMediaChangeRequest runs on the
+    // host. Scope to the remote-conference case so 1:1 calls keep the cheap
+    // in-place mute/un-mute (video-mute is invisible in SDP there anyway).
+    const bool remoteConfParticipant =
+        isRemoteConfParticipant_.load(std::memory_order_relaxed);
+
     for (auto const& newAttr : mediaAttrList) {
         auto streamIdx = findRtpStreamIndex(newAttr.label_);
 
@@ -3313,6 +3327,12 @@ SIPCall::isReinviteRequired(const std::vector<MediaAttribute>& mediaAttrList)
                 != rtpStreams_[streamIdx]
                        .mediaAttribute_->enabled_ // Also check if 'enabled' has changed
         ) {
+            return true;
+        }
+
+        // Video un-mute (muted true -> false) while a remote conference member.
+        if (remoteConfParticipant && newAttr.type_ == MediaType::MEDIA_VIDEO
+            && not newAttr.muted_ && rtpStreams_[streamIdx].mediaAttribute_->muted_) {
             return true;
         }
     }

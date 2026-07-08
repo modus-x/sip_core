@@ -682,6 +682,9 @@ Call::setConferenceInfo(const std::string& msg)
         if (not isConferenceParticipant()) {
             // confID_ empty -> participant set confInfo with the received one
             confInfo_ = std::move(newInfo);
+            // Mirror membership for lock-free reads in isReinviteRequired. An
+            // empty update (e.g. the host's resetConfInfo "{}") clears it.
+            isRemoteConfParticipant_.store(!confInfo_.empty(), std::memory_order_relaxed);
 
             // Create sink for each participant
 #ifdef ENABLE_VIDEO

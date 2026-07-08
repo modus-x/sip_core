@@ -1146,6 +1146,16 @@ VideoMixer::process()
             if (frameRendered != src->hasVideo) {
                 src->hasVideo = frameRendered;
                 layoutInvalidated = true;
+                // A participant's video presence changed purely from frame
+                // arrival (e.g. a remote camera resumed with no re-negotiation).
+                // layoutInvalidated suppresses THIS frame's onSourcesUpdated_
+                // emit to avoid publishing stale positions, but nothing else
+                // bumps layoutUpdated_, so without this the refreshed
+                // videoMuted (= !hasVideo) would never reach confInfo until some
+                // unrelated layout event (voice activity, join/leave) happened
+                // to flush it — leaving the tile stuck on an avatar. Schedule a
+                // layout update so the NEXT frame recomputes and emits.
+                addLayoutUpdate("source hasVideo changed");
             }
 
             sourcesInfo.emplace_back(SourceInfo {src->source,
