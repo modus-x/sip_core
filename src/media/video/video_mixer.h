@@ -83,8 +83,15 @@ public:
         int height;
         AVPixelFormat format {AV_PIX_FMT_YUV422P};
         double grid_aspect {16.0 / 9.0}; // rectangular tiles; = 0 to match mixer aspect
-        int padding {2};
-        int border_size {8};
+        // Tight, Teams-like spacing: every tile is inset by (padding+border_size)
+        // on each side (see VideoMixer::calc_position), so the inter-tile gap is
+        // 2*(padding+border_size) and the outer margin is (padding+border_size).
+        // These match the Flutter SPLITTED gallery tiles (1px padding + 3px
+        // active-speaker border) so the composited/MIXED stream reads the same as
+        // the split view. border_size also sets the baked active-speaker frame
+        // thickness (drawbox t=). Raise them for a looser grid / bolder frame.
+        int padding {1};
+        int border_size {3};
         std::string active_border_color {"CornflowerBlue@1"}; // ffmpeg compatible colors only
         std::string inactive_border_color {"Blue@0"};         // invisible: only the active speaker is framed
         bool remove_black_borders {true};
@@ -277,9 +284,9 @@ private:
     int height_ = 0;
     AVPixelFormat format_ = AV_PIX_FMT_YUV422P;
     double grid_aspect_ {16.0 / 9.0};
-    int padding_ {2};
+    int padding_ {1}; // kept in sync with Parameters::padding (Teams-tight gaps)
     const std::string borderFilterName_ = "border";
-    int border_size_ {8};
+    int border_size_ {3}; // kept in sync with Parameters::border_size
     std::string active_border_color_ {"CornflowerBlue@1"}; // ffmpeg declared colors only
     std::string inactive_border_color_ {"Blue@0"};         // invisible: only the active speaker is framed
     bool remove_black_borders_ {true};

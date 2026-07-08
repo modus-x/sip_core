@@ -76,6 +76,7 @@ struct ParticipantInfo
     bool voiceActivity {false};
     bool recording {false};
     std::string callId;
+    bool isSharing {false}; // participant is sharing its desktop (screen share)
 
     void fromJson(const Json::Value& v)
     {
@@ -94,6 +95,7 @@ struct ParticipantInfo
         handRaised = v["handRaised"].asBool();
         voiceActivity = v["voiceActivity"].asBool();
         recording = v["recording"].asBool();
+        isSharing = v["isSharing"].asBool();
     }
 
     Json::Value toJson() const
@@ -114,6 +116,7 @@ struct ParticipantInfo
         val["handRaised"] = handRaised;
         val["voiceActivity"] = voiceActivity;
         val["recording"] = recording;
+        val["isSharing"] = isSharing;
         return val;
     }
 
@@ -134,7 +137,8 @@ struct ParticipantInfo
                 {"handRaised", handRaised ? "true" : "false"},
                 {"voiceActivity", voiceActivity ? "true" : "false"},
                 {"callId", callId},
-                {"recording", recording ? "true" : "false"}};
+                {"recording", recording ? "true" : "false"},
+                {"isSharing", isSharing ? "true" : "false"}};
     }
 
     friend bool operator==(const ParticipantInfo& p1, const ParticipantInfo& p2)
@@ -145,7 +149,8 @@ struct ParticipantInfo
                and p1.audioLocalMuted == p2.audioLocalMuted
                and p1.audioModeratorMuted == p2.audioModeratorMuted
                and p1.isModerator == p2.isModerator and p1.handRaised == p2.handRaised
-               and p1.voiceActivity == p2.voiceActivity and p1.recording == p2.recording;
+               and p1.voiceActivity == p2.voiceActivity and p1.recording == p2.recording
+               and p1.isSharing == p2.isSharing;
     }
 
     friend bool operator!=(const ParticipantInfo& p1, const ParticipantInfo& p2)
@@ -364,6 +369,23 @@ public:
     void setActiveStream(const std::string& streamId, bool state);
     void setLayout(int layout);
 
+    /**
+     * A participant (peerId empty ⇒ the local host) announced it started/stopped
+     * sharing its desktop. The host arbitrates a single active sharer: the first
+     * to share is accepted; a moderator (or the host) may take over and preempt
+     * the current sharer; a non-moderator is denied while someone else shares.
+     * On accept the sharer's stream is promoted to Layout::ONE_BIG for everyone;
+     * on stop the layout returns to GRID.
+     */
+    void onShareState(const std::string& peerId, bool state);
+
+    /**
+     * End the current screen share (sharer muted its desktop source or left).
+     * Called from the confInfo builder when the active sharer stops producing
+     * video. Idempotent — a no-op when nobody is sharing.
+     */
+    void endCurrentShare();
+
     void onConfOrder(const std::string& callId, const std::string& order);
 
     bool isVideoEnabled() const;
@@ -479,6 +501,16 @@ private:
 
     mutable std::mutex confInfoMutex_ {};
     ConfInfo confInfo_ {};
+
+    // Screen-share arbitration. `activeSharerStreamId_` is the mixer stream id
+    // of the single participant currently sharing its desktop (empty = nobody).
+    // `sharerHadVideo_` gates share-stop detection: the confInfo builder only
+    // treats a muted sharer as "stopped" once it has seen at least one live
+    // frame, so the brief no-frame window right after a share starts does not
+    // immediately cancel it.
+    mutable std::mutex sharerMtx_ {};
+    std::string activeSharerStreamId_ {};
+    bool sharerHadVideo_ {false};
 
     void sendConferenceInfos();
     // Rate-limited entry point (called from updateVoiceActivity()). Voice state

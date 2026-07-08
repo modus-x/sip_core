@@ -2145,6 +2145,17 @@ SIPCall::switchInput(const std::string& source)
             }
         }
     }
+
+    // Conference screen-share announce: when this participant is part of a
+    // conference (V1 confOrder), tell the host (the mixer/focus) that it
+    // started/stopped sharing its desktop, so the host can promote it to a
+    // full-screen ONE_BIG layout for everyone. Reuses the confOrder channel;
+    // share-stop via muting the desktop source is detected host-side from the
+    // participant's videoMuted flag, so only the switch transitions announce here.
+    if (Call::conferenceProtocolVersion() == 1) {
+        const bool isDesktop = normalizedSource.rfind("display", 0) == 0;
+        Call::sendConfOrder(sip_core::ConfOrder::shareState(isDesktop));
+    }
     return true;
 #endif
     return false;

@@ -45,6 +45,8 @@ constexpr static const char* MUTEAUDIO = "muteAudio";
 // Future
 constexpr static const char* MUTEVIDEO = "muteVideo";
 constexpr static const char* VOICEACTIVITY = "voiceActivity";
+// Screen-share self-announce (top-level, like LAYOUT)
+constexpr static const char* SHARESTATE = "shareState";
 
 } // namespace ProtocolKeys
 
@@ -115,6 +117,15 @@ setActiveStream(const std::string& accountUri,
                 bool state)
 {
     return mediaOrder(accountUri, deviceId, streamId, ProtocolKeys::ACTIVE, state);
+}
+
+Json::Value
+shareState(bool state)
+{
+    Json::Value root;
+    root[ProtocolKeys::PROTOVERSION] = 1;
+    root[ProtocolKeys::SHARESTATE] = state;
+    return root;
 }
 
 } // namespace ConfOrder
@@ -198,6 +209,14 @@ ConfProtocolParser::parseV1()
         auto key = itr.key();
         if (key == ProtocolKeys::PROTOVERSION)
             continue;
+        if (key == ProtocolKeys::SHARESTATE) {
+            // Self-announce: any participant may declare its OWN screen-share
+            // start/stop. The host authorises/arbitrates (moderator takeover)
+            // when resolving peerId_; no moderator gate here.
+            if (shareState_)
+                shareState_(std::string(peerId_), itr->asBool());
+            continue;
+        }
         if (isPeerModerator && key == ProtocolKeys::LAYOUT) {
             // Note: can be removed soon
             if (setLayout_)

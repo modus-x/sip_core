@@ -49,6 +49,12 @@ Json::Value setActiveStream(const std::string& accountUri,
                             const std::string& deviceId,
                             const std::string& streamId,
                             bool state);
+/**
+ * Self-announce: the sender declares it started/stopped sharing its desktop.
+ * Top-level payload {"version":1,"shareState":<bool>} — the host resolves the
+ * sharer from the delivering call, so no account/device/stream ids are needed.
+ */
+Json::Value shareState(bool state);
 
 } // namespace ConfOrder
 
@@ -98,6 +104,14 @@ public:
         muteStreamVideo_ = std::move(cb);
     }
     void onSetLayout(std::function<void(int)>&& cb) { setLayout_ = std::move(cb); }
+    /**
+     * A participant announced its own screen-share start/stop. Callback receives
+     * (peerId, state); peerId is the authenticated sender (delivering call).
+     */
+    void onShareState(std::function<void(const std::string&, bool)>&& cb)
+    {
+        shareState_ = std::move(cb);
+    }
 
     // Version 0, deprecated
     void onKickParticipant(std::function<void(const std::string&)>&& cb)
@@ -153,6 +167,7 @@ private:
     std::function<void(const std::string&, const std::string&, const std::string&, bool)>
         muteStreamVideo_;
     std::function<void(int)> setLayout_;
+    std::function<void(const std::string&, bool)> shareState_;
 
     std::function<void(const std::string&, bool)> raiseHandUri_;
     std::function<void(const std::string&)> kickParticipant_;

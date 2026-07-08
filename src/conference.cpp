@@ -104,6 +104,7 @@ Conference::Conference(const std::shared_ptr<Account>& account, const std::strin
             muteStream(accountUri, deviceId, streamId, state);
         });
     parser_.onSetLayout([&](int layout) { setLayout(layout); });
+    parser_.onShareState([&](const auto& peerId, bool state) { onShareState(peerId, state); });
 
     // Version 0, deprecated
     parser_.onKickParticipant([&](const auto& participantId) { hangupParticipant(participantId); });
@@ -252,6 +253,41 @@ Conference::attachVideoMixerCallbacks()
                 pi.audioLocalMuted = shared->isMediaSourceMuted(MediaType::MEDIA_AUDIO);
                 pi.isModerator = true;
                 newInfo.emplace_back(pi);
+            }
+
+            // Screen share: flag the active sharer's row so every client renders
+            // the "X is sharing" UI, and detect share-stop (the sharer muted its
+            // desktop source or left the conference) to restore the grid.
+            {
+                std::string sharer;
+                bool hadVideo = false;
+                {
+                    std::lock_guard<std::mutex> lk(shared->sharerMtx_);
+                    sharer = shared->activeSharerStreamId_;
+                    hadVideo = shared->sharerHadVideo_;
+                }
+                if (!sharer.empty()) {
+                    ParticipantInfo* row = nullptr;
+                    for (auto& pi : newInfo) {
+                        if (pi.sinkId == sharer) {
+                            row = &pi;
+                            break;
+                        }
+                    }
+                    if (row && !row->videoMuted) {
+                        row->isSharing = true;
+                        if (!hadVideo) {
+                            std::lock_guard<std::mutex> lk(shared->sharerMtx_);
+                            shared->sharerHadVideo_ = true;
+                        }
+                    } else if (hadVideo) {
+                        // Sharer left (row == null) or muted its desktop source.
+                        runOnMainThread([w] {
+                            if (auto s = w.lock())
+                                s->endCurrentShare();
+                        });
+                    }
+                }
             }
 
             shared->updateConferenceInfo(std::move(newInfo));
@@ -838,6 +874,79 @@ Conference::setLayout(int layout)
 #endif
 }
 
+void
+Conference::onShareState(const std::string& peerId, bool state)
+{
+#ifdef ENABLE_VIDEO
+    if (!videoMixer_)
+        return;
+
+    // Resolve the sharer's mixer stream id and whether it may preempt an
+    // existing share. The local host (empty peerId) may always share/take over.
+    std::string streamId;
+    bool sharerMayOverride = false;
+    if (peerId.empty() || isHost(peerId)) {
+        streamId = sip_utils::streamId("", sip_utils::DEFAULT_VIDEO_STREAMID);
+        sharerMayOverride = true;
+    } else if (auto call = getCallFromPeerID(peerId)) {
+        streamId = sip_utils::streamId(call->getCallId(), sip_utils::DEFAULT_VIDEO_STREAMID);
+        sharerMayOverride = isModerator(peerId);
+    } else {
+        SIP_CORE_WARN("[Conf:%s] onShareState: cannot resolve sharer '%s'",
+                      id_.c_str(),
+                      peerId.c_str());
+        return;
+    }
+
+    if (state) {
+        {
+            std::lock_guard<std::mutex> lk(sharerMtx_);
+            if (!activeSharerStreamId_.empty() && activeSharerStreamId_ != streamId
+                && !sharerMayOverride) {
+                // Someone else is already sharing and this peer is not a
+                // moderator: deny. Their client self-reverts because their own
+                // confInfo isSharing stays false.
+                SIP_CORE_WARN("[Conf:%s] onShareState: '%s' denied (already sharing)",
+                              id_.c_str(),
+                              peerId.c_str());
+                return;
+            }
+            activeSharerStreamId_ = streamId;
+            sharerHadVideo_ = false;
+        }
+        // Promote the sharer to a full-screen ONE_BIG layout for everyone.
+        setActiveStream(streamId, true);
+        setLayout(static_cast<int>(video::Layout::ONE_BIG));
+    } else {
+        {
+            std::lock_guard<std::mutex> lk(sharerMtx_);
+            if (activeSharerStreamId_ != streamId)
+                return; // not the current sharer; ignore
+            activeSharerStreamId_.clear();
+            sharerHadVideo_ = false;
+        }
+        setActiveStream(streamId, false);
+        setLayout(static_cast<int>(video::Layout::GRID));
+    }
+#endif
+}
+
+void
+Conference::endCurrentShare()
+{
+#ifdef ENABLE_VIDEO
+    {
+        std::lock_guard<std::mutex> lk(sharerMtx_);
+        if (activeSharerStreamId_.empty())
+            return;
+        activeSharerStreamId_.clear();
+        sharerHadVideo_ = false;
+    }
+    setActiveStream("", false); // resetActiveStream()
+    setLayout(static_cast<int>(video::Layout::GRID));
+#endif
+}
+
 std::vector<std::map<std::string, std::string>>
 ConfInfo::toVectorMapStringString() const
 {
@@ -1285,6 +1394,11 @@ Conference::switchInput(const std::string& input)
         mixer->switchInputs({normalizedInput},
                             isMediaSourceMuted(MediaType::MEDIA_VIDEO));
     }
+
+    // Host screen-share: promote to ONE_BIG when the host switches its own
+    // conference input to a desktop source, and restore the grid when it
+    // switches away (share-stop via muting is handled by the confInfo builder).
+    onShareState("", normalizedInput.rfind("display", 0) == 0);
 
     reportMediaNegotiationStatus();
     return true;
