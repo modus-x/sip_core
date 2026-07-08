@@ -982,7 +982,17 @@ VideoMixer::process()
         }
 
         int i = 0;
-        if (!activeStream_.empty())
+        // Reserve render index 0 for the active/spotlighted stream ONLY in the
+        // mixed layouts that actually consume that slot (ONE_BIG puts the active
+        // source full-screen; ONE_BIG_WITH_SMALL puts it big below the preview
+        // strip — both pull the active source to wantedIndex 0 and decrement i in
+        // processSource()). In GRID the active source is drawn like any other
+        // (client-side SPLITTED spotlight is a pure layout concern), so reserving
+        // slot 0 here would leave cell 0 empty (black) and shove every source to
+        // indices 1..n — pushing the last tile off-canvas and desyncing the
+        // per-sink crop rectangles that host AND remotes derive from these
+        // coordinates, turning non-spotlighted tiles black. Gate on non-GRID.
+        if (!activeStream_.empty() && currentLayout_ != Layout::GRID)
             i++; // reserve 0 index place for active stream
 
         // Build a stableIndex-sorted iteration order across video sources
