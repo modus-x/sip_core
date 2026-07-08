@@ -819,13 +819,17 @@ Conference::setActiveParticipant(const std::string& participant_id)
 #ifdef ENABLE_VIDEO
     if (!videoMixer_)
         return;
+    // Route through setActiveStream() so this deprecated no-sink / V0 fallback
+    // also stamps confInfo_.active and pushes it to remotes (previously it only
+    // poked the mixer, so a spotlight requested before per-sink metadata arrived
+    // never reached remote participants).
     if (isHost(participant_id)) {
-        videoMixer_->setActiveStream(sip_utils::streamId("", sip_utils::DEFAULT_VIDEO_STREAMID));
+        setActiveStream(sip_utils::streamId("", sip_utils::DEFAULT_VIDEO_STREAMID), true);
         return;
     }
     if (auto call = getCallFromPeerID(participant_id)) {
-        videoMixer_->setActiveStream(
-            sip_utils::streamId(call->getCallId(), sip_utils::DEFAULT_VIDEO_STREAMID));
+        setActiveStream(sip_utils::streamId(call->getCallId(), sip_utils::DEFAULT_VIDEO_STREAMID),
+                        true);
         return;
     }
 
@@ -836,7 +840,7 @@ Conference::setActiveParticipant(const std::string& participant_id)
         return;
     }
     // Unset active participant by default
-    videoMixer_->resetActiveStream();
+    setActiveStream("", false);
 #endif
 }
 
@@ -850,6 +854,24 @@ Conference::setActiveStream(const std::string& streamId, bool state)
         videoMixer_->setActiveStream(streamId);
     else
         videoMixer_->resetActiveStream();
+
+    // Stamp `active` into confInfo_ and push it to every remote immediately,
+    // mirroring setLayout()'s synchronous isSharing stamp + send. The async
+    // mixer onSourcesUpdated_ callback also recomputes active (verifyActive)
+    // and re-broadcasts, but only when the render loop next emits
+    // (needsUpdate && !layoutInvalidated) — a pure spotlight toggle need not
+    // change geometry, so that path is racy/deferred and left remote
+    // participants on the old grid while the host UI already reflected the
+    // spotlight. Exactly one row (sinkId == streamId) is active while
+    // spotlighting; un-spotlighting clears them all. This produces the same
+    // result the async verifyActive() path would (activeStream_ == pi.sinkId),
+    // so the two stay consistent — this one is just immediate and deterministic.
+    {
+        std::lock_guard<std::mutex> lk(confInfoMutex_);
+        for (auto& pi : confInfo_)
+            pi.active = (state && !streamId.empty() && pi.sinkId == streamId);
+    }
+    sendConferenceInfos();
 #endif
 }
 
