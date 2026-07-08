@@ -246,6 +246,11 @@ Conference::attachVideoMixerCallbacks()
             if (auto videoMixer = shared->videoMixer_) {
                 newInfo.h = videoMixer->getHeight();
                 newInfo.w = videoMixer->getWidth();
+                // Preserve the mixer's real layout. ConfInfo.layout defaults to
+                // GRID, and this rebuild replaces confInfo_ wholesale, so without
+                // this every mixer-driven rebuild (join, leave, voice-activity)
+                // would clobber an active ONE_BIG share back to GRID on remotes.
+                newInfo.layout = static_cast<int>(videoMixer->getVideoLayout());
             }
             if (!hostAdded) {
                 ParticipantInfo pi;
@@ -934,6 +939,9 @@ Conference::onShareState(const std::string& peerId, bool state)
     }
 
     if (state) {
+        // Read the pre-share layout BEFORE promoting, so stop/leave can restore
+        // it. Read outside sharerMtx_ (getVideoLayout takes the mixer lock).
+        const int currentLayout = static_cast<int>(videoMixer_->getVideoLayout());
         {
             std::lock_guard<std::mutex> lk(sharerMtx_);
             if (!activeSharerStreamId_.empty() && activeSharerStreamId_ != streamId
@@ -946,6 +954,10 @@ Conference::onShareState(const std::string& peerId, bool state)
                               peerId.c_str());
                 return;
             }
+            // Only capture on a FRESH start, not a moderator takeover of an
+            // ongoing share — the original pre-share layout must survive takeovers.
+            if (activeSharerStreamId_.empty())
+                layoutBeforeShare_ = currentLayout;
             activeSharerStreamId_ = streamId;
             sharerHadVideo_ = false;
         }
@@ -953,15 +965,17 @@ Conference::onShareState(const std::string& peerId, bool state)
         setActiveStream(streamId, true);
         setLayout(static_cast<int>(video::Layout::ONE_BIG));
     } else {
+        int restore = static_cast<int>(video::Layout::GRID);
         {
             std::lock_guard<std::mutex> lk(sharerMtx_);
             if (activeSharerStreamId_ != streamId)
                 return; // not the current sharer; ignore
             activeSharerStreamId_.clear();
             sharerHadVideo_ = false;
+            restore = layoutBeforeShare_;
         }
         setActiveStream(streamId, false);
-        setLayout(static_cast<int>(video::Layout::GRID));
+        setLayout(restore);
     }
 #endif
 }
@@ -970,15 +984,17 @@ void
 Conference::endCurrentShare()
 {
 #ifdef ENABLE_VIDEO
+    int restore = static_cast<int>(video::Layout::GRID);
     {
         std::lock_guard<std::mutex> lk(sharerMtx_);
         if (activeSharerStreamId_.empty())
             return;
         activeSharerStreamId_.clear();
         sharerHadVideo_ = false;
+        restore = layoutBeforeShare_;
     }
     setActiveStream("", false); // resetActiveStream()
-    setLayout(static_cast<int>(video::Layout::GRID));
+    setLayout(restore);
 #endif
 }
 
@@ -1180,9 +1196,29 @@ Conference::removeParticipant(const std::string& participant_id)
         if (videoMixer_->verifyActive(
                 sip_utils::streamId(participant_id, sip_utils::DEFAULT_VIDEO_STREAMID)))
             videoMixer_->resetActiveStream();
+        // If the departing participant is the current sharer, end the share
+        // deterministically so isSharing clears and the layout is restored —
+        // rather than relying on the racy confInfo-builder stop-detection.
+        bool sharerLeft = false;
+        {
+            std::lock_guard<std::mutex> lk(sharerMtx_);
+            sharerLeft = !activeSharerStreamId_.empty()
+                         && activeSharerStreamId_
+                                == sip_utils::streamId(participant_id,
+                                                       sip_utils::DEFAULT_VIDEO_STREAMID);
+        }
 #endif // ENABLE_VIDEO
         call->exitConference();
 #ifdef ENABLE_VIDEO
+        // Post to the main thread (not this pjsip/Manager disconnect thread) to
+        // match every other endCurrentShare caller — it takes confInfoMutex_ +
+        // the mixer rwMutex_ and drives SIP sends, so keep it off re-entrant
+        // Manager locks. Idempotent: a no-op if the share already ended.
+        if (sharerLeft)
+            runOnMainThread([w = weak()] {
+                if (auto s = w.lock())
+                    s->endCurrentShare();
+            });
         if (call->isPeerRecording())
             call->peerRecording(false);
 #endif // ENABLE_VIDEO

@@ -511,6 +511,9 @@ private:
     mutable std::mutex sharerMtx_ {};
     std::string activeSharerStreamId_ {};
     bool sharerHadVideo_ {false};
+    // Layout that was active when the current share started, so stop/leave
+    // restores what the conference looked like before (not a hardcoded GRID).
+    int layoutBeforeShare_ {0};
 
     void sendConferenceInfos();
     // Rate-limited entry point (called from updateVoiceActivity()). Voice state
