@@ -1127,13 +1127,17 @@ SIPCall::requestKeyframe(int streamIdx)
                          "</to_encoder></vc_primitive></media_control>";
     SIP_CORE_DBG("Sending video keyframe request via SIP INFO");
     try {
-        // Deliberately live while the other media_control senders stay disabled
-        // (5532cf12b): a starving receive decoder has NO other recovery path —
-        // the peer's encoder emits no periodic IDR, so a lost keyframe stalls
-        // video until the next renegotiation. Rate-limited above. In-dialog
-        // INFO is the sanctioned in-call channel for this PBX (out-of-dialog
-        // MESSAGE can be lost).
-        sendSIPInfo(BODY, "media_control+xml");
+        // DO NOT re-enable on this deployment. The RTC CallManager B2BUA
+        // (tele.svetets.ru) answers a media_control+xml INFO with 481 "Call/
+        // Transaction Does Not Exist"; per RFC 3261 §12.2.1.2 a 481 to an
+        // in-dialog request terminates the dialog, so every accepted video
+        // call is torn down the moment media starts and this fires. That is
+        // why 5532cf12b commented it out. There is no RTCP PLI/FIR fallback
+        // either, so mid-call keyframe recovery is simply unavailable behind
+        // this PBX — the encoder's start-of-stream IDR covers normal setup,
+        // and the conference un-mute fix no longer rebuilds the receive
+        // decoder, so nothing depends on this request.
+        // sendSIPInfo(BODY, "media_control+xml");
     } catch (const std::exception& e) {
         SIP_CORE_ERR("Error sending video keyframe request: %s", e.what());
     }
