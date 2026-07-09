@@ -103,9 +103,10 @@ Conference::Conference(const std::shared_ptr<Account>& account, const std::strin
         }
         hangupParticipant(accountUri, deviceId);
     });
-    parser_.onRaiseHand([&](const auto& accountUri, const auto& deviceId, bool state) {
-        setHandRaised(accountUri, deviceId, state);
-    });
+    parser_.onRaiseHand(
+        [&](const auto& senderUri, const auto& accountUri, const auto& deviceId, bool state) {
+            setHandRaised(accountUri, deviceId, state, senderUri);
+        });
     parser_.onSetActiveStream(
         [&](const auto& streamId, bool state) { setActiveStream(streamId, state); });
     parser_.onMuteStreamAudio(
@@ -121,7 +122,9 @@ Conference::Conference(const std::shared_ptr<Account>& account, const std::strin
         [&](const auto& participantId) { setActiveParticipant(participantId); });
     parser_.onMuteParticipant(
         [&](const auto& participantId, bool state) { muteParticipant(participantId, state); });
-    parser_.onRaiseHandUri([&](const auto& uri, bool state) { setHandRaised(uri, "", state); });
+    parser_.onRaiseHandUri([&](const auto& senderUri, const auto& uri, bool state) {
+        setHandRaised(uri, "", state, senderUri);
+    });
 
     parser_.onVoiceActivity(
         [&](const auto& streamId, bool state) { setVoiceActivity(streamId, state); });
@@ -1620,7 +1623,8 @@ Conference::isHandRaised(std::string_view id) const
 void
 Conference::setHandRaised(const std::string& accountUri,
                           const std::string& deviceId,
-                          const bool& state)
+                          const bool& state,
+                          const std::string& senderUri)
 {
     // Hands are keyed by the host-side call id ("host" for the local host):
     // it is the only unique participant key over plain SIP, where transport
@@ -1634,6 +1638,15 @@ Conference::setHandRaised(const std::string& accountUri,
         key = call->getCallId();
     } else if (auto call = getCallFromPeerID(uri)) {
         key = call->getCallId();
+    } else if (!senderUri.empty() && senderUri != uri) {
+        // The stamped uri is a client login the host cannot resolve — it
+        // knows the peer only by the uri it dialed ("m12" vs "74112"). The
+        // parser already routes plain self-actions to the sender; the case
+        // left ambiguous to it is a MODERATOR lowering a hand, which may
+        // address either itself or another participant. A target that
+        // resolves to nobody was the sender's own login: apply to the sender.
+        setHandRaised(senderUri, deviceId, state);
+        return;
     } else {
         SIP_CORE_WARN("Fail to raise %s hand (participant not found)", accountUri.c_str());
         return;

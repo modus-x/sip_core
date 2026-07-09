@@ -417,11 +417,16 @@ public:
     /**
      * Raise/lower a participant's hand. The participant is resolved from the
      * account uri (deviceId is vestigial over plain SIP); the state itself is
-     * keyed by the host-side call id ("host" for the local host).
+     * keyed by the host-side call id ("host" for the local host). When the
+     * order came over the wire, senderUri carries the SIP-layer sender
+     * identity: clients stamp self-actions with their typed login, which the
+     * host cannot resolve (it knows the peer by the uri it dialed), so an
+     * unresolvable accountUri is retried as the sender.
      */
     void setHandRaised(const std::string& accountUri,
                        const std::string& deviceId,
-                       const bool& state);
+                       const bool& state,
+                       const std::string& senderUri = {});
     void setVoiceActivity(const std::string& id, const bool& newState);
     void setVoiceActivityForCall(const std::string& callId, const bool& newState);
     void setVoiceActivity(const Json::Value& json);

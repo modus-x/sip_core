@@ -167,10 +167,18 @@ ConfProtocolParser::parseV0()
                             << ProtocolKeys::HANDRAISED;
         } else if (peerId_ == uri) {
             // In this case, the user want to change their state
-            raiseHandUri_(uri, state);
+            raiseHandUri_(std::string(peerId_), uri, state);
         } else if (!state && isPeerModerator) {
             // In this case a moderator can lower the hand
-            raiseHandUri_(uri, state);
+            raiseHandUri_(std::string(peerId_), uri, state);
+        } else {
+            // Clients stamp self-actions with their typed login (e.g. "m12"),
+            // while the host knows the sender only by the uri it dialed (e.g.
+            // "74112") — the two need not match. Anything that is not a
+            // moderator lowering someone else can only be the sender acting
+            // on its OWN hand, so apply it to the SIP-layer sender instead of
+            // silently dropping it (2026-07-09 remote raise-hand bug).
+            raiseHandUri_(std::string(peerId_), std::string(peerId_), state);
         }
     }
     if (!isPeerModerator) {
@@ -239,7 +247,15 @@ ConfProtocolParser::parseV1()
                     if (raiseHand_ && deviceValue.isMember(ProtocolKeys::RAISEHAND)) {
                         auto newState = deviceValue[ProtocolKeys::RAISEHAND].asBool();
                         if (peerId_ == accountUri || (!newState && isPeerModerator))
-                            raiseHand_(accountUri, deviceId, newState);
+                            raiseHand_(std::string(peerId_), accountUri, deviceId, newState);
+                        else
+                            // Self-action stamped with the sender's typed
+                            // login (see the parseV0 hand block): apply it to
+                            // the SIP-layer sender rather than dropping it.
+                            raiseHand_(std::string(peerId_),
+                                       std::string(peerId_),
+                                       deviceId,
+                                       newState);
                     }
                     if (hangupParticipant_ && isPeerModerator
                         && deviceValue.isMember(ProtocolKeys::HANGUP)) {

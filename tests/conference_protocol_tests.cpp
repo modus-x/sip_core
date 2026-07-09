@@ -94,8 +94,11 @@ wireAll(ConfProtocolParser& parser, Recorder& rec, bool moderator)
     parser.onHangupParticipant([&rec](const std::string& uri, const std::string& dev) {
         rec.add("hangup:" + uri + "/" + dev);
     });
-    parser.onRaiseHand([&rec](const std::string& uri, const std::string& dev, bool state) {
-        rec.add("raiseHand:" + uri + "/" + dev + ":" + (state ? "1" : "0"));
+    parser.onRaiseHand([&rec](const std::string& sender,
+                              const std::string& uri,
+                              const std::string& dev,
+                              bool state) {
+        rec.add("raiseHand:" + uri + "/" + dev + ":" + (state ? "1" : "0") + "@" + sender);
     });
     parser.onSetActiveStream([&rec](const std::string& sid, bool state) {
         rec.add("active:" + sid + ":" + (state ? "1" : "0"));
@@ -113,8 +116,8 @@ wireAll(ConfProtocolParser& parser, Recorder& rec, bool moderator)
     parser.onMuteParticipant([&rec](const std::string& uri, bool state) {
         rec.add("mutePart:" + uri + ":" + (state ? "1" : "0"));
     });
-    parser.onRaiseHandUri([&rec](const std::string& uri, bool state) {
-        rec.add("raiseHandUri:" + uri + ":" + (state ? "1" : "0"));
+    parser.onRaiseHandUri([&rec](const std::string& sender, const std::string& uri, bool state) {
+        rec.add("raiseHandUri:" + uri + ":" + (state ? "1" : "0") + "@" + sender);
     });
     parser.onVoiceActivity([&rec](const std::string& sid, bool state) {
         rec.add("voice:" + sid + ":" + (state ? "1" : "0"));
@@ -168,7 +171,7 @@ test_v0_moderator_full_dispatch()
     expect_true(rec.has("activePart:bob"), "V0 moderator: activeParticipant not dispatched");
     expect_true(rec.has("mutePart:bob:1"), "V0 moderator: muteParticipant not dispatched");
     expect_true(rec.has("kick:carl"), "V0 moderator: hangupParticipant not dispatched");
-    expect_true(rec.has("raiseHandUri:alice:1"), "V0: own hand raise not dispatched");
+    expect_true(rec.has("raiseHandUri:alice:1@alice"), "V0: own hand raise not dispatched");
 }
 
 void
@@ -183,7 +186,7 @@ test_v0_non_moderator_rejected()
                  "muteParticipant": "bob", "muteState": "true",
                  "hangupParticipant": "carl",
                  "handRaised": "alice", "handState": "true"})");
-    expect_true(rec.has("raiseHandUri:alice:1"),
+    expect_true(rec.has("raiseHandUri:alice:1@alice"),
                 "V0 non-moderator: own hand raise must still work");
     expect_true(rec.count() == 1,
                 "V0 non-moderator: moderation actions must be rejected");
@@ -194,12 +197,42 @@ test_v0_moderator_lowers_other_hand_but_cannot_raise()
 {
     Recorder lower;
     runOrder(lower, true, "alice", R"({"handRaised": "bob", "handState": "false"})");
-    expect_true(lower.has("raiseHandUri:bob:0"), "V0: moderator must lower bob's hand");
+    expect_true(lower.has("raiseHandUri:bob:0@alice"), "V0: moderator must lower bob's hand");
 
+    // A raise addressed at someone else is treated as the sender's own raise
+    // (clients stamp self-raises with a login the host may not recognize —
+    // see test_v0_login_stamped_self_action below); it must never land on
+    // the stamped third party.
     Recorder raise;
     runOrder(raise, true, "alice", R"({"handRaised": "bob", "handState": "true"})");
-    expect_true(!raise.has("raiseHandUri:bob:1"),
+    expect_true(!raise.has("raiseHandUri:bob:1@alice"),
                 "V0: moderator must NOT raise someone else's hand");
+    expect_true(raise.has("raiseHandUri:alice:1@alice"),
+                "V0: a raise stamped with a foreign uri must resolve to the sender");
+}
+
+void
+test_v0_login_stamped_self_action()
+{
+    // Live bug (2026-07-09): the sender stamps its typed login ("m12") while
+    // the host knows it by the extension it dialed ("74112"). The raise used
+    // to be dropped silently by the peerId==uri gate.
+    Recorder raise;
+    runOrder(raise, false, "74112", R"({"handRaised": "m12", "handState": "true"})");
+    expect_true(raise.has("raiseHandUri:74112:1@74112"),
+                "V0: login-stamped self raise must resolve to the SIP sender");
+
+    Recorder lower;
+    runOrder(lower, false, "74112", R"({"handRaised": "m12", "handState": "false"})");
+    expect_true(lower.has("raiseHandUri:74112:0@74112"),
+                "V0: login-stamped self lower must resolve to the SIP sender");
+
+    // From a moderator, a lower keeps the stamped target: the Conference
+    // resolves it and falls back to the sender only when it matches nobody.
+    Recorder modLower;
+    runOrder(modLower, true, "74112", R"({"handRaised": "m12", "handState": "false"})");
+    expect_true(modLower.has("raiseHandUri:m12:0@74112"),
+                "V0: moderator lower must keep the stamped target with the sender attached");
 }
 
 void
@@ -277,25 +310,58 @@ test_v1_raise_hand_self_authorization()
              false,
              "bob",
              canonicalV1("bob", "dev1", R"({"raiseHand": true})"));
-    expect_true(rec.has("raiseHand:bob/dev1:1"), "V1: self raiseHand must dispatch");
+    expect_true(rec.has("raiseHand:bob/dev1:1@bob"), "V1: self raiseHand must dispatch");
 
-    // A non-moderator must not lower (or raise) someone else's hand.
+    // A hand order from a non-moderator can only be a self-action: it must
+    // never land on the stamped third party, only on the sender itself.
     Recorder other;
     runOrder(other,
              false,
              "mallory",
              canonicalV1("bob", "dev1", R"({"raiseHand": false})"));
-    expect_true(other.count() <= 1 && !other.has("raiseHand:bob/dev1:0"),
+    expect_true(!other.has("raiseHand:bob/dev1:0@mallory"),
                 "V1: non-moderator must not lower another participant's hand");
+    expect_true(other.has("raiseHand:mallory/dev1:0@mallory"),
+                "V1: non-moderator hand order must resolve to the sender's own hand");
 
     // A moderator may lower, but not raise, someone else's hand.
     Recorder lower;
     runOrder(lower, true, "alice", canonicalV1("bob", "dev1", R"({"raiseHand": false})"));
-    expect_true(lower.has("raiseHand:bob/dev1:0"), "V1: moderator must lower bob's hand");
+    expect_true(lower.has("raiseHand:bob/dev1:0@alice"), "V1: moderator must lower bob's hand");
     Recorder raise;
     runOrder(raise, true, "alice", canonicalV1("bob", "dev1", R"({"raiseHand": true})"));
-    expect_true(!raise.has("raiseHand:bob/dev1:1"),
+    expect_true(!raise.has("raiseHand:bob/dev1:1@alice"),
                 "V1: moderator must NOT raise someone else's hand");
+    expect_true(raise.has("raiseHand:alice/dev1:1@alice"),
+                "V1: a raise stamped with a foreign uri must resolve to the sender");
+}
+
+void
+test_v1_login_stamped_self_action()
+{
+    // Live bug (2026-07-09): remote m12 raised its hand; the V1 order carried
+    // its typed login ("m12") while the host knew the leg only by the dialed
+    // extension ("74112"). The peerId==accountUri gate dropped every raise
+    // silently. Such orders must dispatch as the sender's own action.
+    Recorder raise;
+    runOrder(raise, false, "74112", canonicalV1("m12", "", R"({"raiseHand": true})"));
+    expect_true(raise.has("raiseHand:74112/:1@74112"),
+                "V1: login-stamped self raise must resolve to the SIP sender");
+
+    Recorder lower;
+    runOrder(lower, false, "74112", canonicalV1("m12", "", R"({"raiseHand": false})"));
+    expect_true(lower.has("raiseHand:74112/:0@74112"),
+                "V1: login-stamped self lower must resolve to the SIP sender");
+
+    // From a moderator (the common case under allModerators), a lower keeps
+    // the stamped target and attaches the sender: Conference::setHandRaised
+    // resolves the target and falls back to the sender when it matches no
+    // participant, so a moderator lowering its OWN login-stamped hand works
+    // without letting it lower arbitrary uris by accident.
+    Recorder modLower;
+    runOrder(modLower, true, "74112", canonicalV1("m12", "", R"({"raiseHand": false})"));
+    expect_true(modLower.has("raiseHand:m12/:0@74112"),
+                "V1: moderator lower must keep the stamped target with the sender attached");
 }
 
 void
@@ -360,12 +426,15 @@ test_v1_minimal_handler_set()
     Recorder rec;
     ConfProtocolParser parser;
     parser.onCheckAuthorization([](std::string_view) { return false; });
-    parser.onRaiseHand([&rec](const std::string& uri, const std::string& dev, bool state) {
-        rec.add("raiseHand:" + uri + "/" + dev + ":" + (state ? "1" : "0"));
+    parser.onRaiseHand([&rec](const std::string& sender,
+                              const std::string& uri,
+                              const std::string& dev,
+                              bool state) {
+        rec.add("raiseHand:" + uri + "/" + dev + ":" + (state ? "1" : "0") + "@" + sender);
     });
     parser.initData(parseJson(canonicalV1("bob", "dev1", R"({"raiseHand": true})")), "bob");
     parser.parse();
-    expect_true(rec.has("raiseHand:bob/dev1:1"),
+    expect_true(rec.has("raiseHand:bob/dev1:1@bob"),
                 "D1 regression: raiseHand must dispatch with minimal handler set");
 }
 
@@ -378,7 +447,7 @@ test_builders_round_trip_through_parser()
     // that our own (fixed) parser dispatches.
     Recorder raise;
     runBuiltOrder(raise, false, "bob", sip_core::ConfOrder::raiseHand("bob", "dev1", true));
-    expect_true(raise.has("raiseHand:bob/dev1:1"), "builder: raiseHand round-trip failed");
+    expect_true(raise.has("raiseHand:bob/dev1:1@bob"), "builder: raiseHand round-trip failed");
 
     Recorder hangup;
     runBuiltOrder(hangup, true, "alice", sip_core::ConfOrder::hangupParticipant("bob", "dev1"));
@@ -450,10 +519,12 @@ main()
     test_v0_moderator_full_dispatch();
     test_v0_non_moderator_rejected();
     test_v0_moderator_lowers_other_hand_but_cannot_raise();
+    test_v0_login_stamped_self_action();
     test_v0_missing_optional_handler_keeps_other_dispatches();
     test_v1_canonical_moderator_dispatch();
     test_v1_legacy_self_nested_shape_still_dispatches();
     test_v1_raise_hand_self_authorization();
+    test_v1_login_stamped_self_action();
     test_v1_non_moderator_media_actions_rejected();
     test_v1_mute_video_without_handler_does_not_crash();
     test_v1_version_scalar_does_not_throw();

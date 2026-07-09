@@ -81,11 +81,17 @@ public:
         hangupParticipant_ = std::move(cb);
     }
     /**
-     * Callback receives (accountUri, deviceId, state). The account URI is
-     * required for participant resolution: over plain SIP the device id is
-     * always empty (see specs/conference-actions.md, identity model).
+     * Callback receives (senderUri, accountUri, deviceId, state). senderUri is
+     * the authenticated SIP-layer sender (the parser peerId); accountUri is the
+     * uri stamped in the order. They live in different namespaces: clients
+     * stamp self-actions with their typed login (e.g. "m12") while the host
+     * knows the peer by the uri it dialed (e.g. "74112"), so the receiver must
+     * resolve accountUri and fall back to senderUri (see
+     * specs/conference-actions.md, identity model). Over plain SIP the device
+     * id is always empty.
      */
-    void onRaiseHand(std::function<void(const std::string&, const std::string&, bool)>&& cb)
+    void onRaiseHand(std::function<
+                     void(const std::string&, const std::string&, const std::string&, bool)>&& cb)
     {
         raiseHand_ = std::move(cb);
     }
@@ -126,7 +132,11 @@ public:
     {
         muteParticipant_ = std::move(cb);
     }
-    void onRaiseHandUri(std::function<void(const std::string&, bool)>&& cb)
+    /**
+     * V0 hand orders. Callback receives (senderUri, uri, state) — same
+     * sender-vs-stamped-uri split as onRaiseHand.
+     */
+    void onRaiseHandUri(std::function<void(const std::string&, const std::string&, bool)>&& cb)
     {
         raiseHandUri_ = std::move(cb);
     }
@@ -160,7 +170,8 @@ private:
 
     std::function<bool(std::string_view)> checkAuthorization_;
     std::function<void(const std::string&, const std::string&)> hangupParticipant_;
-    std::function<void(const std::string&, const std::string&, bool)> raiseHand_;
+    std::function<void(const std::string&, const std::string&, const std::string&, bool)>
+        raiseHand_;
     std::function<void(const std::string&, bool)> setActiveStream_;
     std::function<void(const std::string&, const std::string&, const std::string&, bool)>
         muteStreamAudio_;
@@ -169,7 +180,7 @@ private:
     std::function<void(int)> setLayout_;
     std::function<void(const std::string&, bool)> shareState_;
 
-    std::function<void(const std::string&, bool)> raiseHandUri_;
+    std::function<void(const std::string&, const std::string&, bool)> raiseHandUri_;
     std::function<void(const std::string&)> kickParticipant_;
     std::function<void(const std::string&)> setActiveParticipant_;
     std::function<void(const std::string&, bool)> muteParticipant_;
