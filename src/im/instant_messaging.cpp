@@ -179,7 +179,7 @@ im::sendSipMessage(pjsip_inv_session* session, const std::map<std::string, std::
 
         fillPJSIPMessageBody(*tdata, payloads);
 
-        SIP_CORE_DBG("im: sending SIP MESSAGE with %zu payloads: first is %s", payloads.size(), payloads.begin()->second.c_str());
+        SIP_CORE_DBG("im: sending in-dialog SIP INFO with %zu payloads: first is %s", payloads.size(), payloads.begin()->second.c_str());
 
         status = pjsip_dlg_send_request(dialog, tdata, -1, nullptr);
         if (status != PJ_SUCCESS) {

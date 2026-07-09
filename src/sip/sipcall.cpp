@@ -3203,6 +3203,16 @@ SIPCall::updateMediaStream(const MediaAttribute& newMediaAttr, size_t streamIdx)
         rtpStream.rtpSession_->setMuted(mediaAttr->muted_);
         if (not isSubcall())
             emitSignal<libsip_core::CallSignal::VideoMuted>(getCallId(), mediaAttr->muted_);
+        // Muting a desktop source IS a share stop, but the host's
+        // frame-absence detection only fires while the row stays videoMuted;
+        // if this client later switches to camera before that triggers, no
+        // shareState(false) is ever announced and the host is stuck in
+        // ONE_BIG. Announce it explicitly — the host ignores it when this
+        // peer is not the current sharer.
+        if (mediaAttr->muted_ && Call::conferenceProtocolVersion() == 1
+            && mediaAttr->sourceUri_.rfind("display", 0) == 0) {
+            Call::sendConfOrder(sip_core::ConfOrder::shareState(false));
+        }
     }
 #endif
 }

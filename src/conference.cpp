@@ -862,7 +862,7 @@ Conference::setActiveParticipant(const std::string& participant_id)
 }
 
 void
-Conference::setActiveStream(const std::string& streamId, bool state)
+Conference::setActiveStream(const std::string& streamId, bool state, bool sendInfo)
 {
 #ifdef ENABLE_VIDEO
     if (!videoMixer_)
@@ -888,12 +888,13 @@ Conference::setActiveStream(const std::string& streamId, bool state)
         for (auto& pi : confInfo_)
             pi.active = (state && !streamId.empty() && pi.sinkId == streamId);
     }
-    sendConferenceInfos();
+    if (sendInfo)
+        sendConferenceInfos();
 #endif
 }
 
 void
-Conference::setLayout(int layout)
+Conference::setLayout(int layout, bool sendInfo)
 {
 #ifdef ENABLE_VIDEO
     if (layout < 0 || layout > 2) {
@@ -908,6 +909,17 @@ Conference::setLayout(int layout)
     {
         std::lock_guard<std::mutex> lk(sharerMtx_);
         sharer = activeSharerStreamId_;
+        // A share owns the layout: a mid-share layout change would clear the
+        // mixer's activeStream_ while activeSharerStreamId_ stays set — share
+        // stops promoting but isSharing stays true, and the eventual share
+        // stop overrides the user's choice anyway. Share transitions
+        // themselves call setLayout with the sharer already updated.
+        if (!sharer.empty() && layout != static_cast<int>(video::Layout::ONE_BIG)) {
+            SIP_CORE_WARN("[Conf:%s] setLayout(%d) ignored during active screen share",
+                          id_.c_str(),
+                          layout);
+            return;
+        }
     }
     {
         std::lock_guard<std::mutex> lk(confInfoMutex_);
@@ -922,7 +934,8 @@ Conference::setLayout(int layout)
     videoMixer_->setVideoLayout(static_cast<video::Layout>(layout));
     // Push metadata immediately so remote peers receive the layout change
     // even before mixer coordinates are refreshed asynchronously.
-    sendConferenceInfos();
+    if (sendInfo)
+        sendConferenceInfos();
 #endif
 }
 
@@ -987,8 +1000,11 @@ Conference::onShareState(const std::string& peerId, bool state)
             sharerHadVideo_ = false;
         }
         // Promote the sharer to a full-screen ONE_BIG layout for everyone.
-        setActiveStream(streamId, true);
-        setLayout(static_cast<int>(video::Layout::ONE_BIG));
+        // Stamp both, broadcast ONE coalesced snapshot (losing the second of
+        // two INFOs left remotes spotlight-active-but-GRID).
+        setActiveStream(streamId, true, /*sendInfo=*/false);
+        setLayout(static_cast<int>(video::Layout::ONE_BIG), /*sendInfo=*/false);
+        sendConferenceInfos();
     } else {
         int restore = static_cast<int>(video::Layout::GRID);
         std::string restoreActive;
@@ -1037,7 +1053,7 @@ Conference::restoreShareLayout(const std::string& sharerStreamId,
                                int restoreLayout,
                                const std::string& restoreActive)
 {
-    setActiveStream(sharerStreamId, false);
+    setActiveStream(sharerStreamId, false, /*sendInfo=*/false);
     if (!restoreActive.empty()) {
         bool stillPresent = false;
         {
@@ -1050,11 +1066,13 @@ Conference::restoreShareLayout(const std::string& sharerStreamId,
             }
         }
         if (stillPresent)
-            setActiveStream(restoreActive, true);
+            setActiveStream(restoreActive, true, /*sendInfo=*/false);
         else
             restoreLayout = static_cast<int>(video::Layout::GRID);
     }
-    setLayout(restoreLayout);
+    // One coalesced snapshot for the whole stop transition.
+    setLayout(restoreLayout, /*sendInfo=*/false);
+    sendConferenceInfos();
 }
 #endif
 
@@ -1093,6 +1111,8 @@ ConfInfo::toString() const
     val["h"] = h;
     val["v"] = v;
     val["layout"] = layout;
+    if (seq != 0)
+        val["seq"] = Json::Value::UInt64(seq);
     return Json::writeString(Json::StreamWriterBuilder {}, val);
 }
 
@@ -1100,6 +1120,10 @@ void
 Conference::sendConferenceInfos()
 {
 #if CONFERENCE_METADATA
+    // One seq per broadcast: every per-destination copy of THIS snapshot
+    // carries the same value, and receivers drop anything older than the
+    // last snapshot they applied (wire-reorder defense).
+    const uint64_t seq = ++confInfoSeq_;
     // Inform calls that the layout has changed
     foreachCall([&](auto call) {
         // Produce specific JSON for each participant (2 separate accounts can host ...
@@ -1110,6 +1134,7 @@ Conference::sendConferenceInfos()
             return;
 
         auto ci = getConfInfoHostUri(account->getUsername() + "@server", call->getPeerNumber());
+        ci.seq = seq;
         int shareCount = 0;
         for (const auto& p : ci)
             if (p.isSharing)

@@ -503,6 +503,9 @@ protected:
 
     mutable std::mutex confInfoMutex_ {};
     mutable ConfInfo confInfo_ {};
+    // Highest host confInfo seq applied so far (guarded by confInfoMutex_);
+    // see ConfInfo::seq for the drop-stale contract.
+    uint64_t lastConfInfoSeq_ {0};
     time_point duration_start_ {time_point::min()};
 
 private:

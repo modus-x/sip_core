@@ -654,6 +654,8 @@ Call::setConferenceInfo(const std::string& msg)
                 newInfo.h = json["h"].asInt();
             if (json.isMember("layout"))
                 newInfo.layout = json["layout"].asInt();
+            if (json.isMember("seq"))
+                newInfo.seq = json["seq"].asUInt64();
         } else {
             // old confInfo
             for (const auto& participantInfo : json) {
@@ -686,6 +688,20 @@ Call::setConferenceInfo(const std::string& msg)
     }
     {
         std::lock_guard<std::mutex> lk(confInfoMutex_);
+        // Wire-reorder defense: apply is a wholesale replace, so a reordered
+        // stale snapshot silently reverts layout/share/badges. A LARGE
+        // backward jump is a new conference/host epoch (the host seeds seq
+        // from wall-clock ms) — accept it and re-latch. seq==0 = legacy host.
+        if (newInfo.seq != 0 && lastConfInfoSeq_ != 0 && newInfo.seq <= lastConfInfoSeq_
+            && lastConfInfoSeq_ - newInfo.seq < 60000) {
+            SIP_CORE_WARN("[call:%s] dropping stale confInfo seq=%llu (last applied %llu)",
+                          id_.c_str(),
+                          static_cast<unsigned long long>(newInfo.seq),
+                          static_cast<unsigned long long>(lastConfInfoSeq_));
+            return;
+        }
+        if (newInfo.seq != 0)
+            lastConfInfoSeq_ = newInfo.seq;
         if (not isConferenceParticipant()) {
             // confID_ empty -> participant set confInfo with the received one
             confInfo_ = std::move(newInfo);

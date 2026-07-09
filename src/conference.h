@@ -174,6 +174,12 @@ struct ConfInfo : public std::vector<ParticipantInfo>
     int w {0};
     int v {1}; // Supported conference protocol version
     int layout {0};
+    // Monotonic snapshot counter stamped by the host once per broadcast.
+    // Receivers drop a snapshot older than the last applied one — the only
+    // defense against wire/PBX reordering under rapid share/spotlight churn
+    // (apply is a wholesale replace, so one stale snapshot silently reverts
+    // layout/share/badges). 0 = legacy sender, always applied.
+    uint64_t seq {0};
 
     friend bool operator==(const ConfInfo& c1, const ConfInfo& c2)
     {
@@ -375,8 +381,12 @@ public:
 
     bool switchInput(const std::string& input);
     void setActiveParticipant(const std::string& participant_id);
-    void setActiveStream(const std::string& streamId, bool state);
-    void setLayout(int layout);
+    // sendInfo=false lets multi-step transitions (share start/stop) stamp
+    // active+layout+isSharing first and broadcast ONE coalesced snapshot —
+    // two per transition meant the second could be lost/reordered, leaving
+    // remotes spotlight-active-but-GRID.
+    void setActiveStream(const std::string& streamId, bool state, bool sendInfo = true);
+    void setLayout(int layout, bool sendInfo = true);
 
     /**
      * A participant (peerId empty ⇒ the local host) announced it started/stopped
@@ -515,6 +525,13 @@ private:
 
     mutable std::mutex confInfoMutex_ {};
     ConfInfo confInfo_ {};
+    // Seed with wall-clock ms so a re-created conference (or a new host after
+    // a host swap) always starts above any seq a remote latched from the
+    // previous epoch (see ConfInfo::seq).
+    std::atomic<uint64_t> confInfoSeq_ {static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch())
+            .count())};
 
     // Screen-share arbitration. `activeSharerStreamId_` is the mixer stream id
     // of the single participant currently sharing its desktop (empty = nobody).

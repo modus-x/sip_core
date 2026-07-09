@@ -243,7 +243,11 @@ setConferenceLayout(const std::string& accountId, const std::string& confId, uin
 {
     if (const auto account = sip_core::Manager::instance().getAccount(accountId)) {
         if (auto conf = account->getConference(confId)) {
-            conf->setLayout(layout);
+            // Marshal to the main thread: every REMOTE-driven conference
+            // mutation (incoming INFO, mixer rebuild) is already serialized
+            // there — a host FFI call running concurrently is last-writer-wins
+            // nondeterminism on confInfo_/layout under rapid mode churn.
+            sip_core::runOnMainThread([conf, layout] { conf->setLayout(layout); });
         } else if (auto call = account->getCall(confId)) {
             Json::Value root;
             root["layout"] = layout;
@@ -662,7 +666,9 @@ setActiveStream(const std::string& accountId,
     if (const auto account = sip_core::Manager::instance().getAccount<sip_core::SIPAccount>(
             accountId)) {
         if (auto conf = account->getConference(confId)) {
-            conf->setActiveStream(streamId, state);
+            // Same marshaling rationale as setConferenceLayout above.
+            sip_core::runOnMainThread(
+                [conf, streamId, state] { conf->setActiveStream(streamId, state); });
         } else if (auto call = std::static_pointer_cast<sip_core::SIPCall>(
                        account->getCall(confId))) {
             call->setActiveMediaStream(accountUri, deviceId, streamId, state);
