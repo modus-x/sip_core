@@ -92,6 +92,15 @@ Conference::Conference(const std::shared_ptr<Account>& account, const std::strin
     parser_.onVersion([&](uint32_t) {}); // TODO
     parser_.onCheckAuthorization([&](std::string_view peerId) { return isModerator(peerId); });
     parser_.onHangupParticipant([&](const auto& accountUri, const auto& deviceId) {
+        // confOrders only ever arrive from remote participants; never let one
+        // remove the conference host. Without this, a non-empty deviceId with
+        // the host uri reaches Manager::detachLocalParticipant (the host's own
+        // UI is unaffected — it calls hangupParticipant directly).
+        if (isHost(sip_utils::stripSipUriPrefix(accountUri))) {
+            SIP_CORE_WARN("[conf %s] Ignoring remote hangup order targeting the host",
+                          id_.c_str());
+            return;
+        }
         hangupParticipant(accountUri, deviceId);
     });
     parser_.onRaiseHand([&](const auto& accountUri, const auto& deviceId, bool state) {
@@ -2169,6 +2178,20 @@ Conference::getConfInfoHostUri(std::string_view localHostURI, std::string_view d
 
     for (auto it = newInfo.begin(); it != newInfo.end();) {
         bool isRemoteHost = remoteHosts_.find(it->uri) != remoteHosts_.end();
+        // Per-destination self-marker: the row whose uri is the host's view of
+        // the destination leg is the recipient's own row — both sides originate
+        // from call->getPeerNumber(), compared as user-parts like every other
+        // identity check here. Clients cannot derive this themselves: their
+        // local Account.username is a login (e.g. n.plaksin) that never matches
+        // a dialed extension (<sip:3084@...>). Stamped from the ORIGINAL uri,
+        // BEFORE the empty-uri host fill below: the host's own row must never
+        // match a destination even when the destination is another device of
+        // the host's own account (username@server would strip to the same
+        // user-part). Unconditional, so the local emission (destURI empty)
+        // clears any stale flag instead of skipping.
+        it->isMe = not destURI.empty() and not it->uri.empty()
+                   and sip_utils::stripSipUriPrefix(it->uri)
+                           == sip_utils::stripSipUriPrefix(destURI);
         if (it->uri.empty() and not destURI.empty()) {
             // fill the empty uri with the local host URI, let void for local client
             it->uri = localHostURI;
@@ -2188,8 +2211,14 @@ Conference::getConfInfoHostUri(std::string_view localHostURI, std::string_view d
         // ConfA send ConfA and ConfB for ConfC
         // ConfA send ConfA and ConfC for ConfB
         // ...
-        if (destURI != hostUri)
-            newInfo.insert(newInfo.end(), confInfo.begin(), confInfo.end());
+        if (destURI != hostUri) {
+            auto inserted = newInfo.insert(newInfo.end(), confInfo.begin(), confInfo.end());
+            // Never forward another host's isMe stamps: they were computed for
+            // ITS destinations (fromJson ingests "me", so merged rows may carry
+            // one), and on our local emission they would leak a stale me=true.
+            for (auto it = inserted; it != newInfo.end(); ++it)
+                it->isMe = false;
+        }
     }
     return newInfo;
 }

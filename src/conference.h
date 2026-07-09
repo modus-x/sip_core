@@ -77,6 +77,12 @@ struct ParticipantInfo
     bool recording {false};
     std::string callId;
     bool isSharing {false}; // participant is sharing its desktop (screen share)
+    // Marks the row that IS the destination participant. Stamped only in the
+    // per-destination copies built by Conference::getConfInfoHostUri — never
+    // true in the host's own confInfo_. Lets clients detect their own row
+    // without guessing identities (their Account.username is a login, e.g.
+    // n.plaksin, while the row uri is the extension the host dialed).
+    bool isMe {false};
 
     void fromJson(const Json::Value& v)
     {
@@ -96,6 +102,7 @@ struct ParticipantInfo
         voiceActivity = v["voiceActivity"].asBool();
         recording = v["recording"].asBool();
         isSharing = v["isSharing"].asBool();
+        isMe = v["me"].asBool(); // absent on old hosts -> false
     }
 
     Json::Value toJson() const
@@ -117,6 +124,7 @@ struct ParticipantInfo
         val["voiceActivity"] = voiceActivity;
         val["recording"] = recording;
         val["isSharing"] = isSharing;
+        val["me"] = isMe;
         return val;
     }
 
@@ -138,7 +146,8 @@ struct ParticipantInfo
                 {"voiceActivity", voiceActivity ? "true" : "false"},
                 {"callId", callId},
                 {"recording", recording ? "true" : "false"},
-                {"isSharing", isSharing ? "true" : "false"}};
+                {"isSharing", isSharing ? "true" : "false"},
+                {"me", isMe ? "true" : "false"}};
     }
 
     friend bool operator==(const ParticipantInfo& p1, const ParticipantInfo& p2)
