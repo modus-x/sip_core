@@ -951,9 +951,20 @@ Conference::onShareState(const std::string& peerId, bool state)
     }
 
     if (state) {
-        // Read the pre-share layout BEFORE promoting, so stop/leave can restore
-        // it. Read outside sharerMtx_ (getVideoLayout takes the mixer lock).
+        // Read the pre-share layout and spotlight BEFORE promoting, so
+        // stop/leave can restore them. Read outside sharerMtx_ (getVideoLayout
+        // takes the mixer lock; the spotlight read takes confInfoMutex_).
         const int currentLayout = static_cast<int>(videoMixer_->getVideoLayout());
+        std::string currentActive;
+        {
+            std::lock_guard<std::mutex> lk(confInfoMutex_);
+            for (const auto& pi : confInfo_) {
+                if (pi.active) {
+                    currentActive = pi.sinkId;
+                    break;
+                }
+            }
+        }
         {
             std::lock_guard<std::mutex> lk(sharerMtx_);
             if (!activeSharerStreamId_.empty() && activeSharerStreamId_ != streamId
@@ -968,8 +979,10 @@ Conference::onShareState(const std::string& peerId, bool state)
             }
             // Only capture on a FRESH start, not a moderator takeover of an
             // ongoing share — the original pre-share layout must survive takeovers.
-            if (activeSharerStreamId_.empty())
+            if (activeSharerStreamId_.empty()) {
                 layoutBeforeShare_ = currentLayout;
+                activeStreamBeforeShare_ = currentActive;
+            }
             activeSharerStreamId_ = streamId;
             sharerHadVideo_ = false;
         }
@@ -978,6 +991,7 @@ Conference::onShareState(const std::string& peerId, bool state)
         setLayout(static_cast<int>(video::Layout::ONE_BIG));
     } else {
         int restore = static_cast<int>(video::Layout::GRID);
+        std::string restoreActive;
         {
             std::lock_guard<std::mutex> lk(sharerMtx_);
             if (activeSharerStreamId_ != streamId)
@@ -985,9 +999,9 @@ Conference::onShareState(const std::string& peerId, bool state)
             activeSharerStreamId_.clear();
             sharerHadVideo_ = false;
             restore = layoutBeforeShare_;
+            restoreActive.swap(activeStreamBeforeShare_);
         }
-        setActiveStream(streamId, false);
-        setLayout(restore);
+        restoreShareLayout(streamId, restore, restoreActive);
     }
 #endif
 }
@@ -997,6 +1011,7 @@ Conference::endCurrentShare()
 {
 #ifdef ENABLE_VIDEO
     int restore = static_cast<int>(video::Layout::GRID);
+    std::string restoreActive;
     {
         std::lock_guard<std::mutex> lk(sharerMtx_);
         if (activeSharerStreamId_.empty())
@@ -1004,11 +1019,44 @@ Conference::endCurrentShare()
         activeSharerStreamId_.clear();
         sharerHadVideo_ = false;
         restore = layoutBeforeShare_;
+        restoreActive.swap(activeStreamBeforeShare_);
     }
-    setActiveStream("", false); // resetActiveStream()
-    setLayout(restore);
+    restoreShareLayout("", restore, restoreActive);
 #endif
 }
+
+#ifdef ENABLE_VIDEO
+// Common share-stop tail: drop the sharer's spotlight, re-apply the pre-share
+// spotlight when its participant is still in the conference, and restore the
+// pre-share layout. A layout restored for a spotlight whose participant LEFT
+// during the share falls back to GRID (a spotlight-shaped layout with no
+// active stream renders a broken/empty big slot on every client); a layout
+// the host chose without any spotlight is restored as-is.
+void
+Conference::restoreShareLayout(const std::string& sharerStreamId,
+                               int restoreLayout,
+                               const std::string& restoreActive)
+{
+    setActiveStream(sharerStreamId, false);
+    if (!restoreActive.empty()) {
+        bool stillPresent = false;
+        {
+            std::lock_guard<std::mutex> lk(confInfoMutex_);
+            for (const auto& pi : confInfo_) {
+                if (pi.sinkId == restoreActive) {
+                    stillPresent = true;
+                    break;
+                }
+            }
+        }
+        if (stillPresent)
+            setActiveStream(restoreActive, true);
+        else
+            restoreLayout = static_cast<int>(video::Layout::GRID);
+    }
+    setLayout(restoreLayout);
+}
+#endif
 
 std::vector<std::map<std::string, std::string>>
 ConfInfo::toVectorMapStringString() const

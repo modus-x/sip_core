@@ -528,8 +528,19 @@ private:
     // Layout that was active when the current share started, so stop/leave
     // restores what the conference looked like before (not a hardcoded GRID).
     int layoutBeforeShare_ {0};
+    // Spotlight ("в центр внимания") that was active when the share started.
+    // Promoting the sharer overwrites the mixer's single activeStream_, so
+    // without this the pre-share spotlight is silently lost on share stop and
+    // a non-GRID restored layout is left with no active stream backing it.
+    std::string activeStreamBeforeShare_ {};
 
     void sendConferenceInfos();
+#ifdef ENABLE_VIDEO
+    // Share-stop tail shared by onShareState(stop) and endCurrentShare().
+    void restoreShareLayout(const std::string& sharerStreamId,
+                            int restoreLayout,
+                            const std::string& restoreActive);
+#endif
     // Rate-limited entry point (called from updateVoiceActivity()). Voice state
     // flips far faster than is useful to broadcast; flooding remote participants
     // with confVoiceActivity INFO gets them dropped by strict SIP servers.
