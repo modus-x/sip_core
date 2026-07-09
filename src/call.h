@@ -503,14 +503,6 @@ protected:
 
     mutable std::mutex confInfoMutex_ {};
     mutable ConfInfo confInfo_ {};
-    // Lock-free mirror of `!confInfo_.empty()` for a REMOTE conference
-    // participant (a call receiving confInfo published by a host).
-    // SIPCall::isReinviteRequired reads this while holding callMutex_; reading
-    // the real confInfo_ there via isRemoteConferenceParticipant() (which locks
-    // confInfoMutex_) would invert the confInfoMutex_ -> callMutex_ order taken
-    // by the confInfo writer (setConfInfo -> createSinks), risking a deadlock —
-    // so keep a cheap atomic snapshot updated wherever confInfo_ changes size.
-    std::atomic_bool isRemoteConfParticipant_ {false};
     time_point duration_start_ {time_point::min()};
 
 private:

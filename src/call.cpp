@@ -668,23 +668,27 @@ Call::setConferenceInfo(const std::string& msg)
 
     {
         int shareCount = 0;
-        for (const auto& p : newInfo)
+        // Per-row dump: aggregate counts alone cannot answer "did MY videoMuted
+        // flip" during conference forensics (2026-07-09 un-mute investigation).
+        std::string rows;
+        for (const auto& p : newInfo) {
             if (p.isSharing)
                 ++shareCount;
-        SIP_CORE_WARN("[sharedbg] remote recv confInfo: participants=%zu sharing=%d layout=%d confParticipant=%d",
+            rows += " {" + p.uri + "|sink=" + p.sinkId + "|vMuted="
+                    + (p.videoMuted ? "1" : "0") + (p.isSharing ? "|sharing" : "") + "}";
+        }
+        SIP_CORE_WARN("[sharedbg] remote recv confInfo: participants=%zu sharing=%d layout=%d confParticipant=%d%s",
                       newInfo.size(),
                       shareCount,
                       newInfo.layout,
-                      (int) isConferenceParticipant());
+                      (int) isConferenceParticipant(),
+                      rows.c_str());
     }
     {
         std::lock_guard<std::mutex> lk(confInfoMutex_);
         if (not isConferenceParticipant()) {
             // confID_ empty -> participant set confInfo with the received one
             confInfo_ = std::move(newInfo);
-            // Mirror membership for lock-free reads in isReinviteRequired. An
-            // empty update (e.g. the host's resetConfInfo "{}") clears it.
-            isRemoteConfParticipant_.store(!confInfo_.empty(), std::memory_order_relaxed);
 
             // Create sink for each participant
 #ifdef ENABLE_VIDEO
