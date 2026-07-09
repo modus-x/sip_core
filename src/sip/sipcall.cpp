@@ -1127,7 +1127,13 @@ SIPCall::requestKeyframe(int streamIdx)
                          "</to_encoder></vc_primitive></media_control>";
     SIP_CORE_DBG("Sending video keyframe request via SIP INFO");
     try {
-        // sendSIPInfo(BODY, "media_control+xml");
+        // Deliberately live while the other media_control senders stay disabled
+        // (5532cf12b): a starving receive decoder has NO other recovery path —
+        // the peer's encoder emits no periodic IDR, so a lost keyframe stalls
+        // video until the next renegotiation. Rate-limited above. In-dialog
+        // INFO is the sanctioned in-call channel for this PBX (out-of-dialog
+        // MESSAGE can be lost).
+        sendSIPInfo(BODY, "media_control+xml");
     } catch (const std::exception& e) {
         SIP_CORE_ERR("Error sending video keyframe request: %s", e.what());
     }
