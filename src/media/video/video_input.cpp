@@ -292,8 +292,17 @@ bool
 VideoInput::setup()
 {
     if (not attach(sink_.get())) {
-        SIP_CORE_ERR("attach sink failed");
-        return false;
+        // A capture loop that died without running cleanup() (exception, or
+        // detached after a stop timeout) leaves the sink attached, which
+        // would brick every later restart: detach and retry so one dead
+        // loop can never poison the input permanently.
+        detach(sink_.get());
+        if (not attach(sink_.get())) {
+            SIP_CORE_ERR("attach sink failed");
+            emitDeviceOpenError(decOpts_.input);
+            return false;
+        }
+        SIP_CORE_WARN("Recovered stale sink attachment for '%s'", currentResource_.c_str());
     }
 
     if (!sink_->start())
@@ -320,7 +329,10 @@ VideoInput::process()
         createDecoder();
 
     if (not captureFrame()) {
-        loop_.stop();
+        // Only the live capture thread may stop the loop; a worker detached
+        // after a stop timeout must not kill its successor's loop.
+        if (loop_.isCallerActiveLoop())
+            loop_.stop();
         return;
     }
 }
@@ -461,6 +473,13 @@ VideoInput::setRecorderCallback(const std::function<void(const MediaStream& ms)>
 void
 VideoInput::createDecoder()
 {
+    if (!loop_.isCallerActiveLoop()) {
+        // Stale worker detached after a stop timeout: it no longer owns
+        // decoder_ and must not race the live capture loop on it.
+        SIP_CORE_WARN("createDecoder called from a stale capture thread; ignored");
+        return;
+    }
+
     deleteDecoder();
 
     switchPending_ = false;
@@ -582,7 +601,9 @@ VideoInput::createDecoder()
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
-    if (isStopped_) {
+    if (isStopped_ || !loop_.isCallerActiveLoop()) {
+        // isStopped_ may have been reset by a restart that happened while we
+        // were blocked in openInput; the active-loop check catches that.
         startupAbortReason_.store(StartupAbortReason::StopRequested);
         clearStartupDeadline();
         notifyCaptureStopped();
@@ -641,6 +662,13 @@ VideoInput::createDecoder()
         decOpts_.pixel_format = av_get_pix_fmt_name(AV_PIX_FMT_YUV420P);
     }
 
+    if (!loop_.isCallerActiveLoop()) {
+        // Detached while blocked in setupVideo/findStreamInfo: a successor
+        // loop owns decoder_ now, discard our locally-created decoder.
+        SIP_CORE_WARN("Discarding decoder created by a stale capture thread");
+        return;
+    }
+
     SIP_CORE_DBG("created decoder with video params : size=%dX%d, fps=%lf pix=%s",
                  decOpts_.width,
                  decOpts_.height,
@@ -696,10 +724,24 @@ VideoInput::stopInput()
     if (!loop_.joinFor(kStopJoinTimeout)) {
         SIP_CORE_WARN("VideoInput::stopInput: capture thread did not join within %lld ms; detached",
                       static_cast<long long>(kStopJoinTimeout.count()));
+        parkAbandonedDecoder();
     }
     clearStartupDeadline();
 
     clearOptions();
+}
+
+// A worker detached on stop timeout may still be blocked inside
+// decoder_->decode(); if the next capture loop replaced/destroyed that
+// decoder it would be a use-after-free (seen in the field as "mutex lock
+// failed: Invalid argument" killing the fresh camera loop). Park it instead.
+// ponytail: leaks one decoder per stop-timeout until ~VideoInput; a reaper
+// keyed on the abandoned State's `done` flag is the upgrade path.
+void
+VideoInput::parkAbandonedDecoder()
+{
+    if (decoder_)
+        abandonedDecoders_.push_back(std::move(decoder_));
 }
 
 void
@@ -743,6 +785,7 @@ VideoInput::suspendForHold()
         SIP_CORE_WARN(
             "VideoInput::suspendForHold: capture thread did not join within %lld ms; detached",
             static_cast<long long>(kStopJoinTimeout.count()));
+        parkAbandonedDecoder();
     }
     clearStartupDeadline();
     captureStartPending_.store(false);
@@ -1270,8 +1313,22 @@ VideoInput::switchInput(const std::string& resource)
 
     bool expected = false;
     if (!switchInProgress_.compare_exchange_strong(expected, true)) {
-        SIP_CORE_ERR("Video switch already requested");
+        // A switch is mid-flight (it can stall ~2s in stopInput's joinFor).
+        // Dropping the request loses the user's LAST toggle; queue it
+        // last-wins so the final requested source always ends up live.
+        std::lock_guard<std::mutex> lk(pendingSwitchMutex_);
+        pendingSwitchResource_ = normalizedResource;
+        hasPendingSwitch_ = true;
+        SIP_CORE_WARN("Video switch already in progress; queued '%s' (last-wins)",
+                      normalizedResource.c_str());
         return {};
+    }
+
+    {
+        // A fresh explicit switch supersedes anything still queued.
+        std::lock_guard<std::mutex> lk(pendingSwitchMutex_);
+        hasPendingSwitch_ = false;
+        pendingSwitchResource_.clear();
     }
 
     decOptsFound_ = false;
@@ -1289,7 +1346,7 @@ VideoInput::switchInput(const std::string& resource)
         stopInput();
         clearOptions();
         switchInProgress_.store(false);
-        return futureDecOpts_;
+        return runPendingSwitch(normalizedResource, futureDecOpts_);
     }
 
     // Supported MRL schemes
@@ -1392,7 +1449,28 @@ VideoInput::switchInput(const std::string& resource)
     startInput();
     switchInProgress_.store(false);
 
-    return futureDecOpts_;
+    return runPendingSwitch(normalizedResource, futureDecOpts_);
+}
+
+// Runs the newest switch queued while the just-completed one was in flight.
+// ponytail: tail recursion — depth is bounded by switches queued while each
+// predecessor runs, which human-speed toggling cannot stack meaningfully.
+std::shared_future<DeviceParams>
+VideoInput::runPendingSwitch(const std::string& justCompleted,
+                             std::shared_future<DeviceParams> result)
+{
+    std::string next;
+    bool hasNext = false;
+    {
+        std::lock_guard<std::mutex> lk(pendingSwitchMutex_);
+        hasNext = hasPendingSwitch_;
+        next = std::move(pendingSwitchResource_);
+        hasPendingSwitch_ = false;
+        pendingSwitchResource_.clear();
+    }
+    if (hasNext && next != justCompleted)
+        return switchInput(next);
+    return result;
 }
 
 MediaStream

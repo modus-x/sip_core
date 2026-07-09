@@ -52,6 +52,10 @@ joinThread(std::thread& thread, const ThreadLoop* owner, const char* action)
     thread.join();
 }
 
+// Identifies which loop State the calling thread is executing; lets owners
+// fence out workers that were detached by joinFor() (see isCallerActiveLoop).
+static thread_local const void* tlCurrentLoopState = nullptr;
+
 void
 ThreadLoop::mainloop(std::shared_ptr<State> state,
                      std::function<bool()> setup,
@@ -63,11 +67,17 @@ ThreadLoop::mainloop(std::shared_ptr<State> state,
     // captures thread_.get_id() right after spawning us; that avoids a UAF
     // race where joinFor() detaches before the worker runs and ThreadLoop
     // is later destroyed while we still hold a pointer into it.
+    tlCurrentLoopState = state.get();
     try {
         if (setup()) {
-            while (state->state == ThreadState::RUNNING)
+            while (state->state == ThreadState::RUNNING && !state->abandoned)
                 process();
-            cleanup();
+            // A worker abandoned by joinFor() must not run cleanup(): a
+            // successor loop may already be live on the same owner, and
+            // concurrent cleanup is how the owner's members get destroyed
+            // under the successor's feet.
+            if (!state->abandoned)
+                cleanup();
         } else {
             SIP_CORE_ERR("setup failed");
         }
@@ -123,6 +133,9 @@ ThreadLoop::start()
 
     state_->state = ThreadState::RUNNING;
     state_->done.store(false);
+    // Publish before spawning so the worker's very first isCallerActiveLoop()
+    // already matches.
+    activeState_.store(state_.get(), std::memory_order_release);
     thread_ = std::thread(&ThreadLoop::mainloop,
                           state_,
                           setup_,
@@ -162,7 +175,7 @@ ThreadLoop::joinFor(std::chrono::milliseconds timeout)
 
     if (std::this_thread::get_id() == thread_.get_id()) {
         SIP_CORE_WARN("[threadloop:%p] joinFor called from worker thread; detaching", this);
-        thread_.detach();
+        abandonCurrentStateLocked();
         return false;
     }
 
@@ -187,8 +200,32 @@ ThreadLoop::joinFor(std::chrono::milliseconds timeout)
         "[threadloop:%p] joinFor timed out after %lld ms; detaching worker thread",
         this,
         static_cast<long long>(timeout.count()));
-    thread_.detach();
+    abandonCurrentStateLocked();
     return false;
+}
+
+// Precondition: threadMutex_ held. Detach the worker, mark its State
+// abandoned (worker exits its loop at the next check and skips cleanup)
+// and install a fresh State so a later start() cannot resurrect the
+// detached worker's RUNNING condition or be killed by its exit path.
+void
+ThreadLoop::abandonCurrentStateLocked()
+{
+    state_->abandoned.store(true);
+    thread_.detach();
+    state_ = std::make_shared<State>();
+    // Preserve the pre-detach observable state: callers (VideoInput::restart)
+    // treat STOPPING as "stopped, may be restarted"; a READY state here would
+    // silently disable restart after an abandoned stop.
+    state_->state = ThreadState::STOPPING;
+    activeState_.store(state_.get(), std::memory_order_release);
+}
+
+bool
+ThreadLoop::isCallerActiveLoop() const noexcept
+{
+    return tlCurrentLoopState
+           && tlCurrentLoopState == activeState_.load(std::memory_order_acquire);
 }
 
 void

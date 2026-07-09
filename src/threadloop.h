@@ -62,7 +62,18 @@ public:
     // that opt into joinFor are responsible for keeping any `this` referenced
     // by the user callbacks alive past the timeout, typically by capturing a
     // shared_from_this()/weak_ptr in those callbacks.
+    //
+    // On detach the current State is marked abandoned and a fresh State is
+    // installed, so a later start() cannot resurrect the detached worker's
+    // loop condition and the detached worker skips cleanup() — one hung
+    // worker must never race its successor on the owner's members.
     bool joinFor(std::chrono::milliseconds timeout);
+
+    // True only when called from the worker thread of the CURRENT
+    // (non-abandoned) loop. A worker detached by joinFor() compares false as
+    // soon as the detach happens; use this to fence stale workers out of
+    // owner state they no longer own.
+    bool isCallerActiveLoop() const noexcept;
 
     bool isRunning() const noexcept;
     bool isJoinable() const noexcept;
@@ -97,7 +108,12 @@ private:
         std::mutex doneMutex;
         std::condition_variable doneCv;
         std::atomic_bool done {true};
+        // Set when joinFor() detaches the worker owning this State. The
+        // worker then exits its loop at the next check and skips cleanup().
+        std::atomic_bool abandoned {false};
     };
+
+    void abandonCurrentStateLocked();
 
     static void mainloop(std::shared_ptr<State> state,
                          std::function<bool()> setup,
@@ -106,6 +122,11 @@ private:
                          const ThreadLoop* ownerForLogging);
 
     std::shared_ptr<State> state_ {std::make_shared<State>()};
+    // Raw mirror of state_.get() readable without threadMutex_ (joinFor holds
+    // that mutex for its whole bounded wait). Abandoned workers keep their old
+    // State alive via shared_ptr, so the pointer can never be recycled into a
+    // false match.
+    std::atomic<const void*> activeState_ {nullptr};
     std::thread::id threadId_;
     std::thread thread_;
     mutable std::mutex threadMutex_;

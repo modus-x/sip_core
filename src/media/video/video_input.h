@@ -186,6 +186,19 @@ private:
     std::unique_ptr<MediaDecoder> decoder_;
     std::shared_ptr<SinkClient> sink_;
 
+    // Decoders whose capture thread was detached on a stop timeout: that
+    // thread may still be blocked inside decode(), so the decoder must stay
+    // alive until the input is destroyed (see parkAbandonedDecoder()).
+    std::vector<std::unique_ptr<MediaDecoder>> abandonedDecoders_;
+    void parkAbandonedDecoder();
+
+    // Last-wins queue for switch requests arriving while one is in flight.
+    std::mutex pendingSwitchMutex_;
+    std::string pendingSwitchResource_;
+    bool hasPendingSwitch_ {false};
+    std::shared_future<DeviceParams> runPendingSwitch(const std::string& justCompleted,
+                                                      std::shared_future<DeviceParams> result);
+
     // Worker-thread lifetime guard. loop_ lambdas capture this by value, so
     // it outlives ~VideoInput when the thread is detached after a joinFor()
     // timeout. Each callback checks `aborted`, then locks `owner` to a strong
