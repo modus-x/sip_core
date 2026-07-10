@@ -21,6 +21,8 @@ list(
   "${CMAKE_CURRENT_SOURCE_DIR}/video_device_monitor.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/video_input.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/video_input.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/video_source_utils.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/video_source_utils.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/video_mixer.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/video_mixer.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/video_receive_thread.cpp"

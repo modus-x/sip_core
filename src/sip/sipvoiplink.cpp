@@ -312,7 +312,6 @@ transaction_request_cb(pjsip_rx_data* rdata)
         peerNumber = sip_utils::stripSipUriPrefix(std::string_view(tmp, length));
     }
 
-
     auto inviteBody = std::string("");
 
     inviteBody = std::string(rdata->msg_info.msg_buf, rdata->msg_info.len);
@@ -407,11 +406,13 @@ transaction_request_cb(pjsip_rx_data* rdata)
     }
 
     pjmedia_sdp_session* r_sdp {nullptr};
-    if (body) {
+    const bool hasSdpBody = body && body->data && body->len > 0;
+    if (hasSdpBody) {
         if (pjmedia_sdp_parse(rdata->tp_info.pool, (char*) body->data, body->len, &r_sdp)
             != PJ_SUCCESS) {
-            SIP_CORE_WARN("Failed to parse the SDP in offer");
-            r_sdp = nullptr;
+            SIP_CORE_WARN("Failed to parse SDP in incoming INVITE offer; refusing call");
+            try_respond_stateless(endpt_, rdata, PJSIP_SC_NOT_ACCEPTABLE_HERE, NULL, NULL, NULL);
+            return PJ_FALSE;
         }
     }
 
@@ -427,6 +428,22 @@ transaction_request_cb(pjsip_rx_data* rdata)
         SIP_CORE_ERR("Couldn't verify INVITE request in secure dialog.");
         try_respond_stateless(endpt_, rdata, PJSIP_SC_METHOD_NOT_ALLOWED, NULL, NULL, NULL);
         return PJ_FALSE;
+    }
+    if (r_sdp) {
+        const auto audioCodecs = account->getActiveAccountCodecInfoList(MEDIA_AUDIO);
+        const auto videoCodecs = account->isVideoEnabled()
+                                     ? account->getActiveAccountCodecInfoList(MEDIA_VIDEO)
+                                     : std::vector<std::shared_ptr<AccountCodecInfo>> {};
+        if (!Sdp::hasNegotiableMedia(r_sdp, audioCodecs, videoCodecs)) {
+            SIP_CORE_WARN("Incoming INVITE offer has no negotiable media; refusing call");
+            try_respond_stateless(endpt_,
+                                  rdata,
+                                  PJSIP_SC_NOT_ACCEPTABLE_HERE,
+                                  NULL,
+                                  NULL,
+                                  NULL);
+            return PJ_FALSE;
+        }
     }
 
     // Build the initial media using the remote offer.
@@ -574,11 +591,35 @@ transaction_request_cb(pjsip_rx_data* rdata)
         return PJ_FALSE;
     }
 
+    std::map<std::string, std::string> extraHeaders;
+
+    if (dialog->call_id) {
+        auto callId = sip_core::sip_utils::as_string(dialog->call_id->id);
+
+        std::string_view callIdHeaderName(dialog->call_id->name.ptr, dialog->call_id->name.slen);
+
+        extraHeaders.emplace(callIdHeaderName, callId);
+    }
+
+    for (hdr = rdata->msg_info.msg->hdr.next; hdr != &rdata->msg_info.msg->hdr; hdr = hdr->next) {
+        auto type = hdr->type;
+        if (type == PJSIP_H_OTHER) {
+            pjsip_generic_string_hdr* genericHeader = (pjsip_generic_string_hdr*) hdr;
+            std::string_view headerValue(genericHeader->hvalue.ptr, genericHeader->hvalue.slen);
+            std::string_view headerName(genericHeader->name.ptr, genericHeader->name.slen);
+            SIP_CORE_DBG() << "Found custom header in incoming call: " << headerName << " -> "
+                           << headerValue;
+            extraHeaders.emplace(headerName, headerValue);
+        }
+    }
+
     if (account->isDND()) {
         const pj_str_t message = CONST_PJ_STR(
-            "Call is declined because user is in DND / away state");
-
-        if (pjsip_inv_end_session(call->inviteSession_.get(), PJSIP_SC_DECLINE, &message, &tdata)) {
+            "Call was declined because user is in DND state");
+        if (pjsip_inv_end_session(call->inviteSession_.get(),
+                                    PJSIP_SC_DECLINE,
+                                    &message,
+                                    &tdata)) {
             SIP_CORE_ERR("Could not create answer DECLINE");
             return PJ_FALSE;
         }
@@ -606,28 +647,6 @@ transaction_request_cb(pjsip_rx_data* rdata)
 
     call->setState(Call::ConnectionState::RINGING);
 
-    std::map<std::string, std::string> extraHeaders;
-
-    if (dialog->call_id) {
-        auto callId = sip_core::sip_utils::as_string(dialog->call_id->id);
-
-        std::string_view callIdHeaderName(dialog->call_id->name.ptr, dialog->call_id->name.slen);
-
-        extraHeaders.emplace(callIdHeaderName, callId);
-    }
-
-    for (hdr = rdata->msg_info.msg->hdr.next; hdr != &rdata->msg_info.msg->hdr; hdr = hdr->next) {
-        auto type = hdr->type;
-        if (type == PJSIP_H_OTHER) {
-            pjsip_generic_string_hdr* genericHeader = (pjsip_generic_string_hdr*) hdr;
-            std::string_view headerValue(genericHeader->hvalue.ptr, genericHeader->hvalue.slen);
-            std::string_view headerName(genericHeader->name.ptr, genericHeader->name.slen);
-            SIP_CORE_DBG() << "Found custom header in incoming call: " << headerName << " -> "
-                           << headerValue;
-            extraHeaders.emplace(headerName, headerValue);
-        }
-    }
-
     Manager::instance().incomingCall(account->getAccountID(), *call, extraHeaders);
 
     if (replaced_dlg) {
@@ -648,11 +667,20 @@ transaction_request_cb(pjsip_rx_data* rdata)
     return PJ_FALSE;
 }
 
+static void tp_state_callback(pjsip_transport* tp,
+                              pjsip_transport_state state,
+                              const pjsip_transport_state_info* info);
+
+static pjsip_tp_state_callback previous_tp_state_callback {nullptr};
+
 static void
 tp_state_callback(pjsip_transport* tp,
                   pjsip_transport_state state,
                   const pjsip_transport_state_info* info)
 {
+    if (previous_tp_state_callback && previous_tp_state_callback != tp_state_callback)
+        previous_tp_state_callback(tp, state, info);
+
     if (auto& broker = Manager::instance().sipVoIPLink().sipTransportBroker)
         broker->transportStateChanged(tp, state, info);
     else
@@ -725,7 +753,9 @@ SIPVoIPLink::SIPVoIPLink()
 
     sipTransportBroker.reset(new SipTransportBroker(endpt_));
 
-    auto status = pjsip_tpmgr_set_state_cb(pjsip_endpt_get_tpmgr(endpt_), tp_state_callback);
+    auto* tpmgr = pjsip_endpt_get_tpmgr(endpt_);
+    previous_tp_state_callback = pjsip_tpmgr_get_state_cb(tpmgr);
+    auto status = pjsip_tpmgr_set_state_cb(tpmgr, tp_state_callback);
     if (status != PJ_SUCCESS)
         SIP_CORE_ERR("Can't set transport callback: %s", sip_utils::sip_strerror(status).c_str());
 
@@ -817,6 +847,7 @@ SIPVoIPLink::shutdown()
 
     SIP_CORE_DBG("sipTransportBroker was shutdown");
     pjsip_tpmgr_set_state_cb(pjsip_endpt_get_tpmgr(endpt_), nullptr);
+    previous_tp_state_callback = nullptr;
 
     pjsip_endpt_destroy(endpt_);
 
@@ -959,13 +990,20 @@ invite_session_state_changed_cb(pjsip_inv_session* inv, pjsip_event* ev)
 
     switch (inv->state) {
     case PJSIP_INV_STATE_EARLY:
+        SIP_CORE_WARN("[call:%s] EARLY state: status_code=%d, role=%d",
+                      call->getCallId().c_str(),
+                      status_code,
+                      inv->role);
         if (status_code == PJSIP_SC_RINGING) {
             call->onPeerRinging();
         }
 
-        // svetets call manager gives us this when we should start receiving the media
-        if (status_code == PJSIP_SC_PROGRESS) {
-            call->onAnswered();
+        // Early media (183 Session Progress with SDP): start the media path
+        // (addAudio + startAllMedia) but keep the call in RINGING state so
+        // the UI does not show "CURRENT" and the duration timer is deferred
+        // until the real 200 OK arrives.
+        if (status_code == PJSIP_SC_PROGRESS && inv->role == PJSIP_ROLE_UAC) {
+            call->onEarlyAnswered();
         }
         break;
 
@@ -975,6 +1013,16 @@ invite_session_state_changed_cb(pjsip_inv_session* inv, pjsip_event* ev)
         break;
 
     case PJSIP_INV_STATE_DISCONNECTED:
+        // Drop our shared invite-session reference here, on the pjsip callback
+        // thread where `inv` is still guaranteed valid (pjsip holds its own ref
+        // for the callback's duration). Every sub-case below is terminal for
+        // this INVITE, and the SIPCall handlers (onClosed/onBusyHere/onFailure)
+        // defer teardown to the main thread via runOnMainThread. Deferring the
+        // pjsip_inv_dec_ref there races pjsip's own destruction of the session:
+        // by the time the deferred deleter runs, `inv` and its pool may already
+        // be freed, so pjsip_inv_dec_ref -> pj_pool_release dereferences freed
+        // memory (use-after-free, c0000005). Releasing it now closes that race.
+        call->setInviteSession();
         switch (inv->cause) {
         // When a peer's device replies busy
         case PJSIP_SC_BUSY_HERE:
@@ -1003,20 +1051,17 @@ invite_session_state_changed_cb(pjsip_inv_session* inv, pjsip_event* ev)
                 auto sipAccount = std::dynamic_pointer_cast<SIPAccount>(
                     sipCall->getAccount().lock());
 
-                std::lock_guard<std::mutex> lk(sipAccount->switchFromCallRetry);
-
                 // we have some route to retry
                 if (sipAccount
-                    && (sipAccount->hasServiceRoute() || sipAccount->hasBackServiceRoute())) {
+                    && (sipAccount->hasServiceRoute() || sipAccount->hasBackServiceRoutes())) {
                     if (sipCall->getInitialServiceRoute() == sipAccount->getActiveServiceRoute()) {
-                        if (sipAccount->isUsingBackupRoute()) {
-                            sipAccount->switchToMainRoute();
-                        } else {
-                            sipAccount->switchToBackupRoute();
-                        }
+                        const bool switchToBackup = !sipAccount->isUsingBackupRoute();
+                        sipAccount->switchRouteAndReregister(switchToBackup,
+                                                             "invite-failure-route-retry");
                     }
 
-                    sipAccount->newOutgoingCall(sipCall->getPeerNumber(), sipCall->currentMediaList());
+                    sipAccount->newOutgoingCall(sipCall->getPeerNumber(),
+                                                sipCall->currentMediaList());
 
                     // SIP_CORE_WARN(
                     //     "[call:%s] INVITE failed with code %d, performing switch and restart",
@@ -1133,7 +1178,7 @@ sdp_create_offer_cb(pjsip_inv_session* inv, pjmedia_sdp_session** p_offer)
         if (dlg->tp_sel.type == PJSIP_TPSELECTOR_TRANSPORT) {
             if (auto tr = dlg->tp_sel.u.transport)
                 family = tr->local_addr.addr.sa_family;
-        } else if (dlg->tp_sel.type == PJSIP_TPSELECTOR_TRANSPORT) {
+        } else if (dlg->tp_sel.type == PJSIP_TPSELECTOR_LISTENER) {
             if (auto tr = dlg->tp_sel.u.listener)
                 family = tr->local_addr.addr.sa_family;
         }
@@ -1161,7 +1206,14 @@ sdp_create_offer_cb(pjsip_inv_session* inv, pjmedia_sdp_session** p_offer)
         SIP_CORE_DBG("[call %s] Media %s", call->getCallId().c_str(), media.toString(true).c_str());
     }
 
+    if (!call->prepareLocalMediaReservations(mediaList)) {
+        return;
+    }
+
     const bool created = sdp.createOffer(mediaList);
+    if (!created) {
+        call->clearPendingLocalReservations();
+    }
 
     if (created and p_offer != nullptr)
         *p_offer = sdp.getLocalSdpSession();
@@ -1211,6 +1263,12 @@ sdp_media_update_cb(pjsip_inv_session* inv, pj_status_t status)
     if (not call)
         return;
 
+    SIP_CORE_WARN("[call:%s] sdp_media_update_cb: inv_state=%d (%s), status=%d",
+                  call->getCallId().c_str(),
+                  inv->state,
+                  pjsip_inv_state_name(inv->state),
+                  status);
+
     SIP_CORE_DBG("[call:%s] INVITE@%p media update: status %d",
                  call->getCallId().c_str(),
                  inv,
@@ -1244,7 +1302,17 @@ sdp_media_update_cb(pjsip_inv_session* inv, pj_status_t status)
         Sdp::printSession(remoteSDP, "Remote active session:", sdp.getSdpDirection());
     }
 
-    call->onMediaNegotiationComplete();
+    // Wrap in try-catch: C++ exceptions must not propagate through PJSIP C callbacks
+    // (undefined behavior). This can happen e.g. when the remote SDP contains only
+    // unsupported media types (T.38 fax) and downstream code throws.
+    try {
+        call->onMediaNegotiationComplete();
+    } catch (const std::exception& e) {
+        SIP_CORE_ERR("[call:%s] Exception in media negotiation complete: %s",
+                     call->getCallId().c_str(),
+                     e.what());
+        call->hangup(PJSIP_SC_UNSUPPORTED_MEDIA_TYPE);
+    }
 }
 
 static void
@@ -1270,7 +1338,6 @@ handleMediaControl(SIPCall& call, pjsip_msg_body* body)
         static constexpr auto DEVICE_ORIENTATION = "device_orientation"sv;
         static constexpr auto RECORDING_STATE = "recording_state"sv;
         static constexpr auto MUTE_STATE = "mute_state"sv;
-        // static constexpr auto VOICE_ACTIVITY = "voice_activity"sv;
 
         int streamIdx = -1;
         if (body_msg.find(STREAM_ID) != std::string_view::npos) {
@@ -1341,20 +1408,6 @@ handleMediaControl(SIPCall& call, pjsip_msg_body* body)
                 }
                 return true;
             }
-        // } else if (body_msg.find(VOICE_ACTIVITY) != std::string_view::npos) {
-        //     static const std::regex REC_REGEX("voice_activity=([0-1])");
-        //     std::svmatch matched_pattern;
-        //     std::regex_search(body_msg, matched_pattern, REC_REGEX);
-
-        //     if (matched_pattern.ready() && !matched_pattern.empty() && matched_pattern[1].matched) {
-        //         try {
-        //             bool state = std::stoi(matched_pattern[1]);
-        //             call.peerVoice(state);
-        //         } catch (const std::exception& e) {
-        //             SIP_CORE_WARN("Error parsing state remote voice: %s", e.what());
-        //         }
-        //         return true;
-        //     }
         }
     }
 
@@ -1446,11 +1499,28 @@ transaction_state_changed_cb(pjsip_inv_session* inv, pjsip_transaction* tsx, pjs
     auto call = getCallFromInvite(inv);
     if (not call)
         return;
+    if (!tsx || !event || event->type != PJSIP_EVENT_TSX_STATE)
+        return;
 
 #ifdef DEBUG_SIP_REQUEST_MSG
     processInviteResponseHelper(inv, event);
 #endif
 
+    if (tsx->role == PJSIP_ROLE_UAC && tsx->method.id == PJSIP_INVITE_METHOD
+        && call->isConnectivityDialogRefreshAwaitingResponse()) {
+        const bool finalState = tsx->state == PJSIP_TSX_STATE_COMPLETED
+                                || tsx->state == PJSIP_TSX_STATE_TERMINATED;
+        if (finalState) {
+            const auto statusCode = tsx->status_code ? tsx->status_code
+                                                     : PJSIP_SC_TSX_TRANSPORT_ERROR;
+            SIP_CORE_WARN("[call:%s] Connectivity re-INVITE transaction final state=%d "
+                          "status=%d",
+                          call->getCallId().c_str(),
+                          tsx->state,
+                          statusCode);
+            call->onConnectivityReinviteFinalResponse(statusCode);
+        }
+    }
     // We process here only incoming request message
     if (tsx->role != PJSIP_ROLE_UAS or tsx->state != PJSIP_TSX_STATE_TRYING
         or event->body.tsx_state.type != PJSIP_EVENT_RX_MSG) {
@@ -1567,12 +1637,17 @@ public:
 
     void process(uintptr_t key, pj_status_t status, const pjsip_server_addresses* addr)
     {
-        std::lock_guard<std::mutex> lk(mutex_);
-        auto it = cbMap_.find(key);
-        if (it != cbMap_.end()) {
-            it->second(status, addr);
+        ResolveCallback cb;
+        {
+            std::lock_guard<std::mutex> lk(mutex_);
+            auto it = cbMap_.find(key);
+            if (it == cbMap_.end()) {
+                return;
+            }
+            cb = std::move(it->second);
             cbMap_.erase(it);
         }
+        cb(status, addr);
     }
 
 private:
@@ -1673,7 +1748,7 @@ SIPVoIPLink::findLocalAddressFromTransport(std::shared_ptr<SipTransport> transpo
                                            std::string& addr,
                                            pj_uint16_t& port) const
 {
-    auto transportType = transport->getPjSipTransportType();
+    auto transportType = transport ? transport->getPjSipTransportType() : PJSIP_TRANSPORT_UDP;
 
     // Initialize the sip port with the default SIP port
     port = pjsip_transport_get_default_port_for_type(transportType);
@@ -1681,7 +1756,6 @@ SIPVoIPLink::findLocalAddressFromTransport(std::shared_ptr<SipTransport> transpo
     // Initialize the sip address with the hostname
     addr = sip_utils::as_view(*pj_gethostname());
 
-    // Update address and port with active transport
     RETURN_IF_NULL(transport,
                    "Transport is NULL in findLocalAddress, using local address %s :%d",
                    addr.c_str(),
@@ -1716,24 +1790,36 @@ SIPVoIPLink::findLocalAddressFromTransport(std::shared_ptr<SipTransport> transpo
 pjsip_tpselector
 SIPVoIPLink::getTransportSelector(std::shared_ptr<SipTransport> transport)
 {
-    pjsip_tpselector tp;
+    pjsip_tpselector tp {};
+    if (!transport) {
+        tp.type = PJSIP_TPSELECTOR_NONE;
+        return tp;
+    }
 
     auto type = transport->getTransportType();
 
     switch (type) {
     case TransportType::TCP:
         // connection oriented. will be managed by pjsip transport manager
-        tp.type = PJSIP_TPSELECTOR_LISTENER;
-        tp.u.listener = std::static_pointer_cast<TCPTransport>(transport)->get_factory();
-        tp.disable_connection_reuse = PJ_FALSE;
+        if (auto listener = std::static_pointer_cast<TCPTransport>(transport)->get_factory()) {
+            tp.type = PJSIP_TPSELECTOR_LISTENER;
+            tp.u.listener = listener;
+            tp.disable_connection_reuse = PJ_FALSE;
+        } else {
+            tp.type = PJSIP_TPSELECTOR_NONE;
+        }
         break;
     case TransportType::UDP:
         // handled by us when socket is opened
-        tp.type = PJSIP_TPSELECTOR_TRANSPORT;
-        tp.u.transport = std::static_pointer_cast<UDPTransport>(transport)->get();
+        if (auto* tpTransport = std::static_pointer_cast<UDPTransport>(transport)->get()) {
+            tp.type = PJSIP_TPSELECTOR_TRANSPORT;
+            tp.u.transport = tpTransport;
+        } else {
+            tp.type = PJSIP_TPSELECTOR_NONE;
+        }
         break;
     default:
-        // Handle the case when the transport type is not recognized
+        tp.type = PJSIP_TPSELECTOR_NONE;
         break;
     }
 

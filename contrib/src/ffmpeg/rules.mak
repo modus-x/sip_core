@@ -4,9 +4,15 @@ FFMPEG_URL := https://nexus.svetlocal.ru/repository/github-artifacts/FFmpeg-$(FF
 
 PKGS+=ffmpeg
 
-DEPS_ffmpeg = iconv zlib vpx opus speex x264 freetype2 fontconfig harfbuzz ffnvcodec libva libvpl opencl-icd
+DEPS_ffmpeg = iconv zlib freetype2 fontconfig x264 vpx opus harfbuzz
 
-LDFLAGS = -ldrm
+# HW-accel contrib deps are desktop-Linux only: Windows builds them via
+# package.json, Darwin uses the system VideoToolbox/OpenCL frameworks.
+ifdef HAVE_LINUX
+ifndef HAVE_ANDROID
+DEPS_ffmpeg += ffnvcodec libva libvpl opencl-icd
+endif
+endif
 
 FFMPEGCONF = \
 	--cc="$(CC)" \
@@ -22,9 +28,7 @@ FFMPEGCONF += \
 	--enable-libfreetype \
 	--enable-libfontconfig \
 	--enable-iconv \
-    --enable-libxml2 \
 	--enable-libharfbuzz \
-	--enable-opencl \
 	--disable-filters \
 	--disable-autodetect \
 	--disable-programs \
@@ -90,12 +94,9 @@ FFMPEGCONF += \
 	--enable-encoder=mjpeg \
 	--enable-decoder=mjpeg \
 	--enable-decoder=mjpegb \
-	--enable-libspeex \
 	--enable-libopus \
 	--enable-libvpx \
 	--enable-libx264 \
-	--enable-encoder=libspeex \
-	--enable-decoder=libspeex \
 	--enable-encoder=libopus \
 	--enable-decoder=libopus
 
@@ -145,8 +146,7 @@ FFMPEGCONF += \
 	--enable-filter=pad \
 	--enable-filter=drawbox \
 	--enable-filter=crop \
-	--enable-filter=drawtext \
-	--enable-filter=sv_participant_opencl
+	--enable-filter=drawtext
 
 # platform specific options (LINUX / MAC)
 ifdef HAVE_LINUX
@@ -191,6 +191,9 @@ FFMPEGCONF += \
 # End Desktop Linux:
 
 FFMPEGCONF += \
+	--enable-opencl \
+	--enable-filter=sv_participant_opencl \
+	--extra-libs=-ldrm \
 	--enable-vaapi \
 	--enable-hwaccel=h264_vaapi \
 	--enable-hwaccel=vp8_vaapi \
@@ -223,6 +226,8 @@ endif
 
 ifdef HAVE_MACOSX
 FFMPEGCONF += \
+	--enable-opencl \
+	--enable-filter=sv_participant_opencl \
 	--enable-avfoundation \
 	--enable-indev=avfoundation \
 	--enable-videotoolbox \
@@ -247,6 +252,15 @@ FFMPEGCONF += \
 	--target-os=darwin \
 	--enable-cross-compile \
 	--enable-pic
+endif
+
+ifdef HAVE_WIN32
+# For `MediaDemuxer::openInput()` using `format=lavfi` + `input=gfxcapture` with
+# `resize_mode=scale_aspect` and `hwdownload`.
+FFMPEGCONF += \
+	--enable-indev=lavfi \
+	--enable-filter=gfxcapture \
+	--enable-filter=hwdownload
 endif
 
 # x86 stuff
@@ -292,6 +306,8 @@ ffmpeg: ffmpeg-$(FFMPEG_HASH).tar.gz
 	$(APPLY) $(SRC)/ffmpeg/ios-disable-b-frames.patch
 	$(APPLY) $(SRC)/ffmpeg/screen-sharing-x11-fix.patch
 	$(APPLY) $(SRC)/ffmpeg/ffmpeg-sv_participant_opencl.patch
+	$(APPLY) $(SRC)/ffmpeg/rtp_dtmf.patch
+	$(APPLY) $(SRC)/ffmpeg/opus-rtp-marker.patch
 	$(UPDATE_AUTOCONFIG)
 	$(MOVE)
 
@@ -299,7 +315,6 @@ ffmpeg: ffmpeg-$(FFMPEG_HASH).tar.gz
 	cd $< && $(HOSTVARS) ./configure \
 		--extra-cflags="$(CFLAGS)" \
 		--extra-ldflags="$(LDFLAGS)" $(FFMPEGCONF) \
-		--extra-libs="-ldrm" \
 		--prefix="$(PREFIX)" --enable-static --disable-shared \
                 --pkg-config-flags="--static"
 	cd $< && $(MAKE) install-libs install-headers

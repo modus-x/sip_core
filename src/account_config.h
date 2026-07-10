@@ -95,6 +95,14 @@ struct AccountConfig: public Serializable {
     std::string ringtonePath {DEFAULT_RINGTONE_PATH};
 
     /**
+     * Number of seconds the SIP core waits for the client to push a
+     * per-call ringtone (via setRingtoneForIncomingCall) when an incoming
+     * INVITE carried an Alert-Info header. After the timeout, the default
+     * ringtone is played as a fallback. Set to 0 to disable the wait.
+     */
+    int pauseAfterAlertInfo {3};
+
+    /**
      * Allows user to temporarily disable video calling
      */
     bool videoEnabled {true};

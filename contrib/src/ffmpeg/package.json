@@ -3,12 +3,14 @@
     "version": "ddeec523a252cd3d0d04e45e1d225ffd7f1eea43",
     "url": "https://nexus.svetlocal.ru/repository/github-artifacts/FFmpeg-__VERSION__.tar.gz",
     "deps": [
-        "vpx",
-        "x264",
-        "opus",
+        "iconv",
+        "zlib",
         "freetype2",
-        "fontconfig",
         "harfbuzz",
+        "fontconfig",
+        "x264",
+        "vpx",
+        "opus",
         "ffnvcodec",
         "libvpl",
         "opencl-icd"
@@ -17,7 +19,9 @@
         "windows-configure.patch",
         "windows-configure-ffnvcodec.patch",
         "windows-configure-libmfx-libvpl.patch",
-        "ffmpeg-sv_participant_opencl.patch"
+        "ffmpeg-sv_participant_opencl.patch",
+        "rtp_dtmf.patch",
+        "opus-rtp-marker.patch"
     ],
     "win_patches": [
     ],

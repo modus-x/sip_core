@@ -196,6 +196,8 @@ struct AccountAudioCodecInfo : AccountCodecInfo
     /* account custom values */
     AudioFormat audioformat {AudioFormat::NONE()};
     bool isPCMG722() const;
+    bool isG729() const;
+    bool isOpus() const;
 };
 
 struct AccountVideoCodecInfo : AccountCodecInfo
@@ -210,6 +212,12 @@ struct AccountVideoCodecInfo : AccountCodecInfo
     unsigned profileId;
     std::string parameters;
     bool isAutoQualityEnabled {true};
+    // User-configured ceiling for the adaptive bitrate loop, in Kbit/s.
+    // 0 = unset (use systemCodecInfo.maxBitrate).
+    unsigned userMaxBitrate {0};
+    // Screen-share encode preference: false = sharpness ("detail"),
+    // true = motion smoothness ("motion").
+    bool sharePrefersMotion {false};
 };
 bool operator==(SystemCodecInfo codec1, SystemCodecInfo codec2);
 
@@ -303,5 +311,8 @@ struct MediaDescription
 
     /** Crypto parameters */
     CryptoAttribute crypto {};
+
+    /** g.729 specific */
+    bool annex_b { true };
 };
 } // namespace sip_core

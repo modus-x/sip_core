@@ -22,7 +22,11 @@
 #define CORE_LAYER_H_
 
 #include "audio/audiolayer.h"
+#include "device_signature.h"
 #include <AudioToolbox/AudioToolbox.h>
+#include <atomic>
+#include <cstdint>
+#include <string>
 
 #define checkErr(err) \
     if (err) { \
@@ -97,6 +101,14 @@ public:
      */
     virtual void stopStream(AudioDeviceType stream = AudioDeviceType::ALL);
 
+    /**
+     * Tear down and re-create the AudioUnit for the currently active stream
+     * types, e.g. after a device topology change. Unlike stopStream() +
+     * startStream() this preserves activeStreamMask_, so per-type guard
+     * accounting in Manager stays consistent.
+     */
+    void restartStream();
+
 private:
     NON_COPYABLE(CoreLayer);
 
@@ -139,6 +151,13 @@ private:
     virtual void updatePreference(AudioPreference& pref, int index, AudioDeviceType type);
 
     /**
+     * Configure, initialize and start the AudioUnit for the stream types
+     * currently in activeStreamMask_. Must be called on the audio
+     * configuration queue with status_ == Idle.
+     */
+    bool startAudioUnit();
+
+    /**
      * Number of audio cards on which capture stream has been opened
      */
     int indexIn_;
@@ -160,7 +179,56 @@ private:
     Float64 outSampleRate_;
     UInt32 outChannelsPerFrame_;
 
+    /** Guard flag to prevent infinite restart loop caused by VoiceProcessingIO
+     *  creating/destroying its internal VPAUAggregateAudioDevice. */
+    std::atomic<bool> restartingAudio_ {false};
+
+    /** Bitmask of stream types (PLAYBACK / CAPTURE / RINGTONE) requested by
+     *  the per-type AudioDeviceGuard refcounts in Manager. All three logical
+     *  types share the single full-duplex VoiceProcessingIO unit, so the
+     *  unit may only be torn down once this mask drains to zero — stopping
+     *  just the RINGTONE type after a call is answered must NOT kill the
+     *  call's capture/playback. Confined to the audio configuration queue. */
+    unsigned activeStreamMask_ {0};
+
+    /** Stream types the running unit was configured to serve (device
+     *  selection scope at init time). When startStream() adds a type outside
+     *  this set — e.g. a call answering while the unit was built for
+     *  RINGTONE-only ringing — the unit is rebuilt so the capture device and
+     *  the call playback device get selected. Confined to the audio
+     *  configuration queue. */
+    unsigned configuredStreamMask_ {0};
+
+    /** Stored device IDs so we can remove property listeners in destroyAudioLayer. */
+    AudioDeviceID inputDeviceID_ {0};
+    AudioDeviceID playbackDeviceID_ {0};
+
+    /** Stored device names for name-based re-selection after hot-plug.
+     *  On restart, we first try to find the device by name (stable across
+     *  index shifts) before falling back to the preference index. */
+    std::string captureDeviceName_;
+    std::string playbackDeviceName_;
+
+    /** Hash of the user-visible device topology captured at the end of the
+     *  most recent successful startStream lambda. Device-change callbacks
+     *  compare against this to suppress spurious events that CoreAudio
+     *  raises when VoiceProcessingIO creates/destroys its internal
+     *  VPAUAggregateAudioDevice.
+     *
+     *  Stored as a single atomic so the writer (audio configuration queue)
+     *  and the readers (CoreAudio HAL listener thread) need no further
+     *  synchronisation. A sentinel value of 0 means "no valid snapshot";
+     *  real hashes always have the low bit forced to 1 to avoid colliding
+     *  with the sentinel. */
+    static constexpr std::uint64_t kNoDeviceSignature = 0;
+    std::atomic<std::uint64_t> deviceSignatureHash_ {kNoDeviceSignature};
+
     std::vector<AudioDevice> getDeviceList(bool getCapture) const;
+
+    /** Compute the current user-visible device signature hash by
+     *  enumerating capture and playback devices and filtering internal
+     *  helpers. Always returns a non-sentinel value. */
+    std::uint64_t computeDeviceSignatureHash() const;
 };
 
 } // namespace sip_core

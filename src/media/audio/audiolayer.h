@@ -52,7 +52,7 @@ typedef struct SpeexEchoState_ SpeexEchoState;
 #define ALSA_API_STR       "alsa"
 #define JACK_API_STR       "jack"
 #define COREAUDIO_API_STR  "coreaudio"
-#define PORTAUDIO_API_STR  "portaudio"
+#define WASAPI_API_STR     "wasapi"
 
 #define PCM_DEFAULT     "default"     // Default ALSA plugin
 #define PCM_DSNOOP      "plug:dsnoop" // Alsa plugin for microphone sharing
@@ -99,6 +99,7 @@ public:
     virtual int getIndexRingtone() const = 0;
 
     void setWebRtcParams(const libsip_core::WebRtcParams params);
+    void setVadSensitivity(int32_t sensitivity);
 
     inline const AudioProcessor* getAudioProcessor() const { 
         return audioProcessor ? audioProcessor.get() : nullptr;
@@ -199,6 +200,16 @@ public:
     void notifyIncomingCall();
 
     virtual void updatePreference(AudioPreference& pref, int index, AudioDeviceType type) = 0;
+
+    /**
+     * Whether the configured device preference for this type resolves to an
+     * actual device. A stale preference (device renamed/removed) makes the
+     * layer report the default index to the UI while still trying to use the
+     * dead name — re-selecting that index must then not be treated as a no-op.
+     */
+    virtual bool isPreferredDeviceResolved(AudioDeviceType) const { return true; }
+
+    void notifyDevicesChanged() { devicesChanged(); }
 
 protected:
     /**
@@ -313,6 +324,12 @@ protected:
      */
     std::unique_ptr<Resampler> resampler_;
 
+    /**
+     * Separate resampler for tone audio during mixing, to avoid
+     * thrashing the main resampler's SwrContext when source formats differ.
+     */
+    std::unique_ptr<Resampler> toneResampler_;
+
 
     void adjustVolume(std::shared_ptr<AudioFrame> &frame, bool playback);
 
@@ -322,6 +339,10 @@ private:
 
     void createAudioProcessor();
     void destroyAudioProcessor();
+    void applyVadSensitivityLocked();
+    static int clampVadSensitivity(int32_t sensitivity);
+
+    int vadSensitivity_ {3};
 
     // Set to "true" to play the incoming call notification (beep)
     // when the playback is on (typically when there is already an

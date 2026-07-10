@@ -51,6 +51,7 @@ CallFactory::newSipCall(const std::shared_ptr<SIPAccountBase>& account,
 
     std::lock_guard<std::recursive_mutex> lk(callMapsMutex_);
     auto id = getNewCallID();
+    SIP_CORE_DBG("Creating call %s", id.c_str());
     auto call = std::make_shared<SIPCall>(account, id, type, mediaList);
     callMaps_[call->getLinkType()].emplace(id, call);
     account->attach(call);

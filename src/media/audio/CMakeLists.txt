@@ -23,6 +23,10 @@ list(
   "${CMAKE_CURRENT_SOURCE_DIR}/audiolayer.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/audioloop.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/audioloop.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/g729_encoder.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/g729_encoder.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/g729_decoder.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/g729_decoder.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/dcblocker.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/dcblocker.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/resampler.cpp"
@@ -33,11 +37,6 @@ list(
   "${CMAKE_CURRENT_SOURCE_DIR}/ringbufferpool.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/tonecontrol.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/tonecontrol.h")
-
-if(NOT MSVC)
-  list(APPEND Source_Files__media__audio "${CMAKE_CURRENT_SOURCE_DIR}/dsp.cpp"
-       "${CMAKE_CURRENT_SOURCE_DIR}/dsp.h")
-endif()
 
 set(Source_Files__media__audio
     ${Source_Files__media__audio}
@@ -51,9 +50,9 @@ if(APPLE)
 endif()
 
 if(MSVC)
-  add_subdirectory(portaudio)
-  set(Source_Files__media__audio__portaudio
-      ${Source_Files__media__audio__portaudio}
+  add_subdirectory(wasapi)
+  set(Source_Files__media__audio__wasapi
+      ${Source_Files__media__audio__wasapi}
       PARENT_SCOPE)
 endif()
 

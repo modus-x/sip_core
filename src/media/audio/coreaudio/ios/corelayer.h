@@ -163,8 +163,20 @@ private:
 
     std::condition_variable readyCv_ {};
     dispatch_queue_t audioConfigurationQueue;
-    
+
     std::mutex layerLock_;
+
+    /** Bitmask of stream types (PLAYBACK / CAPTURE / RINGTONE) requested by
+     *  the per-type AudioDeviceGuard refcounts in Manager. All three logical
+     *  types share the single full-duplex VoiceProcessingIO unit, so the
+     *  unit may only be torn down once this mask drains to zero — stopping
+     *  just the RINGTONE type after a call is answered must NOT kill the
+     *  call's capture/playback (same defect class as the macOS layer).
+     *  Unlike macOS, no configured-scope tracking is needed: the
+     *  PlayAndRecord session unit always serves every type, so a running
+     *  unit never has to be rebuilt when another type joins. Confined to
+     *  the audio configuration queue. */
+    unsigned activeStreamMask_ {0};
 };
 
 } // namespace sip_core

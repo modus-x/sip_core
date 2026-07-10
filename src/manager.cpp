@@ -233,8 +233,45 @@ struct Manager::ManagerPimpl
 
     void initAudioDriver();
 
-    void processIncomingCall(const std::string& accountId, Call& incomCall, const std::map<std::string, std::string>& headers = {});
+    /**
+     * Check if any account has an active conference.
+     */
+    bool hasActiveConference() const;
+
+    void processIncomingCall(const std::string& accountId,
+                             Call& incomCall,
+                             const std::map<std::string, std::string>& headers = {});
     static void stripSipPrefix(Call& incomCall);
+
+    /**
+     * Tracks an incoming call that arrived with an Alert-Info header.
+     * Until either the client pushes a custom ringtone via
+     * setRingtoneForIncomingCall() or the scheduled fallback fires, the
+     * default ringtone is intentionally NOT played.
+     */
+    struct PendingAlertInfoCall
+    {
+        std::string accountId;
+        std::shared_ptr<Task> fallbackTask;
+        bool delivered {false};
+    };
+
+    /// Lookup an incoming-call header by name in a case-insensitive manner.
+    /// PJSIP preserves the original casing of received headers, so the
+    /// remote PBX may emit "Alert-Info" in any case.
+    static std::string findHeaderCaseInsensitive(
+        const std::map<std::string, std::string>& headers,
+        std::string_view name);
+
+    /// Called from the scheduler when the Alert-Info wait window expired
+    /// without the client pushing a custom ringtone. Plays the default
+    /// ringtone and logs an ERROR.
+    void onAlertInfoTimeout(const std::string& accountId, const std::string& callId);
+
+    /// Drop any pending Alert-Info entry for the given call id and cancel
+    /// the scheduled fallback if it has not run yet. Safe to call for
+    /// calls that never had a pending entry.
+    void clearPendingAlertInfoCall(const std::string& callId);
 
     Manager& base_; // pimpl back-pointer
 
@@ -257,6 +294,14 @@ struct Manager::ManagerPimpl
     /** Audio layer */
     std::shared_ptr<AudioLayer> audiodriver_ {nullptr};
     std::array<std::atomic_uint, 3> audioStreamUsers_ {};
+    // Per-stream pending stop task: scheduled when the user count drops
+    // to 0, cancelled when a new guard reclaims the stream within the
+    // linger window. Lets us coalesce rapid destroy/recreate cycles that
+    // would otherwise stall PulseAudio's virtual xrdp-source (Linux over
+    // xrdp on Astra 1.8): the source accepts the new connection but its
+    // read callback never fires when destroyed and recreated within ms.
+    std::array<std::shared_ptr<Task>, 3> audioStreamStopTask_ {};
+    std::mutex audioStreamMutex_ {};
 
     // Main thread
     std::unique_ptr<DTMF> dtmfKey_;
@@ -308,6 +353,14 @@ struct Manager::ManagerPimpl
     std::unique_ptr<RingBufferPool> ringbufferpool_;
 
     std::atomic_bool finished_ {false};
+    std::atomic_bool shuttingDown_ {false};
+
+    /// Protects pendingAlertInfoCalls_.
+    std::mutex pendingAlertInfoMutex_;
+
+    /// Active incoming calls that received an Alert-Info header and are
+    /// awaiting a custom ringtone from the client. Keyed by call id.
+    std::map<std::string, PendingAlertInfoCall> pendingAlertInfoCalls_;
 
     /* Sink ID mapping */
     std::map<std::string, std::weak_ptr<video::SinkClient>> sinkMap_;
@@ -534,7 +587,7 @@ Manager::ManagerPimpl::bindCallToConference(Call& call, Conference& conf)
     const auto& callId = call.getCallId();
     const auto& confId = conf.getConfId();
     const auto& state = call.getStateStr();
-    
+
     // ensure that calls are only in one conference at a time
     if (call.isConferenceParticipant())
         base_.detachParticipant(callId);
@@ -545,6 +598,13 @@ Manager::ManagerPimpl::bindCallToConference(Call& call, Conference& conf)
                  state.c_str());
 
     base_.getRingBufferPool().unBindAll(callId);
+    // unBindAll only removes bindings where callId is the reader.
+    // The 1-to-1 call's AudioReceiveThread::setup() created a half-duplex
+    // binding where DEFAULT_ID reads from rb_callId — that lives in
+    // readBindingsMap_[DEFAULT_ID] and is NOT cleaned by unBindAll(callId).
+    // Remove it explicitly so the conference can establish its own bindings
+    // (which respect localPlaybackMuted_).
+    base_.getRingBufferPool().unBindHalfDuplexOut(RingBufferPool::DEFAULT_ID, callId);
 
     conf.addParticipant(callId);
 
@@ -565,20 +625,41 @@ Manager::ManagerPimpl::bindCallToConference(Call& call, Conference& conf)
                       state.c_str());
 }
 
+bool
+Manager::ManagerPimpl::hasActiveConference() const
+{
+    for (const auto& account : base_.getAllAccounts())
+        if (!account->getConferenceList().empty())
+            return true;
+    return false;
+}
+
 //==============================================================================
 
 Manager&
 Manager::instance()
 {
-    // Meyers singleton
-    static Manager instance;
+    // Leak-on-exit singleton (not a Meyers singleton): a plain
+    // `static Manager instance` is destroyed during `__cxa_finalize_ranges`
+    // at process exit, but other globals (notably `bindings::ClientImpl` and
+    // its owned `InstanceHandler<DirectRenderer>` map) are finalised AFTER
+    // us and still call `Manager::getSinkClient()` / similar from their
+    // destructors. Touching the already-destroyed `callSinksMap_` (or any
+    // other member) dereferences zeroed memory and the macOS app crashes on
+    // every Cmd-Q.
+    //
+    // Allocate once on the heap and never free. The singleton outlives every
+    // atexit handler, so late destructors can still reach Manager safely.
+    // The OS reclaims memory at process exit anyway. Same pattern as the
+    // `common_glue::TypeRepository` leak-on-exit fix.
+    static Manager* instance = new Manager();
 
     // This will give a warning that can be ignored the first time instance()
     // is called...subsequent warnings are more serious
     if (not Manager::initialized)
         SIP_CORE_DBG("Not initialized");
 
-    return instance;
+    return *instance;
 }
 
 Manager::Manager()
@@ -613,7 +694,9 @@ Manager::setRingtone(const std::string& accountId, const std::string& ringtone)
     return false;
 }
 
-int Manager::getKeepAliveInterval(const std::string& accountId) {
+int
+Manager::getKeepAliveInterval(const std::string& accountId)
+{
     if (auto account = getAccount(accountId)) {
         if (account->config().type == ACCOUNT_TYPE_SIP) {
             auto sipAccount = std::static_pointer_cast<SIPAccount>(account);
@@ -623,15 +706,44 @@ int Manager::getKeepAliveInterval(const std::string& accountId) {
     return 0;
 }
 
-void Manager::setKeepAliveInterval(const std::string& accountId, int interval) {
-        if (auto account = getAccount(accountId)) {
+void
+Manager::setKeepAliveInterval(const std::string& accountId, int interval)
+{
+    if (auto account = getAccount(accountId)) {
         if (account->config().type == ACCOUNT_TYPE_SIP) {
             auto sipAccount = std::static_pointer_cast<SIPAccount>(account);
-            sipAccount->editConfig([&](SipAccountConfig& config) { config.keepAliveInterval = interval; });
-            sipAccount->registerKeepAliveTimer();
+            const bool restoreMainRouteFastProbe = sipAccount->isUsingBackupRoute()
+                                                   && sipAccount->isMainRouteFastProbeEnabled()
+                                                   && interval > 0;
+            const bool restoreActiveNoRouteFastProbe
+                = SIPAccount::shouldUseOptionsForKeepAlive(
+                      sipAccount->config().keepAliveType,
+                      sipAccount->getTransportType() == PJSIP_TRANSPORT_UDP)
+                  && sipAccount->isActiveNoRouteFastProbeEnabled() && interval > 0;
+            sipAccount->editConfig(
+                [&](SipAccountConfig& config) { config.keepAliveInterval = interval; });
+
+            sipAccount->cancelKeepAliveTimer();
+            sipAccount->cancelMainRouteKeepAliveTimer();
+            sipAccount->cancelBackupRouteKeepAliveTimer();
+
+            if (sipAccount->isUsable() && sipAccount->getTransport()) {
+                sipAccount->registerKeepAliveTimer();
+                if (restoreActiveNoRouteFastProbe)
+                    sipAccount->enableActiveNoRouteFastProbe("manager-keepalive-interval-refresh");
+                if (sipAccount->hasBackServiceRoutes()) {
+                    if (sipAccount->isUsingBackupRoute()) {
+                        sipAccount->registerMainRouteKeepAliveTimer();
+                        if (restoreMainRouteFastProbe)
+                            sipAccount->enableMainRouteFastProbe(
+                                "manager-keepalive-interval-refresh");
+                    } else {
+                        sipAccount->registerBackupRouteKeepAliveTimer();
+                    }
+                }
+            }
         }
     }
-
 }
 
 std::string
@@ -660,16 +772,19 @@ Manager::setRingtoneEnabled(const std::string& accountId, bool enabled)
     }
 }
 
-// Signal handler function
+// Signal handler function — must be async-signal-safe.
+// std::exit() is NOT safe here (runs atexit handlers / static dtors while
+// potentially holding PJSIP locks).  _exit() is async-signal-safe.
 static void
 signalHandler(int signum)
 {
-    std::cout << "Signal " << signum << " received. Terminating..." << std::endl;
-    std::exit(signum);
+    _exit(signum);
 }
 
-static void beforeExit() {
-	Manager::instance().finish();
+static void
+beforeExit()
+{
+    Manager::instance().finish();
 }
 
 void
@@ -714,8 +829,7 @@ Manager::init(const std::string& config_file, const std::optional<std::string>& 
     // So only create the SipLink once
     pimpl_->sipLink_ = std::make_unique<SIPVoIPLink>();
 
-    pimpl_->path_ = config_file.empty() ? pimpl_->retrieveConfigPath()
-                                        : config_file;
+    pimpl_->path_ = config_file.empty() ? pimpl_->retrieveConfigPath() : config_file;
     SIP_CORE_DBG("Configuration file path: %s", pimpl_->path_.c_str());
 
     pimpl_->data_path_ = data_path;
@@ -743,8 +857,14 @@ Manager::init(const std::string& config_file, const std::optional<std::string>& 
             pimpl_->dtmfKey_.reset(new DTMF(getRingBufferPool().getInternalSamplingRate()));
         }
     }
-	
-	atexit(beforeExit);
+
+    // Register atexit handler only once — repeated init/finish cycles must not
+    // stack duplicate handlers.
+    static bool atexitRegistered = false;
+    if (!atexitRegistered) {
+        atexit(beforeExit);
+        atexitRegistered = true;
+    }
 
     // Register the signal handler for common termination signals
     if (signal(SIGINT, signalHandler) == SIG_ERR) {
@@ -770,33 +890,54 @@ Manager::finish() noexcept
     try {
         SIP_CORE_DBG("Finishing started");
 
-        // Forbid call creation
-        // callFactory.forbid();
+        // 1. Set global shutdown flag
+        pimpl_->shuttingDown_ = true;
 
-        // Hangup all remaining active calls
+        // 2. Mark all SIP accounts as shutting down and cancel their timers.
+        //    This disables transport recovery, reregistration, keepalive, and
+        //    route-switching guards that are already scattered through SIPAccount.
+        for (const auto& account : getAllAccounts<SIPAccount>()) {
+            account->isShuttingDown_.store(true);
+            account->cancelKeepAliveTimer();
+            account->cancelMainRouteKeepAliveTimer();
+            account->cancelBackupRouteKeepAliveTimer();
+            // Cancel the auto-reregistration timer here too, while the PJSIP
+            // endpoint is still alive. Otherwise ~SIPAccount (step 8, after the
+            // endpoint is destroyed in step 7) would call
+            // cancelAutoReregistrationTimer() -> pjsip_endpt_cancel_timer() on a
+            // NULL/destroyed endpoint and crash (SIGSEGV in pjsip_endpt_cancel_timer).
+            account->cancelAutoReregistrationTimer();
+        }
+
+        // 3. Hangup all remaining active calls
         SIP_CORE_DBG("Hangup %zu remaining call(s)", callFactory.callCount());
         for (const auto& call : callFactory.getAllCalls())
             hangupCall(call->getAccountId(), call->getCallId());
         callFactory.clear();
 
-        SIP_CORE_DBG("Unregistering accounts started");
-        // Disconnect accounts, close link stacks and free allocated ressources
-        unregisterAccounts();
-        SIP_CORE_DBG("Unregistering accounts completed");
+        // 4. Fire-and-forget UNREGISTER for every account.
+        //    Each account sends the SIP UNREGISTER packet, then immediately
+        //    destroys its regc (callback suppressed via pjsip_regc_destroy2).
+        SIP_CORE_DBG("Fire-and-forget unregister for all accounts");
+        unregisterAccountsImmediate();
 
-        SIP_CORE_DBG("Resetting audio layer started");
-        {
-            std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
-            pimpl_->audiodriver_.reset();
-        }
-        SIP_CORE_DBG("Resetting audio layer completed");
-
-        // Flush remaining tasks (free lambda' with capture)
+        // 5. Stop the scheduler — prevents new callbacks from being dispatched
+        //    while we tear down the SIP stack.
         pimpl_->scheduler_.stop();
 
-        // NOTE: sipLink_->shutdown() is needed because this will perform
-        // sipTransportBroker->shutdown(); which will call Manager::instance().sipVoIPLink()
-        // so the pointer MUST NOT be resetted at this point
+        // 6. Detach transports from all accounts so that no account holds a
+        //    shared_ptr<SipTransport> when the PJSIP endpoint is destroyed.
+        //    Without this, ~SIPAccount would release the last transport
+        //    reference AFTER pjsip_endpt_destroy, causing use-after-free.
+        SIP_CORE_DBG("Detaching transports from all accounts");
+        for (const auto& account : getAllAccounts<SIPAccount>()) {
+            account->setTransport();
+        }
+
+        // 7. Shut down SIP stack: stop event loop, destroy transports, endpoint.
+        //    NOTE: sipLink_->shutdown() calls sipTransportBroker->shutdown()
+        //    which accesses Manager::instance().sipVoIPLink(), so the pointer
+        //    MUST NOT be reset before shutdown() returns.
         if (pimpl_->sipLink_) {
             SIP_CORE_DBG("Shutting down sip voiplink");
             pimpl_->sipLink_->shutdown();
@@ -804,10 +945,18 @@ Manager::finish() noexcept
             pimpl_->sipLink_.reset();
         }
 
+        // 8. Destroy all accounts (triggers ~SIPAccount final cleanup).
+        //    Safe now: event loop is stopped, scheduler is stopped, transports
+        //    detached, no PJSIP callbacks can fire during account destruction.
         accountFactory.clear();
 
-        SIP_CORE_DBG("pj_shutdown");
+        // 9. Audio layer — no SIP dependencies, safe to tear down last.
+        {
+            std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
+            pimpl_->audiodriver_.reset();
+        }
 
+        SIP_CORE_DBG("pj_shutdown");
         pj_shutdown();
 
         SIP_CORE_DBG("Finishing completed");
@@ -816,6 +965,7 @@ Manager::finish() noexcept
         SIP_CORE_ERR("%s", err.what());
     }
 
+    pimpl_->shuttingDown_ = false;
     pimpl_->finished_ = true;
     initialized = false;
 }
@@ -891,6 +1041,16 @@ Manager::unregisterAccounts()
     }
 }
 
+void
+Manager::unregisterAccountsImmediate()
+{
+    for (const auto& account : getAllAccounts<SIPAccount>()) {
+        if (account->isEnabled()) {
+            account->doUnregisterFireAndForget();
+        }
+    }
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // Management of events' IP-phone user
 ///////////////////////////////////////////////////////////////////////////////
@@ -899,15 +1059,16 @@ Manager::unregisterAccounts()
 std::string
 Manager::outgoingCall(const std::string& account_id,
                       const std::string& to,
-                      const std::vector<libsip_core::MediaMap>& mediaList)
+                      const std::vector<libsip_core::MediaMap>& mediaList,
+                      const std::map<std::string, std::string>& headers)
 {
-    SIP_CORE_DBG() << "try outgoing call to '" << to << "'" << " with account '" << account_id
-                   << "'";
+    SIP_CORE_DBG() << "try outgoing call to '" << to << "'"
+                   << " with account '" << account_id << "'";
 
     std::shared_ptr<Call> call;
 
     try {
-        call = newOutgoingCall(trim(to), account_id, mediaList);
+        call = newOutgoingCall(trim(to), account_id, mediaList, headers);
     } catch (const std::exception& e) {
         SIP_CORE_ERR("%s", e.what());
         return {};
@@ -943,11 +1104,16 @@ Manager::switchTransport(const std::string& accountId, libsip_core::TransportTyp
     if (auto account = getAccount(accountId)) {
         return account->switchTransport(transportType);
     }
+    return false;
 }
 
 bool
 Manager::answerCall(Call& call, const std::vector<libsip_core::MediaMap>& mediaList)
 {
+    if (call.getCallType() != Call::CallType::INCOMING) {
+        SIP_CORE_WARN("Ignoring answer request for non-incoming call %s", call.getCallId().c_str());
+        return false;
+    }
     SIP_CORE_INFO("Answer call %s", call.getCallId().c_str());
 
     if (call.getConnectionState() != Call::ConnectionState::RINGING) {
@@ -957,6 +1123,7 @@ Manager::answerCall(Call& call, const std::vector<libsip_core::MediaMap>& mediaL
 
     // If ringing
     stopTone();
+    pimpl_->clearPendingAlertInfoCall(call.getCallId());
     pimpl_->removeWaitingCall(call.getCallId());
 
     try {
@@ -993,6 +1160,7 @@ Manager::hangupCall(const std::string& accountId, const std::string& callId)
         return false;
     // store the current call id
     stopTone();
+    pimpl_->clearPendingAlertInfoCall(callId);
     pimpl_->removeWaitingCall(callId);
 
     /* We often get here when the call was hungup before being created */
@@ -1150,6 +1318,7 @@ Manager::refuseCall(const std::string& accountId, const std::string& id)
     if (auto account = getAccount(accountId)) {
         if (auto call = account->getCall(id)) {
             stopTone();
+            pimpl_->clearPendingAlertInfoCall(id);
             call->refuse();
             pimpl_->removeWaitingCall(id);
             removeAudio(*call);
@@ -1311,7 +1480,8 @@ Manager::joinParticipant(const std::string& accountId,
                          const std::string& callId1,
                          const std::string& account2Id,
                          const std::string& callId2,
-                         bool attached)
+                         bool attached,
+                         bool muteLocalPlayback)
 {
     SIP_CORE_INFO("JoinParticipant(%s, %s, %i)", callId1.c_str(), callId2.c_str(), attached);
     auto account = getAccount(accountId);
@@ -1342,14 +1512,14 @@ Manager::joinParticipant(const std::string& accountId,
     auto call1Media = call1->getMediaAttributeList();
 
     attachLocalVideo = std::any_of(call1Media.begin(),
-                                     call1Media.end(),
-                                     [](const MediaAttribute& media) {
-                                         return media.hasValidVideo();
-                                     });
+                                   call1Media.end(),
+                                   [](const MediaAttribute& media) {
+                                       return media.hasValidVideo();
+                                   });
 
     // use default source if not found
     std::string source;
-    if(attachLocalVideo) {
+    if (attachLocalVideo) {
         for (auto m : call1Media) {
             if (m.type_ == MediaType::MEDIA_VIDEO) {
                 source = m.sourceUri_;
@@ -1369,13 +1539,13 @@ Manager::joinParticipant(const std::string& accountId,
     // is that true for call2 ?
     if (!attachLocalVideo) {
         attachLocalVideo = std::any_of(call2Media.begin(),
-                                     call2Media.end(),
-                                     [](const MediaAttribute& media) {
-                                         return media.hasValidVideo();
-                                     });
+                                       call2Media.end(),
+                                       [](const MediaAttribute& media) {
+                                           return media.hasValidVideo();
+                                       });
     }
 
-    if(attachLocalVideo) {
+    if (attachLocalVideo) {
         for (auto m : call2Media) {
             if (m.type_ == MediaType::MEDIA_VIDEO) {
                 source = m.sourceUri_;
@@ -1384,6 +1554,17 @@ Manager::joinParticipant(const std::string& accountId,
     }
 
     auto conf = std::make_shared<Conference>(account, "");
+    // Register the mixer callback now that a shared_ptr owns the conference
+    // (weak_from_this() is valid). Done before account->attach so no CallSet
+    // lock is held while the mixer's rwMutex_ is taken.
+    conf->attachVideoMixerCallbacks();
+
+    // Set the local playback mute flag BEFORE any bindings are established.
+    // attachLocalParticipant() and bindParticipant() already respect this flag,
+    // using half-duplex (host-inaudible) bindings when it is true.
+    if (muteLocalPlayback)
+        conf->muteLocalPlayback(true);
+
     account->attach(conf);
     emitSignal<libsip_core::CallSignal::ConferenceCreated>(account->getAccountID(),
                                                            conf->getConfId());
@@ -1427,6 +1608,10 @@ Manager::createConfFromParticipantList(const std::string& accountId,
     }
 
     auto conf = std::make_shared<Conference>(account);
+    // Register the mixer callback now that a shared_ptr owns the conference
+    // (weak_from_this() is valid; captured by value so the mixer thread never
+    // dereferences a raw `this`).
+    conf->attachVideoMixerCallbacks();
 
     unsigned successCounter = 0;
     for (const auto& numberaccount : participantList) {
@@ -1455,16 +1640,39 @@ Manager::createConfFromParticipantList(const std::string& accountId,
 bool
 Manager::detachLocalParticipant(const std::shared_ptr<Conference>& conf)
 {
-    if (not conf)
-        return false;
+    auto detachOne = [this](const std::shared_ptr<Conference>& c) {
+        SIP_CORE_INFO("Detach local participant from conference %s", c->getConfId().c_str());
+        c->detachLocalParticipant();
+        emitSignal<libsip_core::CallSignal::ConferenceChanged>(c->getAccountId(),
+                                                               c->getConfId(),
+                                                               c->getStateStr());
+    };
 
-    SIP_CORE_INFO("Detach local participant from conference %s", conf->getConfId().c_str());
-    conf->detachLocalParticipant();
-    emitSignal<libsip_core::CallSignal::ConferenceChanged>(conf->getAccountId(),
-                                                           conf->getConfId(),
-                                                           conf->getStateStr());
-    pimpl_->unsetCurrentCall();
-    return true;
+    if (conf) {
+        detachOne(conf);
+        pimpl_->unsetCurrentCall();
+        return true;
+    }
+
+    // No conference passed: this is the no-arg public API
+    // (CallController::detachLocalParticipant). Resolve the current conference
+    // by detaching the local host from every attached conference. Without this
+    // the call was a silent no-op, which left the VideoMixer holding a strong
+    // ref to the local camera VideoInput after logout — keeping the capture
+    // device (and its "in use" LED) alive until full app exit.
+    bool detachedAny = false;
+    for (const auto& account : getAllAccounts()) {
+        for (const auto& confId : account->getConferenceList()) {
+            auto c = account->getConference(confId);
+            if (c && c->getState() == Conference::State::ACTIVE_ATTACHED) {
+                detachOne(c);
+                detachedAny = true;
+            }
+        }
+    }
+    if (detachedAny)
+        pimpl_->unsetCurrentCall();
+    return detachedAny;
 }
 
 bool
@@ -1477,10 +1685,6 @@ Manager::detachParticipant(const std::string& callId)
         SIP_CORE_ERR("Could not find call %s", callId.c_str());
         return false;
     }
-
-    // Don't hold ringing calls when detaching them from conferences
-    if (call->getStateStr() != "RINGING")
-        onHoldCall(call->getAccountId(), callId);
 
     removeParticipant(*call);
     return true;
@@ -1572,11 +1776,31 @@ Manager::addAudio(Call& call)
     if (call.isConferenceParticipant()) {
         SIP_CORE_DBG("[conf:%s] Attach local audio", callId.c_str());
 
-        // bind to conference participant
-        /*auto iter = pimpl_->conferenceMap_.find(callId);
-        if (iter != pimpl_->conferenceMap_.end() and iter->second) {
-            iter->second->bindParticipant(callId);
-        }*/
+        // Ring-buffer bindings are owned by the conference (Conference::
+        // bindParticipant, which is mute/half-duplex aware) — do NOT
+        // bindCallID(callId, DEFAULT_ID) here or it would clobber the
+        // conference routing. But we MUST still pin the physical PortAudio
+        // PLAYBACK + CAPTURE device streams for this participant exactly like
+        // the 1:1 branch below. Every re-invite during a conference runs
+        // stopAllMedia()/startAllMedia(), which drops the AudioInput's CAPTURE
+        // guard; without a guard held here the device stream user-count can
+        // reach 0, the deferred stopStream() tears the streams down, and on
+        // Windows/PortAudio the conference-attach path never restarts them —
+        // leaving mic + speaker dead until the user switches audio device
+        // (which rebuilds the whole audio layer). Acquire-before-release keeps
+        // the count >= 1 so any pending deferred stop is cancelled and reused.
+        auto oldGuard = std::move(call.audioGuard);
+        call.audioGuard = startAudioStream(AudioDeviceType::PLAYBACK);
+        auto oldCaptureGuard = std::move(call.audioCaptureGuard);
+        call.audioCaptureGuard = startAudioStream(AudioDeviceType::CAPTURE);
+
+        std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
+        if (!pimpl_->audiodriver_) {
+            SIP_CORE_ERR("Audio driver not initialized");
+            return;
+        }
+        pimpl_->audiodriver_->flushUrgent();
+        getRingBufferPool().flushAllBuffers();
     } else {
         SIP_CORE_DBG("[call:%s] Attach audio", callId.c_str());
 
@@ -1584,6 +1808,16 @@ Manager::addAudio(Call& call)
         getRingBufferPool().bindCallID(callId, RingBufferPool::DEFAULT_ID);
         auto oldGuard = std::move(call.audioGuard);
         call.audioGuard = startAudioStream(AudioDeviceType::PLAYBACK);
+
+        // Pin the capture stream for the call's lifetime. AudioRtpSession::stop()
+        // (called on every re-invite via stopAllMedia/startAllMedia) drops the
+        // AudioInput, which drops its own AudioDeviceGuard(CAPTURE). Without
+        // this anchor the user count would hit 0, PulseLayer::stopStream(CAPTURE)
+        // would tear the xrdp-source stream down, and on xrdp the recreated
+        // stream silently fails to deliver samples for many seconds. Holding
+        // a second guard here keeps the count >=1 across stop()/start().
+        auto oldCaptureGuard = std::move(call.audioCaptureGuard);
+        call.audioCaptureGuard = startAudioStream(AudioDeviceType::CAPTURE);
 
         std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
         if (!pimpl_->audiodriver_) {
@@ -1602,6 +1836,7 @@ Manager::removeAudio(Call& call)
     SIP_CORE_DBG("[call:%s] Remove local audio", callId.c_str());
     getRingBufferPool().unBindAll(callId);
     call.audioGuard.reset();
+    call.audioCaptureGuard.reset();
 }
 
 ScheduledExecutor&
@@ -1772,7 +2007,9 @@ Manager::incomingCallsWaiting()
 }
 
 void
-Manager::incomingCall(const std::string& accountId, Call& call, const std::map<std::string, std::string>& headers)
+Manager::incomingCall(const std::string& accountId,
+                      Call& call,
+                      const std::map<std::string, std::string>& headers)
 {
     if (not accountId.empty()) {
         pimpl_->stripSipPrefix(call);
@@ -1870,6 +2107,28 @@ Manager::sendCallTextMessage(const std::string& accountId,
     }
 }
 
+// THREAD=Main
+void
+Manager::onCallEarlyMedia(Call& call)
+{
+    SIP_CORE_DBG("[call:%s] Early media started, enabling playback", call.getCallId().c_str());
+
+    // Start the playback device BEFORE stopping the tone so the refcount
+    // never drops to zero (avoids a brief playback-stream gap).
+    auto oldGuard = std::move(call.audioGuard);
+    call.audioGuard = startAudioStream(AudioDeviceType::PLAYBACK);
+
+    // Stop any local ringback tone — the server is now providing audio.
+    // Always stop regardless of current-call status because the tone is
+    // global and now gets mixed into every active audio stream.
+    stopTone();
+
+    if (pimpl_->audiodriver_) {
+        std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
+        pimpl_->audiodriver_->flushUrgent();
+    }
+}
+
 // THREAD=VoIP CALL=Outgoing
 void
 Manager::peerAnsweredCall(Call& call)
@@ -1877,9 +2136,10 @@ Manager::peerAnsweredCall(Call& call)
     const auto& callId = call.getCallId();
     SIP_CORE_DBG("[call:%s] Peer answered", callId.c_str());
 
-    // The if statement is useful only if we sent two calls at the same time.
-    if (isCurrentCall(call))
-        stopTone();
+    // Always stop the ringback tone — it is global and now gets mixed into
+    // every active audio stream, so it must be silenced as soon as any
+    // outgoing call is answered.
+    stopTone();
 
     addAudio(call);
 
@@ -1902,8 +2162,11 @@ Manager::peerRingingCall(Call& call)
 {
     SIP_CORE_DBG("[call:%s] Peer ringing!!!", call.getCallId().c_str());
 
-    if (!hasCurrentCall())
-        ringback();
+    // Always play the ringback tone.  AudioLayer::getToPlay() now mixes
+    // the tone with any active call / conference audio instead of choosing
+    // one over the other, so the ringback is audible without muting the
+    // ongoing conversation.
+    ringback();
 }
 
 // THREAD=VoIP Call=Outgoing/Ingoing
@@ -1912,6 +2175,8 @@ Manager::peerHungupCall(Call& call)
 {
     const auto& callId = call.getCallId();
     SIP_CORE_DBG("[call:%s] Peer hung up", callId.c_str());
+
+    pimpl_->clearPendingAlertInfoCall(callId);
 
     if (call.isConferenceParticipant()) {
         removeParticipant(call);
@@ -1935,6 +2200,8 @@ Manager::callBusy(Call& call)
 {
     SIP_CORE_DBG("[call:%s] Busy", call.getCallId().c_str());
 
+    pimpl_->clearPendingAlertInfoCall(call.getCallId());
+
     if (isCurrentCall(call)) {
         pimpl_->unsetCurrentCall();
     }
@@ -1951,6 +2218,8 @@ Manager::callFailure(Call& call)
     SIP_CORE_DBG("[call:%s] %s failed",
                  call.getCallId().c_str(),
                  call.isSubcall() ? "Sub-call" : "Parent call");
+
+    pimpl_->clearPendingAlertInfoCall(call.getCallId());
 
     if (isCurrentCall(call)) {
         pimpl_->unsetCurrentCall();
@@ -2097,7 +2366,11 @@ Manager::setAudioDevice(int index, AudioDeviceType type)
         SIP_CORE_ERR("Audio driver not initialized");
         return;
     }
-    if (pimpl_->getCurrentDeviceIndex(type) == index) {
+    // A stale preference (device renamed/removed) reports the default index
+    // to the UI while the dead name is still stored — re-selecting that index
+    // must still rewrite the preference and rebuild the driver.
+    if (pimpl_->getCurrentDeviceIndex(type) == index
+        && pimpl_->audiodriver_->isPreferredDeviceResolved(type)) {
         SIP_CORE_WARN("Audio device already selected ; doing nothing.");
         return;
     }
@@ -2174,12 +2447,35 @@ Manager::startAudio()
     // Recreate audio driver with new settings
     pimpl_->audiodriver_.reset(pimpl_->base_.audioPreference.createAudioLayer());
 
-    constexpr std::array<AudioDeviceType, 2> TYPES {AudioDeviceType::CAPTURE, AudioDeviceType::PLAYBACK};
+    constexpr std::array<AudioDeviceType, 2> TYPES {AudioDeviceType::CAPTURE,
+                                                    AudioDeviceType::PLAYBACK};
 
     for (const auto& type : TYPES)
         if (pimpl_->audioStreamUsers_[(unsigned) type])
             pimpl_->audiodriver_->startStream(type);
 #endif
+}
+void
+Manager::recoverAudioDevices()
+{
+    if (!initialized || pimpl_->finished_ || pimpl_->shuttingDown_)
+        return;
+
+    std::shared_ptr<AudioLayer> refreshedDriver;
+    {
+        std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
+        SIP_CORE_WARN("Audio devices changed, refreshing audio layer");
+        pimpl_->audiodriver_.reset();
+        pimpl_->initAudioDriver();
+        refreshedDriver = pimpl_->audiodriver_;
+    }
+
+    if (refreshedDriver) {
+        refreshedDriver->notifyDevicesChanged();
+    } else {
+        SIP_CORE_ERR("Audio devices changed, but audio layer could not be recreated");
+        onAudioDevicesChanged();
+    }
 }
 
 AudioDeviceGuard::AudioDeviceGuard(Manager& manager, AudioDeviceType type)
@@ -2189,19 +2485,52 @@ AudioDeviceGuard::AudioDeviceGuard(Manager& manager, AudioDeviceType type)
     auto streamId = (unsigned) type;
     if (streamId >= manager_.pimpl_->audioStreamUsers_.size())
         throw std::invalid_argument("Invalid audio device type");
+    std::lock_guard<std::mutex> lk(manager_.pimpl_->audioStreamMutex_);
     if (manager_.pimpl_->audioStreamUsers_[streamId]++ == 0) {
-        if (auto layer = manager_.getAudioDriver())
+        // If a deferred stop is pending the underlying device stream is
+        // still alive — cancel the task and reuse it without touching
+        // PulseAudio (xrdp-source on Astra 1.8 silently stalls when
+        // destroyed and recreated within the same instant, e.g. on the
+        // hold→outgoing→hangup→unhold cycle). Otherwise the stream is
+        // really stopped and must be started from scratch.
+        if (auto& pending = manager_.pimpl_->audioStreamStopTask_[streamId]) {
+            pending->cancel();
+            pending.reset();
+        } else if (auto layer = manager_.getAudioDriver()) {
             layer->startStream(type);
+        }
     }
 }
 
 AudioDeviceGuard::~AudioDeviceGuard()
 {
     auto streamId = (unsigned) type_;
-    if (--manager_.pimpl_->audioStreamUsers_[streamId] == 0) {
-        if (auto layer = manager_.getAudioDriver())
-            layer->stopStream(type_);
-    }
+    std::lock_guard<std::mutex> lk(manager_.pimpl_->audioStreamMutex_);
+    if (--manager_.pimpl_->audioStreamUsers_[streamId] != 0)
+        return;
+
+    // Defer the actual stopStream so a fresh guard within the linger
+    // window can reuse the existing device stream. The hold→outgoing→
+    // hangup→unhold path tears the capture guard down and re-acquires
+    // it within ~2 ms; PulseAudio's xrdp-source enters a deaf state in
+    // that window. A 750 ms linger comfortably covers re-invite media
+    // renegotiation and call-to-call transitions.
+    auto& manager = manager_;
+    auto streamType = type_;
+    auto streamIdx = streamId;
+    manager_.pimpl_->audioStreamStopTask_[streamId] = manager.scheduleTaskIn(
+        [&manager, streamType, streamIdx]() {
+            std::lock_guard<std::mutex> lk(manager.pimpl_->audioStreamMutex_);
+            // Clear the slot first so a re-entrant ctor on this same
+            // thread doesn't try to cancel a now-firing task.
+            manager.pimpl_->audioStreamStopTask_[streamIdx].reset();
+            if (manager.pimpl_->audioStreamUsers_[streamIdx].load() != 0)
+                return; // a new guard reclaimed the stream
+            if (auto layer = manager.getAudioDriver())
+                layer->stopStream(streamType);
+        },
+        std::chrono::milliseconds(750),
+        __FILE__, __LINE__);
 }
 
 bool
@@ -2243,7 +2572,7 @@ Manager::toggleRecordingCall(const std::string& accountId, const std::string& id
 bool
 Manager::startRecordedFilePlayback(const std::string& filepath)
 {
-    auto data_path =  Manager::instance().getDataPath();
+    auto data_path = Manager::instance().getDataPath();
 
     if (!data_path.has_value()) {
         return false;
@@ -2272,8 +2601,7 @@ Manager::startRecordedFilePlayback(const std::string& filepath)
     pimpl_->audiodriver_->putUrgentNoResize(*pimpl_->currentFile_->getBuffer());
 
     // todo: wait autio stop, then stop audio layer
-    scheduler().scheduleIn([audioGuard] { SIP_CORE_WARN("End of dtmf"); },
-                        std::chrono::seconds(3));
+    scheduler().scheduleIn([audioGuard] { SIP_CORE_WARN("End of dtmf"); }, std::chrono::seconds(3));
 
     return true;
 }
@@ -2491,6 +2819,66 @@ Manager::isVADEnabled() const
     return audioPreference.getVadEnabled();
 }
 
+int32_t
+Manager::getVADSensitivity() const
+{
+    return audioPreference.getVoiceActivitySensitivity();
+}
+
+void
+Manager::setVADSensitivity(int32_t sensitivity)
+{
+    audioPreference.setVoiceActivitySensitivity(sensitivity);
+    const auto clampedSensitivity = audioPreference.getVoiceActivitySensitivity();
+
+    {
+        std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
+        if (pimpl_->audiodriver_)
+            pimpl_->audiodriver_->setVadSensitivity(clampedSensitivity);
+    }
+
+    for (auto& call : callFactory.getAllCalls()) {
+        if (auto sipCall = std::dynamic_pointer_cast<SIPCall>(call)) {
+            for (auto& audioRtp : sipCall->getRtpSessionList(MediaType::MEDIA_AUDIO)) {
+                auto& recv = std::static_pointer_cast<AudioRtpSession>(audioRtp)->getAudioReceive();
+                if (recv)
+                    recv->setVadSensitivity(clampedSensitivity);
+            }
+        }
+    }
+
+    saveConfig();
+}
+
+int32_t
+Manager::getConferenceVoiceInactiveHoldMs() const
+{
+#ifdef ENABLE_VIDEO
+    return videoPreferences.getConferenceVoiceInactiveHoldMs();
+#else
+    return 0;
+#endif
+}
+
+void
+Manager::setConferenceVoiceInactiveHoldMs(int32_t holdMs)
+{
+#ifdef ENABLE_VIDEO
+    videoPreferences.setConferenceVoiceInactiveHoldMs(holdMs);
+    const auto clampedHoldMs = videoPreferences.getConferenceVoiceInactiveHoldMs();
+
+    for (const auto& account : getAllAccounts()) {
+        for (const auto& confId : account->getConferenceList()) {
+            if (auto conf = account->getConference(confId))
+                conf->setVoiceInactiveHoldMs(clampedHoldMs);
+        }
+    }
+#else
+    (void) holdMs;
+#endif
+    saveConfig();
+}
+
 void
 Manager::setAudioProcessor(const std::string& processor)
 {
@@ -2501,12 +2889,12 @@ Manager::setAudioProcessor(const std::string& processor)
         pimpl_->initAudioDriver();
     }
 
-    if(audioPreference.getVadEnabled()) {
+    if (audioPreference.getVadEnabled()) {
         for (auto& call : callFactory.getAllCalls()) {
             if (auto sipCall = std::dynamic_pointer_cast<SIPCall>(call)) {
                 for (auto& audioRtp : sipCall->getRtpSessionList(MediaType::MEDIA_AUDIO)) {
                     auto& recv = std::static_pointer_cast<AudioRtpSession>(audioRtp)
-                            ->getAudioReceive();
+                                     ->getAudioReceive();
                     recv->setVAD(false);
                     recv->setVAD(true);
                 }
@@ -2530,8 +2918,7 @@ Manager::setVADState(bool state)
     for (auto& call : callFactory.getAllCalls()) {
         if (auto sipCall = std::dynamic_pointer_cast<SIPCall>(call)) {
             for (auto& audioRtp : sipCall->getRtpSessionList(MediaType::MEDIA_AUDIO)) {
-                auto& recv = std::static_pointer_cast<AudioRtpSession>(audioRtp)
-                        ->getAudioReceive();
+                auto& recv = std::static_pointer_cast<AudioRtpSession>(audioRtp)->getAudioReceive();
                 recv->setVAD(state);
             }
         }
@@ -2547,6 +2934,10 @@ void
 Manager::ManagerPimpl::initAudioDriver()
 {
     audiodriver_.reset(base_.audioPreference.createAudioLayer());
+    if (!audiodriver_) {
+        SIP_CORE_ERR("Unable to initialize audio driver");
+        return;
+    }
     constexpr std::array<AudioDeviceType, 3> TYPES {AudioDeviceType::CAPTURE,
                                                     AudioDeviceType::PLAYBACK,
                                                     AudioDeviceType::RINGTONE};
@@ -2570,16 +2961,158 @@ Manager::ManagerPimpl::stripSipPrefix(Call& incomCall)
         incomCall.setPeerNumber(peerNumber.substr(startIndex + sizeof(SIP_PREFIX) - 1));
 }
 
+std::string
+Manager::ManagerPimpl::findHeaderCaseInsensitive(
+    const std::map<std::string, std::string>& headers, std::string_view name)
+{
+    auto equalIgnoreCase = [](std::string_view a, std::string_view b) {
+        if (a.size() != b.size())
+            return false;
+        for (size_t i = 0; i < a.size(); ++i) {
+            if (std::tolower(static_cast<unsigned char>(a[i]))
+                != std::tolower(static_cast<unsigned char>(b[i])))
+                return false;
+        }
+        return true;
+    };
+    for (const auto& [k, v] : headers) {
+        if (equalIgnoreCase(k, name))
+            return v;
+    }
+    return {};
+}
+
+void
+Manager::ManagerPimpl::onAlertInfoTimeout(const std::string& accountId,
+                                          const std::string& callId)
+{
+    bool needFallback = false;
+    {
+        std::lock_guard<std::mutex> lock(pendingAlertInfoMutex_);
+        auto it = pendingAlertInfoCalls_.find(callId);
+        if (it == pendingAlertInfoCalls_.end()) {
+            // Already handled (delivered or cleared).
+            return;
+        }
+        if (!it->second.delivered) {
+            needFallback = true;
+        }
+        pendingAlertInfoCalls_.erase(it);
+    }
+
+    if (needFallback) {
+        SIP_CORE_ERR(
+            "[call:%s] Alert-Info wait timed out, falling back to default ringtone",
+            callId.c_str());
+        base_.playRingtone(accountId);
+    }
+}
+
+void
+Manager::ManagerPimpl::clearPendingAlertInfoCall(const std::string& callId)
+{
+    std::shared_ptr<Task> taskToCancel;
+    {
+        std::lock_guard<std::mutex> lock(pendingAlertInfoMutex_);
+        auto it = pendingAlertInfoCalls_.find(callId);
+        if (it == pendingAlertInfoCalls_.end())
+            return;
+        taskToCancel = std::move(it->second.fallbackTask);
+        pendingAlertInfoCalls_.erase(it);
+    }
+    // Cancel outside the lock to avoid potential reentrancy if the task
+    // somehow runs synchronously on cancel().
+    if (taskToCancel)
+        taskToCancel->cancel();
+}
+
+bool
+Manager::setRingtoneForIncomingCall(const std::string& accountId,
+                                    const std::string& callId,
+                                    const std::string& ringtonePath)
+{
+    std::shared_ptr<Task> taskToCancel;
+    {
+        std::lock_guard<std::mutex> lock(pimpl_->pendingAlertInfoMutex_);
+        auto it = pimpl_->pendingAlertInfoCalls_.find(callId);
+        if (it == pimpl_->pendingAlertInfoCalls_.end()) {
+            SIP_CORE_WARN(
+                "setRingtoneForIncomingCall: no pending Alert-Info call %s on account %s",
+                callId.c_str(),
+                accountId.c_str());
+            return false;
+        }
+        if (it->second.delivered) {
+            SIP_CORE_WARN(
+                "setRingtoneForIncomingCall: ringtone already delivered for call %s",
+                callId.c_str());
+            return false;
+        }
+        // Mark delivered + remove the entry (we own everything we need locally now).
+        taskToCancel = std::move(it->second.fallbackTask);
+        it->second.delivered = true;
+        pimpl_->pendingAlertInfoCalls_.erase(it);
+    }
+
+    if (taskToCancel)
+        taskToCancel->cancel();
+
+    auto account = getAccount(accountId);
+    if (!account) {
+        SIP_CORE_ERR("setRingtoneForIncomingCall: unknown account %s", accountId.c_str());
+        return false;
+    }
+
+    if (account->isAutoAnswerEnabled())
+        return true; // intentionally do not play any ringtone
+
+    if (!account->getRingtoneEnabled()) {
+        ringback();
+        return true;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
+        if (not pimpl_->audiodriver_) {
+            SIP_CORE_ERR("setRingtoneForIncomingCall: no audio layer for call %s",
+                         callId.c_str());
+            return false;
+        }
+        auto oldGuard = std::move(pimpl_->toneDeviceGuard_);
+        pimpl_->toneDeviceGuard_ = startAudioStream(AudioDeviceType::RINGTONE);
+        pimpl_->toneCtrl_.setSampleRate(pimpl_->audiodriver_->getSampleRate());
+    }
+
+    if (not pimpl_->toneCtrl_.setAudioFile(ringtonePath)) {
+        SIP_CORE_ERR(
+            "setRingtoneForIncomingCall: failed to play custom ringtone '%s' for call %s — "
+            "falling back to default ringtone",
+            ringtonePath.c_str(),
+            callId.c_str());
+        playRingtone(accountId);
+        return false;
+    }
+
+    SIP_CORE_INFO("[call:%s] Playing custom ringtone '%s'",
+                  callId.c_str(),
+                  ringtonePath.c_str());
+    return true;
+}
+
 // Internal helper method
 void
-Manager::ManagerPimpl::processIncomingCall(const std::string& accountId, Call& incomCall, const std::map<std::string, std::string>& headers)
+Manager::ManagerPimpl::processIncomingCall(const std::string& accountId,
+                                           Call& incomCall,
+                                           const std::map<std::string, std::string>& headers)
 {
     base_.stopTone();
 
     auto incomCallId = incomCall.getCallId();
     auto currentCall = base_.getCurrentCall();
 
-    if(currentCall && (currentCall->isConferenceParticipant() || currentCall->isRemoteConferenceParticipant())) {
+    if (currentCall
+        && (currentCall->isConferenceParticipant()
+            || currentCall->isRemoteConferenceParticipant())) {
         incomCall.refuse();
         return;
     }
@@ -2602,17 +3135,47 @@ Manager::ManagerPimpl::processIncomingCall(const std::string& accountId, Call& i
                   accountId.c_str(),
                   mediaList.size());
 
+    // Look up the Alert-Info header (case-insensitive) BEFORE we emit the
+    // signal so that, if present, we can install a pending entry first and
+    // a fast-responding client cannot push a custom ringtone before we are
+    // ready to honor it.
+    const std::string alertInfo = findHeaderCaseInsensitive(headers, "Alert-Info");
+    const bool hasAlertInfo = !alertInfo.empty();
+
+    if (hasAlertInfo) {
+        const int pauseSec = std::max(0, account->getPauseAfterAlertInfo());
+        SIP_CORE_INFO("[call:%s] Alert-Info present (%s) — postponing default ringtone for %d s",
+                      incomCallId.c_str(),
+                      alertInfo.c_str(),
+                      pauseSec);
+
+        std::lock_guard<std::mutex> lock(pendingAlertInfoMutex_);
+        // Replace any stale entry for this id (paranoia).
+        pendingAlertInfoCalls_.erase(incomCallId);
+        auto& entry = pendingAlertInfoCalls_[incomCallId];
+        entry.accountId = accountId;
+        entry.delivered = false;
+        entry.fallbackTask = base_.scheduler().scheduleIn(
+            [this, accountId, incomCallId] { this->onAlertInfoTimeout(accountId, incomCallId); },
+            std::chrono::seconds(pauseSec));
+    }
+
     emitSignal<libsip_core::CallSignal::IncomingCallWithMedia>(accountId,
                                                                incomCallId,
                                                                incomCall.getPeerNumber(),
-                                                               mediaList, headers);
+                                                               mediaList,
+                                                               headers);
 
     if (not base_.hasCurrentCall()) {
         incomCall.setState(Call::ConnectionState::RINGING);
 #if !defined(RING_UWP) && !(defined(TARGET_OS_IOS) && TARGET_OS_IOS)
         if (not account->isRendezVous() && incomCall.getPeerNumber().find("__callback") == -1
             && incomCall.getPeerNumber().find("_supervise") == -1) {
-            base_.playRingtone(accountId);
+            // When Alert-Info is present, the ringtone is played either by
+            // setRingtoneForIncomingCall() or by the scheduled timeout.
+            if (not hasAlertInfo) {
+                base_.playRingtone(accountId);
+            }
         }
 
 #endif
@@ -2984,10 +3547,58 @@ Manager::getAudioDriver()
     return pimpl_->audiodriver_;
 }
 
+void
+Manager::onAudioDevicesChanged()
+{
+    SIP_CORE_DBG("Audio devices changed, restarting media senders for active calls");
+    for (const auto& call : callFactory.getAllCalls()) {
+        if (call->isSubcall())
+            continue;
+        if (call->getConnectionState() != Call::ConnectionState::CONNECTED)
+            continue;
+        if (call->getState() != Call::CallState::ACTIVE)
+            continue;
+        call->restartMediaSender();
+    }
+}
+
+#ifdef ENABLE_VIDEO
+void
+Manager::onVideoDevicesChanged()
+{
+    SIP_CORE_DBG("Video devices changed, checking for video inputs to restart");
+    for (const auto& call : callFactory.getAllCalls()) {
+        if (call->isSubcall())
+            continue;
+        if (call->getConnectionState() != Call::ConnectionState::CONNECTED)
+            continue;
+        if (call->getState() != Call::CallState::ACTIVE)
+            continue;
+
+        auto* sipCall = dynamic_cast<SIPCall*>(call.get());
+        if (!sipCall)
+            continue;
+
+        for (const auto& rtpSession : sipCall->getRtpSessionList(MediaType::MEDIA_VIDEO)) {
+            auto videoRtp = std::dynamic_pointer_cast<video::VideoRtpSession>(rtpSession);
+            if (!videoRtp)
+                continue;
+            auto& videoLocal = videoRtp->getVideoLocal();
+            if (videoLocal && videoLocal->wasStoppedByDeviceDisconnect()) {
+                SIP_CORE_DBG("Restarting video input for call %s", call->getCallId().c_str());
+                videoLocal->restart();
+                videoRtp->restartSender();
+            }
+        }
+    }
+}
+#endif
+
 std::shared_ptr<Call>
 Manager::newOutgoingCall(std::string_view toUrl,
                          const std::string& accountId,
-                         const std::vector<libsip_core::MediaMap>& mediaList)
+                         const std::vector<libsip_core::MediaMap>& mediaList,
+                         const std::map<std::string, std::string>& headers)
 {
     auto account = getAccount(accountId);
     if (not account) {
@@ -3000,7 +3611,7 @@ Manager::newOutgoingCall(std::string_view toUrl,
         return {};
     }
 
-    return account->newOutgoingCall(toUrl, mediaList);
+    return account->newOutgoingCall(toUrl, mediaList, headers);
 }
 
 #ifdef ENABLE_VIDEO

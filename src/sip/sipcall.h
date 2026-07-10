@@ -31,6 +31,7 @@
 #include "call.h"
 #include "media_codec.h" // for MediaType enum
 #include "connectivity/sip_utils.h"
+#include "sip_core/media_const.h"
 #include "sip/sdp.h"
 
 #include "media/rtp_session.h"
@@ -40,7 +41,10 @@
 #endif
 #include "noncopyable.h"
 
+#include <atomic>
+#include <cstdint>
 #include <memory>
+#include <mutex>
 #include <optional>
 
 extern "C" {
@@ -105,8 +109,8 @@ private:
     void merge(Call& call) override; // not public - only called by Call
 
 public:
-
     void setExtraSipHeaders(std::map<std::string, std::string> extraHeaders);
+    const std::map<std::string, std::string>& getExtraSipHeaders() const { return extraHeaders_; }
     void answer() override;
     void answer(const std::vector<libsip_core::MediaMap>& mediaList) override;
     bool checkMediaChangeRequest(const std::vector<libsip_core::MediaMap>& remoteMediaList) override;
@@ -120,9 +124,11 @@ public:
     bool attendedTransfer(const std::string& to) override;
     bool onhold(OnReadyCb&& cb) override;
     bool offhold(OnReadyCb&& cb) override;
-    void switchInput(const std::string& resource = {}) override;
+    bool switchInput(const std::string& resource = {}) override;
     void peerHungup() override;
-    void carryingDTMFdigits(const std::string& dtmfEvents, double duration, unsigned int volume) override;
+    void carryingDTMFdigits(const std::string& dtmfEvents,
+                            double duration,
+                            unsigned int volume) override;
     bool requestMediaChange(const std::vector<libsip_core::MediaMap>& mediaList) override;
     std::vector<libsip_core::MediaMap> currentMediaList() const override;
     void sendTextMessage(const std::map<std::string, std::string>& messages,
@@ -188,6 +194,8 @@ public:
      * Return the SDP's manager of this call
      */
     Sdp& getSDP() { return *sdp_; }
+    bool prepareLocalMediaReservations(const std::vector<MediaAttribute>& mediaAttrList);
+    void clearPendingLocalReservations();
 
     // Implementation of events reported by SipVoipLink.
     /**
@@ -195,20 +203,29 @@ public:
      */
     void onPeerRinging();
     /**
-     * Peer answered the call
+     * Peer answered the call (200 OK)
      */
     void onAnswered();
+    /**
+     * 183 Session Progress with SDP received — start media but keep
+     * the call in RINGING state (not CURRENT) and defer duration_start_.
+     */
+    void onEarlyAnswered();
+    /**
+     * Peer sent 183 Session Progress with SDP (early media).
+     */
+    void onEarlyMediaProgress183();
     /**
      * Called to report server/internal errors
      * @param cause Optional error code
      */
     void onFailure(signed cause = 0);
-    
+
     /**
      * Check if this call can be retried with backup route
      */
     bool canRetryWithBackupRoute() const { return canRetryWithBackupRoute_; }
-    
+
     /**
      * Disable retry with backup route (after first attempt)
      */
@@ -235,9 +252,62 @@ public:
     const std::string& getContactHeader() const;
 
     void setSipTransport(const std::shared_ptr<SipTransport>& transport,
-                         const std::string& contactHdr = {});
+                         const std::string& contactHdr = {},
+                         bool keepRebindPending = false);
 
     std::shared_ptr<SipTransport> getTransport() { return sipTransport_; }
+
+    void markConnectivityTransportRebindPending(const char* reason);
+    bool isConnectivityDialogRefreshPending() const;
+    bool isConnectivityDialogRefreshAwaitingResponse() const;
+    static bool isConnectivityDialogRefreshSuccessCode(int statusCode);
+    static bool isConnectivityDialogRefreshFinalFailureCode(int statusCode);
+    void onConnectivityReinviteFinalResponse(int statusCode);
+    void forceConnectivityDialogRefreshFailure(const char* reason, int statusCode);
+
+    /**
+     * Refresh the SDP's published IP/port based on the current account transport
+     * binding before sending a re-INVITE on connectivity change. Reserves new
+     * RTP ports via prepareLocalMediaReservations(). Returns true on success.
+     */
+    bool refreshSdpForConnectivityChange();
+
+    /**
+     * Send a re-INVITE to refresh the media path after a connectivity change.
+     * Updates the dialog transport binding before sending.
+     * @return PJ_SUCCESS on success, PJ_EPENDING if deferred, or an error code on failure.
+     */
+    int reinviteOnConnectivityChange();
+
+    /**
+     * Update the PJSIP dialog's transport selector to match the current
+     * call-level transport. Must be called before sending a re-INVITE
+     * after a connectivity change so PJSIP routes through the new transport.
+     */
+    bool updateDialogTransport();
+
+    /**
+     * Flag indicating a connectivity re-INVITE is pending (transaction was
+     * in-flight or call was not yet in a re-invitable state).
+     */
+    std::atomic<bool> pendingConnectivityReinvite_ {false};
+
+    /**
+     * Number of re-INVITE retry attempts after connectivity change failure.
+     */
+    uint8_t connectivityReinviteRetryCount_ {0};
+    static constexpr uint8_t MAX_CONNECTIVITY_REINVITE_RETRIES = 3;
+
+    /**
+     * Reset connectivity reinvite state (call on new connectivity change or success).
+     */
+    void resetConnectivityReinviteState();
+
+    /**
+     * Try to execute a deferred connectivity re-INVITE if one is pending.
+     * Called from onMediaNegotiationComplete and state change listeners.
+     */
+    void tryDeferredConnectivityReinvite();
 
     void sendSIPInfo(std::string_view body, std::string_view subtype);
 
@@ -289,15 +359,17 @@ public:
     /**
      * Announce to the client that medias are successfully negotiated
      */
-    void reportMediaNegotiationStatus();
+    void reportMediaNegotiationStatus(
+        const std::string& event = libsip_core::Media::MediaNegotiationStatusEvents::NEGOTIATION_SUCCESS);
 
-    void setInitialServiceRoute(const std::string& serviceRoute) { initialServiceRoute_ = serviceRoute; }
+    void setInitialServiceRoute(const std::string& serviceRoute)
+    {
+        initialServiceRoute_ = serviceRoute;
+    }
 
     std::string getInitialServiceRoute() const { return initialServiceRoute_; }
 
 private:
-    void generateMediaPorts();
-
     void deinitRecorder();
 
     void rtpSetupSuccess();
@@ -305,7 +377,6 @@ private:
     void setupVoiceCallback(const std::shared_ptr<RtpSession>& rtpSession);
 
     void sendMuteState(bool state);
-    // void sendVoiceActivity(std::string_view streamId, bool state);
 
     /**
      * Send device orientation through SIP INFO
@@ -316,15 +387,35 @@ private:
 
     mutable std::mutex transportMtx_ {};
 
-    void setupNegotiatedMedia();
-
-    void setCallMediaLocal();
+    bool setupNegotiatedMedia();
+    void startEarlyMediaLocked();
+    void promoteEarlyMediaToActiveLocked();
+    void applyLocalHoldAudioKeepalive(bool enable, bool startSessionsIfNeeded);
+#ifdef ENABLE_VIDEO
+    void applyLocalHoldVideoBlackout(bool enable, bool startSessionsIfNeeded);
+#endif
+    bool prepareConnectivityTransportForAnswer();
+    void scheduleDeferredConnectivityAnswer();
+    void scheduleDeferredConnectivityAnswer(const std::vector<libsip_core::MediaMap>& mediaList);
+    void beginConnectivityDialogRefresh(const char* reason, bool awaitingResponse);
+    void clearConnectivityDialogRefreshState();
+    void scheduleConnectivityDialogRefreshWatchdog(uint64_t generation, const std::string& reason);
+    void onConnectivityDialogRefreshWatchdog(uint64_t generation, const std::string& reason);
 
     void startIceMedia();
     void onIceNegoSucceed();
     void startAllMedia();
     void stopAllMedia();
     void updateRemoteMedia();
+
+    mutable std::mutex mediaLifecycleMtx_ {};
+    std::atomic_bool localHangupInProgress_ {false};
+    std::atomic_bool connectivityTransportRebindPending_ {false};
+    std::atomic_bool connectivityDialogRefreshPending_ {false};
+    std::atomic_bool connectivityDialogRefreshAwaitingResponse_ {false};
+    std::atomic_bool connectivityAnswerRetryScheduled_ {false};
+    std::atomic<uint64_t> sipTransportGeneration_ {0};
+    std::atomic<uint64_t> connectivityDialogRefreshGeneration_ {0};
 
     /**
      * Transfer method used for both type of transfer
@@ -357,6 +448,9 @@ private:
                              const std::shared_ptr<MediaAttribute>& mediaAttr,
                              const MediaDescription& localMedia,
                              const MediaDescription& remoteMedia);
+    uint16_t getPublishedMediaFamily() const;
+    void applyPendingLocalPortsToSdp();
+    static bool hasEnabledMedia(const std::vector<MediaAttribute>& mediaAttrList, MediaType type);
     // Find the stream index with the matching label
     int findRtpStreamIndex(const std::string& label) const;
 
@@ -408,8 +502,14 @@ private:
     unsigned int localAudioPort_ {0};
     /** Local video port, as seen by me. */
     unsigned int localVideoPort_ {0};
+    std::optional<ReservedSocketPair> pendingAudioSocketPair_ {};
+#ifdef ENABLE_VIDEO
+    std::optional<ReservedSocketPair> pendingVideoSocketPair_ {};
+#endif
 
     bool mediaRestartRequired_ {true};
+    bool earlyMediaRequested_ {false};
+    bool earlyMediaStarted_ {false};
     bool srtpEnabled_ {false};
     bool rtcpMuxEnabled_ {false};
 

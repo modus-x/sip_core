@@ -32,6 +32,7 @@
 #include "connectivity/ip_utils.h"
 #include "sip/sipaccount.h"
 #include "sip/sipaccount_config.h"
+#include "sip/sipvoiplink.h"
 #include "audio/audiolayer.h"
 #include "system_codec_container.h"
 #include "client/ring_signal.h"
@@ -50,6 +51,7 @@
 #include <cstring>
 #include <sstream>
 #include <math.h>
+#include <chrono>
 
 #ifdef _WIN32
 #undef interface
@@ -62,6 +64,43 @@ constexpr unsigned CODECS_NOT_LOADED = 0x1000; /** Codecs not found */
 using sip_core::SIPAccount;
 using sip_core::AudioDeviceType;
 
+namespace {
+constexpr int64_t CONNECTIVITY_SKIP_WARN_INTERVAL_MS = 5000;
+constexpr int64_t CONNECTIVITY_RESET_DEBOUNCE_MS = 200;
+
+bool
+shouldLogConnectivitySkipWarn()
+{
+    static std::atomic<int64_t> lastWarnMs {0};
+    const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                         std::chrono::steady_clock::now().time_since_epoch())
+                         .count();
+    const auto last = lastWarnMs.load();
+    if (last > 0 && (now - last) < CONNECTIVITY_SKIP_WARN_INTERVAL_MS)
+        return false;
+    lastWarnMs.store(now);
+    return true;
+}
+
+/**
+ * Debounce rapid-fire connectivity change events.  Returns true if the caller
+ * should proceed; false if the call should be silently skipped.
+ */
+bool
+shouldProcessConnectivityChange()
+{
+    static std::atomic<int64_t> lastResetMs {0};
+    const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                         std::chrono::steady_clock::now().time_since_epoch())
+                         .count();
+    const auto last = lastResetMs.load();
+    if (last > 0 && (now - last) < CONNECTIVITY_RESET_DEBOUNCE_MS)
+        return false;
+    lastResetMs.store(now);
+    return true;
+}
+} // namespace
+
 bool
 registerEventPackage(const std::string& eventPackage, int expires)
 {
@@ -69,12 +108,14 @@ registerEventPackage(const std::string& eventPackage, int expires)
 }
 
 int
-getKeepAliveInterval(const std::string& accountId) {
+getKeepAliveInterval(const std::string& accountId)
+{
     return sip_core::Manager::instance().getKeepAliveInterval(accountId);
-
 }
 
-void setKeepAliveInterval(const std::string& accountId, int interval) {
+void
+setKeepAliveInterval(const std::string& accountId, int interval)
+{
     sip_core::Manager::instance().setKeepAliveInterval(accountId, interval);
 }
 
@@ -519,6 +560,30 @@ setVADState(bool enabled)
     sip_core::Manager::instance().setVADState(enabled);
 }
 
+int32_t
+getVADSensitivity()
+{
+    return sip_core::Manager::instance().getVADSensitivity();
+}
+
+void
+setVADSensitivity(int32_t sensitivity)
+{
+    sip_core::Manager::instance().setVADSensitivity(sensitivity);
+}
+
+int32_t
+getConferenceVoiceInactiveHoldMs()
+{
+    return sip_core::Manager::instance().getConferenceVoiceInactiveHoldMs();
+}
+
+void
+setConferenceVoiceInactiveHoldMs(int32_t holdMs)
+{
+    sip_core::Manager::instance().setConferenceVoiceInactiveHoldMs(holdMs);
+}
+
 std::string
 getRecordPath()
 {
@@ -531,10 +596,13 @@ getHomePath()
     return sip_core::Manager::instance().getHomePath();
 }
 
-void
+bool
 setRecordPath(const std::string& recPath)
 {
-    sip_core::Manager::instance().audioPreference.setRecordPath(recPath);
+    bool result = sip_core::Manager::instance().audioPreference.setRecordPath(recPath);
+    if (result)
+        sip_core::Manager::instance().saveConfig();
+    return result;
 }
 
 bool
@@ -785,11 +853,68 @@ setCredentials(const std::string& accountID,
 void
 connectivityChanged()
 {
+    if (!shouldProcessConnectivityChange()) {
+        SIP_CORE_DBG("Connectivity changed debounced (duplicate within %lld ms)",
+                     (long long) CONNECTIVITY_RESET_DEBOUNCE_MS);
+        return;
+    }
+
     SIP_CORE_WARN("received connectivity changed - trying to re-connect enabled accounts");
 
-    for (const auto& account : sip_core::Manager::instance().getAllAccounts()) {
-        account->connectivityChanged();
+    auto& manager = sip_core::Manager::instance();
+    auto& sipVoipLink = manager.sipVoIPLink();
+    if (!sipVoipLink.getEndpoint()) {
+        if (shouldLogConnectivitySkipWarn()) {
+            SIP_CORE_WARN("Connectivity changed ignored: SIP endpoint is not ready yet");
+        } else {
+            SIP_CORE_DBG("Connectivity changed ignored: SIP endpoint not ready");
+        }
+        return;
     }
+    if (!sipVoipLink.sipTransportBroker) {
+        if (shouldLogConnectivitySkipWarn()) {
+            SIP_CORE_WARN("Connectivity changed ignored: SIP transport broker is not ready yet");
+        } else {
+            SIP_CORE_DBG("Connectivity changed ignored: SIP transport broker not ready");
+        }
+        return;
+    }
+
+    std::vector<std::shared_ptr<SIPAccount>> eligibleSipAccounts;
+    for (const auto& account : manager.getAllAccounts()) {
+        auto sipAccount = std::dynamic_pointer_cast<SIPAccount>(account);
+        if (!sipAccount)
+            continue;
+        if (!sipAccount->shouldHandleConnectivityChange()) {
+            SIP_CORE_DBG("Connectivity changed: skipping account %s (not eligible)",
+                         sipAccount->getAccountID().c_str());
+            continue;
+        }
+        eligibleSipAccounts.emplace_back(std::move(sipAccount));
+    }
+
+    if (eligibleSipAccounts.empty()) {
+        if (shouldLogConnectivitySkipWarn()) {
+            SIP_CORE_WARN("Connectivity changed ignored: no eligible SIP accounts");
+        } else {
+            SIP_CORE_DBG("Connectivity changed ignored: no eligible SIP accounts (no running "
+                         "transports or recoverable error state)");
+        }
+        return;
+    }
+
+    SIP_CORE_WARN("Connectivity changed: resetting SIP transports and recovering %zu SIP accounts",
+                  eligibleSipAccounts.size());
+    for (const auto& account : eligibleSipAccounts)
+        account->prepareConnectivityRecovery("connectivity-changed");
+
+    if (auto* broker = sipVoipLink.sipTransportBroker.get())
+        broker->resetForConnectivityChange();
+
+    for (const auto& account : eligibleSipAccounts)
+        account->dispatchPreparedConnectivityRecovery("connectivity-changed");
+
+    SIP_CORE_DBG("Connectivity changed: recovery dispatch complete");
 }
 
 bool

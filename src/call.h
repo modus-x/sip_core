@@ -144,6 +144,11 @@ public:
      */
     std::shared_ptr<Conference> getConference() const { return conf_.lock(); }
     bool isConferenceParticipant() const { return not is_uninitialized(conf_); }
+    bool isConferenceAudioManaged() const
+    {
+        return conferenceAudioManaged_.load() || isConferenceParticipant();
+    }
+    void setConferenceAudioManaged(bool managed) { conferenceAudioManaged_.store(managed); }
     bool isRemoteConferenceParticipant() const { std::lock_guard<std::mutex> lock(confInfoMutex_); return !confInfo_.empty(); }
 
     std::weak_ptr<Account> getAccount() const { return account_; }
@@ -378,7 +383,7 @@ public:
     virtual void createSinks(ConfInfo& infos) = 0;
 #endif
 
-    virtual void switchInput(const std::string& = {}) {};
+    virtual bool switchInput(const std::string& = {}) { return false; };
 
     /**
      * mute/unmute a media of a call
@@ -444,6 +449,12 @@ public:
     }
 
     std::unique_ptr<AudioDeviceGuard> audioGuard;
+    // Capture-side guard pinned for the call's lifetime so the OS capture
+    // stream (e.g. PulseAudio xrdp-source) is not destroyed and recreated
+    // when AudioRtpSession::stop() drops its own AudioInput across a
+    // re-invite. xrdp's virtual source can stop delivering audio for many
+    // seconds after such a rapid destroy/create cycle.
+    std::unique_ptr<AudioDeviceGuard> audioCaptureGuard;
     void sendConfOrder(const Json::Value& root);
     void sendConfInfo(const std::string& json);
     void sendVoiceActivity(const std::string& json);
@@ -492,6 +503,9 @@ protected:
 
     mutable std::mutex confInfoMutex_ {};
     mutable ConfInfo confInfo_ {};
+    // Highest host confInfo seq applied so far (guarded by confInfoMutex_);
+    // see ConfInfo::seq for the drop-stale contract.
+    uint64_t lastConfInfoSeq_ {0};
     time_point duration_start_ {time_point::min()};
 
 private:
@@ -510,6 +524,7 @@ private:
 protected:
     /** Unique conference ID, used exclusively in case of a conference */
     std::weak_ptr<Conference> conf_ {};
+    std::atomic_bool conferenceAudioManaged_ {false};
 
     /** Type of the call */
     CallType type_;

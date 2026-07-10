@@ -11,13 +11,6 @@
 #define PATH_MAX MAX_PATH
 #endif
 
-// Get list of input devices
-// auto inputs = sip_core::Manager::instance().getAudioInputDeviceList();
-// Get list of output devices
-// auto outputs = sip_core::Manager::instance().getAudioOutputDeviceList();
-// sip_core::Manager::instance().setAudioDevice(1, sip_core::AudioDeviceType::CAPTURE);
-// sip_core::Manager::instance().setAudioDevice(1, sip_core::AudioDeviceType::PLAYBACK);
-
 CallController::CallController(const std::string& accountId, bool enableVideo /* = true */)
     : m_mtxEvents()
 #ifdef ENABLE_VIDEO
@@ -25,6 +18,7 @@ CallController::CallController(const std::string& accountId, bool enableVideo /*
     , m_mediaVideo {{"MEDIA_TYPE", "MEDIA_TYPE_VIDEO"},
                     {"ENABLED", "true"},
                     {"MUTED", "false"},
+                    { "SOURCE", "display://desktop source:0" }, //640x480
                     {"LABEL", "video_0"}}
 #endif
     , m_mediaAudio {{"MEDIA_TYPE", "MEDIA_TYPE_AUDIO"},
@@ -485,6 +479,19 @@ CallController::moveParticipant(size_t from_index, size_t to_index)
 }
 
 bool
+CallController::playDTMF(const std::string& dtmfEvents, double duration, uint16_t volume)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
+    if(!hasActiveCall())
+        return false;
+
+    for(auto it = m_activeCalls.begin(); it != m_activeCalls.end(); it++) {
+        libsip_core::playDTMF(m_accountId, it->second, dtmfEvents, duration, volume);
+    }
+    return true;
+}
+
+bool
 CallController::isCaptureInProgress()
 {
     return libsip_core::getIsRecording(m_accountId, getActiveCall());
@@ -546,6 +553,8 @@ CallController::enableVideo(bool enabled)
         return;
 
     m_isVideoEnabled = enabled;
+    m_mediaVideo["ENABLED"] = "true";
+    m_mediaVideo["MUTED"] = enabled ? "false" : "true";
 
     if (hasActiveCall()) {
         // build media list settings according to settings
@@ -553,16 +562,12 @@ CallController::enableVideo(bool enabled)
         mediaList.push_back(m_mediaAudio);
         // if (m_isVideoEnabled) 
         //     mediaList.push_back(m_mediaVideo);
-        if (m_isVideoEnabled) 
-            m_mediaVideo["ENABLED"] = "true";
-        else 
-            m_mediaVideo["ENABLED"] = "false";
         mediaList.push_back(m_mediaVideo);
         
         libsip_core::requestMediaChange(m_accountId, getActiveCall(), mediaList);
     }
 
-#elif
+#else
     std::cerr << "Video is unsupported by a kernel build." << std::endl;
 #endif
 }
@@ -573,7 +578,7 @@ CallController::isVideoEnabled() const
 #ifdef ENABLE_VIDEO
     std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
     return m_isVideoEnabled;
-#elif
+#else
     return false;
 #endif
 }
@@ -595,7 +600,7 @@ CallController::enableHWAccel(bool enabled)
     }
 
     sip_core::Manager::instance().saveConfig();
-#elif
+#else
     std::cerr << "Video hardware acceleration is unsupported by a kernel build." << std::endl;
 #endif
 }
@@ -606,7 +611,7 @@ CallController::isHWAccelEnabled() const
 #ifdef RING_ACCEL
     std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
     return sip_core::Manager::instance().videoPreferences.getDecodingAccelerated() && sip_core::Manager::instance().videoPreferences.getEncodingAccelerated();
-#elif
+#else
     return false;
 #endif
 }
@@ -692,10 +697,10 @@ CallController::hangUp()
 }
 
 void
-CallController::proccesEvents()
+CallController::proccesEvents(int32_t timeout)
 {
     SDL_Event event;
-    while (SDL_PollEvent(&event)) {
+    while (SDL_WaitEventTimeout(&event, timeout)) {
         if (event.type == EVENT_FRAME_READY) {
             std::unique_ptr<std::string> args((std::string*) event.user.data1);
 

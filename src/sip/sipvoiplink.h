@@ -148,7 +148,12 @@ public:
      */
     static inline pjsip_tpselector getTransportSelector(pjsip_transport* transport)
     {
-        pjsip_tpselector tp;
+        pjsip_tpselector tp {};
+        if (!transport) {
+            tp.type = PJSIP_TPSELECTOR_NONE;
+            return tp;
+        }
+
         tp.type = PJSIP_TPSELECTOR_TRANSPORT;
         tp.u.transport = transport;
         return tp;

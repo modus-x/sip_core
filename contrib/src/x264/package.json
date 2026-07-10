@@ -1,6 +1,6 @@
 {
     "name": "x264",
-    "version": "80f01757b979a2a7aa4840ef41790e3ede124300",
+    "version": "0.165.r3222",
     "url": "https://nexus.svetlocal.ru/repository/github-artifacts/x264-__VERSION__.tar.gz",
     "deps": [],
     "patches": [],

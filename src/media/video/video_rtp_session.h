@@ -28,6 +28,8 @@
 #include "threadloop.h"
 #include "sip/sipvoiplink.h"
 
+#include <atomic>
+#include <optional>
 #include <string>
 #include <memory>
 
@@ -87,9 +89,10 @@ public:
     void stop() override;
 
     void setMuted(bool mute, Direction dir = Direction::SEND) override;
+    void enterLocalHoldBlackout(bool startSessionIfNeeded = false);
+    void leaveLocalHoldBlackout();
 
     void cancelKeepAliveTimer();
-
 
     /**
      * Set video orientation
@@ -158,19 +161,25 @@ private:
     Conference* conference_ {nullptr};
 
     uint16_t initSeqVal_ = 0;
+    // Last RTP sequence value used by sender_ before it was reset.
+    // Persisted across stop()/startSender() so the new sender continues the
+    // sequence space rather than restarting from a low value, which would
+    // otherwise confuse the peer's FFmpeg RTP demuxer ("RTP: dropping old
+    // packet received too late" warning) on hold/unhold transitions.
+    std::optional<uint16_t> lastSenderSeqVal_;
 
     std::function<void(void)> requestKeyFrameCallback_;
 
     bool check_RCTP_Info_RR(RTCPInfo&);
     bool check_RCTP_Info_REMB(uint64_t*);
     void adaptQualityAndBitrate();
-    void storeVideoBitrateInfo();
     void setupVideoBitrateInfo();
     void checkReceiver();
     float getPonderateLoss(float lastLoss);
     void delayMonitor(int gradient, int deltaT);
     void dropProcessing(RTCPInfo* rtcpi);
-    void delayProcessing(int br);
+    void delayProcessing(uint64_t rembBps);
+    void tryIncrease();
     void setNewBitrate(unsigned int newBR);
 
     // no packet loss can be calculated as no data in input
@@ -187,6 +196,20 @@ private:
     InterruptedThreadLoop rtcpCheckerThread_;
     void processRtcpChecker();
 
+    // Thread for sending black frames when video is muted
+    InterruptedThreadLoop mutedFrameThread_;
+    void processMutedFrame();
+    void stopMutedKeepAliveLocked(std::unique_lock<std::recursive_mutex>& lock);
+    void ensureMutedKeepAliveLocked();
+    void sendHoldBlackPrerollLocked();
+    bool isDisplayCaptureSource() const;
+    std::atomic<bool> stopInProgress_ {false};
+    std::atomic<bool> sendMutedFrames_ {false};
+    std::atomic<bool> localMuted_ {false};
+    bool localHoldBlackoutActive_ {false};
+    bool holdBlackoutPrerollPending_ {false};
+    bool displaySuspendedForHold_ {false};
+
     std::function<void(int)> changeOrientationCallback_;
 
     std::function<void(bool)> recordingStateCallback_;
@@ -194,11 +217,21 @@ private:
     std::function<void(DeviceParams&)> localDeviceParamsChangedCallback_;
 
     // interval in seconds between RTCP checkings
-    std::chrono::seconds rtcp_checking_interval {4};
+    std::chrono::seconds rtcp_checking_interval {1};
 
     time_point lastMediaRestart_ {time_point::min()};
     time_point last_REMB_inc_ {time_point::min()};
     time_point last_REMB_dec_ {time_point::min()};
+    // GCC-style ramp-up state: hold after any decrease, only increase on
+    // fresh, clean feedback.
+    time_point lastBitrateDecrease_ {time_point::min()};
+    time_point lastBitrateIncrease_ {time_point::min()};
+    time_point lastFeedbackTime_ {time_point::min()};
+    float lastPondLoss_ {0.0f};
+    // Session-local adaptation state: the current bitrate is seeded from the
+    // account codec once per (re)negotiation and then owned by this session —
+    // adapted values are never written back to the shared codec object.
+    bool bitrateInfoInitialized_ {false};
 
     unsigned remb_dec_cnt_ {0};
 

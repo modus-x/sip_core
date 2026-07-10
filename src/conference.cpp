@@ -21,6 +21,7 @@
 
 #include <regex>
 #include <sstream>
+#include <algorithm>
 
 #include "conference.h"
 #include "manager.h"
@@ -34,6 +35,7 @@
 #include "call.h"
 #include "video/video_input.h"
 #include "video/video_mixer.h"
+#include "video/video_source_utils.h"
 #endif
 
 #include "call_factory.h"
@@ -48,8 +50,7 @@ using namespace std::literals;
 
 namespace sip_core {
 
-Conference::Conference(const std::shared_ptr<Account>& account,
-                       const std::string& confId)
+Conference::Conference(const std::shared_ptr<Account>& account, const std::string& confId)
     : id_(confId.empty() ? Manager::instance().callFactory.getNewCallID() : confId)
     , account_(account)
 #ifdef ENABLE_VIDEO
@@ -62,8 +63,88 @@ Conference::Conference(const std::shared_ptr<Account>& account,
 
 #ifdef ENABLE_VIDEO
     videoMixer_ = std::make_shared<video::VideoMixer>(id_);
-    videoMixer_->setOnSourcesUpdated([this](std::vector<video::SourceInfo>&& infos) {
-        runOnMainThread([w = weak(), infos = std::move(infos)] {
+    // NOTE: the VideoMixer onSourcesUpdated callback is registered separately in
+    // attachVideoMixerCallbacks(), called right after this Conference is owned by
+    // a shared_ptr. It captures weak_from_this() by value so the mixer process()
+    // thread never dereferences a raw `this` (the createSinks/teardown UAF). We
+    // cannot do it here because weak_from_this() is invalid in the constructor.
+
+    auto conf_res = split_string_to_unsigned(sip_core::Manager::instance()
+                                                 .videoPreferences.getConferenceResolution(),
+                                             'x');
+    const auto voiceInactiveHoldMs = sip_core::Manager::instance()
+                                         .videoPreferences.getConferenceVoiceInactiveHoldMs();
+    if (conf_res.size() == 2u) {
+#if defined(__APPLE__) && TARGET_OS_MAC
+        auto params = video::VideoMixer::Parameters {(int) conf_res[0],
+                                                     (int) conf_res[1],
+                                                     AV_PIX_FMT_NV12};
+#else
+        auto params = video::VideoMixer::Parameters {(int) conf_res[0], (int) conf_res[1]};
+#endif
+        params.voice_inactive_hold_ms = voiceInactiveHoldMs;
+        videoMixer_->setParameters(params);
+    } else {
+        SIP_CORE_ERR("Conference resolution is invalid");
+    }
+#endif
+
+    parser_.onVersion([&](uint32_t) {}); // TODO
+    parser_.onCheckAuthorization([&](std::string_view peerId) { return isModerator(peerId); });
+    parser_.onHangupParticipant([&](const auto& accountUri, const auto& deviceId) {
+        // confOrders only ever arrive from remote participants; never let one
+        // remove the conference host. Without this, a non-empty deviceId with
+        // the host uri reaches Manager::detachLocalParticipant (the host's own
+        // UI is unaffected — it calls hangupParticipant directly).
+        if (isHost(sip_utils::stripSipUriPrefix(accountUri))) {
+            SIP_CORE_WARN("[conf %s] Ignoring remote hangup order targeting the host",
+                          id_.c_str());
+            return;
+        }
+        hangupParticipant(accountUri, deviceId);
+    });
+    parser_.onRaiseHand(
+        [&](const auto& senderUri, const auto& accountUri, const auto& deviceId, bool state) {
+            setHandRaised(accountUri, deviceId, state, senderUri);
+        });
+    parser_.onSetActiveStream(
+        [&](const auto& streamId, bool state) { setActiveStream(streamId, state); });
+    parser_.onMuteStreamAudio(
+        [&](const auto& accountUri, const auto& deviceId, const auto& streamId, bool state) {
+            muteStream(accountUri, deviceId, streamId, state);
+        });
+    parser_.onSetLayout([&](int layout) { setLayout(layout); });
+    parser_.onShareState([&](const auto& peerId, bool state) { onShareState(peerId, state); });
+
+    // Version 0, deprecated
+    parser_.onKickParticipant([&](const auto& participantId) { hangupParticipant(participantId); });
+    parser_.onSetActiveParticipant(
+        [&](const auto& participantId) { setActiveParticipant(participantId); });
+    parser_.onMuteParticipant(
+        [&](const auto& participantId, bool state) { muteParticipant(participantId, state); });
+    parser_.onRaiseHandUri([&](const auto& senderUri, const auto& uri, bool state) {
+        setHandRaised(uri, "", state, senderUri);
+    });
+
+    parser_.onVoiceActivity(
+        [&](const auto& streamId, bool state) { setVoiceActivity(streamId, state); });
+    sip_core_tracepoint(conference_begin, id_.c_str());
+}
+
+void
+Conference::attachVideoMixerCallbacks()
+{
+#ifdef ENABLE_VIDEO
+    if (!videoMixer_)
+        return;
+    // Capture weak_from_this() BY VALUE. The outer lambda runs on the VideoMixer
+    // process() thread; evaluating weak() once here (after a shared_ptr owns this
+    // Conference) means that thread never dereferences a raw `this`. w.lock()
+    // inside the posted task is null-safe once the Conference has been destroyed,
+    // and the captured weak_ptr keeps the control block alive for the lock. This
+    // is the root-cause fix for the Conference::createSinks use-after-free.
+    videoMixer_->setOnSourcesUpdated([w = weak()](std::vector<video::SourceInfo>&& infos) {
+        runOnMainThread([w, infos = std::move(infos)] {
             auto shared = w.lock();
             if (!shared)
                 return;
@@ -93,9 +174,9 @@ Conference::Conference(const std::shared_ptr<Account>& account,
                         isPeerRecording = call->isPeerRecording();
                         deviceId = "";
                     }
-                    std::string_view peerId = string_remove_suffix(uri, '@');
+                    std::string_view peerId = sip_utils::stripSipUriPrefix(uri);
                     auto isModerator = shared->isModerator(peerId);
-                    auto isHandRaised = shared->isHandRaised(deviceId);
+                    auto isHandRaised = shared->isHandRaised(callId);
                     auto isModeratorMuted = shared->isMuted(callId);
                     auto isVoiceActive = shared->isVoiceActive(info.streamId);
                     if (auto videoMixer = shared->videoMixer_)
@@ -121,13 +202,15 @@ Conference::Conference(const std::shared_ptr<Account>& account,
                     // If not local
                     auto streamInfo = shared->videoMixer_->streamInfo(info.source);
                     std::string streamId = streamInfo.streamId;
+                    std::string callId;
                     if (!streamId.empty()) {
                         // Retrieve calls participants
                         // TODO: this is a first version, we assume that the peer is not
                         // a master of a conference and there is only one remote
                         // In the future, we should retrieve confInfo from the call
                         // To merge layout information
-                        isModeratorMuted = shared->isMuted(streamId);
+                        // participantsMuted_ is keyed by call id, not stream id.
+                        isModeratorMuted = shared->isMuted(streamInfo.callId);
                         if (auto videoMixer = shared->videoMixer_)
                             active = videoMixer->verifyActive(streamId);
                         if (auto call = std::dynamic_pointer_cast<SIPCall>(
@@ -136,13 +219,14 @@ Conference::Conference(const std::shared_ptr<Account>& account,
                             isLocalMuted = call->isPeerMuted();
                             isPeerRecording = call->isPeerRecording();
                             deviceId = "";
+                            callId = streamInfo.callId;
                         }
                     } else {
                         streamId = sip_utils::streamId("", sip_utils::DEFAULT_VIDEO_STREAMID);
                         if (auto videoMixer = shared->videoMixer_)
                             active = videoMixer->verifyActive(streamId);
                     }
-                    std::string_view peerId = string_remove_suffix(uri, '@');
+                    std::string_view peerId = sip_utils::stripSipUriPrefix(uri);
                     auto isModerator = shared->isModerator(peerId);
                     if (uri.empty() && !hostAdded) {
                         hostAdded = true;
@@ -150,7 +234,8 @@ Conference::Conference(const std::shared_ptr<Account>& account,
                         isLocalMuted = shared->isMediaSourceMuted(MediaType::MEDIA_AUDIO);
                         isPeerRecording = shared->isRecording();
                     }
-                    auto isHandRaised = shared->isHandRaised(deviceId);
+                    auto isHandRaised = shared->isHandRaised(uri.empty() ? "host"
+                                                                         : std::string_view(callId));
                     auto isVoiceActive = shared->isVoiceActive(streamId);
                     newInfo.emplace_back(ParticipantInfo {std::move(uri),
                                                           deviceId,
@@ -167,12 +252,17 @@ Conference::Conference(const std::shared_ptr<Account>& account,
                                                           isHandRaised,
                                                           isVoiceActive,
                                                           isPeerRecording,
-                                                          ""});
+                                                          callId});
                 }
             }
             if (auto videoMixer = shared->videoMixer_) {
                 newInfo.h = videoMixer->getHeight();
                 newInfo.w = videoMixer->getWidth();
+                // Preserve the mixer's real layout. ConfInfo.layout defaults to
+                // GRID, and this rebuild replaces confInfo_ wholesale, so without
+                // this every mixer-driven rebuild (join, leave, voice-activity)
+                // would clobber an active ONE_BIG share back to GRID on remotes.
+                newInfo.layout = static_cast<int>(videoMixer->getVideoLayout());
             }
             if (!hostAdded) {
                 ParticipantInfo pi;
@@ -182,58 +272,57 @@ Conference::Conference(const std::shared_ptr<Account>& account,
                 newInfo.emplace_back(pi);
             }
 
+            // Screen share: flag the active sharer's row so every client renders
+            // the "X is sharing" UI, and detect share-stop (the sharer muted its
+            // desktop source or left the conference) to restore the grid.
+            {
+                std::string sharer;
+                bool hadVideo = false;
+                {
+                    std::lock_guard<std::mutex> lk(shared->sharerMtx_);
+                    sharer = shared->activeSharerStreamId_;
+                    hadVideo = shared->sharerHadVideo_;
+                }
+                if (!sharer.empty()) {
+                    ParticipantInfo* row = nullptr;
+                    for (auto& pi : newInfo) {
+                        if (pi.sinkId == sharer) {
+                            row = &pi;
+                            break;
+                        }
+                    }
+                    if (row && !row->videoMuted) {
+                        row->isSharing = true;
+                        if (!hadVideo) {
+                            std::lock_guard<std::mutex> lk(shared->sharerMtx_);
+                            shared->sharerHadVideo_ = true;
+                        }
+                    } else if (hadVideo) {
+                        // Sharer left (row == null) or muted its desktop source.
+                        runOnMainThread([w] {
+                            if (auto s = w.lock())
+                                s->endCurrentShare();
+                        });
+                    }
+                }
+            }
+
             shared->updateConferenceInfo(std::move(newInfo));
         });
     });
-
-    auto conf_res = split_string_to_unsigned(sip_core::Manager::instance()
-                                                 .videoPreferences.getConferenceResolution(),
-                                             'x');
-    if (conf_res.size() == 2u) {
-#if defined(__APPLE__) && TARGET_OS_MAC
-        videoMixer_->setParameters({(int)conf_res[0], (int)conf_res[1], AV_PIX_FMT_NV12});
-#else
-        videoMixer_->setParameters({(int)conf_res[0], (int)conf_res[1]});
 #endif
-    } else {
-        SIP_CORE_ERR("Conference resolution is invalid");
-    }
-#endif
-
-    parser_.onVersion([&](uint32_t) {}); // TODO
-    parser_.onCheckAuthorization([&](std::string_view peerId) { return isModerator(peerId); });
-    parser_.onHangupParticipant([&](const auto& accountUri, const auto& deviceId) {
-        hangupParticipant(accountUri, deviceId);
-    });
-    parser_.onRaiseHand([&](const auto& deviceId, bool state) { setHandRaised(deviceId, state); });
-    parser_.onSetActiveStream(
-        [&](const auto& streamId, bool state) { setActiveStream(streamId, state); });
-    parser_.onMuteStreamAudio(
-        [&](const auto& accountUri, const auto& deviceId, const auto& streamId, bool state) {
-            muteStream(accountUri, deviceId, streamId, state);
-        });
-    // parser_.onSetLayout([&](int layout) { setLayout(layout); });
-
-    // Version 0, deprecated
-    parser_.onKickParticipant([&](const auto& participantId) { hangupParticipant(participantId); });
-    parser_.onSetActiveParticipant(
-        [&](const auto& participantId) { setActiveParticipant(participantId); });
-    parser_.onMuteParticipant(
-        [&](const auto& participantId, bool state) { muteParticipant(participantId, state); });
-    parser_.onRaiseHandUri([&](const auto& uri, bool state) {
-        if (auto call = std::dynamic_pointer_cast<SIPCall>(getCallFromPeerID(uri)))
-            if (auto transport = call->getTransport())
-                setHandRaised(std::string(transport->deviceId()), state);
-    });
-
-    parser_.onVoiceActivity(
-        [&](const auto& streamId, bool state) { setVoiceActivity(streamId, state); });
-    sip_core_tracepoint(conference_begin, id_.c_str());
 }
 
 Conference::~Conference()
 {
     SIP_CORE_INFO("Destroying conference %s", id_.c_str());
+
+    // Clear all per-participant pool filters for this conference.
+    auto& rbPool = Manager::instance().getRingBufferPool();
+    for (const auto& p : getParticipantList()) {
+        rbPool.setLocalPlaybackMuted(p, false);
+        rbPool.setMicMuted(p, false);
+    }
 
 #ifdef ENABLE_VIDEO
     foreachCall([&](auto call) {
@@ -260,7 +349,8 @@ Conference::~Conference()
         //     call->peerRecording(true);
     });
     if (videoMixer_) {
-        auto& sink = videoMixer_->getSink();
+        std::lock_guard<std::mutex> lk(sinksMtx_);
+        auto sink = videoMixer_->getSink(); // strong copy: keep the sink alive for the loop
         for (auto it = confSinksMap_.begin(); it != confSinksMap_.end();) {
             sink->detach(it->second.get());
             it->second->stop();
@@ -326,11 +416,11 @@ Conference::setLocalHostDefaultMediaSource(bool addVideo, const std::string& sou
 }
 
 void
-Conference::reportMediaNegotiationStatus()
+Conference::reportMediaNegotiationStatus(const std::string& event)
 {
     emitSignal<libsip_core::CallSignal::MediaNegotiationStatus>(
         getConfId(),
-        libsip_core::Media::MediaNegotiationStatusEvents::NEGOTIATION_SUCCESS,
+        event,
         currentMediaList());
 }
 
@@ -391,6 +481,49 @@ Conference::takeOverMediaSourceControl(const std::string& callId)
 
     auto mediaList = call->getMediaAttributeList();
 
+#ifdef ENABLE_VIDEO
+    const bool participantWasAudioOnly = std::none_of(mediaList.begin(),
+                                                      mediaList.end(),
+                                                      [](const MediaAttribute& media) {
+                                                          return media.hasValidVideo();
+                                                      });
+    if (participantWasAudioOnly) {
+        if (isVideoEnabled()) {
+            auto videoIter = std::find_if(mediaList.begin(),
+                                          mediaList.end(),
+                                          [](const auto& mediaAttr) {
+                                              return mediaAttr.type_ == MediaType::MEDIA_VIDEO;
+                                          });
+            const auto defaultVideoSource
+                = Manager::instance().getVideoManager().videoDeviceMonitor.getMRLForDefaultDevice();
+
+            if (videoIter == mediaList.end()) {
+                mediaList.emplace_back(MediaType::MEDIA_VIDEO,
+                                       false,
+                                       false,
+                                       true,
+                                       defaultVideoSource,
+                                       sip_utils::DEFAULT_VIDEO_STREAMID,
+                                       false);
+            } else {
+                videoIter->enabled_ = true;
+                if (videoIter->label_.empty())
+                    videoIter->label_ = sip_utils::DEFAULT_VIDEO_STREAMID;
+                if (videoIter->sourceUri_.empty())
+                    videoIter->sourceUri_ = defaultVideoSource;
+            }
+
+            SIP_CORE_INFO(
+                "[Call: %s] Forcing conference media upgrade from audio-only to audio+video",
+                callId.c_str());
+        } else {
+            SIP_CORE_WARN("[Call: %s] Participant is audio-only, but conference/account video is "
+                          "disabled. Skipping forced video media upgrade",
+                          callId.c_str());
+        }
+    }
+#endif
+
     std::vector<MediaType> mediaTypeList {MediaType::MEDIA_AUDIO, MediaType::MEDIA_VIDEO};
 
     for (auto mediaType : mediaTypeList) {
@@ -414,12 +547,17 @@ Conference::takeOverMediaSourceControl(const std::string& callId)
             // If it's the first participant, just use its mute state as local
             if (participants_.size() == 1) {
                 setLocalHostMuteState(iter->type_, iter->muted_);
-            } else {
-                // The best logic here is to set local state as muted only if: previous local state
-                // was muted AND call media is muted
-                setLocalHostMuteState(iter->type_, iter->muted_ and isMediaSourceMuted(iter->type_));
             }
+            // Otherwise leave the host mute state untouched: the mute flags
+            // of a joining call must not clear (or set) the host-wide mute.
         }
+
+        // The call may still be in HOLD when ManagerPimpl::bindCallToConference()
+        // invokes addParticipant() and only calls offHoldCall() afterwards.
+        // Clear the per-stream hold bit before requestMediaChange(), otherwise
+        // the conference takeover re-INVITE replays the stale hold state and
+        // advertises sendonly SDP for the newly added participant.
+        iter->onHold_ = false;
 
         // Un-mute media in the call. The mute/un-mute state will be handled
         // by the conference/mixer from now on.
@@ -468,7 +606,6 @@ Conference::requestMediaChange(const std::vector<libsip_core::MediaMap>& mediaLi
                        mediaAttr.toString(true));
     }
 
-
     for (auto& mediaAttr : mediaAttrList) {
         // Find media
         auto oldIdx = std::find_if(hostSources_.begin(), hostSources_.end(), [&](auto oldAttr) {
@@ -492,6 +629,12 @@ Conference::requestMediaChange(const std::vector<libsip_core::MediaMap>& mediaLi
                 // if videoMixer_ is defined, switch inputs!
                 if (videoMixer_) {
                     videoMixer_->switchInputs(newVideoInputs);
+                    // Remove the host's audio-only placeholder now that real
+                    // video is being attached (mirrors handleMediaChangeRequest
+                    // logic for remote participants).
+                    videoMixer_->removeAudioOnlySource(
+                        "",
+                        sip_utils::streamId("", sip_utils::DEFAULT_VIDEO_STREAMID));
                 }
             }
         }
@@ -516,7 +659,8 @@ Conference::requestMediaChange(const std::vector<libsip_core::MediaMap>& mediaLi
 }
 
 // handle media change request OF CALL -> should auto - add / auto - delete patricipant video from mixer!
-void Conference::handleMediaChangeRequest(const std::shared_ptr<Call>& call,
+void
+Conference::handleMediaChangeRequest(const std::shared_ptr<Call>& call,
                                      const std::vector<libsip_core::MediaMap>& remoteMediaList)
 {
     SIP_CORE_DEBUG("Conf [{:s}] Answer to media change request", getConfId());
@@ -561,7 +705,15 @@ void Conference::handleMediaChangeRequest(const std::shared_ptr<Call>& call,
     // the local camera will be enabled, unless the video is disabled
     // in the account settings.
     call->answerMediaChangeRequest(newMediaList);
-    call->enterConference(shared_from_this());
+    // Only (re-)enter the conference if the call is not already in THIS
+    // conference.  When the call is already a member, the conference
+    // pipelines will be set up by VideoRtpSession::start() during SDP
+    // completion — calling enterConference() again would cause a
+    // redundant detach/reattach cycle that creates transient duplicate
+    // sources in the video mixer (the detach is deferred while the
+    // attach is immediate).
+    if (call->getConference().get() != this)
+        call->enterConference(shared_from_this());
 }
 
 void
@@ -578,14 +730,34 @@ Conference::addParticipant(const std::string& participant_id)
     }
 
     if (auto call = std::dynamic_pointer_cast<SIPCall>(getCall(participant_id))) {
+#ifdef ENABLE_VIDEO
+        const auto mediaBeforeTakeover = call->getMediaAttributeList();
+        const bool participantWasAudioOnly = std::none_of(mediaBeforeTakeover.begin(),
+                                                          mediaBeforeTakeover.end(),
+                                                          [](const MediaAttribute& media) {
+                                                              return media.hasValidVideo();
+                                                          });
+#endif
         // Check if participant was muted before conference
         if (call->isPeerMuted())
             participantsMuted_.emplace(call->getCallId());
+        // Mark conference audio management before takeover-triggered
+        // renegotiation can restart RTP receive threads.  Otherwise the
+        // restart path may briefly treat this as a 1:1 call and bind its
+        // audio directly to local playback.
+        call->setConferenceAudioManaged(true);
 
         // NOTE:
         // When a call joins a conference, the media source of the call
         // will be set to the output of the conference mixer.
         takeOverMediaSourceControl(participant_id);
+
+        // If local playback is muted, mark this new participant in the
+        // ring buffer pool so getData(DEFAULT_ID) skips its audio.
+        if (localPlaybackMuted_)
+            Manager::instance().getRingBufferPool().setLocalPlaybackMuted(
+                call->getCallId(), true);
+
         auto w = call->getAccount();
         auto account = w.lock();
         if (account) {
@@ -608,19 +780,16 @@ Conference::addParticipant(const std::string& participant_id)
                 moderators_.emplace(getRemoteId(call));
         }
 #ifdef ENABLE_VIDEO
-        // In conference, if a participant joins with an audio only
-        // call, it must be listed in the audioonlylist.
-        auto mediaList = call->getMediaAttributeList();
-        bool hasValidVideo = std::any_of(mediaList.begin(), mediaList.end(), 
-                                        [](const MediaAttribute& media) {
-                                            return media.hasValidVideo();
-                                        });
-        if (videoMixer_ && !hasValidVideo) {
+        // Keep a visible placeholder while the call is upgraded to include video.
+        if (videoMixer_ && participantWasAudioOnly) {
             videoMixer_->addAudioOnlySource(call->getCallId(),
                                             sip_utils::streamId(call->getCallId(),
-                                                                sip_utils::DEFAULT_AUDIO_STREAMID));
+                                                                sip_utils::DEFAULT_AUDIO_STREAMID),
+                                            call->getPeerNumber());
         }
+#endif // ENABLE_VIDEO
         call->enterConference(shared_from_this());
+#ifdef ENABLE_VIDEO
         // Continue the recording for the conference if one participant was recording
         if (call->isRecording()) {
             SIP_CORE_DEBUG("Stop recording for call {:s}", call->getCallId());
@@ -636,10 +805,13 @@ Conference::addParticipant(const std::string& participant_id)
         SIP_CORE_ERR("no call associate to participant %s", participant_id.c_str());
 }
 
-bool 
+bool
 Conference::moveParticipant(const std::string& participant_id, size_t to)
 {
-    SIP_CORE_DEBUG("Moving participant {:s} to position {:s} in conference {:s}", participant_id, std::to_string(to), id_);
+    SIP_CORE_DEBUG("Moving participant {:s} to position {:s} in conference {:s}",
+                   participant_id,
+                   std::to_string(to),
+                   id_);
     // todo: add finding participant id
     return false;
 }
@@ -647,7 +819,10 @@ Conference::moveParticipant(const std::string& participant_id, size_t to)
 bool
 Conference::moveParticipant(size_t from, size_t to)
 {
-    SIP_CORE_DEBUG("Moving participant from position {:s} to position {:s} in conference {:s}", std::to_string(from), std::to_string(to), id_);
+    SIP_CORE_DEBUG("Moving participant from position {:s} to position {:s} in conference {:s}",
+                   std::to_string(from),
+                   std::to_string(to),
+                   id_);
 
     if (!videoMixer_)
         return false;
@@ -661,13 +836,17 @@ Conference::setActiveParticipant(const std::string& participant_id)
 #ifdef ENABLE_VIDEO
     if (!videoMixer_)
         return;
+    // Route through setActiveStream() so this deprecated no-sink / V0 fallback
+    // also stamps confInfo_.active and pushes it to remotes (previously it only
+    // poked the mixer, so a spotlight requested before per-sink metadata arrived
+    // never reached remote participants).
     if (isHost(participant_id)) {
-        videoMixer_->setActiveStream(sip_utils::streamId("", sip_utils::DEFAULT_VIDEO_STREAMID));
+        setActiveStream(sip_utils::streamId("", sip_utils::DEFAULT_VIDEO_STREAMID), true);
         return;
     }
     if (auto call = getCallFromPeerID(participant_id)) {
-        videoMixer_->setActiveStream(
-            sip_utils::streamId(call->getCallId(), sip_utils::DEFAULT_VIDEO_STREAMID));
+        setActiveStream(sip_utils::streamId(call->getCallId(), sip_utils::DEFAULT_VIDEO_STREAMID),
+                        true);
         return;
     }
 
@@ -678,12 +857,12 @@ Conference::setActiveParticipant(const std::string& participant_id)
         return;
     }
     // Unset active participant by default
-    videoMixer_->resetActiveStream();
+    setActiveStream("", false);
 #endif
 }
 
 void
-Conference::setActiveStream(const std::string& streamId, bool state)
+Conference::setActiveStream(const std::string& streamId, bool state, bool sendInfo)
 {
 #ifdef ENABLE_VIDEO
     if (!videoMixer_)
@@ -692,11 +871,30 @@ Conference::setActiveStream(const std::string& streamId, bool state)
         videoMixer_->setActiveStream(streamId);
     else
         videoMixer_->resetActiveStream();
+
+    // Stamp `active` into confInfo_ and push it to every remote immediately,
+    // mirroring setLayout()'s synchronous isSharing stamp + send. The async
+    // mixer onSourcesUpdated_ callback also recomputes active (verifyActive)
+    // and re-broadcasts, but only when the render loop next emits
+    // (needsUpdate && !layoutInvalidated) — a pure spotlight toggle need not
+    // change geometry, so that path is racy/deferred and left remote
+    // participants on the old grid while the host UI already reflected the
+    // spotlight. Exactly one row (sinkId == streamId) is active while
+    // spotlighting; un-spotlighting clears them all. This produces the same
+    // result the async verifyActive() path would (activeStream_ == pi.sinkId),
+    // so the two stay consistent — this one is just immediate and deterministic.
+    {
+        std::lock_guard<std::mutex> lk(confInfoMutex_);
+        for (auto& pi : confInfo_)
+            pi.active = (state && !streamId.empty() && pi.sinkId == streamId);
+    }
+    if (sendInfo)
+        sendConferenceInfos();
 #endif
 }
 
 void
-Conference::setLayout(int layout)
+Conference::setLayout(int layout, bool sendInfo)
 {
 #ifdef ENABLE_VIDEO
     if (layout < 0 || layout > 2) {
@@ -705,21 +903,200 @@ Conference::setLayout(int layout)
     }
     if (!videoMixer_)
         return;
+    // Read the active sharer OUTSIDE confInfoMutex_ to avoid a lock-order
+    // inversion with the mixer callback / onShareState.
+    std::string sharer;
+    {
+        std::lock_guard<std::mutex> lk(sharerMtx_);
+        sharer = activeSharerStreamId_;
+        // A share owns the layout: a mid-share layout change would clear the
+        // mixer's activeStream_ while activeSharerStreamId_ stays set — share
+        // stops promoting but isSharing stays true, and the eventual share
+        // stop overrides the user's choice anyway. Share transitions
+        // themselves call setLayout with the sharer already updated.
+        if (!sharer.empty() && layout != static_cast<int>(video::Layout::ONE_BIG)) {
+            SIP_CORE_WARN("[Conf:%s] setLayout(%d) ignored during active screen share",
+                          id_.c_str(),
+                          layout);
+            return;
+        }
+    }
     {
         std::lock_guard<std::mutex> lk(confInfoMutex_);
         confInfo_.layout = layout;
+        // Stamp isSharing synchronously so the IMMEDIATE send below already
+        // carries it to remotes. Otherwise this synchronous send races the
+        // async mixer-driven resend and remotes can latch a layout change with
+        // isSharing=false (host is unaffected — it reads the later local emit).
+        for (auto& pi : confInfo_)
+            pi.isSharing = (!sharer.empty() && pi.sinkId == sharer);
     }
     videoMixer_->setVideoLayout(static_cast<video::Layout>(layout));
+    // Push metadata immediately so remote peers receive the layout change
+    // even before mixer coordinates are refreshed asynchronously.
+    if (sendInfo)
+        sendConferenceInfos();
 #endif
 }
+
+void
+Conference::onShareState(const std::string& peerId, bool state)
+{
+#ifdef ENABLE_VIDEO
+    if (!videoMixer_)
+        return;
+
+    // Resolve the sharer's mixer stream id and whether it may preempt an
+    // existing share. The local host (empty peerId) may always share/take over.
+    std::string streamId;
+    bool sharerMayOverride = false;
+    if (peerId.empty() || isHost(peerId)) {
+        streamId = sip_utils::streamId("", sip_utils::DEFAULT_VIDEO_STREAMID);
+        sharerMayOverride = true;
+    } else if (auto call = getCallFromPeerID(peerId)) {
+        streamId = sip_utils::streamId(call->getCallId(), sip_utils::DEFAULT_VIDEO_STREAMID);
+        sharerMayOverride = isModerator(peerId);
+    } else {
+        SIP_CORE_WARN("[Conf:%s] onShareState: cannot resolve sharer '%s'",
+                      id_.c_str(),
+                      peerId.c_str());
+        return;
+    }
+
+    if (state) {
+        // Read the pre-share layout and spotlight BEFORE promoting, so
+        // stop/leave can restore them. Read outside sharerMtx_ (getVideoLayout
+        // takes the mixer lock; the spotlight read takes confInfoMutex_).
+        const int currentLayout = static_cast<int>(videoMixer_->getVideoLayout());
+        std::string currentActive;
+        {
+            std::lock_guard<std::mutex> lk(confInfoMutex_);
+            for (const auto& pi : confInfo_) {
+                if (pi.active) {
+                    currentActive = pi.sinkId;
+                    break;
+                }
+            }
+        }
+        {
+            std::lock_guard<std::mutex> lk(sharerMtx_);
+            if (!activeSharerStreamId_.empty() && activeSharerStreamId_ != streamId
+                && !sharerMayOverride) {
+                // Someone else is already sharing and this peer is not a
+                // moderator: deny. Their client self-reverts because their own
+                // confInfo isSharing stays false.
+                SIP_CORE_WARN("[Conf:%s] onShareState: '%s' denied (already sharing)",
+                              id_.c_str(),
+                              peerId.c_str());
+                return;
+            }
+            // Only capture on a FRESH start, not a moderator takeover of an
+            // ongoing share — the original pre-share layout must survive takeovers.
+            if (activeSharerStreamId_.empty()) {
+                layoutBeforeShare_ = currentLayout;
+                activeStreamBeforeShare_ = currentActive;
+            }
+            activeSharerStreamId_ = streamId;
+            sharerHadVideo_ = false;
+        }
+        // Promote the sharer to a full-screen ONE_BIG layout for everyone.
+        // Stamp both, broadcast ONE coalesced snapshot (losing the second of
+        // two INFOs left remotes spotlight-active-but-GRID).
+        setActiveStream(streamId, true, /*sendInfo=*/false);
+        setLayout(static_cast<int>(video::Layout::ONE_BIG), /*sendInfo=*/false);
+        sendConferenceInfos();
+    } else {
+        int restore = static_cast<int>(video::Layout::GRID);
+        std::string restoreActive;
+        {
+            std::lock_guard<std::mutex> lk(sharerMtx_);
+            if (activeSharerStreamId_ != streamId)
+                return; // not the current sharer; ignore
+            activeSharerStreamId_.clear();
+            sharerHadVideo_ = false;
+            restore = layoutBeforeShare_;
+            restoreActive.swap(activeStreamBeforeShare_);
+        }
+        restoreShareLayout(streamId, restore, restoreActive);
+    }
+#endif
+}
+
+void
+Conference::endCurrentShare()
+{
+#ifdef ENABLE_VIDEO
+    int restore = static_cast<int>(video::Layout::GRID);
+    std::string restoreActive;
+    {
+        std::lock_guard<std::mutex> lk(sharerMtx_);
+        if (activeSharerStreamId_.empty())
+            return;
+        activeSharerStreamId_.clear();
+        sharerHadVideo_ = false;
+        restore = layoutBeforeShare_;
+        restoreActive.swap(activeStreamBeforeShare_);
+    }
+    restoreShareLayout("", restore, restoreActive);
+#endif
+}
+
+#ifdef ENABLE_VIDEO
+// Common share-stop tail: drop the sharer's spotlight, re-apply the pre-share
+// spotlight when its participant is still in the conference, and restore the
+// pre-share layout. A layout restored for a spotlight whose participant LEFT
+// during the share falls back to GRID (a spotlight-shaped layout with no
+// active stream renders a broken/empty big slot on every client); a layout
+// the host chose without any spotlight is restored as-is.
+void
+Conference::restoreShareLayout(const std::string& sharerStreamId,
+                               int restoreLayout,
+                               const std::string& restoreActive)
+{
+    setActiveStream(sharerStreamId, false, /*sendInfo=*/false);
+    if (!restoreActive.empty()) {
+        bool stillPresent = false;
+        {
+            std::lock_guard<std::mutex> lk(confInfoMutex_);
+            for (const auto& pi : confInfo_) {
+                if (pi.sinkId == restoreActive) {
+                    stillPresent = true;
+                    break;
+                }
+            }
+        }
+        if (stillPresent)
+            setActiveStream(restoreActive, true, /*sendInfo=*/false);
+        else
+            restoreLayout = static_cast<int>(video::Layout::GRID);
+    }
+    // One coalesced snapshot for the whole stop transition.
+    setLayout(restoreLayout, /*sendInfo=*/false);
+    sendConferenceInfos();
+}
+#endif
 
 std::vector<std::map<std::string, std::string>>
 ConfInfo::toVectorMapStringString() const
 {
+    // Inject canvas dimensions (the host mixer's total width/height) into
+    // every participant entry. The OnConferenceInfosUpdated signal is the
+    // only channel that crosses into Dart for both host- and remote-side
+    // conference state — denormalising `cw`/`ch` onto every row lets the
+    // UI lay tiles out against the host's canvas rather than guessing it
+    // from the bounding box of participant rects (which collapses any
+    // host-authored padding around the grid). The values are identical
+    // for all rows since they describe the conference canvas, not a tile.
+    const auto cw = std::to_string(w);
+    const auto ch = std::to_string(h);
     std::vector<std::map<std::string, std::string>> infos;
     infos.reserve(size());
-    for (const auto& info : *this)
-        infos.emplace_back(info.toMap());
+    for (const auto& info : *this) {
+        auto entry = info.toMap();
+        entry["cw"] = cw;
+        entry["ch"] = ch;
+        infos.emplace_back(std::move(entry));
+    }
     return infos;
 }
 
@@ -734,12 +1111,19 @@ ConfInfo::toString() const
     val["h"] = h;
     val["v"] = v;
     val["layout"] = layout;
+    if (seq != 0)
+        val["seq"] = Json::Value::UInt64(seq);
     return Json::writeString(Json::StreamWriterBuilder {}, val);
 }
 
 void
 Conference::sendConferenceInfos()
 {
+#if CONFERENCE_METADATA
+    // One seq per broadcast: every per-destination copy of THIS snapshot
+    // carries the same value, and receivers drop anything older than the
+    // last snapshot they applied (wire-reorder defense).
+    const uint64_t seq = ++confInfoSeq_;
     // Inform calls that the layout has changed
     foreachCall([&](auto call) {
         // Produce specific JSON for each participant (2 separate accounts can host ...
@@ -749,21 +1133,85 @@ Conference::sendConferenceInfos()
         if (!account)
             return;
 
-        call->sendConfInfo(
-            getConfInfoHostUri(account->getUsername() + "@server", call->getPeerNumber()).toString());
+        auto ci = getConfInfoHostUri(account->getUsername() + "@server", call->getPeerNumber());
+        ci.seq = seq;
+        int shareCount = 0;
+        for (const auto& p : ci)
+            if (p.isSharing)
+                ++shareCount;
+        SIP_CORE_WARN("[sharedbg] host send confInfo to %s: participants=%zu sharing=%d layout=%d",
+                      call->getPeerNumber().c_str(),
+                      ci.size(),
+                      shareCount,
+                      ci.layout);
+        call->sendConfInfo(ci.toString());
     });
+#endif
 
     auto confInfo = getConfInfoHostUri("", "");
 #ifdef ENABLE_VIDEO
     createSinks(confInfo);
 #endif
 
+    {
+        int shareCount = 0;
+        for (const auto& p : confInfo)
+            if (p.isSharing)
+                ++shareCount;
+        SIP_CORE_WARN("[sharedbg] host local emit confInfo: participants=%zu sharing=%d layout=%d",
+                      confInfo.size(),
+                      shareCount,
+                      confInfo.layout);
+    }
     // Inform client that layout has changed
     sip_core::emitSignal<libsip_core::CallSignal::OnConferenceInfosUpdated>(
         id_, confInfo.toVectorMapStringString());
 }
 
-void Conference::sendVoiceActivity()
+void
+Conference::sendVoiceActivity()
+{
+    // Throttle: voice activity toggles many times per second (16+/s observed),
+    // and emitting a confVoiceActivity INFO per flip floods remote participants,
+    // tripping SIP-server flood protection (peer dropped ~30s in). Send the first
+    // change immediately for responsiveness, then coalesce subsequent flips into a
+    // single trailing send that carries the latest state.
+    const auto now = std::chrono::steady_clock::now();
+    {
+        std::lock_guard<std::mutex> lk(voiceActivityMutex_);
+        if (voiceActivitySendPending_)
+            return; // a trailing send is already scheduled; it will carry the latest state
+
+        const auto elapsed = now - lastVoiceActivitySent_;
+        if (elapsed < VOICE_ACTIVITY_MIN_INTERVAL) {
+            voiceActivitySendPending_ = true;
+            std::weak_ptr<Conference> w = weak_from_this();
+            Manager::instance().scheduleTaskIn(
+                [w] {
+                    if (auto shared = w.lock())
+                        shared->flushVoiceActivity();
+                },
+                VOICE_ACTIVITY_MIN_INTERVAL - elapsed);
+            return;
+        }
+        lastVoiceActivitySent_ = now;
+    }
+    doSendVoiceActivity();
+}
+
+void
+Conference::flushVoiceActivity()
+{
+    {
+        std::lock_guard<std::mutex> lk(voiceActivityMutex_);
+        voiceActivitySendPending_ = false;
+        lastVoiceActivitySent_ = std::chrono::steady_clock::now();
+    }
+    doSendVoiceActivity();
+}
+
+void
+Conference::doSendVoiceActivity()
 {
     // Inform calls that voiceActivity changed
     foreachCall([&](auto call) {
@@ -774,10 +1222,9 @@ void Conference::sendVoiceActivity()
         if (!account)
             return;
 
-        //send voice activity without additional ConfInfo parameters
+        // send voice activity without additional ConfInfo parameters
         call->sendVoiceActivity(voiceActivivtyToString(
-            getConfInfoHostUri(account->getUsername() + "@server", call->getPeerNumber())
-        ));
+            getConfInfoHostUri(account->getUsername() + "@server", call->getPeerNumber())));
     });
 
     auto confInfo = getConfInfoHostUri("", "");
@@ -792,9 +1239,18 @@ void
 Conference::createSinks(const ConfInfo& infos)
 {
     std::lock_guard<std::mutex> lk(sinksMtx_);
-    if (!videoMixer_)
+    // Pin the mixer and take a STRONG COPY of its sink for the duration of the
+    // call. getSink() returns a reference into VideoMixer::sink_; copying it
+    // keeps the SinkClient control block owned here (use_count >= 2) so the
+    // temporary vector's element can never become the last owner and dispatch
+    // _M_dispose() through a freed control block. Defense-in-depth alongside the
+    // weak_from_this()-captured mixer callback (see attachVideoMixerCallbacks()).
+    auto mixer = videoMixer_;
+    if (!mixer)
         return;
-    auto& sink = videoMixer_->getSink();
+    auto sink = mixer->getSink();
+    if (!sink)
+        return;
     Manager::instance().createSinkClients(getConfId(),
                                           infos,
                                           {std::static_pointer_cast<video::VideoFrameActiveWriter>(
@@ -807,22 +1263,47 @@ void
 Conference::removeParticipant(const std::string& participant_id)
 {
     SIP_CORE_DEBUG("Remove call {:s} in conference {:s}", participant_id, id_);
+    // Clear the per-participant pool filters for the departing participant
+    // so a follow-up 1:1 call on the same id is not affected.
+    auto& rbPool = Manager::instance().getRingBufferPool();
+    rbPool.setLocalPlaybackMuted(participant_id, false);
+    rbPool.setMicMuted(participant_id, false);
     {
         std::lock_guard<std::mutex> lk(participantsMtx_);
         if (!participants_.erase(participant_id))
             return;
     }
     if (auto call = std::dynamic_pointer_cast<SIPCall>(getCall(participant_id))) {
-        const auto& peerId = getRemoteId(call);
         participantsMuted_.erase(call->getCallId());
-        if (auto transport = call->getTransport())
-            handsRaised_.erase(std::string(transport->deviceId()));
+        handsRaised_.erase(call->getCallId());
 #ifdef ENABLE_VIDEO
         // TODO all streams
         if (videoMixer_->verifyActive(
                 sip_utils::streamId(participant_id, sip_utils::DEFAULT_VIDEO_STREAMID)))
             videoMixer_->resetActiveStream();
+        // If the departing participant is the current sharer, end the share
+        // deterministically so isSharing clears and the layout is restored —
+        // rather than relying on the racy confInfo-builder stop-detection.
+        bool sharerLeft = false;
+        {
+            std::lock_guard<std::mutex> lk(sharerMtx_);
+            sharerLeft = !activeSharerStreamId_.empty()
+                         && activeSharerStreamId_
+                                == sip_utils::streamId(participant_id,
+                                                       sip_utils::DEFAULT_VIDEO_STREAMID);
+        }
+#endif // ENABLE_VIDEO
         call->exitConference();
+#ifdef ENABLE_VIDEO
+        // Post to the main thread (not this pjsip/Manager disconnect thread) to
+        // match every other endCurrentShare caller — it takes confInfoMutex_ +
+        // the mixer rwMutex_ and drives SIP sends, so keep it off re-entrant
+        // Manager locks. Idempotent: a no-op if the share already ended.
+        if (sharerLeft)
+            runOnMainThread([w = weak()] {
+                if (auto s = w.lock())
+                    s->endCurrentShare();
+            });
         if (call->isPeerRecording())
             call->peerRecording(false);
 #endif // ENABLE_VIDEO
@@ -838,9 +1319,18 @@ Conference::attachLocalParticipant()
         setState(State::ACTIVE_ATTACHED);
 
         auto& rbPool = Manager::instance().getRingBufferPool();
+        const bool hostMuted = isMediaSourceMuted(MediaType::MEDIA_AUDIO) or isMuted("host"sv);
         for (const auto& participant : getParticipantList()) {
             if (auto call = Manager::instance().getCallFromCallID(participant)) {
-                if (isMuted(call->getCallId()))
+                rbPool.setMicMuted(participant, hostMuted);
+                const bool participantSilenced = localPlaybackMuted_
+                                                 || isMuted(call->getCallId());
+                if (hostMuted and participantSilenced) {
+                    // No direct audio either way; bindings are re-established
+                    // by bindHost() / bindParticipant() on un-mute.
+                } else if (hostMuted)
+                    rbPool.bindHalfDuplexOut(RingBufferPool::DEFAULT_ID, participant);
+                else if (participantSilenced)
                     rbPool.bindHalfDuplexOut(participant, RingBufferPool::DEFAULT_ID);
                 else
                     rbPool.bindCallID(participant, RingBufferPool::DEFAULT_ID);
@@ -861,6 +1351,15 @@ Conference::attachLocalParticipant()
             }
 
             videoMixer_->switchInputs(videoInputs);
+
+            const auto hostStreamId = sip_utils::streamId("", sip_utils::DEFAULT_VIDEO_STREAMID);
+            if (videoInputs.empty()) {
+                // Host has no video — add placeholder so it appears in the layout
+                videoMixer_->addAudioOnlySource("", hostStreamId);
+            } else {
+                // Host has video — remove stale audio-only placeholder if any
+                videoMixer_->removeAudioOnlySource("", hostStreamId);
+            }
         }
 #endif
     } else {
@@ -886,7 +1385,9 @@ Conference::detachLocalParticipant()
         if (videoMixer_) {
             videoMixer_->stopInputs();
             // Remove local host from audio only sources when detaching
-            videoMixer_->removeAudioOnlySource("", sip_utils::streamId("", sip_utils::DEFAULT_VIDEO_STREAMID));
+            videoMixer_
+                ->removeAudioOnlySource("",
+                                        sip_utils::streamId("", sip_utils::DEFAULT_VIDEO_STREAMID));
         }
 #endif
     } else {
@@ -924,7 +1425,13 @@ Conference::bindParticipant(const std::string& participant_id)
     // Bind local participant to other participants only if the
     // local is attached to the conference.
     if (getState() == State::ACTIVE_ATTACHED) {
-        if (isMediaSourceMuted(MediaType::MEDIA_AUDIO))
+        const bool hostMuted = isMediaSourceMuted(MediaType::MEDIA_AUDIO) or isMuted("host"sv);
+        // Keep the data-plane mic filter consistent for (re-)bound
+        // participants, including ones joining while the host is muted.
+        rbPool.setMicMuted(participant_id, hostMuted);
+        if (localPlaybackMuted_)
+            rbPool.bindHalfDuplexOut(participant_id, RingBufferPool::DEFAULT_ID);
+        else if (hostMuted)
             rbPool.bindHalfDuplexOut(RingBufferPool::DEFAULT_ID, participant_id);
         else
             rbPool.bindCallID(participant_id, RingBufferPool::DEFAULT_ID);
@@ -948,9 +1455,14 @@ Conference::bindHost()
 
     for (const auto& item : getParticipantList()) {
         if (auto call = Manager::instance().getCallFromCallID(item)) {
+            // Clear the data-plane mic filter set by unbindHost().
+            rbPool.setMicMuted(item, false);
             if (isMuted(call->getCallId()))
                 continue;
-            rbPool.bindCallID(item, RingBufferPool::DEFAULT_ID);
+            if (localPlaybackMuted_)
+                rbPool.bindHalfDuplexOut(item, RingBufferPool::DEFAULT_ID);
+            else
+                rbPool.bindCallID(item, RingBufferPool::DEFAULT_ID);
             rbPool.flush(RingBufferPool::DEFAULT_ID);
         }
     }
@@ -960,7 +1472,20 @@ void
 Conference::unbindHost()
 {
     SIP_CORE_INFO("Unbind host from conference %s", id_.c_str());
-    Manager::instance().getRingBufferPool().unBindAllHalfDuplexOut(RingBufferPool::DEFAULT_ID);
+    auto& rbPool = Manager::instance().getRingBufferPool();
+    for (const auto& item : getParticipantList()) {
+        // Sever the participant→mic binding directly. Iterating the
+        // participant list (instead of unBindAllHalfDuplexOut(DEFAULT_ID),
+        // which derives the mic readers from the host's own read bindings)
+        // keeps this correct even when the bindings are asymmetric — e.g.
+        // local playback muted, a moderator host-mute, or a re-bind that
+        // raced a re-INVITE.
+        rbPool.unBindHalfDuplexOut(item, RingBufferPool::DEFAULT_ID);
+        // Race-proof data-plane mute (mirrors localPlaybackMutedIds_): even
+        // if an async re-bind re-attaches the capture buffer to this reader,
+        // its mix will not contain the host microphone.
+        rbPool.setMicMuted(item, true);
+    }
 }
 
 ParticipantSet
@@ -982,14 +1507,11 @@ Conference::toggleRecording()
     // Notify each participant
     foreachCall([&](auto call) { call->updateRecState(newState); });
 
-
     std::time_t t = std::time(nullptr);
     auto recTime = std::localtime(&t);
     char time[20];
     strftime(time, 20, "%Y-%m-%d %H-%M-%S", recTime);
-    auto filename = fmt::format("{} Conference [id {}]",
-                                time,
-                                getConfId());
+    auto filename = fmt::format("{} Conference [id {}]", time, getConfId());
     SIP_CORE_INFO() << "Recording conference to filename -> " << filename;
     setRecordingFilename(filename);
 
@@ -1006,11 +1528,40 @@ Conference::getAccountId() const
     return {};
 }
 
-void
+bool
 Conference::switchInput(const std::string& input)
 {
 #ifdef ENABLE_VIDEO
-    SIP_CORE_DEBUG("[Conf:{:s}] Setting video input to {:s}", id_, input);
+    const auto normalizedInput = video::normalizeVideoSwitchSource(input);
+    SIP_CORE_DEBUG("[Conf:{:s}] Setting video input to {:s}", id_, normalizedInput);
+    if (!video::isValidVideoSwitchSource(
+            normalizedInput,
+            Manager::instance().getVideoManager().videoDeviceMonitor.getDeviceList())) {
+        reportMediaNegotiationStatus(libsip_core::Media::MediaNegotiationStatusEvents::NEGOTIATION_FAIL);
+        return false;
+    }
+
+#ifdef __APPLE__
+    {
+        constexpr auto sep = libsip_core::Media::VideoProtocolPrefix::SEPARATOR;
+        const auto displayPrefix = std::string(libsip_core::Media::VideoProtocolPrefix::DISPLAY)
+                                   + sep;
+        if (normalizedInput.rfind(displayPrefix, 0) == 0 && !video::hasScreenCaptureAccess()) {
+            SIP_CORE_WARN("[conf %s] Rejecting desktop source: no screen recording permission",
+                          id_.c_str());
+            // Prefix must match the Dart-side video filter in
+            // available_devices_provider ("Failed to open video input").
+            emitSignal<libsip_core::ConfigurationSignal::DeviceOpenError>(
+                "Failed to open video input: Screen recording permission denied: "
+                    + normalizedInput,
+                true);
+            reportMediaNegotiationStatus(
+                libsip_core::Media::MediaNegotiationStatusEvents::NEGOTIATION_FAIL);
+            return false;
+        }
+    }
+#endif
+
     std::vector<MediaAttribute> newSources;
     auto firstVideo = true;
     // Rewrite hostSources (remove all except one video input)
@@ -1019,7 +1570,7 @@ Conference::switchInput(const std::string& input)
         if (source.type_ == MediaType::MEDIA_VIDEO) {
             if (firstVideo) {
                 firstVideo = false;
-                source.sourceUri_ = input;
+                source.sourceUri_ = normalizedInput;
                 newSources.emplace_back(source);
             }
         } else {
@@ -1028,20 +1579,27 @@ Conference::switchInput(const std::string& input)
     }
 
     // Done if the video is disabled
-    if (not isVideoEnabled())
-        return;
-
-    if (auto mixer = videoMixer_) {
-        mixer->switchInputs({input});
-
-        // if local video was not muted, start / restart video input again
-        if (!isMediaSourceMuted(MediaType::MEDIA_VIDEO)) {
-            mixer->startInputs();
-        }
+    if (not isVideoEnabled()) {
+        reportMediaNegotiationStatus(libsip_core::Media::MediaNegotiationStatusEvents::NEGOTIATION_FAIL);
+        return false;
     }
 
+    if (auto mixer = videoMixer_) {
+        // Pass the current mute state so that switchInputs creates
+        // new source entries already muted — zero frame leak.
+        mixer->switchInputs({normalizedInput},
+                            isMediaSourceMuted(MediaType::MEDIA_VIDEO));
+    }
+
+    // Host screen-share: promote to ONE_BIG when the host switches its own
+    // conference input to a desktop source, and restore the grid when it
+    // switches away (share-stop via muting is handled by the confInfo builder).
+    onShareState("", normalizedInput.rfind("display", 0) == 0);
+
     reportMediaNegotiationStatus();
+    return true;
 #endif
+    return false;
 }
 
 bool
@@ -1150,48 +1708,53 @@ Conference::isModerator(std::string_view uri) const
 }
 
 bool
-Conference::isHandRaised(std::string_view deviceId) const
+Conference::isHandRaised(std::string_view id) const
 {
-    return isHostDevice(deviceId) ? handsRaised_.find("host"sv) != handsRaised_.end()
-                                  : handsRaised_.find(deviceId) != handsRaised_.end();
+    // `id` is a host-side call id, or "host" for the local host.
+    return handsRaised_.find(id) != handsRaised_.end();
 }
 
 void
-Conference::setHandRaised(const std::string& deviceId, const bool& state)
+Conference::setHandRaised(const std::string& accountUri,
+                          const std::string& deviceId,
+                          const bool& state,
+                          const std::string& senderUri)
 {
-    if (isHostDevice(deviceId)) {
-        auto isPeerRequiringAttention = isHandRaised("host"sv);
-        if (state and not isPeerRequiringAttention) {
-            SIP_CORE_DBG("Raise host hand");
-            handsRaised_.emplace("host"sv);
-            updateHandsRaised();
-        } else if (not state and isPeerRequiringAttention) {
-            SIP_CORE_DBG("Lower host hand");
-            handsRaised_.erase("host");
-            updateHandsRaised();
-        }
+    // Hands are keyed by the host-side call id ("host" for the local host):
+    // it is the only unique participant key over plain SIP, where transport
+    // device ids are always empty and peer numbers may be duplicated
+    // (specs/conference-actions.md, D6).
+    const auto uri = std::string(sip_utils::stripSipUriPrefix(accountUri));
+    std::string key;
+    if (isHost(uri)) {
+        key = "host";
+    } else if (auto call = getCallWith(uri, deviceId)) {
+        key = call->getCallId();
+    } else if (auto call = getCallFromPeerID(uri)) {
+        key = call->getCallId();
+    } else if (!senderUri.empty() && senderUri != uri) {
+        // The stamped uri is a client login the host cannot resolve — it
+        // knows the peer only by the uri it dialed ("m12" vs "74112"). The
+        // parser already routes plain self-actions to the sender; the case
+        // left ambiguous to it is a MODERATOR lowering a hand, which may
+        // address either itself or another participant. A target that
+        // resolves to nobody was the sender's own login: apply to the sender.
+        setHandRaised(senderUri, deviceId, state);
+        return;
     } else {
-        for (const auto& p : getParticipantList()) {
-            if (auto call = std::dynamic_pointer_cast<SIPCall>(getCall(p))) {
-                auto isPeerRequiringAttention = isHandRaised(deviceId);
-                std::string callDeviceId;
-                if (auto transport = call->getTransport())
-                    callDeviceId = transport->deviceId();
-                if (deviceId == callDeviceId) {
-                    if (state and not isPeerRequiringAttention) {
-                        SIP_CORE_DEBUG("Raise {:s} hand", deviceId);
-                        handsRaised_.emplace(deviceId);
-                        updateHandsRaised();
-                    } else if (not state and isPeerRequiringAttention) {
-                        SIP_CORE_DEBUG("Remove {:s} raised hand", deviceId);
-                        handsRaised_.erase(deviceId);
-                        updateHandsRaised();
-                    }
-                    return;
-                }
-            }
-        }
-        SIP_CORE_WARN("Fail to raise %s hand (participant not found)", deviceId.c_str());
+        SIP_CORE_WARN("Fail to raise %s hand (participant not found)", accountUri.c_str());
+        return;
+    }
+
+    auto isPeerRequiringAttention = isHandRaised(key);
+    if (state and not isPeerRequiringAttention) {
+        SIP_CORE_DEBUG("Raise {:s} hand", key);
+        handsRaised_.emplace(key);
+        updateHandsRaised();
+    } else if (not state and isPeerRequiringAttention) {
+        SIP_CORE_DEBUG("Remove {:s} raised hand", key);
+        handsRaised_.erase(key);
+        updateHandsRaised();
     }
 }
 
@@ -1204,12 +1767,21 @@ Conference::isVoiceActive(std::string_view streamId) const
 void
 Conference::setVoiceActivity(const std::string& streamId, const bool& newState)
 {
-    // verify that streamID exists in our confInfo
+    // verify that streamID exists in conference info (local or remote-host propagated)
     bool exists = false;
-    for (auto& participant : confInfo_) {
-        if (participant.sinkId == streamId) {
-            exists = true;
-            break;
+    {
+        std::lock_guard<std::mutex> lk(confInfoMutex_);
+        auto hasSink = [&streamId](const auto& participantInfo) {
+            return participantInfo.sinkId == streamId;
+        };
+        exists = std::any_of(confInfo_.begin(), confInfo_.end(), hasSink);
+        if (!exists) {
+            for (const auto& [_, remoteConfInfo] : remoteHosts_) {
+                if (std::any_of(remoteConfInfo.begin(), remoteConfInfo.end(), hasSink)) {
+                    exists = true;
+                    break;
+                }
+            }
         }
     }
 
@@ -1241,60 +1813,137 @@ Conference::setVoiceActivity(const std::string& streamId, const bool& newState)
 }
 
 void
+Conference::setVoiceActivityForCall(const std::string& callId, const bool& newState)
+{
+    ConfInfo confInfoSnapshot;
+    {
+        std::lock_guard<std::mutex> lk(confInfoMutex_);
+        confInfoSnapshot = confInfo_;
+    }
+
+    std::set<std::string> sinkIds;
+    auto call = getCall(callId);
+    for (const auto& participantInfo : confInfoSnapshot) {
+        if (participantInfo.sinkId.empty())
+            continue;
+        if (!participantInfo.callId.empty() && participantInfo.callId == callId) {
+            sinkIds.emplace(participantInfo.sinkId);
+            continue;
+        }
+        if (call && participantInfo.uri == call->getPeerNumber())
+            sinkIds.emplace(participantInfo.sinkId);
+    }
+
+    if (sinkIds.empty()) {
+        SIP_CORE_DBG("No conference participant found for callId: %s", callId.c_str());
+        return;
+    }
+
+    bool needsUpdate = false;
+    for (const auto& sinkId : sinkIds) {
+        auto previousState = isVoiceActive(sinkId);
+        if (previousState == newState)
+            continue;
+
+        if (newState)
+            streamsVoiceActive.emplace(sinkId);
+        else
+            streamsVoiceActive.erase(sinkId);
+
+        needsUpdate = true;
+    }
+
+    if (needsUpdate)
+        updateVoiceActivity();
+}
+
+void
 Conference::setVoiceActivity(const Json::Value& json)
 {
-    bool needsUpdate = false;
-    for (const auto& participantInfo : json) {
-        if (!json.isMember("uri") || !json.isMember("state") || !json.isMember("sinkId"))
-            continue;
-            
-        auto uri = json["uri"].asString();
-        auto sinkId = json["sinkId"].asString();
-        auto state = json["state"].asBool();
-        
+    auto applyVoiceState = [this](const Json::Value& participantInfo, bool& needsUpdate) {
+        if (!participantInfo.isObject() || !participantInfo.isMember("sinkId")
+            || !participantInfo.isMember("state"))
+            return;
+
+        auto sinkId = participantInfo["sinkId"].asString();
+        auto state = participantInfo["state"].asBool();
+        if (sinkId.empty())
+            return;
+
         bool exists = false;
-        for (auto& participant : confInfo_) {
-            if (participant.sinkId == sinkId) {
-                exists = true;
-                break;
+        {
+            std::lock_guard<std::mutex> lk(confInfoMutex_);
+            auto hasSink = [&sinkId](const auto& p) {
+                return p.sinkId == sinkId;
+            };
+            exists = std::any_of(confInfo_.begin(), confInfo_.end(), hasSink);
+            if (!exists) {
+                for (const auto& [_, remoteConfInfo] : remoteHosts_) {
+                    if (std::any_of(remoteConfInfo.begin(), remoteConfInfo.end(), hasSink)) {
+                        exists = true;
+                        break;
+                    }
+                }
             }
         }
 
         if (!exists) {
             SIP_CORE_ERR("participant not found with streamId: %s", sinkId.c_str());
-            continue;
+            return;
         }
 
         auto previousState = isVoiceActive(sinkId);
 
         if (previousState == state) {
             // no change, do not send out updates
-            continue;
+            return;
         }
 
         if (state and not previousState) {
             // voice going from inactive to active
             streamsVoiceActive.emplace(sinkId);
             needsUpdate = true;
-            continue;
+            return;
         }
 
         if (not state and previousState) {
             // voice going from active to inactive
             streamsVoiceActive.erase(sinkId);
             needsUpdate = true;
-            continue;
+            return;
         }
+    };
+
+    bool needsUpdate = false;
+    if (json.isArray()) {
+        for (const auto& participantInfo : json)
+            applyVoiceState(participantInfo, needsUpdate);
+    } else if (json.isObject() && json.isMember("p") && json["p"].isArray()) {
+        for (const auto& participantInfo : json["p"])
+            applyVoiceState(participantInfo, needsUpdate);
+    } else if (json.isObject()) {
+        applyVoiceState(json, needsUpdate);
     }
 
-    if(needsUpdate) {
+    if (needsUpdate)
         updateVoiceActivity();
-    }
 }
 
 void
-Conference::setModerator(const std::string& participant_id, const bool& state)
+Conference::setVoiceInactiveHoldMs(int holdMs)
 {
+#ifdef ENABLE_VIDEO
+    if (videoMixer_)
+        videoMixer_->setVoiceInactiveHoldMs(holdMs);
+#else
+    (void) holdMs;
+#endif
+}
+
+void
+Conference::setModerator(const std::string& participant_uri, const bool& state)
+{
+    const auto participant_id = std::string(sip_utils::stripSipUriPrefix(participant_uri));
     for (const auto& p : getParticipantList()) {
         if (auto call = getCall(p)) {
             auto isPeerModerator = isModerator(participant_id);
@@ -1318,19 +1967,27 @@ Conference::setModerator(const std::string& participant_id, const bool& state)
 void
 Conference::updateModerators()
 {
-    std::lock_guard<std::mutex> lk(confInfoMutex_);
-    for (auto& info : confInfo_) {
-        info.isModerator = isModerator(string_remove_suffix(info.uri, '@'));
+    {
+        std::lock_guard<std::mutex> lk(confInfoMutex_);
+        for (auto& info : confInfo_) {
+            info.isModerator = isModerator(sip_utils::stripSipUriPrefix(info.uri));
+        }
     }
+    // Call sendConferenceInfos() outside the lock to avoid deadlocks
+    // since it iterates calls and may acquire other locks
     sendConferenceInfos();
 }
 
 void
 Conference::updateHandsRaised()
 {
-    std::lock_guard<std::mutex> lk(confInfoMutex_);
-    for (auto& info : confInfo_)
-        info.handRaised = isHandRaised(info.device);
+    {
+        std::lock_guard<std::mutex> lk(confInfoMutex_);
+        for (auto& info : confInfo_)
+            info.handRaised = info.uri.empty() ? isHandRaised("host"sv)
+                                               : isHandRaised(info.callId);
+    }
+    // Call sendConferenceInfos() outside the lock to avoid deadlocks
     sendConferenceInfos();
 }
 
@@ -1356,19 +2013,24 @@ Conference::updateVoiceActivity()
             }
 
             participantInfo.voiceActivity = newActivity;
+            voiceStates[participantInfo.sinkId] = participantInfo.voiceActivity;
         }
-        for (auto p : confInfo_) {
-            voiceStates[p.sinkId] = p.voiceActivity;
+
+        for (auto& [_, remoteConfInfo] : remoteHosts_) {
+            for (auto& participantInfo : remoteConfInfo) {
+                participantInfo.voiceActivity = isVoiceActive(participantInfo.sinkId);
+                voiceStates[participantInfo.sinkId] = participantInfo.voiceActivity;
+            }
         }
     }
+    // NOTE: All operations below are done OUTSIDE the confInfoMutex_ lock
+    // to avoid deadlocks with video mixer and call mutexes
 
     if (videoMixer_)
         videoMixer_->setVoiceActivity(std::move(voiceStates));
 
-    {
-        std::lock_guard<std::mutex> lk(confInfoMutex_);
-        sendVoiceActivity(); // also emits signal to client
-    }
+    // sendVoiceActivity() iterates calls and emits signals, do NOT hold confInfoMutex_
+    sendVoiceActivity();
 }
 
 void
@@ -1388,13 +2050,28 @@ Conference::isMuted(std::string_view callId) const
 void
 Conference::muteStream(const std::string& accountUri,
                        const std::string& deviceId,
-                       const std::string&,
+                       const std::string& streamId,
                        const bool& state)
 {
     if (auto acc = std::dynamic_pointer_cast<SIPAccount>(account_.lock())) {
-        if (accountUri == acc->getUsername()) {
+        const auto uri = std::string(sip_utils::stripSipUriPrefix(accountUri));
+        if (uri == acc->getUsername()
+            || (uri.empty() && streamId.rfind("host_", 0) == 0)) {
             muteHost(state);
-        } else if (auto call = getCallWith(accountUri, deviceId)) {
+            return;
+        }
+        // Participant streams are "<callId>_<label>" — the call id embedded
+        // in the stream id is the only unique addressing over plain SIP
+        // (device ids are empty, peer numbers may be duplicated, D7).
+        for (const auto& p : getParticipantList()) {
+            if (!streamId.empty() && streamId.rfind(p + "_", 0) == 0) {
+                muteCall(p, state);
+                return;
+            }
+        }
+        if (auto call = getCallWith(uri, deviceId)) {
+            muteCall(call->getCallId(), state);
+        } else if (auto call = getCallFromPeerID(uri)) {
             muteCall(call->getCallId(), state);
         } else {
             SIP_CORE_WARN("No call with %s - %s", accountUri.c_str(), deviceId.c_str());
@@ -1411,6 +2088,12 @@ Conference::muteHost(bool state)
         if (not isMediaSourceMuted(MediaType::MEDIA_AUDIO)) {
             SIP_CORE_DBG("Mute host");
             unbindHost();
+        } else {
+            // Bindings already severed by muteLocalHost(); make sure the
+            // data-plane mic filter is set regardless.
+            auto& rbPool = Manager::instance().getRingBufferPool();
+            for (const auto& item : getParticipantList())
+                rbPool.setMicMuted(item, true);
         }
     } else if (not state and isHostMuted) {
         participantsMuted_.erase("host");
@@ -1418,6 +2101,8 @@ Conference::muteHost(bool state)
             SIP_CORE_DBG("Unmute host");
             bindHost();
         }
+        // When the media source is still muted, keep the filter set; it is
+        // cleared by bindHost() once muteLocalHost(false) runs.
     }
     updateMuted();
 }
@@ -1437,6 +2122,51 @@ Conference::muteCall(const std::string& callId, bool state)
         bindParticipant(callId);
         updateMuted();
     }
+}
+
+void
+Conference::muteLocalPlayback(bool muted)
+{
+    if (localPlaybackMuted_ == muted) {
+        SIP_CORE_DEBUG("Re-applying local conference playback state %s for %s",
+                       muted ? "muted" : "un-muted",
+                       id_.c_str());
+    } else {
+        SIP_CORE_INFO("Set local conference playback to %s for %s",
+                      muted ? "muted" : "un-muted",
+                      id_.c_str());
+    }
+    localPlaybackMuted_ = muted;
+
+    // Primary mute mechanism: tell the ring buffer pool to skip these
+    // participants when mixing audio for the local speaker (DEFAULT_ID).
+    // This is race-proof — no async re-bind can override it.
+    auto& rbPool = Manager::instance().getRingBufferPool();
+    const auto participants = getParticipantList();
+    for (const auto& participantId : participants)
+        rbPool.setLocalPlaybackMuted(participantId, muted);
+
+    if (getState() != State::ACTIVE_ATTACHED)
+        return;
+
+    // Secondary: also adjust bindings for correctness when unmuting.
+    const bool hostAudioMuted = isMediaSourceMuted(MediaType::MEDIA_AUDIO) or isMuted("host"sv);
+    for (const auto& participantId : participants) {
+        // Authoritatively recompute the data-plane mic filter on every
+        // transition; the bindings below are a routing optimization only.
+        rbPool.setMicMuted(participantId, hostAudioMuted);
+        rbPool.unBindHalfDuplexOut(RingBufferPool::DEFAULT_ID, participantId);
+        if (!muted && !isMuted(participantId)) {
+            if (hostAudioMuted)
+                rbPool.bindHalfDuplexOut(RingBufferPool::DEFAULT_ID, participantId);
+            else
+                rbPool.bindCallID(participantId, RingBufferPool::DEFAULT_ID);
+        }
+
+        rbPool.flush(participantId);
+    }
+
+    rbPool.flush(RingBufferPool::DEFAULT_ID);
 }
 
 void
@@ -1473,42 +2203,102 @@ Conference::muteParticipant(const std::string& participant_id, const bool& state
 void
 Conference::updateRecording()
 {
-    std::lock_guard<std::mutex> lk(confInfoMutex_);
-    for (auto& info : confInfo_) {
-        if (info.uri.empty()) {
-            info.recording = isRecording();
-        } else if (auto call = getCallWith(std::string(string_remove_suffix(info.uri, '@')),
-                                           info.device)) {
-            info.recording = call->isPeerRecording();
+    {
+        std::lock_guard<std::mutex> lk(confInfoMutex_);
+        for (auto& info : confInfo_) {
+            if (info.uri.empty()) {
+                info.recording = isRecording();
+            } else if (auto call = getCallWith(std::string(string_remove_suffix(info.uri, '@')),
+                                               info.device)) {
+                info.recording = call->isPeerRecording();
+            }
         }
     }
+    // Call sendConferenceInfos() outside the lock to avoid deadlocks
     sendConferenceInfos();
 }
 
 void
 Conference::updateMuted()
 {
-    std::lock_guard<std::mutex> lk(confInfoMutex_);
-    for (auto& info : confInfo_) {
-        if (info.uri.empty()) {
-            info.audioModeratorMuted = isMuted("host"sv);
-            info.audioLocalMuted = isMediaSourceMuted(MediaType::MEDIA_AUDIO);
-        } else if (auto call = getCallWith(std::string(string_remove_suffix(info.uri, '@')),
-                                           info.device)) {
-            info.audioModeratorMuted = isMuted(call->getCallId());
-            info.audioLocalMuted = call->isPeerMuted();
+    // Collect mute state from call objects OUTSIDE confInfoMutex_ to avoid
+    // deadlocks with callMutex_ (getCallWith/isPeerMuted may interact with
+    // call-level locks that are also acquired by sendConferenceInfos path).
+    struct MuteState {
+        std::string uri;   // stripped, without '@'
+        std::string device;
+        std::string callId;
+        bool audioModeratorMuted {false};
+        bool audioLocalMuted {false};
+    };
+    std::vector<MuteState> callStates;
+
+    // Step 1: snapshot URI/device pairs under the lock (cheap, no call access)
+    {
+        std::lock_guard<std::mutex> lk(confInfoMutex_);
+        for (const auto& info : confInfo_) {
+            if (!info.uri.empty()) {
+                callStates.push_back(
+                    {std::string(string_remove_suffix(info.uri, '@')), info.device, {}, false, false});
+            }
         }
     }
+
+    // Step 2: query call objects outside the lock
+    for (auto& st : callStates) {
+        if (auto call = getCallWith(st.uri, st.device)) {
+            st.callId = call->getCallId();
+            st.audioModeratorMuted = isMuted(st.callId);
+            st.audioLocalMuted = call->isPeerMuted();
+        }
+    }
+
+    // Step 3: apply collected data back under the lock
+    {
+        std::lock_guard<std::mutex> lk(confInfoMutex_);
+        for (auto& info : confInfo_) {
+            if (info.uri.empty()) {
+                info.audioModeratorMuted = isMuted("host"sv);
+                info.audioLocalMuted = isMediaSourceMuted(MediaType::MEDIA_AUDIO);
+            } else {
+                auto stripped = std::string(string_remove_suffix(info.uri, '@'));
+                auto it = std::find_if(callStates.begin(), callStates.end(),
+                    [&](const MuteState& s) {
+                        return s.uri == stripped && s.device == info.device;
+                    });
+                if (it != callStates.end() && !it->callId.empty()) {
+                    info.audioModeratorMuted = it->audioModeratorMuted;
+                    info.audioLocalMuted = it->audioLocalMuted;
+                }
+            }
+        }
+    }
+    // Call sendConferenceInfos() outside the lock to avoid deadlocks
     sendConferenceInfos();
 }
 
 ConfInfo
 Conference::getConfInfoHostUri(std::string_view localHostURI, std::string_view destURI)
 {
+    std::lock_guard<std::mutex> lk(confInfoMutex_);
     ConfInfo newInfo = confInfo_;
 
     for (auto it = newInfo.begin(); it != newInfo.end();) {
         bool isRemoteHost = remoteHosts_.find(it->uri) != remoteHosts_.end();
+        // Per-destination self-marker: the row whose uri is the host's view of
+        // the destination leg is the recipient's own row — both sides originate
+        // from call->getPeerNumber(), compared as user-parts like every other
+        // identity check here. Clients cannot derive this themselves: their
+        // local Account.username is a login (e.g. n.plaksin) that never matches
+        // a dialed extension (<sip:3084@...>). Stamped from the ORIGINAL uri,
+        // BEFORE the empty-uri host fill below: the host's own row must never
+        // match a destination even when the destination is another device of
+        // the host's own account (username@server would strip to the same
+        // user-part). Unconditional, so the local emission (destURI empty)
+        // clears any stale flag instead of skipping.
+        it->isMe = not destURI.empty() and not it->uri.empty()
+                   and sip_utils::stripSipUriPrefix(it->uri)
+                           == sip_utils::stripSipUriPrefix(destURI);
         if (it->uri.empty() and not destURI.empty()) {
             // fill the empty uri with the local host URI, let void for local client
             it->uri = localHostURI;
@@ -1528,8 +2318,14 @@ Conference::getConfInfoHostUri(std::string_view localHostURI, std::string_view d
         // ConfA send ConfA and ConfB for ConfC
         // ConfA send ConfA and ConfC for ConfB
         // ...
-        if (destURI != hostUri)
-            newInfo.insert(newInfo.end(), confInfo.begin(), confInfo.end());
+        if (destURI != hostUri) {
+            auto inserted = newInfo.insert(newInfo.end(), confInfo.begin(), confInfo.end());
+            // Never forward another host's isMe stamps: they were computed for
+            // ITS destinations (fromJson ingests "me", so merged rows may carry
+            // one), and on our local emission they would leak a stale me=true.
+            for (auto it = inserted; it != newInfo.end(); ++it)
+                it->isMe = false;
+        }
     }
     return newInfo;
 }
@@ -1569,24 +2365,22 @@ Conference::isHost(std::string_view uri) const
     return false;
 }
 
-bool
-Conference::isHostDevice(std::string_view deviceId) const
-{
-    return false;
-}
-
 void
 Conference::updateConferenceInfo(ConfInfo confInfo)
 {
-    std::lock_guard<std::mutex> lk(confInfoMutex_);
-    confInfo_ = std::move(confInfo);
+    {
+        std::lock_guard<std::mutex> lk(confInfoMutex_);
+        confInfo_ = std::move(confInfo);
+    }
+    // Call sendConferenceInfos() outside the lock to avoid deadlocks
     sendConferenceInfos();
 }
 
 void
-Conference::hangupParticipant(const std::string& accountUri, const std::string& deviceId)
+Conference::hangupParticipant(const std::string& participantUri, const std::string& deviceId)
 {
     if (auto acc = std::dynamic_pointer_cast<SIPAccount>(account_.lock())) {
+        const auto accountUri = std::string(sip_utils::stripSipUriPrefix(participantUri));
         if (deviceId.empty()) {
             // If deviceId is empty, hangup all calls with device
             while (auto call = getCallFromPeerID(accountUri)) {
@@ -1622,19 +2416,30 @@ void
 Conference::muteLocalHost(bool is_muted, const std::string& mediaType)
 {
     if (mediaType.compare(libsip_core::Media::Details::MEDIA_TYPE_AUDIO) == 0) {
-        if (is_muted == isMediaSourceMuted(MediaType::MEDIA_AUDIO)) {
+        const bool attached = getState() == State::ACTIVE_ATTACHED;
+        if (attached and is_muted == isMediaSourceMuted(MediaType::MEDIA_AUDIO)) {
             SIP_CORE_DEBUG("Local audio source already in [{:s}] state",
                            is_muted ? "muted" : "un-muted");
             return;
         }
 
         auto isHostMuted = isMuted("host"sv);
-        if (is_muted and not isMediaSourceMuted(MediaType::MEDIA_AUDIO) and not isHostMuted) {
-            SIP_CORE_DBG("Muting local audio source");
-            unbindHost();
-        } else if (not is_muted and isMediaSourceMuted(MediaType::MEDIA_AUDIO) and not isHostMuted) {
-            SIP_CORE_DBG("Un-muting local audio source");
-            bindHost();
+        if (attached and not isHostMuted) {
+            if (is_muted) {
+                SIP_CORE_DBG("Muting local audio source");
+                unbindHost();
+            } else {
+                SIP_CORE_DBG("Un-muting local audio source");
+                bindHost();
+            }
+        } else if (not attached) {
+            // Not attached (e.g. mute requested between ConferenceCreated and
+            // attachLocalParticipant): there are no host bindings to adjust,
+            // but record the data-plane filter so the mute survives the
+            // attach regardless of the bindings it sets up.
+            auto& rbPool = Manager::instance().getRingBufferPool();
+            for (const auto& item : getParticipantList())
+                rbPool.setMicMuted(item, is_muted);
         }
         setLocalHostMuteState(MediaType::MEDIA_AUDIO, is_muted);
         updateMuted();
@@ -1657,11 +2462,18 @@ Conference::muteLocalHost(bool is_muted, const std::string& mediaType)
             if (auto mixer = videoMixer_) {
                 SIP_CORE_DBG("Muting local video sources");
                 mixer->muteInputs(true);
+                // No audio-only placeholder needed here: the muted video
+                // source stays in sources_ and already renders black frames.
             }
         } else {
             if (auto mixer = videoMixer_) {
                 SIP_CORE_DBG("Un-muting local video sources");
                 mixer->muteInputs(false);
+                // Remove the host audio-only placeholder since the real video
+                // source is now rendering.
+                mixer->removeAudioOnlySource(
+                    "",
+                    sip_utils::streamId("", sip_utils::DEFAULT_VIDEO_STREAMID));
             }
         }
         emitSignal<libsip_core::CallSignal::VideoMuted>(id_, is_muted);
@@ -1702,10 +2514,13 @@ Conference::resizeRemoteParticipants(ConfInfo& confInfo, std::string_view peerUR
 
     // get the size of the local frame
     ParticipantInfo localCell;
-    for (const auto& p : confInfo_) {
-        if (p.uri == peerURI) {
-            localCell = p;
-            break;
+    {
+        std::lock_guard<std::mutex> lk(confInfoMutex_);
+        for (const auto& p : confInfo_) {
+            if (p.uri == peerURI) {
+                localCell = p;
+                break;
+            }
         }
     }
 
@@ -1726,8 +2541,11 @@ Conference::mergeConfInfo(ConfInfo& newInfo, const std::string& peerURI)
 {
     if (newInfo.empty()) {
         SIP_CORE_DBG("confInfo empty, remove remoteHost");
-        std::lock_guard<std::mutex> lk(confInfoMutex_);
-        remoteHosts_.erase(peerURI);
+        {
+            std::lock_guard<std::mutex> lk(confInfoMutex_);
+            remoteHosts_.erase(peerURI);
+        }
+        // Call sendConferenceInfos() outside the lock to avoid deadlocks
         sendConferenceInfos();
         return;
     }
@@ -1737,17 +2555,20 @@ Conference::mergeConfInfo(ConfInfo& newInfo, const std::string& peerURI)
 #endif
 
     bool updateNeeded = false;
-    auto it = remoteHosts_.find(peerURI);
-    if (it != remoteHosts_.end()) {
-        // Compare confInfo before update
-        if (it->second != newInfo) {
-            it->second = newInfo;
+    {
+        std::lock_guard<std::mutex> lk(confInfoMutex_);
+        auto it = remoteHosts_.find(peerURI);
+        if (it != remoteHosts_.end()) {
+            // Compare confInfo before update
+            if (it->second != newInfo) {
+                it->second = newInfo;
+                updateNeeded = true;
+            } else
+                SIP_CORE_WARN("No change in confInfo, don't update");
+        } else {
+            remoteHosts_.emplace(peerURI, newInfo);
             updateNeeded = true;
-        } else
-            SIP_CORE_WARN("No change in confInfo, don't update");
-    } else {
-        remoteHosts_.emplace(peerURI, newInfo);
-        updateNeeded = true;
+        }
     }
     // Send confInfo only if needed to avoid loops
 #ifdef ENABLE_VIDEO
@@ -1763,6 +2584,7 @@ Conference::mergeConfInfo(ConfInfo& newInfo, const std::string& peerURI)
 std::string_view
 Conference::findHostforRemoteParticipant(std::string_view uri, std::string_view deviceId)
 {
+    std::lock_guard<std::mutex> lk(confInfoMutex_);
     for (const auto& host : remoteHosts_) {
         for (const auto& p : host.second) {
             if (uri == string_remove_suffix(p.uri, '@') && (deviceId == "" || deviceId == p.device))
@@ -1775,6 +2597,7 @@ Conference::findHostforRemoteParticipant(std::string_view uri, std::string_view 
 std::shared_ptr<Call>
 Conference::getCallFromPeerID(std::string_view peerID)
 {
+    peerID = sip_utils::stripSipUriPrefix(peerID);
     for (const auto& p : getParticipantList()) {
         auto call = getCall(p);
         if (call && getRemoteId(call) == peerID) {
@@ -1787,11 +2610,15 @@ Conference::getCallFromPeerID(std::string_view peerID)
 std::shared_ptr<Call>
 Conference::getCallWith(const std::string& accountUri, const std::string& deviceId)
 {
+    // Strip both sides: confInfo publishes the raw peer number (possibly a
+    // full bracketed URI), so clients legitimately pass it back verbatim.
+    const auto uri = sip_utils::stripSipUriPrefix(accountUri);
     for (const auto& p : getParticipantList()) {
         if (auto call = std::dynamic_pointer_cast<SIPCall>(getCall(p))) {
             auto transport = call->getTransport();
-            if (accountUri == string_remove_suffix(call->getPeerNumber(), '@') && transport
-                && deviceId == transport->deviceId()) {
+            const auto callDeviceId = transport ? transport->deviceId() : std::string_view {};
+            if (uri == sip_utils::stripSipUriPrefix(call->getPeerNumber())
+                && deviceId == callDeviceId) {
                 return call;
             }
         }
@@ -1802,7 +2629,14 @@ Conference::getCallWith(const std::string& accountUri, const std::string& device
 std::string
 Conference::getRemoteId(const std::shared_ptr<sip_core::Call>& call) const
 {
-    return call->getCallId();
+    // The peer username (the user part of the peer URI) is the conference-
+    // protocol peer identity: it is what remote clients put as the account
+    // uri in confOrders and what the moderator preferences contain. Returning
+    // the call id here (as this used to) split the identity namespace and
+    // broke every uri-addressed action (specs/conference-actions.md, D5).
+    // getPeerNumber() may be a full bracketed URI ("<sip:009@dom>"), so the
+    // full stripper is required, not just the @domain suffix removal.
+    return std::string(sip_utils::stripSipUriPrefix(call->getPeerNumber()));
 }
 
 void
@@ -1823,6 +2657,7 @@ Conference::startRecording(const std::string& path)
 int
 Conference::getLayout() const
 {
+    std::lock_guard<std::mutex> lk(confInfoMutex_);
     return confInfo_.layout;
 }
 

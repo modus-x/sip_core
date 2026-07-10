@@ -207,6 +207,18 @@ AccountAudioCodecInfo::isPCMG722() const
     return systemCodecInfo.avcodecId == AV_CODEC_ID_ADPCM_G722;
 }
 
+bool
+AccountAudioCodecInfo::isG729() const
+{
+    return systemCodecInfo.avcodecId == AV_CODEC_ID_G729;
+}
+
+bool
+AccountAudioCodecInfo::isOpus() const
+{
+    return systemCodecInfo.avcodecId == AV_CODEC_ID_OPUS;
+}
+
 AccountVideoCodecInfo::AccountVideoCodecInfo(const SystemVideoCodecInfo& sysCodecInfo)
     : AccountCodecInfo(sysCodecInfo)
     , frameRate(sysCodecInfo.frameRate)
@@ -221,7 +233,7 @@ AccountVideoCodecInfo::getCodecSpecifications() const
              (systemCodecInfo.mediaType & MEDIA_AUDIO ? "AUDIO" : "VIDEO")},
             {libsip_core::Account::ConfProperties::CodecInfo::BITRATE, std::to_string(bitrate)},
             {libsip_core::Account::ConfProperties::CodecInfo::MAX_BITRATE,
-             std::to_string(systemCodecInfo.maxBitrate)},
+             std::to_string(userMaxBitrate ? userMaxBitrate : systemCodecInfo.maxBitrate)},
             {libsip_core::Account::ConfProperties::CodecInfo::MIN_BITRATE,
              std::to_string(systemCodecInfo.minBitrate)},
             {libsip_core::Account::ConfProperties::CodecInfo::QUALITY, std::to_string(quality)},
@@ -231,7 +243,9 @@ AccountVideoCodecInfo::getCodecSpecifications() const
              std::to_string(systemCodecInfo.minQuality)},
             {libsip_core::Account::ConfProperties::CodecInfo::FRAME_RATE, std::to_string(frameRate)},
             {libsip_core::Account::ConfProperties::CodecInfo::AUTO_QUALITY_ENABLED,
-             bool_to_str(isAutoQualityEnabled)}};
+             bool_to_str(isAutoQualityEnabled)},
+            {libsip_core::Account::ConfProperties::CodecInfo::SHARE_PREFERENCE,
+             sharePrefersMotion ? "motion" : "detail"}};
 }
 
 void
@@ -254,6 +268,22 @@ AccountVideoCodecInfo::setCodecSpecifications(const std::map<std::string, std::s
     it = details.find(libsip_core::Account::ConfProperties::CodecInfo::AUTO_QUALITY_ENABLED);
     if (it != details.end())
         copy.isAutoQualityEnabled = (it->second == TRUE_STR) ? true : false;
+
+    it = details.find(libsip_core::Account::ConfProperties::CodecInfo::MAX_BITRATE);
+    if (it != details.end()) {
+        unsigned cap = sip_core::stoi(it->second);
+        // Treat the system-wide maximum as "unset" so get->set round-trips
+        // keep the full adaptation range instead of latching the default.
+        if (cap == 0 or cap >= systemCodecInfo.maxBitrate)
+            copy.userMaxBitrate = 0;
+        else
+            copy.userMaxBitrate = cap > systemCodecInfo.minBitrate ? cap
+                                                                   : systemCodecInfo.minBitrate;
+    }
+
+    it = details.find(libsip_core::Account::ConfProperties::CodecInfo::SHARE_PREFERENCE);
+    if (it != details.end())
+        copy.sharePrefersMotion = (it->second == "motion");
 
     // copy back if no exception was raised
     *this = std::move(copy);

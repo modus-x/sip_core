@@ -2,7 +2,11 @@
 LIBVA_VERSION := 2.23.0
 LIBVA_URL := https://nexus.svetlocal.ru/repository/github-artifacts/libva-$(LIBVA_VERSION).tar.gz
 
+ifdef HAVE_LINUX
+ifndef HAVE_ANDROID
 PKGS += libva
+endif
+endif
 
 $(TARBALLS)/libva-$(LIBVA_VERSION).tar.gz:
 	$(call download,$(LIBVA_URL))

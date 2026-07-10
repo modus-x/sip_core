@@ -33,12 +33,12 @@
 #if HAVE_WEBRTC_AP
 #include "audio-processing/webrtc.h"
 #endif
-#if HAVE_SPEEXDSP
-#include "audio-processing/speex.h"
-#endif
+
+#include "libav_deps.h"
 
 #include <ctime>
 #include <algorithm>
+#include <limits>
 
 namespace sip_core {
 
@@ -54,6 +54,8 @@ AudioLayer::AudioLayer(const AudioPreference& pref)
     , audioInputFormat_(Manager::instance().getRingBufferPool().getInternalAudioFormat())
     , urgentRingBuffer_("urgentRingBuffer_id", SIZEBUF, audioFormat_)
     , resampler_(new Resampler)
+    , toneResampler_(new Resampler)
+    , vadSensitivity_(pref.getVoiceActivitySensitivity())
     , lastNotificationTime_()
 {
     urgentRingBuffer_.createReadOffset(RingBufferPool::DEFAULT_ID);
@@ -89,6 +91,13 @@ void
 AudioLayer::devicesChanged()
 {
     emitSignal<libsip_core::AudioSignal::DeviceEvent>();
+#ifdef ENABLE_VIDEO
+    // Also emit VideoSignal::DeviceEvent so the Dart side (which only listens
+    // to video device events) is notified about audio device changes too.
+    emitSignal<libsip_core::VideoSignal::DeviceEvent>();
+#endif
+    // Restart audio senders for active calls so they pick up the new device
+    runOnMainThread([]() { Manager::instance().onAudioDevicesChanged(); });
 }
 
 void
@@ -193,13 +202,7 @@ AudioLayer::createAudioProcessor()
 
     AudioFormat formatForProcessor {sample_rate, nb_channels};
 
-    unsigned int frame_size;
-    if (pref_.getAudioProcessor() == "speex") {
-        // TODO: maybe force this to be equivalent to 20ms? as expected by speex
-        frame_size = sample_rate / 50u;
-    } else {
-        frame_size = sample_rate / 100u;
-    }
+    unsigned int frame_size = sample_rate / 100u;
 
     SIP_CORE_WARN("Input {%d Hz, %d channels}",
                   audioInputFormat_.sample_rate,
@@ -218,15 +221,6 @@ AudioLayer::createAudioProcessor()
                                                       pref_.getWebRtcParams().experimentalNs));
 #else
         SIP_CORE_ERR("[audiolayer] audioProcessor preference is webrtc, but library not linked! "
-                     "using NullAudioProcessor instead");
-        audioProcessor.reset(new NullAudioProcessor(formatForProcessor, frame_size));
-#endif
-    } else if (pref_.getAudioProcessor() == "speex") {
-#if HAVE_SPEEXDSP
-        SIP_CORE_WARN("[audiolayer] using SpeexAudioProcessor");
-        audioProcessor.reset(new SpeexAudioProcessor(formatForProcessor, frame_size));
-#else
-        SIP_CORE_ERR("[audiolayer] audioProcessor preference is speex, but library not linked! "
                      "using NullAudioProcessor instead");
         audioProcessor.reset(new NullAudioProcessor(formatForProcessor, frame_size));
 #endif
@@ -249,6 +243,7 @@ AudioLayer::createAudioProcessor()
         shouldUseAudioProcessorEchoCancel(hasNativeAEC_, pref_.getEchoCanceller()));
 
     audioProcessor->enableVoiceActivityDetection(pref_.getVadEnabled());
+    applyVadSensitivityLocked();
 
     if (pref_.getAudioProcessor() == "webrtc") {
 #if HAVE_WEBRTC_AP
@@ -264,6 +259,27 @@ AudioLayer::destroyAudioProcessor()
 {
     // delete it
     audioProcessor.reset();
+}
+
+int
+AudioLayer::clampVadSensitivity(int32_t sensitivity)
+{
+    if (sensitivity < 0)
+        return 0;
+    if (sensitivity > 3)
+        return 3;
+    return static_cast<int>(sensitivity);
+}
+
+void
+AudioLayer::applyVadSensitivityLocked()
+{
+#if HAVE_WEBRTC_AP
+    if (pref_.getAudioProcessor() == "webrtc" && audioProcessor) {
+        if (auto* webRtc = dynamic_cast<WebRTCAudioProcessor*>(audioProcessor.get()))
+            webRtc->setVadSensitivity(vadSensitivity_);
+    }
+#endif
 }
 
 void
@@ -303,6 +319,7 @@ AudioLayer::notifyIncomingCall()
     putUrgent(buf);
 }
 
+
 std::shared_ptr<AudioFrame>
 AudioLayer::getToRing(AudioFormat format, size_t writableSamples)
 {
@@ -324,6 +341,56 @@ AudioLayer::getToRing(AudioFormat format, size_t writableSamples)
     return {};
 }
 
+// Mix ringback tone audio into call/conference audio in-place.
+// Handles frames of potentially different lengths by mixing only up
+// to the shorter frame's sample count; extra call samples are kept as-is.
+static void
+mixToneIntoCallFrame(const std::shared_ptr<AudioFrame>& callFrame,
+                     const std::shared_ptr<AudioFrame>& toneFrame)
+{
+    auto* cf = callFrame->pointer();
+    auto* tf = toneFrame->pointer();
+
+    if (cf->format != tf->format
+        || cf->ch_layout.nb_channels != tf->ch_layout.nb_channels
+        || cf->sample_rate != tf->sample_rate)
+        return;
+
+    int mixSamples = std::min(cf->nb_samples, tf->nb_samples);
+    if (mixSamples <= 0)
+        return;
+
+    av_frame_make_writable(cf);
+
+    AVSampleFormat fmt = static_cast<AVSampleFormat>(cf->format);
+    bool isPlanar = av_sample_fmt_is_planar(fmt);
+    unsigned samplesPerChannel = isPlanar
+                                     ? static_cast<unsigned>(mixSamples)
+                                     : static_cast<unsigned>(mixSamples) * cf->ch_layout.nb_channels;
+    unsigned channels = isPlanar ? static_cast<unsigned>(cf->ch_layout.nb_channels) : 1u;
+
+    if (fmt == AV_SAMPLE_FMT_S16 || fmt == AV_SAMPLE_FMT_S16P) {
+        for (unsigned ch = 0; ch < channels; ++ch) {
+            auto* c = reinterpret_cast<int16_t*>(cf->extended_data[ch]);
+            auto* t = reinterpret_cast<const int16_t*>(tf->extended_data[ch]);
+            for (unsigned s = 0; s < samplesPerChannel; ++s) {
+                c[s] = static_cast<int16_t>(
+                    std::clamp(static_cast<int32_t>(c[s]) + static_cast<int32_t>(t[s]),
+                               static_cast<int32_t>(std::numeric_limits<int16_t>::min()),
+                               static_cast<int32_t>(std::numeric_limits<int16_t>::max())));
+            }
+        }
+    } else if (fmt == AV_SAMPLE_FMT_FLT || fmt == AV_SAMPLE_FMT_FLTP) {
+        for (unsigned ch = 0; ch < channels; ++ch) {
+            auto* c = reinterpret_cast<float*>(cf->extended_data[ch]);
+            auto* t = reinterpret_cast<const float*>(tf->extended_data[ch]);
+            for (unsigned s = 0; s < samplesPerChannel; ++s) {
+                c[s] += t[s];
+            }
+        }
+    }
+}
+
 std::shared_ptr<AudioFrame>
 AudioLayer::getToPlay(AudioFormat format, size_t writableSamples)
 {
@@ -342,18 +409,33 @@ AudioLayer::getToPlay(AudioFormat format, size_t writableSamples)
         if (auto urgentSamples = urgentRingBuffer_.get(RingBufferPool::DEFAULT_ID)) {
             bufferPool.discard(1, RingBufferPool::DEFAULT_ID);
             resampled = resampler_->resample(std::move(urgentSamples), format);
-        } else if (auto toneToPlay = Manager::instance().getTelephoneTone()) {
-            resampled = resampler_->resample(toneToPlay->getNext(), format);
-        } else if (auto buf = bufferPool.getData(RingBufferPool::DEFAULT_ID)) {
-            resampled = resampler_->resample(std::move(buf), format);
         } else {
-            std::lock_guard<std::mutex> lock(audioProcessorMutex);
-            if (audioProcessor) {
-                auto silence = std::make_shared<AudioFrame>(format, writableSamples);
-                libav_utils::fillWithSilence(silence->pointer());
-                audioProcessor->putPlayback(silence);
+            // Fetch tone and call audio independently so they can be mixed
+            std::shared_ptr<AudioFrame> toneFrame;
+            std::shared_ptr<AudioFrame> callFrame;
+
+            if (auto toneToPlay = Manager::instance().getTelephoneTone())
+                toneFrame = toneResampler_->resample(toneToPlay->getNext(), format);
+
+            if (auto buf = bufferPool.getData(RingBufferPool::DEFAULT_ID))
+                callFrame = resampler_->resample(std::move(buf), format);
+
+            if (toneFrame && callFrame) {
+                mixToneIntoCallFrame(callFrame, toneFrame);
+                resampled = std::move(callFrame);
+            } else if (toneFrame) {
+                resampled = std::move(toneFrame);
+            } else if (callFrame) {
+                resampled = std::move(callFrame);
+            } else {
+                std::lock_guard<std::mutex> lock(audioProcessorMutex);
+                if (audioProcessor) {
+                    auto silence = std::make_shared<AudioFrame>(format, writableSamples);
+                    libav_utils::fillWithSilence(silence->pointer());
+                    audioProcessor->putPlayback(silence);
+                }
+                break;
             }
-            break;
         }
 
         if (resampled) {
@@ -362,7 +444,6 @@ AudioLayer::getToPlay(AudioFormat format, size_t writableSamples)
 #if defined(_WIN32) || defined(__linux__)
             adjustVolume(resampled, true);
 #endif
-
             if (audioProcessor) {
                 audioProcessor->putPlayback(resampled);
             }
@@ -443,6 +524,14 @@ AudioLayer::setWebRtcParams(const libsip_core::WebRtcParams params)
         webRtc->setWebRtcParams(params);
     }
 #endif
+}
+
+void
+AudioLayer::setVadSensitivity(int32_t sensitivity)
+{
+    std::lock_guard<std::mutex> lock(audioProcessorMutex);
+    vadSensitivity_ = clampVadSensitivity(sensitivity);
+    applyVadSensitivityLocked();
 }
 
 } // namespace sip_core

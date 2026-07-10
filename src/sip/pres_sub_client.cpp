@@ -237,6 +237,7 @@ PresSubClient::pres_client_evsub_on_state(pjsip_evsub* sub, pjsip_event* event)
     /* Clear subscription */
     if (pjsip_evsub_get_state(sub) == PJSIP_EVSUB_STATE_TERMINATED) {
         pjsip_evsub_terminate(pres_client->sub_, PJ_FALSE); // = NULL;
+        pres_client->sub_ = NULL;
         pres_client->status_.info_cnt = 0;
         pres_client->dlg_ = NULL;
         pres_client->rescheduleTimer(PJ_FALSE, 0);
@@ -356,6 +357,7 @@ PresSubClient::PresSubClient(const std::string& uri, SIPPresence* pres)
     , pool_(0)
     , status_()
     , sub_(NULL)
+    , desired_(true)
     , term_code_(0)
     , term_reason_()
     , timer_()
@@ -372,8 +374,7 @@ PresSubClient::PresSubClient(const std::string& uri, SIPPresence* pres)
 PresSubClient::~PresSubClient()
 {
     SIP_CORE_DBG("Destroying pres_client object with uri %.*s", (int) uri_.slen, uri_.ptr);
-    rescheduleTimer(PJ_FALSE, 0);
-    unsubscribe();
+    invalidateDialog("destroy", false, false);
     pj_pool_release(pool_);
 }
 
@@ -381,6 +382,49 @@ bool
 PresSubClient::isSubscribed()
 {
     return monitored_;
+}
+
+void
+PresSubClient::refreshContact(const std::string& contactHeader)
+{
+    contact_ = pj_strdup3(pool_, contactHeader.c_str());
+}
+
+void
+PresSubClient::invalidateDialog(const char* reason,
+                                bool preserveDesired,
+                                bool emitStateSignal)
+{
+    SIP_CORE_WARN("Invalidating presence subscription %.*s locally (%s)",
+                  (int) getURI().size(),
+                  getURI().data(),
+                  reason ? reason : "unspecified");
+
+    rescheduleTimer(PJ_FALSE, 0);
+
+    if (!preserveDesired)
+        desired_ = false;
+
+    if (sub_) {
+        pjsip_evsub_set_mod_data(sub_, modId_, NULL);
+        pjsip_evsub_terminate(sub_, PJ_FALSE);
+    }
+
+    sub_ = NULL;
+    dlg_ = NULL;
+    monitored_ = false;
+    status_.info_cnt = 0;
+    term_code_ = 0;
+    term_reason_.ptr = NULL;
+    term_reason_.slen = 0;
+
+    if (emitStateSignal) {
+        emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(
+            pres_->getAccount()->getAccountID(),
+            std::string(getURI()),
+            "presence",
+            PJ_FALSE);
+    }
 }
 
 std::string_view
@@ -525,27 +569,22 @@ PresSubClient::unsubscribe()
     pjsip_tx_data* tdata;
     pj_status_t retStatus;
 
-    if (sub_ == NULL or dlg_ == NULL) {
-        SIP_CORE_WARN("PresSubClient already unsubscribed.");
+    auto* account = pres_->getAccount();
+    const bool shouldInvalidateLocally = sub_ == NULL || dlg_ == NULL
+                                         || account->isTransportRecoveryActive()
+                                         || !account->getTransport();
+    if (shouldInvalidateLocally
+        || pjsip_evsub_get_state(sub_) == PJSIP_EVSUB_STATE_TERMINATED) {
+        if (shouldInvalidateLocally) {
+            SIP_CORE_WARN("PresSubClient unsubscribe is using local cleanup for %.*s",
+                          (int) getURI().size(),
+                          getURI().data());
+        } else {
+            SIP_CORE_WARN("pres_client already unsubscribed sub=TERMINATED.");
+        }
         unlock();
-        emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(pres_->getAccount()
-                                                                              ->getAccountID(),
-                                                                          std::string(getURI()),
-                                                                          "presence",
-                                                                          PJ_FALSE);
-        return false;
-    }
-
-    if (pjsip_evsub_get_state(sub_) == PJSIP_EVSUB_STATE_TERMINATED) {
-        emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(pres_->getAccount()
-                                                                              ->getAccountID(),
-                                                                          std::string(getURI()),
-                                                                          "presence",
-                                                                          PJ_FALSE);
-        SIP_CORE_WARN("pres_client already unsubscribed sub=TERMINATED.");
-        sub_ = NULL;
-        unlock();
-        return false;
+        invalidateDialog("unsubscribe-local", true, true);
+        return true;
     }
 
     /* Unsubscribe means send a subscribe with timeout=0s*/
@@ -560,10 +599,9 @@ PresSubClient::unsubscribe()
     }
 
     if (retStatus != PJ_SUCCESS and sub_) {
-        pjsip_pres_terminate(sub_, PJ_FALSE);
-        sub_ = NULL;
         SIP_CORE_WARN("Unable to unsubscribe presence (%d)", retStatus);
         unlock();
+        invalidateDialog("unsubscribe-send-failed", true, true);
         return false;
     }
 
@@ -576,11 +614,11 @@ PresSubClient::unsubscribe()
 bool
 PresSubClient::subscribe()
 {
-    if (sub_ and dlg_) { // do not bother if already subscribed
-        pjsip_evsub_terminate(sub_, PJ_FALSE);
-        SIP_CORE_DBG("PreseSubClient %.*s: already subscribed. Refresh it.",
+    if (sub_ || dlg_) {
+        SIP_CORE_DBG("PreseSubClient %.*s: resetting stale dialog before subscribe retry.",
                      (int) uri_.slen,
                      uri_.ptr);
+        invalidateDialog("subscribe-refresh", true, false);
     }
 
     // subscribe
@@ -596,6 +634,19 @@ PresSubClient::subscribe()
 
     SIPAccount* acc = pres_->getAccount();
     SIP_CORE_DBG("PresSubClient %.*s: subscribing ", (int) uri_.slen, uri_.ptr);
+
+    if (acc->isTransportRecoveryActive() || !acc->getTransport()
+        || acc->getRegistrationState() != RegistrationState::REGISTERED) {
+        acc->needsResubscribe_.store(true);
+        SIP_CORE_WARN("Deferring presence subscription %.*s until account is REGISTERED "
+                      "(transportRecovery=%d, hasTransport=%d, regState=%d)",
+                      (int) getURI().size(),
+                      getURI().data(),
+                      acc->isTransportRecoveryActive() ? 1 : 0,
+                      acc->getTransport() ? 1 : 0,
+                      static_cast<int>(acc->getRegistrationState()));
+        return false;
+    }
 
     /* Create UAC dialog */
     pj_str_t from = pj_strdup3(pool_, acc->getFromUri().c_str());
@@ -643,6 +694,7 @@ PresSubClient::subscribe()
         if (dlg_) {
             pjsip_dlg_dec_lock(dlg_);
         }
+        dlg_ = NULL;
         return false;
     }
 
@@ -658,6 +710,7 @@ PresSubClient::subscribe()
         if (dlg_) {
             pjsip_dlg_dec_lock(dlg_);
         }
+        dlg_ = NULL;
         emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(pres_->getAccount()
                                                                               ->getAccountID(),
                                                                           std::string(getURI()),
@@ -677,6 +730,12 @@ PresSubClient::subscribe()
         if (dlg_) {
             pjsip_dlg_dec_lock(dlg_);
         }
+        if (sub_) {
+            pjsip_evsub_set_mod_data(sub_, modId_, NULL);
+            pjsip_pres_terminate(sub_, PJ_FALSE);
+            sub_ = NULL;
+        }
+        dlg_ = NULL;
         emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(pres_->getAccount()
                                                                               ->getAccountID(),
                                                                           std::string(getURI()),
@@ -696,9 +755,7 @@ PresSubClient::subscribe()
     if (status != PJ_SUCCESS) {
         if (dlg_)
             pjsip_dlg_dec_lock(dlg_);
-        if (sub_)
-            pjsip_pres_terminate(sub_, PJ_FALSE);
-        sub_ = NULL;
+        invalidateDialog("subscribe-init-failed", true, false);
         emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(pres_->getAccount()
                                                                               ->getAccountID(),
                                                                           std::string(getURI()),
@@ -715,9 +772,7 @@ PresSubClient::subscribe()
     if (status != PJ_SUCCESS) {
         if (dlg_)
             pjsip_dlg_dec_lock(dlg_);
-        if (sub_)
-            pjsip_pres_terminate(sub_, PJ_FALSE);
-        sub_ = NULL;
+        invalidateDialog("subscribe-send-failed", true, false);
         emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(pres_->getAccount()
                                                                               ->getAccountID(),
                                                                           std::string(getURI()),

@@ -21,7 +21,9 @@
 #include "corelayer.h"
 #include "manager.h"
 #include "audiodevice.h"
+#include "device_signature.h"
 #include <Accelerate/Accelerate.h>
+#include <functional>
 
 namespace sip_core {
 
@@ -63,6 +65,33 @@ audioFormatFromDescription(const AudioStreamBasicDescription& descr)
     return AudioFormat {static_cast<unsigned int>(descr.mSampleRate),
                         static_cast<unsigned int>(descr.mChannelsPerFrame),
                         getFormatFromStreamDescription(descr)};
+}
+
+static constexpr unsigned
+streamTypeMask(AudioDeviceType type)
+{
+    switch (type) {
+    case AudioDeviceType::PLAYBACK:
+        return 1u << 0;
+    case AudioDeviceType::CAPTURE:
+        return 1u << 1;
+    case AudioDeviceType::RINGTONE:
+        return 1u << 2;
+    case AudioDeviceType::ALL:
+    default:
+        return (1u << 0) | (1u << 1) | (1u << 2);
+    }
+}
+
+static AudioDeviceType
+effectiveStreamType(unsigned mask)
+{
+    // RINGTONE-only: route output to the dedicated ringtone device; nothing
+    // consumes capture while ringing. Any other combination involves a call,
+    // so configure both buses with the user-selected call devices.
+    if (mask == streamTypeMask(AudioDeviceType::RINGTONE))
+        return AudioDeviceType::RINGTONE;
+    return AudioDeviceType::ALL;
 }
 
 // AudioLayer implementation.
@@ -158,25 +187,49 @@ CoreLayer::initAudioLayerIO(AudioDeviceType stream)
         return;
     }
 
-    AudioDeviceID inputDeviceID;
-    AudioDeviceID playbackDeviceID;
     UInt32 size = sizeof(AudioDeviceID);
     if (stream == AudioDeviceType::CAPTURE || stream == AudioDeviceType::ALL) {
         auto captureList = getDeviceList(true);
         bool useFallbackDevice = true;
-        // try to set the device selected by the user. Otherwise, the default device will be set
-        // automatically.
-        if (indexIn_ < captureList.size()) {
-            inputDeviceID = captureList[indexIn_].id_;
 
+        // First, try to find the previously active device by name.
+        // This handles hot-plug scenarios where indices shift but the
+        // device name remains stable (matches PulseAudio/PortAudio behaviour).
+        if (!captureDeviceName_.empty()) {
+            for (size_t i = 0; i < captureList.size(); ++i) {
+                if (captureList[i].name_ == captureDeviceName_) {
+                    inputDeviceID_ = captureList[i].id_;
+                    auto error = AudioUnitSetProperty(ioUnit_,
+                                                      kAudioOutputUnitProperty_CurrentDevice,
+                                                      kAudioUnitScope_Global,
+                                                      inputBus,
+                                                      &inputDeviceID_,
+                                                      size);
+                    if (error == kAudioServicesNoError) {
+                        useFallbackDevice = false;
+                        SIP_CORE_DBG("Capture device re-selected by name: %s",
+                                     captureDeviceName_.c_str());
+                    }
+                    break;
+                }
+            }
+        }
+
+        // Fall back to index-based selection (first launch or name not found).
+        if (useFallbackDevice && indexIn_ < captureList.size()) {
+            inputDeviceID_ = captureList[indexIn_].id_;
             auto error = AudioUnitSetProperty(ioUnit_,
                                               kAudioOutputUnitProperty_CurrentDevice,
                                               kAudioUnitScope_Global,
                                               inputBus,
-                                              &inputDeviceID,
+                                              &inputDeviceID_,
                                               size);
-            useFallbackDevice = error != kAudioServicesNoError;
+            if (error == kAudioServicesNoError) {
+                useFallbackDevice = false;
+                captureDeviceName_ = captureList[indexIn_].name_;
+            }
         }
+
         // get a fallback capture device id so we could listen when the device disconnect.
         if (useFallbackDevice) {
             const AudioObjectPropertyAddress inputInfo = {kAudioHardwarePropertyDefaultInputDevice,
@@ -187,7 +240,7 @@ CoreLayer::initAudioLayerIO(AudioDeviceType stream)
                                                      0,
                                                      NULL,
                                                      &size,
-                                                     &inputDeviceID);
+                                                     &inputDeviceID_);
             if (status != kAudioServicesNoError) {
                 SIP_CORE_ERR() << "failed to set audio input device";
                 return;
@@ -200,16 +253,44 @@ CoreLayer::initAudioLayerIO(AudioDeviceType stream)
         auto playbackList = getDeviceList(false);
         auto index = stream == AudioDeviceType::RINGTONE ? indexRing_ : indexOut_;
         bool useFallbackDevice = true;
-        if (index < playbackList.size()) {
-            playbackDeviceID = playbackList[index].id_;
+
+        // First, try to find the previously active device by name.
+        if (!playbackDeviceName_.empty() && stream != AudioDeviceType::RINGTONE) {
+            for (size_t i = 0; i < playbackList.size(); ++i) {
+                if (playbackList[i].name_ == playbackDeviceName_) {
+                    playbackDeviceID_ = playbackList[i].id_;
+                    auto error = AudioUnitSetProperty(ioUnit_,
+                                                      kAudioOutputUnitProperty_CurrentDevice,
+                                                      kAudioUnitScope_Global,
+                                                      outputBus,
+                                                      &playbackDeviceID_,
+                                                      size);
+                    if (error == kAudioServicesNoError) {
+                        useFallbackDevice = false;
+                        SIP_CORE_DBG("Playback device re-selected by name: %s",
+                                     playbackDeviceName_.c_str());
+                    }
+                    break;
+                }
+            }
+        }
+
+        // Fall back to index-based selection.
+        if (useFallbackDevice && index < playbackList.size()) {
+            playbackDeviceID_ = playbackList[index].id_;
             auto error = AudioUnitSetProperty(ioUnit_,
                                               kAudioOutputUnitProperty_CurrentDevice,
                                               kAudioUnitScope_Global,
                                               outputBus,
-                                              &playbackDeviceID,
+                                              &playbackDeviceID_,
                                               size);
-            useFallbackDevice = error != kAudioServicesNoError;
+            if (error == kAudioServicesNoError) {
+                useFallbackDevice = false;
+                if (stream != AudioDeviceType::RINGTONE)
+                    playbackDeviceName_ = playbackList[index].name_;
+            }
         }
+
         // get fallback output device id.
         if (useFallbackDevice) {
             const AudioObjectPropertyAddress outputInfo = {kAudioHardwarePropertyDefaultOutputDevice,
@@ -220,7 +301,7 @@ CoreLayer::initAudioLayerIO(AudioDeviceType stream)
                                                      0,
                                                      NULL,
                                                      &size,
-                                                     &playbackDeviceID);
+                                                     &playbackDeviceID_);
             if (status != kAudioServicesNoError) {
                 SIP_CORE_ERR() << "failed to set audio output device";
                 return;
@@ -232,8 +313,8 @@ CoreLayer::initAudioLayerIO(AudioDeviceType stream)
     const AudioObjectPropertyAddress aliveAddress = {kAudioDevicePropertyDeviceIsAlive,
                                                      kAudioObjectPropertyScopeGlobal,
                                                      kAudioObjectPropertyElementMaster};
-    AudioObjectAddPropertyListener(playbackDeviceID, &aliveAddress, &deviceIsAliveCallback, this);
-    AudioObjectAddPropertyListener(inputDeviceID, &aliveAddress, &deviceIsAliveCallback, this);
+    AudioObjectAddPropertyListener(playbackDeviceID_, &aliveAddress, &deviceIsAliveCallback, this);
+    AudioObjectAddPropertyListener(inputDeviceID_, &aliveAddress, &deviceIsAliveCallback, this);
 
     // add listener to detect when devices changed
     const AudioObjectPropertyAddress changedAddress = {kAudioHardwarePropertyDevices,
@@ -352,48 +433,172 @@ CoreLayer::initAudioLayerIO(AudioDeviceType stream)
                                   sizeof(AURenderCallbackStruct)));
 }
 
+bool
+CoreLayer::startAudioUnit()
+{
+    status_ = Status::Started;
+
+    const auto effective = effectiveStreamType(activeStreamMask_);
+    initAudioLayerIO(effective);
+    // An ALL-configured unit has both buses set up with the call devices and
+    // can serve every stream type, so later startStream() calls for other
+    // types need no rebuild. A RINGTONE-only unit serves only ringing.
+    configuredStreamMask_ = effective == AudioDeviceType::ALL
+                                ? streamTypeMask(AudioDeviceType::ALL)
+                                : activeStreamMask_;
+
+    auto inputError = AudioUnitInitialize(ioUnit_);
+    auto outputError = AudioOutputUnitStart(ioUnit_);
+    if (inputError || outputError) {
+        // Deliberate state on failure: status_ goes back to Idle while
+        // activeStreamMask_ keeps the requested types. Manager's guards
+        // still hold those types, so the next startStream() retries the
+        // build and the eventual stopStream() drains the mask normally.
+        // Do not "fix" by clearing the mask here — that would make a
+        // retry impossible and desync the guard refcounts.
+        status_ = Status::Idle;
+        destroyAudioLayer();
+        deviceSignatureHash_.store(kNoDeviceSignature, std::memory_order_release);
+        restartingAudio_ = false;
+        return false;
+    }
+
+    // Snapshot the user-visible device topology *after* the AudioUnit
+    // is up. VoiceProcessingIO has by now created its internal
+    // VPAUAggregateAudioDevice — getDeviceList() filters that out, so
+    // the resulting hash represents only what the user actually sees.
+    // devicesChangedCallback uses it to suppress spurious change
+    // notifications fired by VPAggregate lifecycle events that arrive
+    // after restartingAudio_ has been cleared (the main contributor to
+    // the 3-5 s audio startup delay). The hash is a single atomic so
+    // the HAL listener thread can read it without further locking.
+    deviceSignatureHash_.store(computeDeviceSignatureHash(),
+                               std::memory_order_release);
+
+    restartingAudio_ = false;
+    return true;
+}
+
 void
 CoreLayer::startStream(AudioDeviceType stream)
 {
+    // Set the guard BEFORE dispatch so that any devicesChangedCallback firing
+    // on the system thread (e.g. from VoiceProcessingIO creating its internal
+    // VPAUAggregateAudioDevice) is suppressed during the restart window.
+    restartingAudio_ = true;
+
     dispatch_async(audioConfigurationQueueMacOS(), ^{
-        SIP_CORE_DBG("START STREAM");
+        SIP_CORE_DBG("START STREAM [type=%d]", (int) stream);
 
-        if (status_ != Status::Idle)
-            return;
-        status_ = Status::Started;
+        activeStreamMask_ |= streamTypeMask(stream);
 
-        initAudioLayerIO(stream);
-
-        auto inputError = AudioUnitInitialize(ioUnit_);
-        auto outputError = AudioOutputUnitStart(ioUnit_);
-        if (inputError || outputError) {
-            status_ = Status::Idle;
+        if (status_ == Status::Started) {
+            if ((activeStreamMask_ & ~configuredStreamMask_) == 0) {
+                // Unit already serves every requested type.
+                restartingAudio_ = false;
+                return;
+            }
+            // The unit is running but was configured for a narrower scope —
+            // typically RINGTONE-only ringing while a just-answered call now
+            // needs the capture device and the call playback device. Rebuild
+            // with the widened scope.
+            SIP_CORE_DBG("START STREAM: rebuilding audio unit for wider scope (mask=0x%x)",
+                         activeStreamMask_);
             destroyAudioLayer();
+            status_ = Status::Idle;
         }
+
+        if (status_ != Status::Idle) {
+            restartingAudio_ = false;
+            return;
+        }
+
+        startAudioUnit();
     });
 }
 
 void
 CoreLayer::destroyAudioLayer()
 {
+    // Remove property listeners to prevent callbacks during/after teardown
+    // and to avoid listener accumulation across restart cycles.
+    const AudioObjectPropertyAddress aliveAddress = {kAudioDevicePropertyDeviceIsAlive,
+                                                     kAudioObjectPropertyScopeGlobal,
+                                                     kAudioObjectPropertyElementMaster};
+    if (playbackDeviceID_)
+        AudioObjectRemovePropertyListener(playbackDeviceID_, &aliveAddress, &deviceIsAliveCallback, this);
+    if (inputDeviceID_)
+        AudioObjectRemovePropertyListener(inputDeviceID_, &aliveAddress, &deviceIsAliveCallback, this);
+
+    const AudioObjectPropertyAddress changedAddress = {kAudioHardwarePropertyDevices,
+                                                       kAudioObjectPropertyScopeGlobal,
+                                                       kAudioObjectPropertyElementMaster};
+    AudioObjectRemovePropertyListener(kAudioObjectSystemObject, &changedAddress, &devicesChangedCallback, this);
+
     AudioOutputUnitStop(ioUnit_);
     AudioUnitUninitialize(ioUnit_);
     AudioComponentInstanceDispose(ioUnit_);
+
+    inputDeviceID_ = 0;
+    playbackDeviceID_ = 0;
+    configuredStreamMask_ = 0;
+    deviceSignatureHash_.store(kNoDeviceSignature, std::memory_order_release);
 }
 
 void
 CoreLayer::stopStream(AudioDeviceType stream)
 {
     dispatch_async(audioConfigurationQueueMacOS(), ^{
-        SIP_CORE_DBG("STOP STREAM");
+        SIP_CORE_DBG("STOP STREAM [type=%d]", (int) stream);
+
+        activeStreamMask_ &= ~streamTypeMask(stream);
+
+        // Drop leftover tone/ringtone samples in any case.
+        flushUrgent();
+
         if (status_ != Status::Started)
             return;
+
+        if (activeStreamMask_ != 0) {
+            // Other stream types still depend on the single full-duplex
+            // VoiceProcessingIO unit — e.g. an answered call's CAPTURE /
+            // PLAYBACK when the RINGTONE guard lingers out 750 ms after
+            // pickup. Tearing the unit down here used to silence the whole
+            // first call (no capture, no playback) until the audio layer was
+            // recreated by a manual device switch in settings.
+            SIP_CORE_DBG("STOP STREAM: unit kept alive, remaining mask=0x%x", activeStreamMask_);
+            return;
+        }
+
         status_ = Status::Idle;
         destroyAudioLayer();
+        flushMain();
     });
-    /* Flush the ring buffers */
-    flushUrgent();
-    flushMain();
+}
+
+void
+CoreLayer::restartStream()
+{
+    restartingAudio_ = true;
+
+    dispatch_async(audioConfigurationQueueMacOS(), ^{
+        SIP_CORE_DBG("RESTART STREAM (mask=0x%x)", activeStreamMask_);
+
+        if (status_ == Status::Started) {
+            destroyAudioLayer();
+            status_ = Status::Idle;
+        }
+        flushUrgent();
+        flushMain();
+
+        if (activeStreamMask_ == 0) {
+            // No guard holds any stream type — nothing to bring back up.
+            restartingAudio_ = false;
+            return;
+        }
+
+        startAudioUnit();
+    });
 }
 
 //// PRIVATE /////
@@ -404,10 +609,18 @@ CoreLayer::deviceIsAliveCallback(AudioObjectID inObjectID,
                                  const AudioObjectPropertyAddress inAddresses[],
                                  void* inRefCon)
 {
-    if (static_cast<CoreLayer*>(inRefCon)->status_ != Status::Started)
+    auto* self = static_cast<CoreLayer*>(inRefCon);
+    if (self->status_ != Status::Started)
         return kAudioServicesNoError;
-    static_cast<CoreLayer*>(inRefCon)->stopStream();
-    static_cast<CoreLayer*>(inRefCon)->startStream();
+    if (self->restartingAudio_.load())
+        return kAudioServicesNoError;
+    // Defence in depth: if VoiceProcessingIO momentarily flickers the
+    // underlying device's alive flag while spinning up VPAggregate, the
+    // user-visible device set is unchanged. Skip the restart in that case.
+    auto stored = self->deviceSignatureHash_.load(std::memory_order_acquire);
+    if (stored != kNoDeviceSignature && stored == self->computeDeviceSignatureHash())
+        return kAudioServicesNoError;
+    self->restartStream();
     return kAudioServicesNoError;
 }
 
@@ -417,9 +630,26 @@ CoreLayer::devicesChangedCallback(AudioObjectID inObjectID,
                                   const AudioObjectPropertyAddress inAddresses[],
                                   void* inRefCon)
 {
-    if (static_cast<CoreLayer*>(inRefCon)->status_ != Status::Started)
+    auto* self = static_cast<CoreLayer*>(inRefCon);
+    if (self->status_ != Status::Started)
         return kAudioServicesNoError;
-    static_cast<CoreLayer*>(inRefCon)->devicesChanged();
+    // Skip if we are already in the middle of a restart — VoiceProcessingIO
+    // creates/destroys a VPAUAggregateAudioDevice which fires this callback.
+    if (self->restartingAudio_.load())
+        return kAudioServicesNoError;
+    // Snapshot-based filter: VPAggregate creation/destruction during AU
+    // lifecycle can fire kAudioHardwarePropertyDevices changes *after*
+    // restartingAudio_ has been cleared. Comparing the user-visible device
+    // signatures collapses those spurious events into a no-op and avoids
+    // the cascading stopStream/startStream/recoverAudioDevices() restart
+    // chain that previously produced a 3-5 s audio startup delay.
+    auto stored = self->deviceSignatureHash_.load(std::memory_order_acquire);
+    if (stored != kNoDeviceSignature && stored == self->computeDeviceSignatureHash())
+        return kAudioServicesNoError;
+    // Real device topology change — restart the audio stream so the
+    // AudioUnit reinitialises with the current set of devices.
+    self->restartStream();
+    self->devicesChanged();
     return kAudioServicesNoError;
 }
 
@@ -580,11 +810,12 @@ CoreLayer::getDeviceList(bool getCapture) const
     for (int i = 0; i < nDevices; ++i) {
         auto dev = AudioDevice {devids[i], getCapture};
         if (dev.channels_ > 0) { // Channels < 0 if inactive.
-            // There is additional stream under the built-in device - the raw streams enabled by AUVP.
-            if (dev.name_.find("VPAUAggregateAudioDevice") != std::string::npos) {
-                // ignore VPAUAggregateAudioDevice
+            // VoiceProcessingIO creates an internal aggregate device — keep
+            // the filter in lockstep with the device-change snapshot logic
+            // (see device_signature.h) so notifications about VPAggregate
+            // appearing/disappearing don't show up as a topology change.
+            if (coreaudio::shouldIgnoreDeviceName(dev.name_))
                 continue;
-            }
             // for input device check if it not speaker
             // since the speaker device has input stream for echo cancellation.
             if (getCapture) {
@@ -599,4 +830,15 @@ CoreLayer::getDeviceList(bool getCapture) const
     }
     return ret;
 }
+
+std::uint64_t
+CoreLayer::computeDeviceSignatureHash() const
+{
+    auto sig = coreaudio::makeDeviceSignature(getCaptureDeviceList(), getPlaybackDeviceList());
+    auto h = std::hash<std::string> {}(sig);
+    // Force the low bit so a legitimate hash can never collide with the
+    // kNoDeviceSignature sentinel (0).
+    return static_cast<std::uint64_t>(h) | 1ULL;
+}
+
 } // namespace sip_core

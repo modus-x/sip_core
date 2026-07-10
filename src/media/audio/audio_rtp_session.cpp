@@ -53,6 +53,7 @@ AudioRtpSession::AudioRtpSession(const std::string& callId,
     // account is not used currently for audio sessions
     : RtpSession(callId, streamId, MediaType::MEDIA_AUDIO, nullptr)
     , rtcpCheckerThread_([] { return true; }, [this] { processRtcpChecker(); }, [] {})
+    , natPunchThread_([] { return true; }, [this] { processNatPunch(); }, [] {})
 
 {
     recorder_ = rec;
@@ -74,6 +75,200 @@ AudioRtpSession::sendRtpEvents(const std::string& events, double duration, unsig
 {
     if (sender_) {
         sender_->sendRtpEvents(events, duration, volume);
+    }
+}
+
+void
+AudioRtpSession::ensureSocketPairLocked()
+{
+    if (socketPair_) {
+        return;
+    }
+
+    socketPair_.reset(new SocketPair(getRemoteRtpUri().c_str(), takeReservedSocketPair()));
+
+    if (send_.crypto and receive_.crypto) {
+        socketPair_->createSRTP(receive_.crypto.getCryptoSuite().c_str(),
+                                receive_.crypto.getSrtpKeyInfo().c_str(),
+                                send_.crypto.getCryptoSuite().c_str(),
+                                send_.crypto.getSrtpKeyInfo().c_str());
+    }
+}
+
+void
+AudioRtpSession::ensureEarlySenderLocked()
+{
+    if (not send_.enabled or send_.onHold or not socketPair_) {
+        return;
+    }
+
+    if (audioInput_) {
+        audioInput_->detach(sender_.get());
+        audioInput_.reset();
+    }
+
+    socketPair_->stopSendOp();
+    if (sender_) {
+        initSeqVal_ = sender_->getLastSeqValue() + 1;
+    } else if (lastSenderSeqVal_) {
+        // Continue the wire RTP sequence from the previous sender across a
+        // full stop()/start() cycle (e.g. hold/unhold renegotiation).
+        initSeqVal_ = static_cast<uint16_t>(*lastSenderSeqVal_ + 1);
+    }
+
+    try {
+        sender_.reset();
+        socketPair_->stopSendOp(false);
+        sender_.reset(new AudioSender(getRemoteRtpUri(), send_, *socketPair_, initSeqVal_, mtu_));
+    } catch (const MediaEncoderException& e) {
+        SIP_CORE_ERR("%s", e.what());
+        send_.enabled = false;
+    }
+}
+
+void
+AudioRtpSession::startNatPunchingLocked()
+{
+    if (!sender_) {
+        return;
+    }
+
+    // Send one packet immediately to accelerate NAT hole punching.
+    sender_->natPing();
+
+    if (!natPunchThread_.isRunning()) {
+        natPunchThread_.start();
+    }
+}
+
+void
+AudioRtpSession::stopNatPunchingLocked()
+{
+    if (!earlyMediaMode_ && !holdKeepaliveMode_ && natPunchThread_.isRunning()) {
+        natPunchThread_.join();
+    }
+}
+
+void
+AudioRtpSession::processNatPunch()
+{
+    {
+        std::unique_lock<std::recursive_mutex> lock(mutex_, std::try_to_lock);
+        if (lock.owns_lock() && (earlyMediaMode_ || holdKeepaliveMode_) && sender_) {
+            sender_->natPing();
+        }
+    }
+
+    natPunchThread_.wait_for(natPunchInterval_);
+}
+
+void
+AudioRtpSession::startEarlyMedia()
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+
+    if (not send_.enabled and not receive_.enabled) {
+        stop();
+        return;
+    }
+
+    try {
+        ensureSocketPairLocked();
+    } catch (const std::runtime_error& e) {
+        SIP_CORE_ERR("Socket creation failed: %s", e.what());
+        return;
+    }
+
+    earlyMediaMode_ = true;
+    startReceiver();
+    ensureEarlySenderLocked();
+    startNatPunchingLocked();
+}
+
+void
+AudioRtpSession::stopEarlyMedia()
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    earlyMediaMode_ = false;
+    stopNatPunchingLocked();
+}
+
+void
+AudioRtpSession::promoteEarlyMediaToActive()
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    if (!earlyMediaMode_) {
+        return;
+    }
+
+    earlyMediaMode_ = false;
+    stopNatPunchingLocked();
+    startSender();
+}
+
+void
+AudioRtpSession::startHoldKeepalive()
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+
+    if (!send_.enabled) {
+        return;
+    }
+
+    try {
+        ensureSocketPairLocked();
+    } catch (const std::runtime_error& e) {
+        SIP_CORE_ERR("Socket creation failed: %s", e.what());
+        return;
+    }
+
+    holdKeepaliveMode_ = true;
+
+    if (audioInput_) {
+        audioInput_->detach(sender_.get());
+        audioInput_.reset();
+    }
+
+    if (!sender_) {
+        socketPair_->stopSendOp();
+        // Continue the wire RTP sequence space across the previous stop()
+        // when constructing the keepalive sender, so the peer does not see a
+        // discontinuity at the hold transition.
+        if (lastSenderSeqVal_) {
+            initSeqVal_ = static_cast<uint16_t>(*lastSenderSeqVal_ + 1);
+        }
+        try {
+            sender_.reset();
+            socketPair_->stopSendOp(false);
+            sender_.reset(new AudioSender(getRemoteRtpUri(), send_, *socketPair_, initSeqVal_, mtu_));
+        } catch (const MediaEncoderException& e) {
+            SIP_CORE_ERR("%s", e.what());
+            send_.enabled = false;
+            return;
+        }
+    }
+
+    startNatPunchingLocked();
+}
+
+void
+AudioRtpSession::stopHoldKeepalive(bool restartSender)
+{
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+
+    holdKeepaliveMode_ = false;
+    stopNatPunchingLocked();
+
+    if (restartSender && send_.enabled && !send_.onHold) {
+        if (!socketPair_) {
+            try {
+                ensureSocketPairLocked();
+            } catch (const std::runtime_error& e) {
+                SIP_CORE_ERR("Socket creation failed: %s", e.what());
+                return;
+            }
+        }
+        startSender();
     }
 }
 
@@ -125,8 +320,14 @@ AudioRtpSession::startSender()
 
     // be sure to not send any packets before saving last RTP seq value
     socketPair_->stopSendOp();
-    if (sender_)
+    if (sender_) {
         initSeqVal_ = sender_->getLastSeqValue() + 1;
+    } else if (lastSenderSeqVal_) {
+        // Continue the wire RTP sequence from the previous sender across a
+        // full stop()/start() cycle (e.g. hold/unhold renegotiation) so the
+        // peer's RTP demuxer does not see a sequence-number discontinuity.
+        initSeqVal_ = static_cast<uint16_t>(*lastSenderSeqVal_ + 1);
+    }
     try {
         sender_.reset();
         socketPair_->stopSendOp(false);
@@ -136,8 +337,8 @@ AudioRtpSession::startSender()
         send_.enabled = false;
     }
 
-#ifdef ENABLE_VIDEO
     std::string localId = "";
+#ifdef ENABLE_VIDEO
     if (not sip_core::getVideoDeviceMonitor().getDeviceList().empty()) {
         // if we have a video device
         localId = sip_utils::streamId("", sip_utils::DEFAULT_VIDEO_STREAMID);
@@ -145,9 +346,7 @@ AudioRtpSession::startSender()
 #endif
 
     if (voiceCallback_) {
-        sender_->setVoiceCallback([this, localId](bool active) {
-            voiceCallback_(localId, active);
-        });
+        sender_->setVoiceCallback([this, localId](bool active) { voiceCallback_(localId, active); });
     }
 
     // NOTE do after sender/encoder are ready
@@ -195,9 +394,7 @@ AudioRtpSession::startReceiver()
                                                 mtu_));
 
     if (voiceCallback_)
-        receiveThread_->setVoiceCallback([this](bool active) {
-            voiceCallback_(streamId_, active);
-        });
+        receiveThread_->setVoiceCallback([this](bool active) { voiceCallback_(streamId_, active); });
 
     receiveThread_->setRecorderCallback([this](const MediaStream& ms) { attachRemoteRecorder(ms); });
     receiveThread_->addIOContext(*socketPair_);
@@ -215,15 +412,12 @@ AudioRtpSession::start()
         return;
     }
 
-    try {
-        socketPair_.reset(new SocketPair(getRemoteRtpUri().c_str(), receive_.addr.getPort()));
+    earlyMediaMode_ = false;
+    holdKeepaliveMode_ = false;
+    stopNatPunchingLocked();
 
-        if (send_.crypto and receive_.crypto) {
-            socketPair_->createSRTP(receive_.crypto.getCryptoSuite().c_str(),
-                                    receive_.crypto.getSrtpKeyInfo().c_str(),
-                                    send_.crypto.getCryptoSuite().c_str(),
-                                    send_.crypto.getSrtpKeyInfo().c_str());
-        }
+    try {
+        ensureSocketPairLocked();
     } catch (const std::runtime_error& e) {
         SIP_CORE_ERR("Socket creation failed: %s", e.what());
         return;
@@ -239,14 +433,16 @@ AudioRtpSession::stop()
     std::lock_guard<std::recursive_mutex> lock(mutex_);
 
     SIP_CORE_DBG("[%p] Stopping receiver", this);
-
-    if (not receiveThread_)
-        return;
+    earlyMediaMode_ = false;
+    holdKeepaliveMode_ = false;
+    stopNatPunchingLocked();
 
     if (socketPair_)
         socketPair_->setReadBlockingMode(false);
 
-    receiveThread_->stopReceiver();
+    if (receiveThread_) {
+        receiveThread_->stopReceiver();
+    }
 
     if (audioInput_)
         audioInput_->detach(sender_.get());
@@ -257,7 +453,14 @@ AudioRtpSession::stop()
     rtcpCheckerThread_.join();
 
     receiveThread_.reset();
+    // Persist the sender's last RTP sequence number across full stop/start so
+    // the next sender can continue the wire sequence space instead of
+    // restarting from a low value.
+    if (sender_) {
+        lastSenderSeqVal_ = sender_->getLastSeqValue();
+    }
     sender_.reset();
+    preserveCurrentSocketPairReservationIfNeeded();
     socketPair_.reset();
     audioInput_.reset();
 }
@@ -273,14 +476,16 @@ AudioRtpSession::setMuted(bool muted, Direction dir)
     } else {
         if (receiveThread_) {
             auto ms = receiveThread_->getInfo();
-            if (muted) {
-                if (auto ob = recorder_->getStream(ms.name)) {
-                    receiveThread_->detach(ob);
-                    recorder_->removeStream(ms);
-                }
-            } else {
-                if (auto ob = recorder_->addStream(ms)) {
-                    receiveThread_->attach(ob);
+            if (recorder_ && !ms.name.empty()) {
+                if (muted) {
+                    if (auto ob = recorder_->getStream(ms.name)) {
+                        receiveThread_->detach(ob);
+                        recorder_->removeStream(ms);
+                    }
+                } else {
+                    if (auto ob = recorder_->addStream(ms)) {
+                        receiveThread_->attach(ob);
+                    }
                 }
             }
             // do not stop receiving frames. just don't send them to our ring
@@ -305,21 +510,17 @@ AudioRtpSession::setVoiceCallback(std::function<void(const std::string&, bool)> 
 #endif
 
     if (sender_) {
-        sender_->setVoiceCallback([this, localId](bool active) {
-            voiceCallback_(localId, active);
-        });
+        sender_->setVoiceCallback([this, localId](bool active) { voiceCallback_(localId, active); });
     }
     if (receiveThread_) {
-        receiveThread_->setVoiceCallback([this](bool active) {
-            voiceCallback_(streamId_, active);
-        });
+        receiveThread_->setVoiceCallback([this](bool active) { voiceCallback_(streamId_, active); });
     }
 }
 
 rtcpRRHeader
 AudioRtpSession::getRtcpRR()
 {
-    if(socketPair_)
+    if (socketPair_)
         return socketPair_->getLastRtcpRR();
 
     return {};
@@ -328,15 +529,16 @@ AudioRtpSession::getRtcpRR()
 rtcpREMBHeader
 AudioRtpSession::getRtcpREMB()
 {
-    if(socketPair_)
+    if (socketPair_)
         return socketPair_->getLastRtcpREMB();
 
     return {};
 }
 
-rtcpSRHeader AudioRtpSession::getRtcpSR()
+rtcpSRHeader
+AudioRtpSession::getRtcpSR()
 {
-    if(socketPair_)
+    if (socketPair_)
         return socketPair_->getLastRtcpSR();
 
     return {};
@@ -424,34 +626,35 @@ AudioRtpSession::processRtcpChecker()
 void
 AudioRtpSession::attachRemoteRecorder(const MediaStream& ms)
 {
-    if (!mutex_.try_lock() || !recorder_ || !receiveThread_)
+    std::unique_lock<std::recursive_mutex> lock(mutex_, std::try_to_lock);
+    if (!lock.owns_lock() || !recorder_ || !receiveThread_)
         return;
     if (auto ob = recorder_->addStream(ms)) {
         receiveThread_->attach(ob);
     }
-    mutex_.unlock();
 }
 
 // this is called from audio thread, be careful, audioInput_ can be already reset
 void
 AudioRtpSession::attachLocalRecorder(const MediaStream& ms)
 {
-    if (!mutex_.try_lock() || !recorder_ || !audioInput_)
+    std::unique_lock<std::recursive_mutex> lock(mutex_, std::try_to_lock);
+    if (!lock.owns_lock() || !recorder_ || !audioInput_)
         return;
 
-    if (audioInput_) {
-        if (auto ob = recorder_->addStream(ms)) {
-            audioInput_->attach(ob);
-        }
-    }
+    // We have the lock — clear the retry flag so readFromDevice() stops
+    // calling us on every frame.
+    audioInput_->clearPendingRecorderAttach();
 
-    mutex_.unlock();
+    if (auto ob = recorder_->addStream(ms)) {
+        audioInput_->attach(ob);
+    }
 }
 
 void
 AudioRtpSession::initRecorder()
 {
-    std::lock_guard<std::recursive_mutex> lock(mutex_);    
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
 
     if (!recorder_)
         return;
@@ -471,9 +674,11 @@ AudioRtpSession::deinitRecorder()
         return;
     if (receiveThread_) {
         auto ms = receiveThread_->getInfo();
-        if (auto ob = recorder_->getStream(ms.name)) {
-            receiveThread_->detach(ob);
-            recorder_->removeStream(ms);
+        if (!ms.name.empty()) {
+            if (auto ob = recorder_->getStream(ms.name)) {
+                receiveThread_->detach(ob);
+                recorder_->removeStream(ms);
+            }
         }
     }
     if (audioInput_) {

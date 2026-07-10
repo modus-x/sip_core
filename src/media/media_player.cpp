@@ -72,7 +72,11 @@ MediaPlayer::configureMediaInputs()
         emitInfo();
         return false;
     }
-    demuxer_->findStreamInfo();
+    if (demuxer_->findStreamInfo() < 0) {
+        SIP_CORE_ERR("Could not find stream info for media player input '%s'", path_.c_str());
+        emitInfo();
+        return false;
+    }
 
     pauseInterval_ = 0;
     startTime_ = av_gettime();
@@ -141,19 +145,19 @@ MediaPlayer::process()
 
     const auto ret = demuxer_->demuxe();
     switch (ret) {
-    case MediaDemuxer::Status::Success:
-    case MediaDemuxer::Status::FallBack:
+    case DecodeStatus::Success:
+    case DecodeStatus::FallBack:
         break;
-    case MediaDemuxer::Status::EndOfFile:
+    case DecodeStatus::EndOfFile:
         demuxer_->updateCurrentState(MediaDemuxer::CurrentState::Finished);
         break;
-    case MediaDemuxer::Status::ReadError:
+    case DecodeStatus::ReadError:
         SIP_CORE_ERR() << "Failed to decode frame";
         break;
-    case MediaDemuxer::Status::ReadBufferOverflow:
+    case DecodeStatus::ReadBufferOverflow:
         readBufferOverflow_ = true;
         break;
-    case MediaDemuxer::Status::RestartRequired:
+    case DecodeStatus::RestartRequired:
     default:
         break;
     }
@@ -224,7 +228,7 @@ MediaPlayer::seekToTime(int64_t time)
     demuxer_->updateCurrentState(MediaDemuxer::CurrentState::Demuxing);
 
     int64_t currentTime = av_gettime();
-    if (paused_){
+    if (paused_) {
         pauseInterval_ += currentTime - lastPausedTime_;
         lastPausedTime_ = currentTime;
     }

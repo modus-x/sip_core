@@ -13,8 +13,6 @@ libvpx: libvpx-$(VPX_HASH).tar.gz .sum-vpx
 	(cd $@-$(VPX_HASH) && tar x $(if ${BATCH_MODE},,-v) --strip-components=1 -f $<)
 	$(MOVE)
 
-DEPS_vpx =
-
 ifdef HAVE_CROSS_COMPILE
 ifndef HAVE_IOS
 ifndef HAVE_MACOSX

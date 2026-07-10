@@ -26,6 +26,7 @@ namespace sip_core {
 
 constexpr const char* RINGTONE_PATH_KEY = "ringtonePath";
 constexpr const char* RINGTONE_ENABLED_KEY = "ringtoneEnabled";
+constexpr const char* PAUSE_AFTER_ALERT_INFO_KEY = "pauseAfterAlertInfo";
 constexpr const char* VIDEO_ENABLED_KEY = "videoEnabled";
 constexpr const char* DISPLAY_NAME_KEY = "displayName";
 constexpr const char* ALIAS_KEY = "alias";
@@ -68,6 +69,7 @@ AccountConfig::serializeDiff(YAML::Emitter& out, const AccountConfig& DEFAULT_CO
     SERIALIZE_CONFIG(ACCOUNT_ACTIVE_CALL_LIMIT_KEY, activeCallLimit);
     SERIALIZE_CONFIG(RINGTONE_ENABLED_KEY, ringtoneEnabled);
     SERIALIZE_CONFIG(RINGTONE_PATH_KEY, ringtonePath);
+    SERIALIZE_CONFIG(PAUSE_AFTER_ALERT_INFO_KEY, pauseAfterAlertInfo);
     SERIALIZE_CONFIG(USER_AGENT_KEY, customUserAgent);
     SERIALIZE_CONFIG(DISPLAY_NAME_KEY, displayName);
     SERIALIZE_CONFIG(UPNP_ENABLED_KEY, upnpEnabled);
@@ -102,6 +104,7 @@ AccountConfig::unserialize(const YAML::Node& node)
     parseValueOptional(node, USER_AGENT_KEY, customUserAgent);
     parseValueOptional(node, RINGTONE_PATH_KEY, ringtonePath);
     parseValueOptional(node, RINGTONE_ENABLED_KEY, ringtoneEnabled);
+    parseValueOptional(node, PAUSE_AFTER_ALERT_INFO_KEY, pauseAfterAlertInfo);
     parseValueOptional(node, VIDEO_ENABLED_KEY, videoEnabled);
 
     parseValueOptional(node, UPNP_ENABLED_KEY, upnpEnabled);
@@ -138,6 +141,7 @@ AccountConfig::toMap() const
              std::to_string(activeCallLimit)},
             {Conf::CONFIG_RINGTONE_ENABLED, ringtoneEnabled ? TRUE_STR : FALSE_STR},
             {Conf::CONFIG_RINGTONE_PATH, ringtonePath},
+            {Conf::CONFIG_ACCOUNT_PAUSE_AFTER_ALERT_INFO, std::to_string(pauseAfterAlertInfo)},
             {Conf::CONFIG_VIDEO_ENABLED, videoEnabled ? TRUE_STR : FALSE_STR},
             {Conf::CONFIG_UPNP_ENABLED, upnpEnabled ? TRUE_STR : FALSE_STR},
             {Conf::CONFIG_DEFAULT_MODERATORS, string_join(defaultModerators)},
@@ -161,6 +165,9 @@ AccountConfig::fromMap(const std::map<std::string, std::string>& details)
     parseInt(details, libsip_core::Account::ConfProperties::ACTIVE_CALL_LIMIT, activeCallLimit);
     parseBool(details, Conf::CONFIG_RINGTONE_ENABLED, ringtoneEnabled);
     parseString(details, Conf::CONFIG_RINGTONE_PATH, ringtonePath);
+    parseInt(details, Conf::CONFIG_ACCOUNT_PAUSE_AFTER_ALERT_INFO, pauseAfterAlertInfo);
+    if (pauseAfterAlertInfo < 0)
+        pauseAfterAlertInfo = 0;
     parseString(details, Conf::CONFIG_ACCOUNT_USERAGENT, customUserAgent);
     parseBool(details, Conf::CONFIG_UPNP_ENABLED, upnpEnabled);
     std::string defMod;

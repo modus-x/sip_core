@@ -32,6 +32,8 @@
 #include <string>
 #include <memory>
 #include <mutex>
+#include <optional>
+#include <stdexcept>
 
 namespace sip_core {
 
@@ -73,6 +75,11 @@ public:
     }
 
     void setMtu(uint16_t mtu) { mtu_ = mtu; }
+    void setReservedSocketPair(ReservedSocketPair&& reserved)
+    {
+        reservedSocketPair_.emplace(std::move(reserved));
+    }
+    bool hasReservedSocketPair() const { return reservedSocketPair_.has_value(); }
 
     void setSuccessfulSetupCb(const std::function<void(MediaType, bool)>& cb)
     {
@@ -107,6 +114,29 @@ protected:
     uint16_t mtu_;
     std::shared_ptr<MediaRecorder> recorder_;
     std::function<void(MediaType, bool)> onSuccessfulSetup_;
+    std::optional<ReservedSocketPair> reservedSocketPair_ {};
+    void preserveCurrentSocketPairReservationIfNeeded()
+    {
+        if (reservedSocketPair_ || !socketPair_ || (!send_.enabled && !receive_.enabled)) {
+            return;
+        }
+
+        auto reserved = socketPair_->releaseLocalReservation();
+        if (reserved) {
+            reservedSocketPair_.emplace(std::move(reserved));
+        }
+    }
+
+    ReservedSocketPair takeReservedSocketPair()
+    {
+        if (!reservedSocketPair_) {
+            throw std::runtime_error("Missing reserved socket pair");
+        }
+
+        auto reserved = std::move(*reservedSocketPair_);
+        reservedSocketPair_.reset();
+        return reserved;
+    }
 };
 
 } // namespace sip_core

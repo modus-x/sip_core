@@ -48,6 +48,8 @@ public:
      * @param uri  Remote user that we want to subscribe
      */
     void subscribeClient(const std::string& uri, const std::string& event, bool flag);
+    void recoverSubscriptions(const std::string& contactHeader);
+    void invalidateSubscriptions(const char* reason);
 
     /**
      * Add a client to list.

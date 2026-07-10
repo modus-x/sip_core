@@ -33,9 +33,15 @@
 #include <future>
 #include <memory>
 
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
+
 namespace sip_core {
 
 static constexpr auto MS_PER_PACKET = std::chrono::milliseconds(20);
+// After ~5 seconds (250 frames * 20ms) of no audio, consider the device broken
+static constexpr unsigned int BROKEN_DEVICE_THRESHOLD = 250;
 
 AudioInput::AudioInput(const std::string& id)
     : id_(id)
@@ -125,16 +131,57 @@ AudioInput::readFromDevice()
 
     auto& bufferPool = Manager::instance().getRingBufferPool();
     auto audioFrame = bufferPool.getData(id_);
-    if (not audioFrame && !muteState_) {
-        return;
+
+    // Diagnostic: track how long the capture source has been silent. Do NOT
+    // force-mute — outgoing RTP is kept alive by the silence synthesis below,
+    // and over xrdp the xrdp-source can idle for arbitrary durations after a
+    // re-invite; sticky mute would persist past the moment real samples
+    // finally arrive.
+    if (not audioFrame) {
+        ++consecutiveEmptyFrames_;
+        // Log when the stall is first detected, then once per threshold
+        // interval (~5 s) so a persistent stall stays visible without
+        // flooding the log at frame rate.
+        if (consecutiveEmptyFrames_ % BROKEN_DEVICE_THRESHOLD == 0) {
+            SIP_CORE_WARN("Audio Input: no data for %u consecutive frames, "
+                         "capture source is idle (xrdp-source may stall on re-invite)",
+                         consecutiveEmptyFrames_);
+        }
+#if defined(__APPLE__) && TARGET_OS_OSX
+        // Self-heal (macOS only): a CoreAudio unit that stops delivering
+        // input mid-call does not recover on its own. Recreate the audio
+        // layer exactly like a manual device switch in settings does —
+        // Manager::ManagerPimpl::initAudioDriver() then restarts the streams
+        // for every type still held by an AudioDeviceGuard. One attempt per
+        // stall episode, re-armed only after real samples have flowed again.
+        // (Not on Linux: over xrdp the source legitimately idles for long
+        // stretches and a restart would just re-trigger the stall.)
+        if (consecutiveEmptyFrames_ == BROKEN_DEVICE_THRESHOLD && !stallRecoveryAttempted_) {
+            stallRecoveryAttempted_ = true;
+            SIP_CORE_WARN("Audio Input: capture stalled for ~5 s, restarting audio layer");
+            Manager::instance().recoverAudioDevices();
+        }
+#endif
+    } else {
+        consecutiveEmptyFrames_ = 0;
+        stallRecoveryAttempted_ = false;
     }
 
-    if (muteState_) {
-        if (not audioFrame) {
-            audioFrame = std::make_shared<AudioFrame>(bufferPool.getInternalAudioFormat(), frameSize_);
-        }
+    if (not audioFrame) {
+        // No frame from the capture device this tick — synthesize silence
+        // unconditionally so the outgoing RTP stream keeps ticking. The
+        // capture source can take seconds to start producing samples after
+        // a re-invite restarts the PulseAudio stream (observed on Linux
+        // over xrdp where xrdp-source idles for >5 s after re-creation);
+        // pausing RTP during that window makes peers treat the media path
+        // as dead and they stop sending audio back.
+        audioFrame = std::make_shared<AudioFrame>(bufferPool.getInternalAudioFormat(), frameSize_);
         libav_utils::fillWithSilence(audioFrame->pointer());
-        audioFrame->has_voice = false; // force no voice activity when muted
+        audioFrame->has_voice = false;
+    } else if (muteState_ || forceMuteNoDevice_) {
+        // Muted (user or force-mute) but we got a frame - fill it with silence
+        libav_utils::fillWithSilence(audioFrame->pointer());
+        audioFrame->has_voice = false;
     }
 
     std::lock_guard<std::mutex> lk(fmtMutex_);
@@ -142,7 +189,11 @@ AudioInput::readFromDevice()
         audioFrame = resampler_->resample(std::move(audioFrame), format_);
     resizer_->enqueue(std::move(audioFrame));
 
-    if (recorderCallback_ && settingMS_.exchange(false)) {
+    // Only attempt the callback; do NOT consume settingMS_ here.
+    // The flag is cleared by clearPendingRecorderAttach() once
+    // attachLocalRecorder() actually succeeds (acquires mutex_).
+    // This lets us retry on the next frame if try_to_lock failed.
+    if (recorderCallback_ && settingMS_.load()) {
         recorderCallback_(MediaStream("a:local", format_, sent_samples));
     }
 
@@ -168,18 +219,18 @@ AudioInput::readFromFile()
         return;
     const auto ret = decoder_->decode();
     switch (ret) {
-    case MediaDemuxer::Status::Success:
+    case DecodeStatus::Success:
         break;
-    case MediaDemuxer::Status::EndOfFile:
+    case DecodeStatus::EndOfFile:
         createDecoder();
         break;
-    case MediaDemuxer::Status::ReadError:
+    case DecodeStatus::ReadError:
         SIP_CORE_ERR() << "Failed to decode frame";
         break;
-    case MediaDemuxer::Status::ReadBufferOverflow:
+    case DecodeStatus::ReadBufferOverflow:
         SIP_CORE_ERR() << "Read buffer overflow detected";
         break;
-    case MediaDemuxer::Status::FallBack:
+    case DecodeStatus::FallBack:
         break;
     }
 }
@@ -210,7 +261,7 @@ AudioInput::configureFilePlayback(const std::string& path,
     devOpts_.name = path;
     auto decoder
         = std::make_unique<MediaDecoder>(demuxer, index, [this](std::shared_ptr<MediaFrame>&& frame) {
-              if (muteState_) {
+              if (muteState_ || forceMuteNoDevice_) {
                   libav_utils::fillWithSilence(frame->pointer());
                   return;
               }
@@ -289,10 +340,12 @@ AudioInput::switchInput(const std::string& resource)
                                                                     fileId_);
     }
     fileBuf_.reset();
+    oldGuard.reset();
 
     playingDevice_ = false;
     currentResource_ = resource;
     devOptsFound_ = false;
+    consecutiveEmptyFrames_ = 0;  // Reset broken device detection counter
     updateMuteStateForDeviceAvailability();
 
     std::promise<DeviceParams> p;
@@ -410,11 +463,6 @@ AudioInput::setFormat(const AudioFormat& fmt)
 void
 AudioInput::setMuted(bool isMuted)
 {
-    updateMuteStateForDeviceAvailability();
-    if (forceMuteNoDevice_ && !isMuted) {
-        SIP_CORE_WARN("Audio Input unmute ignored: no capture devices available");
-        return;
-    }
     muteState_ = isMuted;
     SIP_CORE_WARN("Audio Input muted [%s]", muteState_ ? "YES" : "NO");
 }
@@ -453,9 +501,6 @@ AudioInput::updateMuteStateForDeviceAvailability()
     }
 
     forceMuteNoDevice_ = newForceMute;
-    if (forceMuteNoDevice_) {
-        muteState_ = true;
-    }
 }
 
 } // namespace sip_core

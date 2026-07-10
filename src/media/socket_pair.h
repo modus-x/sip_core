@@ -46,10 +46,52 @@ using socklen_t = int;
 #include <vector>
 #include <condition_variable>
 #include <functional>
+#include <utility>
 
 namespace sip_core {
 
 class SRTPProtoContext;
+
+class ReservedSocketPair
+{
+public:
+    ReservedSocketPair() = default;
+    ReservedSocketPair(uint16_t family,
+                       int rtpHandle,
+                       int rtcpHandle,
+                       uint16_t rtpPort,
+                       uint16_t rtcpPort) noexcept;
+    ~ReservedSocketPair();
+
+    ReservedSocketPair(const ReservedSocketPair&) = delete;
+    ReservedSocketPair& operator=(const ReservedSocketPair&) = delete;
+    ReservedSocketPair(ReservedSocketPair&& other) noexcept;
+    ReservedSocketPair& operator=(ReservedSocketPair&& other) noexcept;
+
+    explicit operator bool() const noexcept { return valid(); }
+    bool valid() const noexcept;
+    void reset() noexcept;
+
+    uint16_t family() const noexcept { return family_; }
+    uint16_t rtpPort() const noexcept { return rtpPort_; }
+    uint16_t rtcpPort() const noexcept { return rtcpPort_; }
+
+private:
+    friend class SocketPair;
+
+    int releaseRtpHandle() noexcept;
+    int releaseRtcpHandle() noexcept;
+
+    uint16_t family_ {AF_UNSPEC};
+    int rtpHandle_ {-1};
+    int rtcpHandle_ {-1};
+    uint16_t rtpPort_ {0};
+    uint16_t rtcpPort_ {0};
+};
+
+ReservedSocketPair reserveSocketPairInRange(uint16_t family,
+                                            const std::pair<uint16_t, uint16_t>& range,
+                                            const char* mediaKind);
 
 typedef struct
 {
@@ -131,10 +173,11 @@ typedef struct
 class SocketPair
 {
 public:
-    SocketPair(const char* uri, int localPort);
+    SocketPair(const char* uri, ReservedSocketPair&& reserved);
     ~SocketPair();
 
     void interrupt();
+    ReservedSocketPair releaseLocalReservation() noexcept;
 
     // Set the read blocking mode.
     // By default, the read operation will block until data is available
@@ -145,7 +188,7 @@ public:
 
     MediaIOHandle* createIOContext(const uint16_t mtu);
 
-    void openSockets(const char* uri, int localPort);
+    void openSockets(const char* uri, ReservedSocketPair&& reserved);
     void closeSockets();
 
     /*
@@ -170,6 +213,20 @@ public:
                     const char* in_params);
 
     void stopSendOp(bool state = true);
+
+    /**
+     * Drain any pending RTP/RTCP datagrams from the kernel UDP receive buffer
+     * (and from any queued ICE packets if no system socket is in use).
+     *
+     * Used after a media renegotiation (hold/unhold re-INVITE) to discard the
+     * burst of packets that accumulated while the old receiver was being torn
+     * down and the new one set up. Without this, the FFmpeg RTP demuxer in the
+     * fresh receiver may consume those buffered packets in arrival order with
+     * stale relative timing, causing it to emit "RTP: dropping old packet
+     * received too late" warnings until it eventually re-syncs.
+     */
+    void flushReadQueue();
+
     std::list<rtcpRRHeader> getRtcpRR();
     std::list<rtcpREMBHeader> getRtcpREMB();
 
@@ -180,6 +237,25 @@ public:
     bool waitForRTCP(std::chrono::seconds interval);
     double getLastLatency();
 
+    /**
+     * Enable RFC 3550 receive statistics + periodic Receiver Report emission
+     * for this socket pair. Media-specific (the RTP timestamp clock rate is
+     * needed for jitter); the video session enables it with 90000.
+     * The FFmpeg "sdp" demuxer never sends RRs on the custom-IO transport
+     * (it requires AVPF negotiation), so without this the remote peer's
+     * loss-based bitrate adaptation is blind.
+     */
+    void enableRtcpReports(uint32_t rtpClockRate);
+
+    /** Incoming media rate over the last measurement window, bits/s (0 if unknown). */
+    uint64_t getReceiveBitrateBps() const { return lastRateBps_.load(std::memory_order_relaxed); }
+
+    /**
+     * Bitrate estimate carried by the most recent REMB, decoded directly from
+     * the wire bytes (mantissa*2^exp), consumed on read. 0 = none pending.
+     */
+    uint64_t takeLastRembBps() { return lastRembBps_.exchange(0, std::memory_order_relaxed); }
+
     void setPacketLossCallback(std::function<void(void)> cb)
     {
         packetLossCallback_ = std::move(cb);
@@ -187,6 +263,8 @@ public:
     void setRtpDelayCallback(std::function<void(int, int)> cb);
 
     int writeData(const uint8_t* buf, int buf_size);
+    int readData(uint8_t* buf, int buf_size);
+    int readDataNoBlock(uint8_t* buf, int buf_size);
 
     uint16_t lastSeqValOut();
 
@@ -203,6 +281,10 @@ private:
     int readRtcpData(void* buf, int buf_size);
     void saveRtcpRRPacket(uint8_t* buf, size_t len);
     void saveRtcpREMBPacket(uint8_t* buf, size_t len);
+    void storeValidatedRR(const rtcpRRHeader& header);
+    void handleIncomingSR(uint8_t* buf, size_t len);
+    void processIncomingRtpStats(uint8_t* buf, int len);
+    void sendReceiverReport();
 
     std::mutex dataBuffMutex_;
     std::condition_variable cv_;
@@ -211,6 +293,9 @@ private:
 
     int rtpHandle_ {-1};
     int rtcpHandle_ {-1};
+    uint16_t localFamily_ {AF_UNSPEC};
+    uint16_t localRtpPort_ {0};
+    uint16_t localRtcpPort_ {0};
     IpAddr rtpDestAddr_;
     IpAddr rtcpDestAddr_;
     std::atomic_bool interrupted_ {false};
@@ -235,9 +320,10 @@ private:
 
     mutable std::atomic_bool rtcpPacketLoss_ {false};
     double lastSRTS_ {};
-    uint32_t lastDLSR_ {};
+    std::atomic<uint32_t> lastDLSR_ {0};
 
     std::list<double> histoLatency_;
+    mutable std::mutex latencyMutex_;
 
     time_point lastRR_time;
     uint16_t lastSeqNumIn_ {0};
@@ -246,6 +332,37 @@ private:
     time_point arrival_TS {};
 
     TS_Frame svgTS = {};
+
+    // --- RFC 3550 receive statistics / Receiver Report emission ---
+    // 0 = reporting disabled (audio sessions keep the historical behavior).
+    std::atomic<uint32_t> rtcpReportClockRate_ {0};
+    // Our outgoing RTP SSRC (updated from every sent RTP packet — the FFmpeg
+    // muxer picks a fresh SSRC after each sender restart). Used both as the
+    // reporter identity in our RRs and to validate that inbound report blocks
+    // are about our stream (filters SRTCP ciphertext we cannot decrypt).
+    std::atomic<uint32_t> ourOutSsrc_ {0};
+    // Fields below are only touched on the receive thread (readCallback).
+    uint32_t remoteSsrc_ {0};
+    bool seqInit_ {false};
+    uint16_t maxSeq_ {0};
+    uint32_t seqCycles_ {0};
+    uint32_t baseSeqExt_ {0};
+    uint32_t receivedPkts_ {0};
+    uint32_t expectedPrior_ {0};
+    uint32_t receivedPrior_ {0};
+    uint32_t jitterQ4_ {0};
+    int64_t lastTransit_ {0};
+    bool transitInit_ {false};
+    time_point lastRRSent_ {};
+    // Peer Sender Report info for the LSR/DLSR fields of our RRs.
+    uint32_t peerSrNtpMid_ {0};
+    time_point peerSrArrival_ {};
+    // Incoming media rate measurement (~500 ms window).
+    uint64_t rateWindowBytes_ {0};
+    time_point rateWindowStart_ {};
+    std::atomic<uint64_t> lastRateBps_ {0};
+    // Most recent REMB estimate, decoded from raw wire bytes.
+    std::atomic<uint64_t> lastRembBps_ {0};
 };
 
 } // namespace sip_core

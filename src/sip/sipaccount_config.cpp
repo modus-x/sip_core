@@ -66,6 +66,7 @@ constexpr const char* KEEP_ALIVE_TYPE = "keepAliveType";
 
 constexpr const char* CRED_KEY = "credentials";
 constexpr const char* CRED_PASSWORD = "password";
+constexpr const char* PASSWORD_KEY = "password";
 constexpr const char* CRED_REALM = "realm";
 constexpr const char* CRED_USERNAME = "username";
 constexpr const char* CRED_HASH = "hash";
@@ -103,7 +104,8 @@ SipAccountConfig::serialize(YAML::Emitter& out) const
 
     out << YAML::Key << Conf::REGISTRATION_EXPIRE << YAML::Value << registrationExpire;
     out << YAML::Key << Conf::SERVICE_ROUTE_KEY << YAML::Value << serviceRoute;
-    out << YAML::Key << Conf::BACK_SERVICE_ROUTE_KEY << YAML::Value << backServiceRoute;
+    out << YAML::Key << Conf::BACK_SERVICE_ROUTE_KEY << YAML::Value
+        << string_join(backServiceRoutes, "/"sv);
     out << YAML::Key << Conf::ALLOW_IP_AUTO_REWRITE << YAML::Value << allowIPAutoRewrite;
 
     if (serializeCredentials) {
@@ -125,6 +127,16 @@ SipAccountConfig::unserialize(const YAML::Node& node)
 {
     SipAccountBaseConfig::unserialize(node);
     parseValueOptional(node, Conf::USERNAME_KEY, username);
+    parseValueOptional(node, Conf::PASSWORD_KEY, password);
+#ifdef RQM
+    // Opt-in destination for the local fmp4 mirror. Empty/unset = no
+    // local file written. See SipAccountConfig::localDesktopRecords.
+    parseValueOptional(node, "localDesktopRecords", localDesktopRecords);
+
+    // Opt-in pre-init-segment grace period in seconds. 0/unset = no
+    // delay (default). See SipAccountConfig::desktopStreamStartupDelaySec.
+    parseValueOptional(node, "desktopStreamStartupDelaySec", desktopStreamStartupDelaySec);
+#endif
     parseValueOptional(node, Conf::BIND_ADDRESS_KEY, bindAddress);
     parseValueOptional(node, Conf::PORT_KEY, localPort);
     parseValueOptional(node, Conf::PUBLISH_PORT_KEY, publishedPort);
@@ -137,7 +149,9 @@ SipAccountConfig::unserialize(const YAML::Node& node)
     parseValueOptional(node, Conf::REGISTRATION_EXPIRE, registrationExpire);
     registrationExpire = std::max(MIN_REGISTRATION_TIME, registrationExpire);
     parseValueOptional(node, Conf::SERVICE_ROUTE_KEY, serviceRoute);
-    parseValueOptional(node, Conf::BACK_SERVICE_ROUTE_KEY, backServiceRoute);
+    std::string routes;
+    if (parseValueOptional(node, Conf::BACK_SERVICE_ROUTE_KEY, routes))
+        backServiceRoutes = string_split_vec(routes, "/"sv);
     parseValueOptional(node, Conf::ALLOW_IP_AUTO_REWRITE, allowIPAutoRewrite);
 
     parseValueOptional(node, Conf::PRESENCE_MODULE_ENABLED_KEY, presenceEnabled);
@@ -178,7 +192,7 @@ SipAccountConfig::toMap() const
     a.emplace(Conf::CONFIG_KEEP_ALIVE_INTERVAL, std::to_string(keepAliveInterval));
     a.emplace(Conf::CONFIG_KEEP_ALIVE_TYPE, getKeepAliveTypeName(keepAliveType));
     a.emplace(Conf::CONFIG_ACCOUNT_ROUTESET, serviceRoute);
-    a.emplace(Conf::CONFIG_ACCOUNT_BACK_ROUTESET, backServiceRoute);
+    a.emplace(Conf::CONFIG_ACCOUNT_BACK_ROUTESET, string_join(backServiceRoutes, "/"sv));
     a.emplace(Conf::CONFIG_ACCOUNT_REGISTRATION_EXPIRE, std::to_string(registrationExpire));
 
     std::string password {};
@@ -207,7 +221,9 @@ SipAccountConfig::fromMap(const std::map<std::string, std::string>& details)
     parseInt(details, Conf::CONFIG_LOCAL_PORT, localPort);
     parseString(details, Conf::CONFIG_BIND_ADDRESS, bindAddress);
     parseString(details, Conf::CONFIG_ACCOUNT_ROUTESET, serviceRoute);
-    parseString(details, Conf::CONFIG_ACCOUNT_BACK_ROUTESET, backServiceRoute);
+    std::string routes;
+    parseString(details, Conf::CONFIG_ACCOUNT_BACK_ROUTESET, routes);
+    backServiceRoutes = string_split_vec(routes, "/"sv);
     parseBool(details, Conf::CONFIG_ACCOUNT_IP_AUTO_REWRITE, allowIPAutoRewrite);
     parseString(details, Conf::CONFIG_LOCAL_INTERFACE, interface);
     parseBool(details, Conf::CONFIG_PUBLISHED_SAMEAS_LOCAL, publishedSameasLocal);

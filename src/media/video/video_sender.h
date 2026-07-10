@@ -29,6 +29,7 @@
 #include <string>
 #include <memory>
 #include <atomic>
+#include <mutex>
 
 // Forward declarations
 namespace sip_core {
@@ -69,7 +70,6 @@ public:
 
     void natPing();
 
-    inline void setMuted(bool mute) { muted_.store(mute); }
     void setSource(const std::string& source);
 
 private:
@@ -83,6 +83,7 @@ private:
     // encoder MUST be deleted before muxContext
     std::unique_ptr<MediaIOHandle> muxContext_ = nullptr;
     std::unique_ptr<MediaEncoder> videoEncoder_ = nullptr;
+    mutable std::mutex encoderMutex_ {};
 
     MediaStream stream_;
 
@@ -96,7 +97,6 @@ private:
     std::function<void(int)> changeOrientationCallback_;
 
     bool natResolved_ = false;
-    std::atomic<bool> muted_ {false};
 };
 } // namespace video
 } // namespace sip_core

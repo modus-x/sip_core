@@ -1,6 +1,6 @@
-diff --git a/CMakeLists-old.txt b/CMakeLists.txt
+diff --git a/CMakeLists.txt b/CMakeLists.txt
 index eeae0cf..21e9abf 100644
---- a/CMakeLists-old.txt
+--- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -230,26 +230,10 @@ set (subset_project_headers
  

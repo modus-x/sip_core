@@ -25,7 +25,6 @@ FFMPEGCONF+='
 FFMPEGCONF+='
             --enable-static
             --disable-shared
-            --enable-cross-compile
             --enable-gpl
             --enable-swscale
             --enable-protocols

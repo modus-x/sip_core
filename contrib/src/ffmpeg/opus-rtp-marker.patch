@@ -1,0 +1,21 @@
+diff --git a/libavformat/rtpenc.c b/libavformat/rtpenc.c
+index ac53f6a..e84f8aa 100644
+--- a/libavformat/rtpenc.c
++++ b/libavformat/rtpenc.c
+@@ -627,8 +627,14 @@ static int rtp_write_packet(AVFormatContext *s1, AVPacket *pkt)
+                    size, s->max_payload_size);
+             return AVERROR(EINVAL);
+         }
+-        /* Intentional fallthrough */
+-    default:
++        if (!size)
++            break;
++        s->timestamp = s->cur_timestamp;
++        ff_rtp_send_data(s1, pkt->data, size,
++                         !s->frame_count || (pkt->flags & FF_RTP_FLAG_FORCE_MARKER));
++        s->frame_count = 1;
++        break;
++    default:
+         /* better than nothing : send the codec raw data */
+         rtp_send_raw(s1, pkt->data, size);
+         break;

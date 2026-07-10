@@ -21,7 +21,9 @@
  *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301 USA.
  */
 #include "instant_messaging.h"
+#include <chrono>
 #include <string_view>
+#include <thread>
 
 #include "logger.h"
 #include "connectivity/sip_utils.h"
@@ -152,7 +154,15 @@ im::sendSipMessage(pjsip_inv_session* session, const std::map<std::string, std::
     }
 
     auto dialog = session->dlg;
-    if (pjsip_dlg_try_inc_lock(dialog) == PJ_SUCCESS) {
+    // Bounded retry on dialog-lock contention: this carries in-call conference
+    // signalling (confInfo/confOrder/shareState) — silently dropping one under
+    // rapid mode churn desyncs layouts until the next unrelated resend.
+    pj_status_t lockStatus = pjsip_dlg_try_inc_lock(dialog);
+    for (int attempt = 0; lockStatus != PJ_SUCCESS && attempt < 3; ++attempt) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        lockStatus = pjsip_dlg_try_inc_lock(dialog);
+    }
+    if (lockStatus == PJ_SUCCESS) {
         constexpr pjsip_method msg_method = {PJSIP_OTHER_METHOD,
                                              CONST_PJ_STR(sip_utils::SIP_METHODS::INFO)};
 
@@ -169,7 +179,7 @@ im::sendSipMessage(pjsip_inv_session* session, const std::map<std::string, std::
 
         fillPJSIPMessageBody(*tdata, payloads);
 
-        SIP_CORE_DBG("im: sending SIP MESSAGE with %zu payloads: first is %s", payloads.size(), payloads.begin()->second.c_str());
+        SIP_CORE_DBG("im: sending in-dialog SIP INFO with %zu payloads: first is %s", payloads.size(), payloads.begin()->second.c_str());
 
         status = pjsip_dlg_send_request(dialog, tdata, -1, nullptr);
         if (status != PJ_SUCCESS) {

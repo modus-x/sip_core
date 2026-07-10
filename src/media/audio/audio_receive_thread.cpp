@@ -28,6 +28,7 @@
 #include "media_recorder.h"
 #include "ringbuffer.h"
 #include "ringbufferpool.h"
+#include "g729_decoder.h"
 
 #include <memory>
 
@@ -46,6 +47,7 @@ AudioReceiveThread::AudioReceiveThread(const std::string& id,
             std::bind(&AudioReceiveThread::process, this),
             std::bind(&AudioReceiveThread::cleanup, this),
             ThreadLoop::ThreadPriority::HIGH)
+    , vadSensitivity_(sip_core::Manager::instance().audioPreference.getVoiceActivitySensitivity())
 {}
 
 AudioReceiveThread::~AudioReceiveThread()
@@ -60,30 +62,29 @@ AudioReceiveThread::setup()
     if(sip_core::Manager::instance().audioPreference.getVadEnabled())
         createAudioProcessor();
 
-    std::lock_guard lk(mutex_);
-    audioDecoder_.reset(new MediaDecoder([this](std::shared_ptr<MediaFrame>&& frame) mutable {
+    auto observer = [this](std::shared_ptr<MediaFrame>&& frame) mutable {
         if (!muteState_) {
-            std::lock_guard<std::mutex> lock(audioProcessorMutex_);
-            if (audioProcessor_) {
-                // we need it for some reason
-                auto silence = std::make_shared<AudioFrame>(format_, frame->pointer()->nb_samples);
-                libav_utils::fillWithSilence(silence->pointer());
-                audioProcessor_->putPlayback(silence);
-                
-                audioProcessor_->putRecorded(std::static_pointer_cast<AudioFrame>(frame));
+            bool processed = false;
+            {
+                std::lock_guard<std::mutex> lock(audioProcessorMutex_);
+                if (audioProcessor_) {
+                    // we need it for some reason
+                    auto silence = std::make_shared<AudioFrame>(format_, frame->pointer()->nb_samples);
+                    libav_utils::fillWithSilence(silence->pointer());
+                    audioProcessor_->putPlayback(silence);
+
+                    audioProcessor_->putRecorded(std::static_pointer_cast<AudioFrame>(frame));
+                    processed = true;
+                }
             }
-            else {
+
+            if (!processed) {
                 notify(frame);
             }
-            
-            ringbuffer_->put(std::move(std::static_pointer_cast<AudioFrame>(frame)));
+
+            ringbuffer_->put(std::static_pointer_cast<AudioFrame>(frame));
         }
-    }));
-    audioDecoder_->setContextCallback([this]() {
-        if (recorderCallback_)
-            recorderCallback_(getInfo());
-    });
-    audioDecoder_->setInterruptCallback(interruptCb, this);
+    };
 
     // custom_io so the SDP demuxer will not open any UDP connections
     args_.input = SDP_FILENAME;
@@ -95,10 +96,32 @@ AudioReceiveThread::setup()
         return false;
     }
 
-    audioDecoder_->setIOContext(sdpContext_.get());
-    if (audioDecoder_->openInput(args_)) {
-        SIP_CORE_ERR("Could not open input \"%s\"", SDP_FILENAME);
-        return false;
+    std::lock_guard lk(mutex_);
+    
+    constexpr int G729_RTP_FMT = 18;
+    // Probe the first RTP packet to detect G729 vs other codecs.
+    // If the probe fails (e.g. no RTP arrived yet during early media),
+    // fall back to the standard decoder — the SDP already tells us the codec.
+    auto rtp_type = MediaDecoderBase::get_rtp_packet_type(demuxContext_.get(), 5000);
+    if (rtp_type < 0) {
+        SIP_CORE_WARN("Could not probe RTP packet type, falling back to standard decoder");
+    }
+
+    if (rtp_type == G729_RTP_FMT) {
+        audioDecoder_.reset(new g729MediaDecoder(observer));
+        if (audioDecoder_->openInput(args_)) {
+            SIP_CORE_ERR("Could not open input \"%s\"", SDP_FILENAME);
+            return false;
+        }
+    }
+    else {
+        audioDecoder_.reset(new MediaDecoder(observer));
+
+        audioDecoder_->setIOContext(sdpContext_.get());
+        if (audioDecoder_->openInput(args_)) {
+            SIP_CORE_ERR("Could not open input \"%s\"", SDP_FILENAME);
+            return false;
+        }
     }
 
     // Now replace our custom AVIOContext with one that will read packets
@@ -108,8 +131,27 @@ AudioReceiveThread::setup()
         return false;
     }
 
+    audioDecoder_->setContextCallback([this]() {
+        if (recorderCallback_)
+            recorderCallback_(getInfo());
+    });
+    audioDecoder_->setInterruptCallback(interruptCb, this);
+
     ringbuffer_ = Manager::instance().getRingBufferPool().getRingBuffer(id_);
-    Manager::instance().getRingBufferPool().bindHalfDuplexOut(RingBufferPool::DEFAULT_ID, id_);
+
+    // Only bind the call's ring buffer to the local playback (DEFAULT_ID)
+    // for non-conference calls.  When the call is a conference participant,
+    // the Conference object manages all ring-buffer bindings itself
+    // (respecting localPlaybackMuted_, per-participant mute, etc.).
+    // Binding here unconditionally would override the conference's muted
+    // playback state every time the RTP audio stream is (re-)initialized
+    // (e.g. after a re-INVITE triggered by takeOverMediaSourceControl).
+    if (auto call = Manager::instance().getCallFromCallID(id_)) {
+        if (!call->isConferenceAudioManaged())
+            Manager::instance().getRingBufferPool().bindHalfDuplexOut(RingBufferPool::DEFAULT_ID, id_);
+    } else {
+        Manager::instance().getRingBufferPool().bindHalfDuplexOut(RingBufferPool::DEFAULT_ID, id_);
+    }
 
 
     if (onSuccessfulSetup_)
@@ -193,15 +235,6 @@ AudioReceiveThread::createAudioProcessor()
                      "using NullAudioProcessor instead");
         audioProcessor_.reset(new NullAudioProcessor(format_, frame_size));
 #endif
-    } else if (sip_core::Manager::instance().audioPreference.getAudioProcessor() == "speex") {
-#if HAVE_SPEEXDSP
-        SIP_CORE_WARN("[audio_receive_thread] using SpeexAudioProcessor");
-        audioProcessor_.reset(new SpeexAudioProcessor(format_, frame_size));
-#else
-        SIP_CORE_ERR("[audio_receive_thread] audioProcessor preference is speex, but library not linked! "
-                     "using NullAudioProcessor instead");
-        audioProcessor_.reset(new NullAudioProcessor(format_, frame_size));
-#endif
     } else if (sip_core::Manager::instance().audioPreference.getAudioProcessor() == "null") {
         SIP_CORE_WARN("[audio_receive_thread] using NullAudioProcessor");
         audioProcessor_.reset(new NullAudioProcessor(format_, frame_size));
@@ -213,6 +246,7 @@ AudioReceiveThread::createAudioProcessor()
     }
     
     audioProcessor_->enableVoiceActivityDetection(true);
+    applyVadSensitivityLocked();
 }
 
 void
@@ -261,6 +295,8 @@ AudioReceiveThread::setRecorderCallback(
 MediaStream
 AudioReceiveThread::getInfo() const
 {
+    if (!audioDecoder_)
+        return {};
     return audioDecoder_->getStream("a:remote");
 }
 
@@ -289,6 +325,36 @@ AudioReceiveThread::setVAD(bool active)
         createAudioProcessor();
     else
         destroyAudioProcessor();
+}
+
+int
+AudioReceiveThread::clampVadSensitivity(int32_t sensitivity)
+{
+    if (sensitivity < 0)
+        return 0;
+    if (sensitivity > 3)
+        return 3;
+    return static_cast<int>(sensitivity);
+}
+
+void
+AudioReceiveThread::applyVadSensitivityLocked()
+{
+#if HAVE_WEBRTC_AP
+    if (sip_core::Manager::instance().audioPreference.getAudioProcessor() == "webrtc"
+        && audioProcessor_) {
+        if (auto* webRtc = dynamic_cast<WebRTCAudioProcessor*>(audioProcessor_.get()))
+            webRtc->setVadSensitivity(vadSensitivity_);
+    }
+#endif
+}
+
+void
+AudioReceiveThread::setVadSensitivity(int32_t sensitivity)
+{
+    std::lock_guard<std::mutex> lock(audioProcessorMutex_);
+    vadSensitivity_ = clampVadSensitivity(sensitivity);
+    applyVadSensitivityLocked();
 }
 
 }; // namespace sip_core

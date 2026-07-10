@@ -93,9 +93,28 @@ using sip_utils::CONST_PJ_STR;
 
 static constexpr unsigned REGISTRATION_FIRST_RETRY_INTERVAL = 25; // seconds
 static constexpr unsigned REGISTRATION_RETRY_INTERVAL = 50;       // seconds
+static constexpr int64_t TRANSPORT_RECOVERY_DEBOUNCE_MS = 1500;
+static constexpr size_t OPTIONS_RECOVERY_MAX_ATTEMPTS = 3;
+static constexpr int64_t OPTIONS_RECOVERY_WINDOW_MS = 60 * 1000;
+static constexpr size_t RAW_KEEPALIVE_RECOVERY_MAX_ATTEMPTS = 3;
+static constexpr int64_t RAW_KEEPALIVE_RECOVERY_WINDOW_MS = 60 * 1000;
+static constexpr uint32_t MAIN_ROUTE_FAST_PROBE_INTERVAL_SEC = 1;
+static constexpr uint32_t ACTIVE_NO_ROUTE_FAST_PROBE_INTERVAL_SEC = 1;
 
 // keep-alive const values
 static constexpr pj_str_t KA_DATA = CONST_PJ_STR("");
+
+static pjsip_transport_type_e
+transportTypeFromConfig(libsip_core::TransportType transportType)
+{
+    switch (transportType) {
+    case libsip_core::TransportType::TCP:
+        return PJSIP_TRANSPORT_TCP;
+    case libsip_core::TransportType::UDP:
+    default:
+        return PJSIP_TRANSPORT_UDP;
+    }
+}
 
 static char*
 randomSvAuthString(int length)
@@ -119,32 +138,22 @@ keep_alive_on_complete(void* token, pjsip_event* event)
     if (!acc || !event || event->type != PJSIP_EVENT_TSX_STATE || !event->body.tsx_state.tsx)
         return;
 
-    int code = event->body.tsx_state.tsx->status_code;
-    if (code == PJSIP_SC_REQUEST_TIMEOUT || code == PJSIP_SC_TSX_TRANSPORT_ERROR) {
-        SIP_CORE_WARN("KA: OPTIONS keep-alive failed with code %d", code);
+    const auto* tsx = event->body.tsx_state.tsx;
+    const bool finalState = tsx->state == PJSIP_TSX_STATE_COMPLETED
+                            || tsx->state == PJSIP_TSX_STATE_TERMINATED;
+    if (!finalState)
+        return;
 
-        if (acc->switchFromCallRetry.try_lock()) {
-            if (acc->hasServiceRoute() and acc->hasBackServiceRoute()
-                and !acc->isUsingBackupRoute()) {
-                SIP_CORE_WARN("KA: Main route keep-alive failed, switching to backup route");
-                // Trigger re-registration with backup route
-                acc->switchToBackupRoute();
-                acc->doRegister();
-                acc->ka_options_pending_ = false;
-                acc->switchFromCallRetry.unlock();
-                return;
-            }
-            acc->switchFromCallRetry.unlock();
-        }
+    const int code = tsx->status_code;
+    SIP_CORE_INFO("KA_EVT: options-final route=active code=%d", code);
 
-        acc->setRegistrationState(RegistrationState::ERROR_GENERIC, PJSIP_SC_TSX_TRANSPORT_ERROR);
+    if (acc->isOptionsSuccess200(code)) {
+        acc->handleActiveRouteOptionsSuccess(code);
+    } else if (acc->shouldEnableActiveNoRouteFastProbeForStatusCode(code)) {
+        acc->handleActiveRouteOptionsFailure(code);
     }
 
-    // Clear pending flag when the transaction reaches a final state
-    if (event->body.tsx_state.tsx->state == PJSIP_TSX_STATE_COMPLETED
-        || event->body.tsx_state.tsx->state == PJSIP_TSX_STATE_TERMINATED) {
-        acc->ka_options_pending_ = false;
-    }
+    acc->ka_options_pending_ = false;
 }
 
 /* Backup route keep-alive completion callback */
@@ -155,15 +164,24 @@ backup_keep_alive_on_complete(void* token, pjsip_event* event)
     if (!acc || !event || event->type != PJSIP_EVENT_TSX_STATE || !event->body.tsx_state.tsx)
         return;
 
-    int code = event->body.tsx_state.tsx->status_code;
-    if (code == PJSIP_SC_REQUEST_TIMEOUT || code == PJSIP_SC_TSX_TRANSPORT_ERROR) {
-        SIP_CORE_WARN("Backup route KA: OPTIONS keep-alive failed with code %d", code);
+    const auto* tsx = event->body.tsx_state.tsx;
+    const bool finalState = tsx->state == PJSIP_TSX_STATE_COMPLETED
+                            || tsx->state == PJSIP_TSX_STATE_TERMINATED;
+    if (!finalState)
+        return;
+
+    const int code = tsx->status_code;
+    SIP_CORE_INFO("KA_EVT: options-final route=backup-probe code=%d", code);
+    if (acc->isTransportFailureFromOptions(code)) {
+        SIP_CORE_WARN("Backup route KA: transport failure during probe (code=%d), recovering "
+                      "transport",
+                      code);
+        acc->scheduleTransportRecovery("backup-route-options-transport-failure", code);
+    } else if (acc->isRouteFailureFromOptions(code)) {
+        SIP_CORE_DBG("Backup route KA: probe failed with code %d", code);
     }
 
-    if (event->body.tsx_state.tsx->state == PJSIP_TSX_STATE_COMPLETED
-        || event->body.tsx_state.tsx->state == PJSIP_TSX_STATE_TERMINATED) {
-        acc->ka_backup_route_options_pending_ = false;
-    }
+    acc->ka_backup_route_options_pending_ = false;
 }
 
 /* Main route keep alive completion callback - checks if main route is available */
@@ -174,27 +192,51 @@ main_route_keep_alive_on_complete(void* token, pjsip_event* event)
     if (!acc || !event || event->type != PJSIP_EVENT_TSX_STATE || !event->body.tsx_state.tsx)
         return;
 
-    int code = event->body.tsx_state.tsx->status_code;
+    const auto* tsx = event->body.tsx_state.tsx;
+    const bool finalState = tsx->state == PJSIP_TSX_STATE_COMPLETED
+                            || tsx->state == PJSIP_TSX_STATE_TERMINATED;
+    if (!finalState)
+        return;
 
-    // Main route responded successfully - switch back!
-    if (code >= 200 && code < 300) {
-        if (acc->switchFromCallRetry.try_lock()) {
-            SIP_CORE_WARN("Main route keep-alive succeeded (code %d), switching back to main route",
-                          code);
-            // Trigger re-registration with main route
-            acc->switchToMainRoute();
-            acc->doRegister();
-            acc->switchFromCallRetry.unlock();
+    const int code = tsx->status_code;
+    SIP_CORE_INFO("KA_EVT: options-final route=main-probe code=%d", code);
+    if (acc->isOptionsSuccess200(code)) {
+        acc->mainRouteAvailable_.store(true);
+        if (acc->getRegistrationState() == RegistrationState::TRYING) {
+            SIP_CORE_DBG("Main route KA: registration already in progress, deferring failback");
+            acc->enableMainRouteFastProbe("main-probe-200-register-in-progress");
+        } else {
+            acc->disableMainRouteFastProbe("main-probe-200");
+            SIP_CORE_WARN("Main route keep-alive succeeded with 200, switching back to main route");
+            acc->switchRouteAndReregister(false, "main-route-options-success", true);
         }
-    } else {
+    } else if (acc->shouldEnableMainRouteFastProbeForStatusCode(code)) {
+        acc->mainRouteAvailable_.store(false);
+        acc->enableMainRouteFastProbe("main-probe-non-200");
         SIP_CORE_DBG("Main route keep-alive failed with code %d, staying on backup", code);
     }
 
-    // Clear pending flag when the transaction reaches a final state
-    if (event->body.tsx_state.tsx->state == PJSIP_TSX_STATE_COMPLETED
-        || event->body.tsx_state.tsx->state == PJSIP_TSX_STATE_TERMINATED) {
-        acc->ka_main_route_options_pending_ = false;
-    }
+    acc->ka_main_route_options_pending_ = false;
+}
+
+static void
+startup_main_route_probe_on_complete(void* token, pjsip_event* event)
+{
+    auto* acc = static_cast<SIPAccount*>(token);
+    if (!acc || !event || event->type != PJSIP_EVENT_TSX_STATE || !event->body.tsx_state.tsx)
+        return;
+
+    const auto* tsx = event->body.tsx_state.tsx;
+    const bool finalState = tsx->state == PJSIP_TSX_STATE_COMPLETED
+                            || tsx->state == PJSIP_TSX_STATE_TERMINATED;
+    if (!finalState)
+        return;
+
+    acc->startupMainRouteProbePending_.store(false);
+
+    const int code = tsx->status_code;
+    SIP_CORE_INFO("KA_EVT: options-final route=startup-main-probe code=%d", code);
+    acc->handleStartupMainRouteProbeResult(code);
 }
 
 /* Main route keep alive timer callback - sends OPTIONS to main route */
@@ -223,11 +265,6 @@ main_route_keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
         return;
     }
 
-    // Only for UDP
-    if (acc->getTransportType() != PJSIP_TRANSPORT_UDP) {
-        return;
-    }
-
     // Check if target is available
     if (acc->kaMainRoute.length == 0) {
         SIP_CORE_ERR("Main route KA: no target available");
@@ -240,14 +277,6 @@ main_route_keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
         return;
     }
     acc->kaMainRoute.length = targetLen;
-    if (targetLen > sizeof(pj_sockaddr_in)) {
-        SIP_CORE_WARN("Main route KA: skipping IPv6-sized target (%u bytes) on UDP transport to "
-                      "avoid pj_ioqueue_sendto assert",
-                      targetLen);
-        return;
-    }
-
-    const pjsip_tpselector tp_sel = acc->getTransportSelector();
 
     // Send OPTIONS keep-alive to main route
     if (true) {
@@ -258,7 +287,7 @@ main_route_keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
             acc->ka_main_route_options_pending_ = true;
 
             pjsip_tx_data* tdata = nullptr;
-            auto server_uri = acc->getServerUri();
+            auto server_uri = acc->getMainRouteKeepAliveUri();
             pj_str_t pjServer = sip_utils::CONST_PJ_STR(server_uri);
             auto contact = acc->getContactHeader();
             pj_str_t pjContact = sip_utils::CONST_PJ_STR(contact);
@@ -276,14 +305,13 @@ main_route_keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
 
             if (status == PJ_SUCCESS) {
                 auto ip = acc->getServiceRouteIp();
-                if (ip) {
-                    auto ai = &tdata->dest_info;
-                    ai->name = pj_strdup3(tdata->pool, acc->config().hostname.c_str());
-                    ai->addr.count = 1;
-                    ai->addr.entry[0].type = acc->getTransportType();
-                    pj_memcpy(&ai->addr.entry[0].addr, ip.pjPtr(), ip.getLength());
-                    ai->addr.entry[0].addr_len = ip.getLength();
-                    ai->cur_addr = 0;
+                if (!ip || !acc->setUpTransmissionData(tdata, ip)) {
+                    SIP_CORE_ERR("Main route KA: Unable to setup OPTIONS destination");
+                    pjsip_tx_data_dec_ref(tdata);
+                    acc->mainRouteAvailable_.store(false);
+                    acc->enableMainRouteFastProbe("main-probe-setup-failure");
+                    acc->ka_main_route_options_pending_ = false;
+                    goto reschedule_timer;
                 }
 
                 status = pjsip_endpt_send_request(acc->getVoipLink().getEndpoint(),
@@ -294,18 +322,24 @@ main_route_keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
 
                 if (status == PJ_SUCCESS) {
                     SIP_CORE_DBG("Main route KA: OPTIONS sent to main route");
+                    SIP_CORE_INFO("KA_EVT: options-sent route=main-probe");
                 } else {
                     SIP_CORE_ERR("Main route KA: Error sending OPTIONS: %d", status);
+                    acc->mainRouteAvailable_.store(false);
+                    acc->enableMainRouteFastProbe("main-probe-send-failure");
                     acc->ka_main_route_options_pending_ = false;
                 }
             } else {
                 SIP_CORE_ERR("Main route KA: Error creating OPTIONS: %d", status);
+                acc->mainRouteAvailable_.store(false);
+                acc->enableMainRouteFastProbe("main-probe-create-failure");
                 acc->ka_main_route_options_pending_ = false;
             }
         }
     }
 
-    uint32_t seconds = acc->config().keepAliveInterval;
+reschedule_timer:
+    uint32_t seconds = acc->getMainRouteProbeIntervalSec();
     if (seconds == 0) {
         SIP_CORE_INFO("Main route KA: 0 seconds is set, skipping");
         return;
@@ -318,6 +352,9 @@ main_route_keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
     status = pjsip_endpt_schedule_timer(acc->getVoipLink().getEndpoint(), te, &delay);
     if (status == PJ_SUCCESS) {
         te->id = PJ_TRUE;
+        SIP_CORE_INFO("KA_EVT: main-probe-rescheduled interval_sec=%u fast=%d",
+                      seconds,
+                      acc->isMainRouteFastProbeEnabled() ? 1 : 0);
     } else {
         SIP_CORE_ERROR("Main route KA: Error rescheduling timer: %d", status);
     }
@@ -347,8 +384,8 @@ backup_route_keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
         return;
     }
 
-    if (!acc->hasBackServiceRoute()) {
-        SIP_CORE_DBG("Backup route KA: no backup route configured");
+    if (!acc->hasBackServiceRoutes()) {
+        SIP_CORE_DBG("Backup route KA: no backup routes configured");
         return;
     }
 
@@ -405,6 +442,22 @@ keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
         return;
     }
 
+    // Skip keep-alive during connectivity recovery — transport may be stale
+    if (acc->connectivityRecoveryInProgress_.load()) {
+        SIP_CORE_DBG("KA: skipping keep-alive during connectivity recovery for %s",
+                     contactHeader.c_str());
+        // Reschedule so we resume once recovery is done
+        uint32_t seconds = acc->getActiveKeepAliveIntervalSec();
+        if (seconds > 0) {
+            delay.sec = seconds;
+            delay.msec = 0;
+            status = pjsip_endpt_schedule_timer(acc->getVoipLink().getEndpoint(), te, &delay);
+            if (status == PJ_SUCCESS)
+                te->id = PJ_TRUE;
+        }
+        return;
+    }
+
     auto transportType = acc->getTransportType();
     const bool isUdp = transportType == PJSIP_TRANSPORT_UDP;
     const bool isTcp = transportType == PJSIP_TRANSPORT_TCP;
@@ -438,9 +491,11 @@ keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
     const pjsip_tpselector tp_sel = acc->getTransportSelector();
 
     /* Send keep-alive packet options */
+    const bool noRouteMode = acc->isNoRouteKeepAliveMode();
     const bool forcedOptions = !isUdp && acc->config().keepAliveType != KeepAliveType::Options;
-    const bool useOptions = forcedOptions || acc->config().keepAliveType == KeepAliveType::Options
-                            || !isUdp;
+    const bool useOptions = SIPAccount::shouldUseOptionsForKeepAlive(acc->config().keepAliveType,
+                                                                     isUdp);
+    bool rawUdpKeepAliveSendAttempted = false;
 
     // Avoid crashing inside pj_ioqueue_sendto on IPv6 destinations when we're
     // bound to an IPv4 UDP transport.
@@ -469,14 +524,14 @@ keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
             /* Send SIP Options packet */
             pjsip_tx_data* tdata;
 
-            std::string srvUri(acc->getServerUri());
+            std::string srvUri(acc->getActiveKeepAliveUri());
             pj_str_t pjSrv {(char*) srvUri.data(), (pj_ssize_t) srvUri.size()};
 
             pj_str_t pjContact {(char*) contactHeader.data(), (pj_ssize_t) contactHeader.size()};
 
             SIP_CORE_DEBUG("KA: Sending OPTIONS keep-alive message for acc {:s} to {:s}",
                            contactHeader,
-                           acc->getServerUri());
+                           srvUri);
 
             status = pjsip_endpt_create_request(acc->getVoipLink().getEndpoint(),
                                                 &pjsip_options_method,
@@ -491,7 +546,6 @@ keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
             SIP_CORE_DEBUG("pjsip_endpt_create_request");
             if (status == PJ_SUCCESS) {
                 if (acc->setUpTransmissionData(tdata)) {
-
                     status = pjsip_endpt_send_request(acc->getVoipLink().getEndpoint(),
                                                       tdata,
                                                       -1,
@@ -501,6 +555,7 @@ keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
                     SIP_CORE_DEBUG("pjsip_endpt_send_request");
                     if (status == PJ_SUCCESS) {
                         acc->ka_options_pending_ = true;
+                        SIP_CORE_INFO("KA_EVT: options-sent route=active");
                     }
                 } else {
                     status = PJSIP_SC_TSX_TRANSPORT_ERROR;
@@ -511,6 +566,7 @@ keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
 
     } else if (!skipSend) {
         /* Send raw empty UDP NAT ping */
+        rawUdpKeepAliveSendAttempted = isUdp;
         SIP_CORE_DEBUG("KA: Sending {}-byte keep-alive packet for acc {:s} to {:s}",
                        KA_DATA.slen,
                        contactHeader,
@@ -525,14 +581,22 @@ keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
                                       targetLen,
                                       NULL,
                                       NULL);
+
+        if (status == PJ_SUCCESS && noRouteMode && acc->isActiveNoRouteFastProbeEnabled()) {
+            acc->disableActiveNoRouteFastProbe("active-no-route-raw-success");
+        }
     }
 
     if (status != PJ_SUCCESS && status != PJ_EPENDING) {
         SIP_CORE_ERROR("KA: Error sending keep-alive: {:d}", status);
-        acc->setRegistrationState(RegistrationState::ERROR_GENERIC, PJSIP_SC_TSX_TRANSPORT_ERROR);
+        if (rawUdpKeepAliveSendAttempted) {
+            acc->handleUdpRawKeepAliveSendFailure(status);
+        } else {
+            acc->handleActiveRouteOptionsFailure(PJSIP_SC_TSX_TRANSPORT_ERROR);
+        }
     }
 
-    uint32_t seconds = acc->config().keepAliveInterval;
+    uint32_t seconds = acc->getActiveKeepAliveIntervalSec();
 
     if (seconds == 0) {
         SIP_CORE_INFO() << "KA: 0 seconds is set, skipping keep-alive for contact "
@@ -547,6 +611,10 @@ keep_alive_timer_cb(pj_timer_heap_t* th, pj_timer_entry* te)
     status = pjsip_endpt_schedule_timer(acc->getVoipLink().getEndpoint(), te, &delay);
     if (status == PJ_SUCCESS) {
         te->id = PJ_TRUE;
+        SIP_CORE_INFO("KA_EVT: active-keepalive-rescheduled interval_sec=%u fast=%d no_route=%d",
+                      seconds,
+                      acc->isActiveNoRouteFastProbeEnabled() ? 1 : 0,
+                      noRouteMode ? 1 : 0);
     } else {
         SIP_CORE_ERROR("KA: Error starting keep-alive timer from callback: {:d}", status);
     }
@@ -577,6 +645,12 @@ registration_cb(pjsip_regc_cbparam* param)
         return;
     }
 
+    // Guard: skip callback if the account is shutting down.
+    if (account->isShuttingDown_.load()) {
+        SIP_CORE_DBG("Ignoring registration callback for shutting-down account");
+        return;
+    }
+
     account->onRegister(param);
 }
 
@@ -593,7 +667,20 @@ SIPAccount::SIPAccount(const std::string& accountID, bool presenceEnabled)
 
 SIPAccount::~SIPAccount() noexcept
 {
-    // ensure that no registration callbacks survive past this point
+    isShuttingDown_.store(true);
+    transportRecoveryPending_.store(false);
+    connectivityRecoveryRequested_.store(false);
+    pendingReinviteAfterRegister_.store(false);
+    connectivityRecoveryInProgress_.store(false);
+    prepareTransportResetDone_.store(false);
+
+    cancelKeepAliveTimer();
+    cancelMainRouteKeepAliveTimer();
+    cancelBackupRouteKeepAliveTimer();
+    cancelAutoReregistrationTimer();
+    resetAutoRegistration();
+
+    // ensure that no registration callbacks or transport callbacks survive past this point
     destroyRegistrationInfo();
     setTransport();
 
@@ -603,14 +690,20 @@ SIPAccount::~SIPAccount() noexcept
 void
 SIPAccount::registerKeepAliveTimer()
 {
-    /* In all cases, stop keep-alive timer if it's running. */
-    cancelKeepAliveTimer();
+    /* In all cases, stop keep-alive timer if it's running.
+     * Keep fast-mode state: this path is also used for timer refreshes.
+     */
+    if (kaTarget.timer.id != PJ_FALSE) {
+        pjsip_endpt_cancel_timer(link_.getEndpoint(), &kaTarget.timer);
+        kaTarget.timer = {};
+    }
 
     auto contactHeader = getContactHeader();
 
-    uint32_t seconds = config().keepAliveInterval;
+    uint32_t seconds = getActiveKeepAliveIntervalSec();
 
     if (seconds == 0) {
+        disableActiveNoRouteFastProbe("active-no-route-disabled-by-interval");
         SIP_CORE_INFO() << "KA: 0 seconds is set, skipping keep-alive for contact "
                         << contactHeader;
         return;
@@ -659,6 +752,10 @@ SIPAccount::registerKeepAliveTimer()
     if (status == PJ_SUCCESS) {
         kaTarget.timer.id = PJ_TRUE;
         SIP_CORE_INFO() << "KA: Timer is set for " << contactHeader << " with delay " << seconds;
+        SIP_CORE_INFO("KA_EVT: active-keepalive-rescheduled interval_sec=%u fast=%d no_route=%d",
+                      seconds,
+                      isActiveNoRouteFastProbeEnabled() ? 1 : 0,
+                      isNoRouteKeepAliveMode() ? 1 : 0);
     } else {
         kaTarget.timer.id = PJ_FALSE;
         SIP_CORE_ERR() << "KA: error starting keep-alive timer for contact " << contactHeader
@@ -669,6 +766,7 @@ SIPAccount::registerKeepAliveTimer()
 void
 SIPAccount::cancelKeepAliveTimer()
 {
+    disableActiveNoRouteFastProbe("active-keepalive-timer-cancel");
     auto contactHeader = getContactHeader();
     if (kaTarget.timer.id != PJ_FALSE) {
         SIP_CORE_INFO() << "KA: Timer is removed for " << contactHeader;
@@ -676,21 +774,32 @@ SIPAccount::cancelKeepAliveTimer()
         pjsip_endpt_cancel_timer(link_.getEndpoint(), &kaTarget.timer);
         kaTarget.timer = {};
     }
+    ka_options_pending_ = false;
 }
 
 void
 SIPAccount::registerMainRouteKeepAliveTimer()
 {
-    /* In all cases, stop main route keep-alive timer if it's running. */
-    cancelMainRouteKeepAliveTimer();
+    /* In all cases, stop main route keep-alive timer if it's running.
+     * Keep fast-mode state: this path is also used for timer refreshes.
+     */
+    if (kaMainRoute.timer.id != PJ_FALSE) {
+        pjsip_endpt_cancel_timer(link_.getEndpoint(), &kaMainRoute.timer);
+        kaMainRoute.timer = {};
+    }
 
     if (!isUsingBackupRoute() || !hasServiceRoute()) {
         SIP_CORE_DBG("Main route KA: Not using backup route, not starting main route keep-alive");
         return;
     }
+    if (!isOptionsKeepAliveMode()) {
+        SIP_CORE_DBG("Main route KA: OPTIONS keep-alive disabled for current topology");
+        return;
+    }
 
-    uint32_t seconds = config().keepAliveInterval;
+    uint32_t seconds = getMainRouteProbeIntervalSec();
     if (seconds == 0) {
+        disableMainRouteFastProbe("main-probe-disabled-by-interval");
         SIP_CORE_INFO("Main route KA: 0 seconds is set, skipping main route keep-alive");
         return;
     }
@@ -701,12 +810,6 @@ SIPAccount::registerMainRouteKeepAliveTimer()
         return;
     }
 
-    // Only for UDP
-    if (getTransportType() != PJSIP_TRANSPORT_UDP) {
-        SIP_CORE_INFO("Main route KA: will not be sent for non UDP transport");
-        return;
-    }
-
     // Resolve the main route target
     std::string mainRoute = config().serviceRoute;
     if (mainRoute.empty()) {
@@ -714,11 +817,11 @@ SIPAccount::registerMainRouteKeepAliveTimer()
         return;
     }
 
+    const auto resolveTransportType = transportTypeFromConfig(config().transport);
+
     // Parse and resolve the main route address
     link_.resolveSrvName(
-        mainRoute,
-        PJSIP_TRANSPORT_UDP,
-        [w = weak(), mainRoute, seconds](std::vector<IpAddr> host_ips) {
+        mainRoute, resolveTransportType, [w = weak(), mainRoute](std::vector<IpAddr> host_ips) {
             if (auto acc = w.lock()) {
                 if (host_ips.empty()) {
                     SIP_CORE_ERR("Main route KA: Can't resolve main route address");
@@ -752,8 +855,15 @@ SIPAccount::registerMainRouteKeepAliveTimer()
                 acc->kaMainRoute.timer.cb = &main_route_keep_alive_timer_cb;
                 acc->kaMainRoute.timer.user_data = (void*) acc.get();
 
+                const uint32_t intervalSec = acc->getMainRouteProbeIntervalSec();
+                if (intervalSec == 0) {
+                    SIP_CORE_INFO(
+                        "Main route KA: probe interval resolved to 0, skipping timer start");
+                    return;
+                }
+
                 pj_time_val delay;
-                delay.sec = seconds;
+                delay.sec = intervalSec;
                 delay.msec = 0;
 
                 pj_status_t status = pjsip_endpt_schedule_timer(acc->link_.getEndpoint(),
@@ -762,9 +872,14 @@ SIPAccount::registerMainRouteKeepAliveTimer()
                 if (status == PJ_SUCCESS) {
                     acc->kaMainRoute.timer.id = PJ_TRUE;
                     SIP_CORE_WARN(
-                        "Main route KA: Timer started to check main route %s with delay %d",
+                        "Main route KA: Timer started to check main route %s with delay %ld "
+                        "(fast=%d)",
                         mainRoute.c_str(),
-                        delay.sec);
+                        delay.sec,
+                        acc->isMainRouteFastProbeEnabled() ? 1 : 0);
+                    SIP_CORE_INFO("KA_EVT: main-probe-rescheduled interval_sec=%ld fast=%d",
+                                  delay.sec,
+                                  acc->isMainRouteFastProbeEnabled() ? 1 : 0);
                 } else {
                     acc->kaMainRoute.timer.id = PJ_FALSE;
                     SIP_CORE_ERR("Main route KA: error starting timer, status: %d", status);
@@ -777,70 +892,21 @@ void
 SIPAccount::registerBackupRouteKeepAliveTimer()
 {
     cancelBackupRouteKeepAliveTimer();
-
-    if (isUsingBackupRoute()) {
-        SIP_CORE_DBG("Backup route KA: Using backup route, skipping dedicated timer");
-        return;
-    }
-
-    if (!hasBackServiceRoute()) {
-        SIP_CORE_DBG("Backup route KA: No backup route configured");
-        return;
-    }
-
-    uint32_t seconds = config().keepAliveInterval;
-    if (seconds == 0) {
-        SIP_CORE_INFO("Backup route KA: 0 seconds is set, skipping");
-        return;
-    }
-
-    if (!transport_) {
-        SIP_CORE_ERR("Backup route KA: no transport available");
-        return;
-    }
-
-    if (getTransportType() != PJSIP_TRANSPORT_UDP) {
-        SIP_CORE_INFO("Backup route KA: will not be sent for non UDP transport");
-        return;
-    }
-
-    auto backupIp = getBackServiceRouteIp();
-    if (!backupIp) {
-        SIP_CORE_DBG("Backup route KA: backup route address not resolved yet");
-        return;
-    }
-
-    kaBackupRoute.socket = {};
-    pj_memcpy(&kaBackupRoute.socket, backupIp.pjPtr(), backupIp.getLength());
-    kaBackupRoute.length = backupIp.getLength();
-
     kaBackupRoute.timer.cb = &backup_route_keep_alive_timer_cb;
     kaBackupRoute.timer.user_data = (void*) this;
-
-    pj_time_val delay;
-    delay.sec = seconds;
-    delay.msec = 0;
-
-    pj_status_t status = pjsip_endpt_schedule_timer(link_.getEndpoint(), &kaBackupRoute.timer, &delay);
-    if (status == PJ_SUCCESS) {
-        kaBackupRoute.timer.id = PJ_TRUE;
-        SIP_CORE_DBG("Backup route KA: Timer started for %s with delay %u",
-                     config().backServiceRoute.c_str(),
-                     seconds);
-    } else {
-        kaBackupRoute.timer.id = PJ_FALSE;
-        SIP_CORE_ERR("Backup route KA: error starting timer, status: %d", status);
-    }
+    SIP_CORE_DBG("Backup route KA: standby backup probing is disabled");
 }
 
 void
 SIPAccount::cancelMainRouteKeepAliveTimer()
 {
+    disableMainRouteFastProbe("main-probe-timer-cancel");
     if (kaMainRoute.timer.id != PJ_FALSE) {
         SIP_CORE_INFO("Main route KA: Timer is removed");
         pjsip_endpt_cancel_timer(link_.getEndpoint(), &kaMainRoute.timer);
         kaMainRoute.timer = {};
     }
+    ka_main_route_options_pending_ = false;
 }
 
 void
@@ -858,54 +924,26 @@ SIPAccount::cancelBackupRouteKeepAliveTimer()
 }
 
 void
+SIPAccount::cancelAutoReregistrationTimer()
+{
+    auto_rereg_.active = PJ_FALSE;
+    if (auto_rereg_.timer.id != PJ_FALSE) {
+        pjsip_endpt_cancel_timer(link_.getEndpoint(), &auto_rereg_.timer);
+        auto_rereg_.timer.id = PJ_FALSE;
+    }
+}
+
+void
 SIPAccount::startBackupKeepAliveAfterRegister()
 {
     pendingBackupKeepAliveStart_.store(false);
-
-    if (!hasBackServiceRoute()) {
-        cancelBackupRouteKeepAliveTimer();
-        return;
-    }
-
-    if (isUsingBackupRoute()) {
-        cancelBackupRouteKeepAliveTimer();
-        return;
-    }
-
-    uint32_t seconds = config().keepAliveInterval;
-    if (seconds == 0) {
-        cancelBackupRouteKeepAliveTimer();
-        return;
-    }
-
-    if (!transport_) {
-        SIP_CORE_ERR("Backup route KA: no transport available");
-        return;
-    }
-
-    if (getTransportType() != PJSIP_TRANSPORT_UDP) {
-        SIP_CORE_INFO("Backup route KA: will not be sent for non UDP transport");
-        return;
-    }
-
-    auto backupIp = getBackServiceRouteIp();
-    if (!backupIp) {
-        SIP_CORE_DBG("Backup route KA: backup route address not resolved yet, deferring");
-        pendingBackupKeepAliveStart_.store(true);
-        return;
-    }
-
-    if (!sendBackupRouteKeepAlive()) {
-        SIP_CORE_DBG("Backup route KA: Immediate send failed or skipped");
-    }
-
-    registerBackupRouteKeepAliveTimer();
+    cancelBackupRouteKeepAliveTimer();
 }
 
 bool
 SIPAccount::sendBackupRouteKeepAlive()
 {
-    if (!hasBackServiceRoute()) {
+    if (!hasBackServiceRoutes()) {
         return false;
     }
 
@@ -918,21 +956,9 @@ SIPAccount::sendBackupRouteKeepAlive()
         return false;
     }
 
-    if (getTransportType() != PJSIP_TRANSPORT_UDP) {
-        SIP_CORE_INFO("Backup route KA: will not be sent for non UDP transport");
-        return false;
-    }
-
-    auto backupIp = getBackServiceRouteIp();
+    auto backupIp = getActiveBackServiceRoute().second;
     if (!backupIp) {
         SIP_CORE_DBG("Backup route KA: backup route address not resolved yet");
-        return false;
-    }
-
-    if (getTransportType() == PJSIP_TRANSPORT_UDP
-        && backupIp.getLength() > sizeof(pj_sockaddr_in)) {
-        SIP_CORE_WARN("Backup route KA: skipping IPv6 target on UDP transport to avoid "
-                      "pj_ioqueue_sendto assert");
         return false;
     }
 
@@ -943,7 +969,7 @@ SIPAccount::sendBackupRouteKeepAlive()
 
     pjsip_tx_data* tdata = nullptr;
 
-    auto server_uri = getServerUri();
+    auto server_uri = getBackupRouteKeepAliveUri();
     pj_str_t pjServer = sip_utils::CONST_PJ_STR(server_uri);
     auto contact = getContactHeader();
     pj_str_t pjContact = sip_utils::CONST_PJ_STR(contact);
@@ -977,6 +1003,7 @@ SIPAccount::sendBackupRouteKeepAlive()
     if (status == PJ_SUCCESS) {
         ka_backup_route_options_pending_ = true;
         SIP_CORE_DBG("Backup route KA: OPTIONS sent to backup route");
+        SIP_CORE_INFO("KA_EVT: options-sent route=backup-probe");
         return true;
     }
 
@@ -998,7 +1025,8 @@ SIPAccount::newIncomingCall(const std::string& from UNUSED,
 
 std::shared_ptr<Call>
 SIPAccount::newOutgoingCall(std::string_view toUrl,
-                            const std::vector<libsip_core::MediaMap>& mediaList)
+                            const std::vector<libsip_core::MediaMap>& mediaList,
+                            const std::map<std::string, std::string>& headers)
 {
     std::string to;
     int family;
@@ -1021,6 +1049,10 @@ SIPAccount::newOutgoingCall(std::string_view toUrl,
 
     if (not call)
         throw std::runtime_error("Failed to create the call");
+
+    // Custom application-provided SIP headers to inject into the outgoing INVITE
+    if (not headers.empty())
+        call->setExtraSipHeaders(headers);
 
     to = toUrl;
     call->setSipTransport(transport_, getContactHeader());
@@ -1053,15 +1085,24 @@ SIPAccount::newOutgoingCall(std::string_view toUrl,
     else
         sdp.setPublishedIP(getPublishedAddress());
 
-    // TODO. We should not dot his here. Move it to SIPCall.
-    const bool created = sdp.createOffer(
-        MediaAttribute::buildMediaAttributesList(mediaList, isSrtpEnabled()));
+    auto mediaAttrList = MediaAttribute::buildMediaAttributesList(mediaList, isSrtpEnabled());
+    if (!call->prepareLocalMediaReservations(mediaAttrList)) {
+        call->onFailure();
+        return call;
+    }
+
+    // TODO. We should not do this here. Move it to SIPCall.
+    const bool created = sdp.createOffer(mediaAttrList);
+    if (!created) {
+        call->clearPendingLocalReservations();
+    }
 
     if (created) {
         std::weak_ptr<SIPCall> weak_call = call;
         manager.scheduler().run([this, weak_call] {
             if (auto call = weak_call.lock()) {
                 if (not SIPStartCall(call)) {
+                    call->clearPendingLocalReservations();
                     SIP_CORE_ERR("Could not send outgoing INVITE request for new call");
                     call->onFailure();
                 }
@@ -1075,112 +1116,1091 @@ SIPAccount::newOutgoingCall(std::string_view toUrl,
     return call;
 }
 
+bool
+SIPAccount::isBenignTransportShutdown(pjsip_transport_state state, pj_status_t status) const
+{
+    if (status != PJ_SUCCESS && status != PJ_ECANCELLED)
+        return false;
+
+    if (state == PJSIP_TP_STATE_SHUTDOWN || state == PJSIP_TP_STATE_DESTROY)
+        return true;
+
+    return state == PJSIP_TP_STATE_DISCONNECTED && isShuttingDown_.load();
+}
+
+void
+SIPAccount::markTransportRebindRequired(const char* reason)
+{
+    pendingTransportRebind_.store(true);
+    needsResubscribe_.store(true);
+    needsRepublish_.store(true);
+
+    SIP_CORE_DBG("Marking transport rebind required for account %s (%s)",
+                 accountID_.c_str(),
+                 reason ? reason : "unknown");
+}
+
+void
+SIPAccount::prepareTransportReset(const char* reason, bool resetNetworkRuntimeState)
+{
+    SIP_CORE_WARN("Preparing transport reset for account %s (%s)",
+                  accountID_.c_str(),
+                  reason ? reason : "unspecified");
+
+    if (resetNetworkRuntimeState)
+        resetNetworkRuntimeStateForConnectivityChange();
+
+    markTransportRebindRequired(reason);
+
+    cancelKeepAliveTimer();
+    cancelMainRouteKeepAliveTimer();
+    cancelBackupRouteKeepAliveTimer();
+    cancelAutoReregistrationTimer();
+    resetAutoRegistration();
+    pendingBackupKeepAliveStart_.store(false);
+
+    if (sip_events_)
+        sip_events_->invalidateSubscriptions(reason);
+    if (presence_)
+        presence_->invalidateSubscriptionsAndPublish(reason);
+
+    destroyRegistrationInfo();
+    setTransport(nullptr);
+}
+
+bool
+SIPAccount::isOptionsSuccess200(int statusCode) const
+{
+    return statusCode == PJSIP_SC_OK;
+}
+
+bool
+SIPAccount::isTransportFailureFromOptions(int statusCode) const
+{
+    return statusCode == PJSIP_SC_TSX_TRANSPORT_ERROR;
+}
+
+bool
+SIPAccount::isRouteFailureFromOptions(int statusCode) const
+{
+    // OPTIONS decisions are based on final SIP response codes only.
+    if (statusCode < 200)
+        return false;
+    if (isOptionsSuccess200(statusCode))
+        return false;
+    if (isTransportFailureFromOptions(statusCode))
+        return false;
+    return true;
+}
+
+uint32_t
+SIPAccount::resolveMainRouteProbeIntervalSec(uint32_t keepAliveIntervalSec, bool fastProbeEnabled)
+{
+    if (keepAliveIntervalSec == 0)
+        return 0;
+    return fastProbeEnabled ? MAIN_ROUTE_FAST_PROBE_INTERVAL_SEC : keepAliveIntervalSec;
+}
+
+uint32_t
+SIPAccount::resolveActiveKeepAliveIntervalSec(uint32_t keepAliveIntervalSec,
+                                              bool fastProbeEnabled,
+                                              bool)
+{
+    if (keepAliveIntervalSec == 0)
+        return 0;
+    return fastProbeEnabled ? ACTIVE_NO_ROUTE_FAST_PROBE_INTERVAL_SEC : keepAliveIntervalSec;
+}
+
+bool
+SIPAccount::shouldEnableMainRouteFastProbeForStatusCode(int statusCode)
+{
+    if (statusCode == PJSIP_SC_TSX_TRANSPORT_ERROR)
+        return true;
+    if (statusCode < 200)
+        return false;
+    return statusCode != PJSIP_SC_OK;
+}
+
+bool
+SIPAccount::shouldDisableMainRouteFastProbeForStatusCode(int statusCode)
+{
+    return statusCode == PJSIP_SC_OK;
+}
+
+bool
+SIPAccount::shouldEnableActiveNoRouteFastProbeForStatusCode(int statusCode)
+{
+    if (statusCode == PJSIP_SC_TSX_TRANSPORT_ERROR)
+        return true;
+    if (statusCode < 200)
+        return false;
+    return statusCode != PJSIP_SC_OK;
+}
+
+bool
+SIPAccount::shouldDisableActiveNoRouteFastProbeForStatusCode(int statusCode)
+{
+    return statusCode == PJSIP_SC_OK;
+}
+
+bool
+SIPAccount::isMainRouteFastProbeEnabled() const
+{
+    return mainRouteFastProbeEnabled_.load();
+}
+
+uint32_t
+SIPAccount::getMainRouteProbeIntervalSec() const
+{
+    return resolveMainRouteProbeIntervalSec(config().keepAliveInterval,
+                                            mainRouteFastProbeEnabled_.load());
+}
+
+bool
+SIPAccount::isNoRouteKeepAliveMode() const
+{
+    return !hasServiceRoute() && !hasBackServiceRoutes();
+}
+
+bool
+SIPAccount::isActiveNoRouteFastProbeEnabled() const
+{
+    return activeNoRouteFastProbeEnabled_.load();
+}
+
+uint32_t
+SIPAccount::getActiveKeepAliveIntervalSec() const
+{
+    return resolveActiveKeepAliveIntervalSec(config().keepAliveInterval,
+                                             activeNoRouteFastProbeEnabled_.load(),
+                                             isNoRouteKeepAliveMode());
+}
+
+void
+SIPAccount::rescheduleMainRouteProbeNow(uint32_t seconds)
+{
+    if (!isUsingBackupRoute() || !hasServiceRoute())
+        return;
+
+    if (seconds == 0) {
+        SIP_CORE_INFO("KA_EVT: main-probe-reschedule-skipped interval_sec=0");
+        return;
+    }
+
+    if (!transport_) {
+        SIP_CORE_WARN("KA_EVT: main-probe-reschedule-skipped reason=no-transport");
+        return;
+    }
+
+    if (kaMainRoute.length == 0) {
+        SIP_CORE_WARN("KA_EVT: main-probe-reschedule-skipped reason=no-target");
+        return;
+    }
+
+    if (kaMainRoute.timer.cb == nullptr)
+        kaMainRoute.timer.cb = &main_route_keep_alive_timer_cb;
+    kaMainRoute.timer.user_data = (void*) this;
+
+    if (kaMainRoute.timer.id != PJ_FALSE) {
+        pjsip_endpt_cancel_timer(link_.getEndpoint(), &kaMainRoute.timer);
+        kaMainRoute.timer.id = PJ_FALSE;
+    }
+
+    pj_time_val delay;
+    delay.sec = seconds;
+    delay.msec = 0;
+
+    const pj_status_t status = pjsip_endpt_schedule_timer(link_.getEndpoint(),
+                                                          &kaMainRoute.timer,
+                                                          &delay);
+    if (status == PJ_SUCCESS) {
+        kaMainRoute.timer.id = PJ_TRUE;
+        SIP_CORE_INFO("KA_EVT: main-probe-rescheduled-now interval_sec=%u fast=%d",
+                      seconds,
+                      mainRouteFastProbeEnabled_.load() ? 1 : 0);
+    } else {
+        kaMainRoute.timer.id = PJ_FALSE;
+        SIP_CORE_WARN("KA_EVT: main-probe-reschedule-failed status=%d", status);
+    }
+}
+
+void
+SIPAccount::rescheduleActiveKeepAliveNow(uint32_t seconds)
+{
+
+    if (seconds == 0) {
+        SIP_CORE_INFO("KA_EVT: active-no-route-reschedule-skipped interval_sec=0");
+        return;
+    }
+
+    if (!transport_) {
+        SIP_CORE_WARN("KA_EVT: active-no-route-reschedule-skipped reason=no-transport");
+        return;
+    }
+
+    const unsigned targetLen = pj_sockaddr_get_len(&kaTarget.socket);
+    if (targetLen == 0 || kaTarget.length == 0) {
+        SIP_CORE_WARN("KA_EVT: active-no-route-reschedule-skipped reason=no-target");
+        return;
+    }
+    kaTarget.length = targetLen;
+
+    if (kaTarget.timer.cb == nullptr)
+        kaTarget.timer.cb = &keep_alive_timer_cb;
+    kaTarget.timer.user_data = (void*) this;
+
+    if (kaTarget.timer.id != PJ_FALSE) {
+        pjsip_endpt_cancel_timer(link_.getEndpoint(), &kaTarget.timer);
+        kaTarget.timer.id = PJ_FALSE;
+    }
+
+    pj_time_val delay;
+    delay.sec = seconds;
+    delay.msec = 0;
+
+    const pj_status_t status = pjsip_endpt_schedule_timer(link_.getEndpoint(),
+                                                          &kaTarget.timer,
+                                                          &delay);
+    if (status == PJ_SUCCESS) {
+        kaTarget.timer.id = PJ_TRUE;
+        SIP_CORE_INFO("KA_EVT: active-no-route-rescheduled-now interval_sec=%u fast=%d",
+                      seconds,
+                      activeNoRouteFastProbeEnabled_.load() ? 1 : 0);
+    } else {
+        kaTarget.timer.id = PJ_FALSE;
+        SIP_CORE_WARN("KA_EVT: active-no-route-reschedule-failed status=%d", status);
+    }
+}
+
+void
+SIPAccount::enableMainRouteFastProbe(const char* reason)
+{
+    if (!isUsingBackupRoute())
+        return;
+
+    bool expected = false;
+    if (!mainRouteFastProbeEnabled_.compare_exchange_strong(expected, true)) {
+        const uint32_t interval = getMainRouteProbeIntervalSec();
+        SIP_CORE_DBG("KA_EVT: main-probe-fast-unchanged state=enabled reason=%s interval_sec=%u",
+                     reason ? reason : "unknown",
+                     interval);
+        rescheduleMainRouteProbeNow(interval);
+        return;
+    }
+
+    const uint32_t interval = getMainRouteProbeIntervalSec();
+    SIP_CORE_WARN("KA_EVT: main-probe-fast-enabled reason=%s interval_sec=%u",
+                  reason ? reason : "unknown",
+                  interval);
+    rescheduleMainRouteProbeNow(interval);
+}
+
+void
+SIPAccount::enableActiveNoRouteFastProbe(const char* reason, bool rescheduleNow)
+{
+
+    bool expected = false;
+    if (!activeNoRouteFastProbeEnabled_.compare_exchange_strong(expected, true)) {
+        const uint32_t interval = getActiveKeepAliveIntervalSec();
+        SIP_CORE_DBG(
+            "KA_EVT: active-no-route-fast-unchanged state=enabled reason=%s interval_sec=%u",
+            reason ? reason : "unknown",
+            interval);
+        if (rescheduleNow)
+            rescheduleActiveKeepAliveNow(interval);
+        return;
+    }
+
+    const uint32_t interval = getActiveKeepAliveIntervalSec();
+    SIP_CORE_WARN("KA_EVT: active-no-route-fast-enabled reason=%s interval_sec=%u",
+                  reason ? reason : "unknown",
+                  interval);
+    if (rescheduleNow)
+        rescheduleActiveKeepAliveNow(interval);
+}
+
+void
+SIPAccount::disableMainRouteFastProbe(const char* reason)
+{
+    bool expected = true;
+    if (!mainRouteFastProbeEnabled_.compare_exchange_strong(expected, false)) {
+        SIP_CORE_DBG("KA_EVT: main-probe-fast-unchanged state=disabled reason=%s",
+                     reason ? reason : "unknown");
+        return;
+    }
+
+    const uint32_t interval = getMainRouteProbeIntervalSec();
+    SIP_CORE_INFO("KA_EVT: main-probe-fast-disabled reason=%s interval_sec=%u",
+                  reason ? reason : "unknown",
+                  interval);
+}
+
+void
+SIPAccount::disableActiveNoRouteFastProbe(const char* reason)
+{
+    bool expected = true;
+    if (!activeNoRouteFastProbeEnabled_.compare_exchange_strong(expected, false)) {
+        SIP_CORE_DBG("KA_EVT: active-no-route-fast-unchanged state=disabled reason=%s",
+                     reason ? reason : "unknown");
+        return;
+    }
+
+    const uint32_t interval = getActiveKeepAliveIntervalSec();
+    SIP_CORE_INFO("KA_EVT: active-no-route-fast-disabled reason=%s interval_sec=%u",
+                  reason ? reason : "unknown",
+                  interval);
+}
+
+bool
+SIPAccount::isTransientOptionsFailureCode(int statusCode)
+{
+    if (statusCode == PJSIP_SC_TSX_TRANSPORT_ERROR)
+        return true;
+
+    switch (statusCode) {
+    case PJSIP_SC_REQUEST_TIMEOUT:
+    case PJSIP_SC_INTERNAL_SERVER_ERROR:
+    case PJSIP_SC_BAD_GATEWAY:
+    case PJSIP_SC_SERVICE_UNAVAILABLE:
+    case PJSIP_SC_SERVER_TIMEOUT:
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool
+SIPAccount::isHardOptionsFailureCode(int statusCode)
+{
+    if (statusCode < 200)
+        return false;
+    if (statusCode == PJSIP_SC_OK)
+        return false;
+    if (statusCode == PJSIP_SC_TSX_TRANSPORT_ERROR)
+        return false;
+    return !isTransientOptionsFailureCode(statusCode);
+}
+
+bool
+SIPAccount::shouldSuppressOptionsRecoveryAttempt(std::deque<int64_t>& attemptMs,
+                                                 int64_t nowMs,
+                                                 size_t maxAttempts,
+                                                 int64_t windowMs)
+{
+    const int64_t minAllowedTs = nowMs - windowMs;
+    while (!attemptMs.empty() && attemptMs.front() < minAllowedTs) {
+        attemptMs.pop_front();
+    }
+    if (attemptMs.size() >= maxAttempts) {
+        return true;
+    }
+    attemptMs.emplace_back(nowMs);
+    return false;
+}
+
+bool
+SIPAccount::isTransientOptionsFailure(int statusCode) const
+{
+    return isTransientOptionsFailureCode(statusCode);
+}
+
+bool
+SIPAccount::isHardOptionsFailure(int statusCode) const
+{
+    return isHardOptionsFailureCode(statusCode);
+}
+
+void
+SIPAccount::resetOptionsRecoveryWindow()
+{
+    std::lock_guard<std::mutex> lock(optionsRecoveryMutex_);
+    optionsRecoveryAttemptMs_.clear();
+}
+
+bool
+SIPAccount::shouldSuppressOptionsRecovery()
+{
+    const auto now = std::chrono::steady_clock::now();
+    const int64_t nowMs
+        = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+    std::lock_guard<std::mutex> lock(optionsRecoveryMutex_);
+    return shouldSuppressOptionsRecoveryAttempt(optionsRecoveryAttemptMs_,
+                                                nowMs,
+                                                OPTIONS_RECOVERY_MAX_ATTEMPTS,
+                                                OPTIONS_RECOVERY_WINDOW_MS);
+}
+
+void
+SIPAccount::resetRawKeepAliveRecoveryWindow()
+{
+    std::lock_guard<std::mutex> lock(rawKeepAliveRecoveryMutex_);
+    rawKeepAliveRecoveryAttemptMs_.clear();
+}
+
+bool
+SIPAccount::shouldSuppressRawKeepAliveRecovery()
+{
+    const auto now = std::chrono::steady_clock::now();
+    const int64_t nowMs
+        = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+    std::lock_guard<std::mutex> lock(rawKeepAliveRecoveryMutex_);
+    return shouldSuppressOptionsRecoveryAttempt(rawKeepAliveRecoveryAttemptMs_,
+                                                nowMs,
+                                                RAW_KEEPALIVE_RECOVERY_MAX_ATTEMPTS,
+                                                RAW_KEEPALIVE_RECOVERY_WINDOW_MS);
+}
+
+void
+SIPAccount::handleNoBackupOptionsRouteFailure(int statusCode)
+{
+    handleActiveRouteOptionsFailure(statusCode);
+}
+
+void
+SIPAccount::handleUdpRawKeepAliveSendFailure(pj_status_t status)
+{
+    SIP_CORE_WARN("KA_EVT: udp-raw-send-failure account=%s status=%d", accountID_.c_str(), status);
+
+    if (shouldSuppressRawKeepAliveRecovery()) {
+        SIP_CORE_WARN(
+            "KA_EVT: udp-raw-recovery-suppressed account=%s status=%d window_ms=%lld max=%zu",
+            accountID_.c_str(),
+            status,
+            static_cast<long long>(RAW_KEEPALIVE_RECOVERY_WINDOW_MS),
+            RAW_KEEPALIVE_RECOVERY_MAX_ATTEMPTS);
+        setRegistrationState(RegistrationState::ERROR_GENERIC, PJSIP_SC_TSX_TRANSPORT_ERROR);
+        scheduleReregistration();
+        return;
+    }
+
+    SIP_CORE_WARN("KA_EVT: udp-raw-recovery-trigger account=%s status=%d",
+                  accountID_.c_str(),
+                  status);
+    scheduleTransportRecovery("active-route-udp-raw-keepalive-send-failure", status);
+}
+
+void
+SIPAccount::switchRouteAndReregister(bool useBackup,
+                                     const char* reason,
+                                     bool skipMainRouteStartupProbe)
+{
+    if (isShuttingDown_.load() || !isUsable()) {
+        SIP_CORE_DBG("Skipping route switch for account %s: shutting down or unusable",
+                     accountID_.c_str());
+        return;
+    }
+
+    bool expected = false;
+    if (!routeSwitchPending_.compare_exchange_strong(expected, true)) {
+        SIP_CORE_DBG("Route switch already pending for account %s", accountID_.c_str());
+        return;
+    }
+
+    SIP_CORE_WARN("Route switch requested for account %s: target=%s (%s)",
+                  accountID_.c_str(),
+                  useBackup ? "backup" : "main",
+                  reason ? reason : "unspecified");
+
+    bool switched = false;
+    if (useBackup) {
+        if (!isUsingBackupRoute()) {
+            switchToBackupRoute();
+            switched = isUsingBackupRoute();
+        } else {
+            SIP_CORE_DBG("Route switch skipped for account %s: already on backup",
+                         accountID_.c_str());
+        }
+    } else {
+        if (isUsingBackupRoute()) {
+            switchToMainRoute();
+            switched = !isUsingBackupRoute();
+        } else {
+            SIP_CORE_DBG("Route switch skipped for account %s: already on main", accountID_.c_str());
+        }
+    }
+
+    if (switched) {
+        if (skipMainRouteStartupProbe)
+            skipMainRouteStartupProbeOnce_.store(true);
+        destroyRegistrationInfo();
+        doRegister();
+    }
+
+    routeSwitchPending_.store(false);
+}
+
+std::pair<std::string, pj_uint16_t>
+SIPAccount::currentLocalBinding() const
+{
+    if (!transport_)
+        return {};
+
+    std::string address;
+    pj_uint16_t port = 0;
+    link_.findLocalAddressFromTransport(transport_, config().hostname, address, port);
+    if (address.empty() || port == 0)
+        return {};
+
+    return {address, port};
+}
+
+void
+SIPAccount::runPostRegisterRecoverySync()
+{
+    const bool pendingRebind = pendingTransportRebind_.exchange(false);
+    const bool resubscribe = needsResubscribe_.exchange(false);
+    const bool republish = needsRepublish_.exchange(false);
+
+    if (!pendingRebind && !resubscribe && !republish)
+        return;
+
+    if (!transport_) {
+        SIP_CORE_WARN("Skipping recovery sync for account %s: no transport", accountID_.c_str());
+        if (pendingRebind)
+            pendingTransportRebind_.store(true);
+        if (resubscribe)
+            needsResubscribe_.store(true);
+        if (republish)
+            needsRepublish_.store(true);
+        return;
+    }
+
+    if (!initContactAddress()) {
+        SIP_CORE_WARN("Skipping recovery sync for account %s: invalid contact address",
+                      accountID_.c_str());
+        if (pendingRebind)
+            pendingTransportRebind_.store(true);
+        if (resubscribe)
+            needsResubscribe_.store(true);
+        if (republish)
+            needsRepublish_.store(true);
+        return;
+    }
+    updateContactHeader();
+
+    const std::string contactHeader = getContactHeader();
+    const bool recoverSubscriptions = pendingRebind || resubscribe;
+
+    SIP_CORE_WARN("Running post-register recovery sync for account %s (resubscribe=%d, "
+                  "republish=%d)",
+                  accountID_.c_str(),
+                  recoverSubscriptions ? 1 : 0,
+                  republish ? 1 : 0);
+    SIP_CORE_INFO("KA_EVT: post-register-recovery-sync account=%s resubscribe=%d republish=%d",
+                  accountID_.c_str(),
+                  recoverSubscriptions ? 1 : 0,
+                  republish ? 1 : 0);
+
+    if (recoverSubscriptions && sip_events_)
+        sip_events_->recoverSubscriptions(contactHeader);
+
+    if (presence_ && (recoverSubscriptions || republish))
+        presence_->recoverSubscriptionsAndPublish(contactHeader, republish);
+}
+
+bool
+SIPAccount::shouldRecoverTransport(pjsip_transport_state state, pj_status_t status) const
+{
+    if (config().transport != libsip_core::TransportType::TCP
+        && config().transport != libsip_core::TransportType::UDP)
+        return false;
+    if (isShuttingDown_.load())
+        return false;
+    if (isBenignTransportShutdown(state, status))
+        return false;
+    return !SipTransport::isAlive(state);
+}
+
+bool
+SIPAccount::scheduleTransportRecovery(const char* reason, pj_status_t status)
+{
+    SIP_CORE_WARN("KA_EVT: recovery-scheduled account=%s reason=%s status=%d",
+                  accountID_.c_str(),
+                  reason ? reason : "transport",
+                  status);
+    return scheduleRecoveryInternal(reason, status, true);
+}
+
+void
+SIPAccount::scheduleConnectivityRecovery(const char* reason)
+{
+    handleConnectivityChangedForced(reason);
+}
+
+void
+SIPAccount::prepareConnectivityRecovery(const char* reason)
+{
+    if (isShuttingDown_.load() || !isUsable()) {
+        SIP_CORE_DBG("Skipping connectivity recovery preparation for account %s",
+                     accountID_.c_str());
+        return;
+    }
+
+    connectivityRecoveryRequested_.store(true);
+    connectivityRecoveryInProgress_.store(true);
+
+    SIP_CORE_WARN("connectivity-recovery: prepare account=%s (%s)",
+                  accountID_.c_str(),
+                  reason ? reason : "unspecified");
+    const auto callIds = getCallList();
+    for (const auto& id : callIds) {
+        auto call = std::dynamic_pointer_cast<SIPCall>(getCall(id));
+        if (!call)
+            continue;
+        call->markConnectivityTransportRebindPending(reason ? reason : "connectivity-changed");
+    }
+
+    prepareTransportReset(reason ? reason : "connectivity-changed", true);
+    // Latch so recoverTransport() can skip its own prepareTransportReset() call
+    // when the prepared connectivity step already cleared transport state.
+    prepareTransportResetDone_.store(true);
+}
+
+void
+SIPAccount::dispatchPreparedConnectivityRecovery(const char* reason)
+{
+    scheduleRecoveryInternal(reason ? reason : "connectivity-changed",
+                             PJSIP_SC_TSX_TRANSPORT_ERROR,
+                             false);
+}
+
+bool
+SIPAccount::scheduleRecoveryInternal(const char* reason, pj_status_t status, bool debounced)
+{
+    if (isShuttingDown_.load() || !isUsable()) {
+        SIP_CORE_DBG("Skipping transport recovery scheduling for account %s: shutting down or "
+                     "unusable",
+                     accountID_.c_str());
+        return false;
+    }
+
+    const auto now = std::chrono::steady_clock::now();
+    const auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch())
+                           .count();
+    if (debounced) {
+        const auto lastMs = lastTransportRecoveryMs_.load();
+        if (lastMs > 0 && (nowMs - lastMs) < TRANSPORT_RECOVERY_DEBOUNCE_MS) {
+            SIP_CORE_DBG("Skipping transport recovery for account %s (debounced)",
+                         accountID_.c_str());
+            return false;
+        }
+    }
+
+    bool expected = false;
+    if (!transportRecoveryPending_.compare_exchange_strong(expected, true)) {
+        if (!debounced && connectivityRecoveryRequested_.load()) {
+            SIP_CORE_WARN("Connectivity recovery already pending for account %s, coalescing "
+                          "additional request",
+                          accountID_.c_str());
+        } else {
+            SIP_CORE_DBG("Transport recovery already pending for account %s", accountID_.c_str());
+        }
+        return false;
+    }
+
+    lastTransportRecoveryMs_.store(nowMs);
+
+    const auto reasonStr = std::string(reason ? reason : "transport");
+    runOnMainThread([w = weak(), reasonStr, status] {
+        if (auto acc = w.lock())
+            acc->recoverTransport(reasonStr, status);
+    });
+    return true;
+}
+
+void
+SIPAccount::recoverTransport(const std::string& reason, pj_status_t status)
+{
+    if (!transportRecoveryPending_.exchange(false))
+        return;
+    connectivityRecoveryInProgress_.store(true);
+    const bool connectivityRequested = connectivityRecoveryRequested_.exchange(false);
+    const bool connectivityReason = reason.rfind("connectivity-changed", 0) == 0;
+
+    auto schedulePendingConnectivityRecovery = [&] {
+        if (!isUsable() || isShuttingDown_.load())
+            return;
+        if (connectivityRecoveryRequested_.exchange(false)) {
+            SIP_CORE_WARN("Connectivity recovery was re-requested while recovery was in progress "
+                          "for account %s, scheduling follow-up recovery",
+                          accountID_.c_str());
+            handleConnectivityChangedForced("connectivity-changed-coalesced");
+        }
+    };
+
+    if (isShuttingDown_.load() || !isUsable()) {
+        connectivityRecoveryInProgress_.store(false);
+        return;
+    }
+    if (!link_.sipTransportBroker || !link_.getEndpoint()) {
+        connectivityRecoveryInProgress_.store(false);
+        return;
+    }
+
+    SIP_CORE_WARN("connectivity-recovery: recoverTransport account=%s reason=%s status=%d (%s)",
+                  accountID_.c_str(),
+                  reason.c_str(),
+                  status,
+                  sip_utils::sip_strerror(status).c_str());
+    // Skip the duplicate prepareTransportReset() if the connectivity-prepare
+    // step already ran for this event. The first reset cleared transport_ and
+    // network runtime state; running it again here adds nothing but log noise
+    // and a redundant markTransportRebindRequired().
+    if (prepareTransportResetDone_.exchange(false)) {
+        SIP_CORE_DBG("connectivity-recovery: skipping duplicate prepareTransportReset for "
+                     "account %s",
+                     accountID_.c_str());
+    } else {
+        prepareTransportReset(reason.c_str(), connectivityRequested || connectivityReason);
+    }
+
+    if (!switchTransportInternal(config().transport, false, false, nullptr)) {
+        SIP_CORE_ERR("connectivity-recovery: switch-transport FAILED for account %s",
+                     accountID_.c_str());
+        connectivityRecoveryInProgress_.store(false);
+        // Do NOT clear pendingReinviteAfterRegister_ here: the next successful
+        // recoverTransport pass (driven by scheduleReregistration) will need it
+        // to fire reinviteActiveCalls() on the resulting 200 OK.
+        // Keep calls alive and just re-arm the rebind-pending flag so they don't
+        // get hung up by the OLD transport's listener while we wait for the
+        // next register-retry round to (re-)create a usable transport.
+        for (const auto& id : getCallList()) {
+            if (auto sipCall = std::dynamic_pointer_cast<SIPCall>(getCall(id))) {
+                sipCall->markConnectivityTransportRebindPending(
+                    "recoverTransport-switch-failed");
+                sipCall->pendingConnectivityReinvite_.store(true);
+            }
+        }
+        pendingReinviteAfterRegister_.store(true);
+        setRegistrationState(RegistrationState::ERROR_GENERIC, PJSIP_SC_TSX_TRANSPORT_ERROR);
+        schedulePendingConnectivityRecovery();
+        scheduleReregistration();
+        return;
+    }
+
+    SIP_CORE_WARN("connectivity-recovery: switch-transport ok account=%s; triggering "
+                  "re-registration",
+                  accountID_.c_str());
+    rebindCallsToCurrentTransportForConnectivityChange(reason.c_str());
+
+    // Defer reinvite until registration completes (onRegister 200 OK)
+    pendingReinviteAfterRegister_.store(true);
+    SIP_CORE_WARN("connectivity-recovery: reinvite scheduled after register for account %s",
+                  accountID_.c_str());
+    doRegister();
+    connectivityRecoveryInProgress_.store(false);
+    schedulePendingConnectivityRecovery();
+}
+
+void
+SIPAccount::resetViaTransport()
+{
+    via_tp_ = nullptr;
+}
+
+void
+SIPAccount::resetNetworkRuntimeStateForConnectivityChange()
+{
+    SIP_CORE_WARN("Resetting network runtime state for account %s before connectivity recovery",
+                  accountID_.c_str());
+
+    receivedParameter_.clear();
+    rPort_ = -1;
+    transportError_.clear();
+    transportStatus_ = PJSIP_SC_TRYING;
+
+    via_addr_.host.ptr = nullptr;
+    via_addr_.host.slen = 0;
+    via_addr_.port = 0;
+    resetViaTransport();
+
+    std::lock_guard<std::mutex> lock(localBindingMutex_);
+    hasLocalBindingSnapshot_ = false;
+    lastLocalBindingAddress_.clear();
+    lastLocalBindingPort_ = 0;
+}
+
 void
 SIPAccount::onTransportStateChanged(pjsip_transport_state state,
                                     const pjsip_transport_state_info* info)
 {
-    pj_status_t currentStatus = transportStatus_;
-    SIP_CORE_DBG("Transport state changed to %s for account %s !",
+    const auto status = info ? info->status : PJ_SUCCESS;
+    const auto currentStatus = transportStatus_;
+
+    SIP_CORE_DBG("Transport state changed to %s for account %s",
                  SipTransport::stateToStr(state),
                  accountID_.c_str());
-    if (!SipTransport::isAlive(state)) {
-        if (info) {
-            transportStatus_ = info->status;
-            transportError_ = sip_utils::sip_strerror(info->status);
-            SIP_CORE_ERR("Transport disconnected: %s", transportError_.c_str());
+
+    const bool alive = SipTransport::isAlive(state);
+    if (!alive) {
+        resetViaTransport();
+
+        if (isBenignTransportShutdown(state, status)) {
+            transportStatus_ = status == PJ_SUCCESS ? PJSIP_SC_OK : status;
+            transportError_.clear();
+            SIP_CORE_DBG("Ignoring benign transport shutdown state=%s status=%d for account %s",
+                         SipTransport::stateToStr(state),
+                         status,
+                         accountID_.c_str());
         } else {
-            // This is already the generic error used by pjsip.
-            transportStatus_ = PJSIP_SC_SERVICE_UNAVAILABLE;
-            transportError_ = "";
+            transportStatus_ = status ? status : PJSIP_SC_SERVICE_UNAVAILABLE;
+            transportError_ = sip_utils::sip_strerror(transportStatus_);
+            SIP_CORE_ERR("Transport disconnected: %s", transportError_.c_str());
         }
 
-        // Try switching to backup route if transport fails
-        if (!isUsingBackupRoute() && hasBackServiceRoute()) {
-            SIP_CORE_WARN("Transport disconnected, switching to backup route");
-            // Trigger re-registration with backup route
-            switchToBackupRoute();
-            doRegister();
-            return;
+        if (shouldRecoverTransport(state, status)) {
+            if (!scheduleTransportRecovery("transport-state-change", transportStatus_)) {
+                // Recovery was debounced — set error state as fallback so
+                // connectivityChanged can still pick up this account.
+                setRegistrationState(RegistrationState::ERROR_GENERIC,
+                                     PJSIP_SC_TSX_TRANSPORT_ERROR);
+            }
+        } else if (!isBenignTransportShutdown(state, status)) {
+            setRegistrationState(RegistrationState::ERROR_GENERIC, PJSIP_SC_TSX_TRANSPORT_ERROR);
         }
-
-        setRegistrationState(RegistrationState::ERROR_GENERIC, PJSIP_SC_TSX_TRANSPORT_ERROR);
     } else {
-        // The status can be '0', this is the same as OK
-        transportStatus_ = info && info->status ? info->status : PJSIP_SC_OK;
-        transportError_ = "";
-
-        // Auto-switch back to main route when transport becomes alive
-        if (isUsingBackupRoute() && hasServiceRoute()) {
-            SIP_CORE_WARN("Transport connected, switching back to main route");
-            // Trigger re-registration with main route
-            switchToMainRoute();
-            doRegister();
-            return;
-        }
+        transportStatus_ = status ? status : PJSIP_SC_OK;
+        transportError_.clear();
     }
 
-    // Notify the client of the new transport state
-    if (currentStatus != transportStatus_)
+    if (currentStatus != transportStatus_) {
         emitSignal<libsip_core::ConfigurationSignal::VolatileDetailsChanged>(
             accountID_, getVolatileAccountDetails());
+    }
 }
 
-void
+bool
 SIPAccount::setTransport(const std::shared_ptr<SipTransport>& t)
 {
     if (t == transport_)
-        return;
-    if (transport_) {
-        SIP_CORE_DBG("Removing old transport [%p] from account", transport_.get());
+        return true;
+
+    const auto listenerId = reinterpret_cast<uintptr_t>(this);
+
+    const auto updateLocalBindingSnapshot = [&] {
+        const auto binding = currentLocalBinding();
+        if (binding.first.empty() || binding.second == 0)
+            return;
+
+        std::string prevAddress;
+        pj_uint16_t prevPort = 0;
+        bool changed = false;
+        {
+            std::lock_guard<std::mutex> lock(localBindingMutex_);
+            if (hasLocalBindingSnapshot_) {
+                changed = lastLocalBindingAddress_ != binding.first
+                          || lastLocalBindingPort_ != binding.second;
+                prevAddress = lastLocalBindingAddress_;
+                prevPort = lastLocalBindingPort_;
+            }
+            lastLocalBindingAddress_ = binding.first;
+            lastLocalBindingPort_ = binding.second;
+            hasLocalBindingSnapshot_ = true;
+        }
+
+        if (changed) {
+            SIP_CORE_WARN("SIP local binding changed for account %s: %s:%u -> %s:%u",
+                          accountID_.c_str(),
+                          prevAddress.c_str(),
+                          prevPort,
+                          binding.first.c_str(),
+                          binding.second);
+            markTransportRebindRequired("local-binding-changed");
+        }
+    };
+
+    // attachTransport only runs when transport is non-null, so weak() / shared_from_this()
+    // is safe here — we are guaranteed to be owned by a live shared_ptr.
+    const auto attachTransport = [&](const std::shared_ptr<SipTransport>& transport) {
+        if (!transport)
+            return true;
+
+        const auto stateListener = [w = weak()](pjsip_transport_state state,
+                                                const pjsip_transport_state_info* info) {
+            const bool hasInfo = info != nullptr;
+            const auto status = hasInfo ? info->status : PJ_SUCCESS;
+            runOnMainThread([w, state, status, hasInfo] {
+                if (auto account = w.lock()) {
+                    pjsip_transport_state_info infoCopy {};
+                    infoCopy.status = status;
+                    account->onTransportStateChanged(state, hasInfo ? &infoCopy : nullptr);
+                }
+            });
+        };
+
+        transport->addStateListener(listenerId, stateListener);
+        if (!initContactAddress()) {
+            SIP_CORE_ERR("Can not register account %s: invalid contact address after transport "
+                         "switch",
+                         accountID_.c_str());
+            transport->removeStateListener(listenerId);
+            return false;
+        }
+        updateContactHeader();
+
+        if (regc_) {
+            const auto tpSel = getTransportSelector();
+            if (pjsip_regc_set_transport(regc_, &tpSel) != PJ_SUCCESS) {
+                SIP_CORE_WARN("Failed to rebind registration client to updated transport for "
+                              "account %s",
+                              accountID_.c_str());
+            }
+        }
+
+        updateLocalBindingSnapshot();
+        return true;
+    };
+
+    const auto previousTransport = transport_;
+
+    if (previousTransport) {
+        SIP_CORE_DBG("Removing old transport [%p] from account", previousTransport.get());
         if (regc_)
             pjsip_regc_release_transport(regc_);
-        transport_->removeStateListener(reinterpret_cast<uintptr_t>(this));
+        previousTransport->removeStateListener(listenerId);
     }
 
     transport_ = t;
+    resetViaTransport();
     SIP_CORE_DBG("Set new transport [%p]", transport_.get());
 
-    if (transport_) {
-        transport_->addStateListener(reinterpret_cast<uintptr_t>(this),
-                                     std::bind(&SIPAccount::onTransportStateChanged,
-                                               this,
-                                               std::placeholders::_1,
-                                               std::placeholders::_2));
-        // Update contact address and header
-        if (not initContactAddress()) {
-            SIP_CORE_DBG("Can not register: invalid address");
-            return;
-        }
-        updateContactHeader();
+    if (attachTransport(transport_))
+        return true;
+
+    // Roll back to the previous transport to avoid leaving account in a half-switched state.
+    transport_ = previousTransport;
+    resetViaTransport();
+    SIP_CORE_WARN("Restoring previous transport [%p] for account %s",
+                  transport_.get(),
+                  accountID_.c_str());
+
+    if (attachTransport(transport_))
+        return false;
+
+    SIP_CORE_ERR("Failed to restore previous transport for account %s", accountID_.c_str());
+    transport_.reset();
+    resetViaTransport();
+    return false;
+}
+
+bool
+SIPAccount::switchTransportInternal(libsip_core::TransportType transportType,
+                                    bool persistConfig,
+                                    bool markRebind,
+                                    bool* changed)
+{
+    if (changed)
+        *changed = false;
+
+    if (!link_.sipTransportBroker) {
+        SIP_CORE_ERR("Can't switch transport for account %s: SipTransportBroker is unavailable",
+                     accountID_.c_str());
+        return false;
     }
+
+    if (transportType != libsip_core::TransportType::UDP
+        && transportType != libsip_core::TransportType::TCP) {
+        SIP_CORE_ERR("Unsupported SIP transport switch request for account %s (type=%d)",
+                     accountID_.c_str(),
+                     static_cast<int>(transportType));
+        return false;
+    }
+
+    IpAddr bindAddress = createBindingAddress();
+    if (not bindAddress) {
+        SIP_CORE_ERR("Can't compute bind address for account %s transport switch",
+                     accountID_.c_str());
+        return false;
+    }
+
+    auto previousTransport = transport_;
+    std::shared_ptr<SipTransport> candidateTransport;
+    if (transportType == libsip_core::TransportType::UDP) {
+        candidateTransport = link_.sipTransportBroker->getUdpTransport(bindAddress);
+    } else {
+        candidateTransport = link_.sipTransportBroker->getTcpTransport(bindAddress);
+    }
+
+    if (!candidateTransport) {
+        SIP_CORE_ERR("Failed to acquire %s transport for account %s",
+                     transportType == libsip_core::TransportType::TCP ? "TCP" : "UDP",
+                     accountID_.c_str());
+        return false;
+    }
+
+    if (!setTransport(candidateTransport)) {
+        SIP_CORE_ERR("Transport switch failed for account %s (type=%s)",
+                     accountID_.c_str(),
+                     transportType == libsip_core::TransportType::TCP ? "TCP" : "UDP");
+        return false;
+    }
+
+    const bool transportChanged = previousTransport != transport_;
+    if (changed)
+        *changed = transportChanged;
+
+    if (persistConfig && config().transport != transportType)
+        editConfig([&](SipAccountConfig& config) { config.transport = transportType; });
+
+    if (markRebind && transportChanged)
+        markTransportRebindRequired("transport-type-switch");
+
+    if (transportChanged) {
+        SIP_CORE_WARN("Transport switched for account %s to %s",
+                      accountID_.c_str(),
+                      transportType == libsip_core::TransportType::TCP ? "TCP" : "UDP");
+    } else {
+        SIP_CORE_DBG("Transport switch is a no-op for account %s", accountID_.c_str());
+    }
+
+    return true;
 }
 
 bool
 SIPAccount::switchTransport(libsip_core::TransportType transportType)
 {
-    SIP_CORE_WARN("Switching transport of account if possible");
-
-    IpAddr bindAddress = createBindingAddress();
-    if (not bindAddress) {
-        SIP_CORE_ERR("Can't compute address to bind.");
+    bool expected = false;
+    if (!transportSwitchPending_.compare_exchange_strong(expected, true)) {
+        SIP_CORE_WARN("Transport switch already pending for account %s", accountID_.c_str());
         return false;
     }
 
-    if (transportType == libsip_core::TransportType::UDP) {
-        setTransport(link_.sipTransportBroker->getUdpTransport(bindAddress));
-    } else if (transportType == libsip_core::TransportType::TCP) {
-        setTransport(link_.sipTransportBroker->getTcpTransport(bindAddress));
-    }
+    struct SwitchGuard
+    {
+        std::atomic<bool>& pending;
+        ~SwitchGuard() { pending.store(false); }
+    } guard {transportSwitchPending_};
 
-    // save value to config immediately
-    editConfig([&](SipAccountConfig& config) { config.transport = transportType; });
+    SIP_CORE_WARN("Switching transport for account %s (requested type=%d)",
+                  accountID_.c_str(),
+                  static_cast<int>(transportType));
 
-    if (transport_ != nullptr) {
+    bool changed = false;
+    if (!switchTransportInternal(transportType, true, true, &changed))
+        return false;
+
+    if (!changed)
+        return true;
+
+    if (!isUsable()) {
+        SIP_CORE_DBG("Transport switched for account %s but account is not usable; skipping "
+                     "re-registration",
+                     accountID_.c_str());
         return true;
     }
 
-    SIP_CORE_ERR("Creation of transport failed.");
-    return false;
+    markTransportRebindRequired("manual-transport-switch");
+    cancelKeepAliveTimer();
+    cancelMainRouteKeepAliveTimer();
+    cancelBackupRouteKeepAliveTimer();
+    pendingBackupKeepAliveStart_.store(false);
+    cancelAutoReregistrationTimer();
+    resetAutoRegistration();
+
+    destroyRegistrationInfo();
+    doRegister();
+
+    return true;
 }
 
 void
@@ -1189,6 +2209,8 @@ SIPAccount::setAccountDetails(const std::map<std::string, std::string>& details)
     SipAccountConfig defaults;
     KeepAliveType oldKeepAliveType = defaults.keepAliveType;
     uint32_t oldKeepAliveInterval = defaults.keepAliveInterval;
+    std::string oldServiceRoute;
+    std::vector<std::string> oldBackServiceRoutes;
     bool wasEnabled = defaults.enabled;
 
     {
@@ -1197,6 +2219,8 @@ SIPAccount::setAccountDetails(const std::map<std::string, std::string>& details)
             const auto& cfg = config();
             oldKeepAliveType = cfg.keepAliveType;
             oldKeepAliveInterval = cfg.keepAliveInterval;
+            oldServiceRoute = cfg.serviceRoute;
+            oldBackServiceRoutes = cfg.backServiceRoutes;
             wasEnabled = cfg.enabled;
         }
     }
@@ -1205,19 +2229,32 @@ SIPAccount::setAccountDetails(const std::map<std::string, std::string>& details)
 
     KeepAliveType newKeepAliveType;
     uint32_t newKeepAliveInterval;
+    std::string newServiceRoute;
+    std::vector<std::string> newBackServiceRoutes;
     bool isEnabled;
     {
         std::lock_guard<std::recursive_mutex> lock(configurationMutex_);
         const auto& cfg = config();
         newKeepAliveType = cfg.keepAliveType;
         newKeepAliveInterval = cfg.keepAliveInterval;
+        newServiceRoute = cfg.serviceRoute;
+        newBackServiceRoutes = cfg.backServiceRoutes;
         isEnabled = cfg.enabled;
     }
 
-    const bool keepAliveChanged =
-        (oldKeepAliveType != newKeepAliveType) || (oldKeepAliveInterval != newKeepAliveInterval);
-    if (!keepAliveChanged && wasEnabled == isEnabled)
+    const bool keepAliveChanged = (oldKeepAliveType != newKeepAliveType)
+                                  || (oldKeepAliveInterval != newKeepAliveInterval);
+    const bool routeConfigChanged = oldServiceRoute != newServiceRoute
+                                    || oldBackServiceRoutes != newBackServiceRoutes;
+    if (!keepAliveChanged && wasEnabled == isEnabled && !routeConfigChanged)
         return;
+
+    const bool restoreMainRouteFastProbe = isUsingBackupRoute() && mainRouteFastProbeEnabled_.load()
+                                           && newKeepAliveInterval > 0;
+    const bool restoreActiveNoRouteFastProbe
+        = shouldUseOptionsForKeepAlive(newKeepAliveType, getTransportType() == PJSIP_TRANSPORT_UDP)
+          && activeNoRouteFastProbeEnabled_.load()
+                                               && newKeepAliveInterval > 0;
 
     // Clear pending state and restart timers based on the new configuration.
     ka_options_pending_ = false;
@@ -1230,11 +2267,16 @@ SIPAccount::setAccountDetails(const std::map<std::string, std::string>& details)
 
     if (isUsable() && transport_) {
         registerKeepAliveTimer();
-        if (hasBackServiceRoute()) {
-            if (isUsingBackupRoute())
+        if (restoreActiveNoRouteFastProbe)
+            enableActiveNoRouteFastProbe("set-account-details-keepalive-refresh");
+        if (hasBackServiceRoutes()) {
+            if (isUsingBackupRoute()) {
                 registerMainRouteKeepAliveTimer();
-            else
+                if (restoreMainRouteFastProbe)
+                    enableMainRouteFastProbe("set-account-details-keepalive-refresh");
+            } else {
                 registerBackupRouteKeepAliveTimer();
+            }
         }
     }
 }
@@ -1308,6 +2350,17 @@ SIPAccount::SIPStartCall(std::shared_ptr<SIPCall>& call)
 
     // Add user-agent header
     sip_utils::addUserAgentHeader(getUserAgentName(), tdata);
+
+    // Inject any custom application-provided headers into the INVITE
+    for (const auto& [name, value] : call->getExtraSipHeaders()) {
+        auto pjName = sip_utils::CONST_PJ_STR(name);
+        auto pjValue = sip_utils::CONST_PJ_STR(value);
+        auto* customHdr = pjsip_generic_string_hdr_create(tdata->pool, &pjName, &pjValue);
+        if (customHdr) {
+            SIP_CORE_DBG("Add custom header to INVITE: \"%s: %s\"", name.c_str(), value.c_str());
+            pjsip_msg_add_hdr(tdata->msg, reinterpret_cast<pjsip_hdr*>(customHdr));
+        }
+    }
 
     if (pjsip_inv_send_msg(call->inviteSession_.get(), tdata) != PJ_SUCCESS) {
         SIP_CORE_ERR("Unable to send invite message for this call");
@@ -1400,16 +2453,21 @@ SIPAccount::doRegister()
 void
 SIPAccount::doRegister1_()
 {
+    const auto resolveTransportType = transportTypeFromConfig(config().transport);
+
     // pre-resolve of proxy OR backup proxy
-    if (hasServiceRoute() || hasBackServiceRoute()) {
+    if (hasServiceRoute() || hasBackServiceRoutes()) {
         if (hasServiceRoute()) {
             link_.resolveSrvName(config().serviceRoute,
-                                 PJSIP_TRANSPORT_UDP,
+                                 resolveTransportType,
                                  [w = weak()](std::vector<IpAddr> host_ips) {
                                      if (auto acc = w.lock()) {
                                          std::lock_guard<std::recursive_mutex> lock(
                                              acc->configurationMutex_);
                                          if (host_ips.empty()) {
+                                             SIP_CORE_ERR("Can't resolve serviceRoute for registration.");
+                                             acc->setRegistrationState(RegistrationState::ERROR_GENERIC,
+                                                                       PJSIP_SC_NOT_FOUND);
                                              return;
                                          }
                                          acc->serviceRouteIp_ = host_ips[0];
@@ -1417,28 +2475,33 @@ SIPAccount::doRegister1_()
                                      }
                                  });
         }
-        if (hasBackServiceRoute()) {
-            link_.resolveSrvName(config().backServiceRoute,
-                                 PJSIP_TRANSPORT_UDP,
-                                 [w = weak()](std::vector<IpAddr> host_ips) {
-                                     if (auto acc = w.lock()) {
-                                         std::lock_guard<std::recursive_mutex> lock(
-                                             acc->configurationMutex_);
-                                         if (host_ips.empty()) {
-                                             return;
+        backServiceRouteIps_.clear();
+        if (!config().backServiceRoutes.empty()) {
+            for(auto route : config().backServiceRoutes){
+                link_.resolveSrvName(route,
+                                     resolveTransportType,
+                                     [w = weak()](std::vector<IpAddr> host_ips) {
+                                         if (auto acc = w.lock()) {
+                                             std::lock_guard<std::recursive_mutex> lock(
+                                                 acc->configurationMutex_);
+                                             if (host_ips.empty()) {
+                                                 acc->backServiceRouteIps_.emplace_back("");
+                                                 return;
+                                             }
+                                             acc->backServiceRouteIps_.emplace_back(host_ips[0]);
+                                             if (acc->pendingBackupKeepAliveStart_.exchange(false)) {
+                                                 acc->startBackupKeepAliveAfterRegister();
+                                             }
                                          }
-                                         acc->backServiceRouteIp_ = host_ips[0];
-                                         if (acc->pendingBackupKeepAliveStart_.exchange(false)) {
-                                             acc->startBackupKeepAliveAfterRegister();
-                                         }
-                                     }
-                                 });
+                                     });
+
+            }
         }
 
     } else {
         // pre-resolve of hostname
         link_.resolveSrvName(config().hostname,
-                             PJSIP_TRANSPORT_UDP,
+                             resolveTransportType,
                              [w = weak()](std::vector<IpAddr> host_ips) {
                                  if (auto acc = w.lock()) {
                                      std::lock_guard<std::recursive_mutex> lock(
@@ -1460,8 +2523,8 @@ SIPAccount::doRegister1_()
 const IpAddr&
 SIPAccount::getActualIpAddress() const
 {
-    if (usingBackupRoute_ && hasBackServiceRoute()) {
-        return backServiceRouteIp_;
+    if (isUsingBackupRoute() && hasBackServiceRoutes()) {
+        return activeBackupRoute_.second;
     }
 
     if (hasServiceRoute()) {
@@ -1471,13 +2534,312 @@ SIPAccount::getActualIpAddress() const
     return hostIp_;
 }
 
+SIPAccount::KeepAliveTopology
+SIPAccount::resolveKeepAliveTopology(bool hasServiceRoute, bool hasBackServiceRoute)
+{
+    if (hasServiceRoute && hasBackServiceRoute)
+        return KeepAliveTopology::ServiceRouteWithBackup;
+    if (hasServiceRoute)
+        return KeepAliveTopology::ServiceRoute;
+    return KeepAliveTopology::NoRoute;
+}
+
+bool
+SIPAccount::shouldUseOptionsForKeepAlive(KeepAliveType keepAliveType, bool isUdpTransport)
+{
+    return !isUdpTransport || keepAliveType == KeepAliveType::Options;
+}
+
+bool
+SIPAccount::shouldUseStartupMainRouteProbe(bool optionsKeepAliveMode,
+                                           KeepAliveTopology topology,
+                                           bool usingBackupRoute,
+                                           bool skipStartupProbe)
+{
+    return optionsKeepAliveMode && topology == KeepAliveTopology::ServiceRouteWithBackup
+           && !usingBackupRoute && !skipStartupProbe;
+}
+
+bool
+SIPAccount::isOptionsKeepAliveMode() const
+{
+    return shouldUseOptionsForKeepAlive(config().keepAliveType,
+                                        getTransportType() == PJSIP_TRANSPORT_UDP);
+}
+
+SIPAccount::KeepAliveTopology
+SIPAccount::getKeepAliveTopology() const
+{
+    return resolveKeepAliveTopology(hasServiceRoute(), hasBackServiceRoutes());
+}
+
+bool
+SIPAccount::shouldRunStartupMainRouteProbe() const
+{
+    return shouldUseStartupMainRouteProbe(isOptionsKeepAliveMode(),
+                                          getKeepAliveTopology(),
+                                          isUsingBackupRoute(),
+                                          skipMainRouteStartupProbeOnce_.load());
+}
+
+bool
+SIPAccount::consumeShouldRunStartupMainRouteProbe()
+{
+    const bool skipStartupProbe = skipMainRouteStartupProbeOnce_.exchange(false);
+    return shouldUseStartupMainRouteProbe(isOptionsKeepAliveMode(),
+                                          getKeepAliveTopology(),
+                                          isUsingBackupRoute(),
+                                          skipStartupProbe);
+}
+
+std::string
+SIPAccount::getServerUriForTarget(const std::string& target) const
+{
+    if (target.empty())
+        return getServerUri();
+    if (!target.empty() && target.front() == '<')
+        return target;
+    if (target.rfind("sip:", 0) == 0 || target.rfind("sips:", 0) == 0)
+        return "<" + target + ">";
+    return "<sip:" + target + ">";
+}
+
+std::string
+SIPAccount::getActiveKeepAliveUri() const
+{
+    if (isUsingBackupRoute() && hasBackServiceRoutes())
+        return getBackupRouteKeepAliveUri();
+    if (hasServiceRoute())
+        return getMainRouteKeepAliveUri();
+    return getServerUri();
+}
+
+std::string
+SIPAccount::getMainRouteKeepAliveUri() const
+{
+    return hasServiceRoute() ? getServerUriForTarget(config().serviceRoute) : getServerUri();
+}
+
+std::string
+SIPAccount::getBackupRouteKeepAliveUri() const
+{
+    return hasBackServiceRoutes() ? getServerUriForTarget(activeBackupRoute_.first)
+                                 : getServerUri();
+}
+
+bool
+SIPAccount::updateActiveKeepAliveTargetFromActualIpAddress()
+{
+    const auto& ip = getActualIpAddress();
+    if (!ip)
+        return false;
+
+    kaTarget.socket = {};
+    pj_memcpy(&kaTarget.socket, ip.pjPtr(), ip.getLength());
+    kaTarget.length = ip.getLength();
+    return true;
+}
+
+void
+SIPAccount::emitRegistrationStateSignal(RegistrationState state, unsigned details_code)
+{
+    std::string details_str;
+    const pj_str_t* description = pjsip_get_status_text(details_code);
+    if (description)
+        details_str = sip_utils::as_view(*description);
+
+    setRegistrationStateDetailed({static_cast<int>(details_code), details_str});
+
+    runOnMainThread([accountId = accountID_,
+                     state = mapStateNumberToString(state),
+                     details_code,
+                     details_str,
+                     details = getVolatileAccountDetails()] {
+        emitSignal<libsip_core::ConfigurationSignal::RegistrationStateChanged>(accountId,
+                                                                               state,
+                                                                               details_code,
+                                                                               details_str);
+        emitSignal<libsip_core::ConfigurationSignal::VolatileDetailsChanged>(accountId, details);
+    });
+}
+
+void
+SIPAccount::setRegistrationStateWithSignal(RegistrationState state,
+                                           unsigned details_code,
+                                           bool forceEmit)
+{
+    if (!forceEmit || state != getRegistrationState()) {
+        setRegistrationState(state, details_code);
+        return;
+    }
+
+    emitRegistrationStateSignal(state, details_code);
+}
+
+void
+SIPAccount::reregisterCurrentRoute(const char* reason)
+{
+    if (isShuttingDown_.load() || !isUsable()) {
+        SIP_CORE_DBG("Skipping route refresh for account %s: shutting down or unusable",
+                     accountID_.c_str());
+        return;
+    }
+    if (getRegistrationState() == RegistrationState::TRYING) {
+        SIP_CORE_DBG("Skipping route refresh for account %s: registration already in progress",
+                     accountID_.c_str());
+        return;
+    }
+
+    SIP_CORE_WARN("Refreshing registration for account %s on current route (%s)",
+                  accountID_.c_str(),
+                  reason ? reason : "unspecified");
+    needsResubscribe_.store(true);
+    needsRepublish_.store(true);
+    destroyRegistrationInfo();
+    doRegister();
+}
+
+void
+SIPAccount::handleStartupMainRouteProbeResult(int statusCode)
+{
+    if (isOptionsSuccess200(statusCode)) {
+        mainRouteAvailable_.store(true);
+        skipMainRouteStartupProbeOnce_.store(true);
+        doRegister2_();
+        return;
+    }
+
+    mainRouteAvailable_.store(false);
+    switchRouteAndReregister(true, "startup-main-route-options-failure");
+    enableMainRouteFastProbe("startup-main-route-options-failure");
+}
+
+void
+SIPAccount::handleActiveRouteOptionsSuccess(int statusCode)
+{
+    if (!isOptionsSuccess200(statusCode))
+        return;
+
+    if (!isUsingBackupRoute() && hasServiceRoute())
+        mainRouteAvailable_.store(true);
+
+    if (!isActiveNoRouteFastProbeEnabled())
+        return;
+    if (getRegistrationState() == RegistrationState::TRYING) {
+        SIP_CORE_DBG("Active route OPTIONS recovered while registration is already in progress");
+        enableActiveNoRouteFastProbe("active-route-options-200-register-in-progress");
+        return;
+    }
+
+    disableActiveNoRouteFastProbe("active-route-options-200");
+    reregisterCurrentRoute("active-route-options-200");
+}
+
+void
+SIPAccount::handleActiveRouteOptionsFailure(int statusCode)
+{
+    if (!shouldEnableActiveNoRouteFastProbeForStatusCode(statusCode))
+        return;
+    const bool noResponse = statusCode == PJSIP_SC_TSX_TRANSPORT_ERROR
+                            || statusCode == PJSIP_SC_REQUEST_TIMEOUT;
+    if (getRegistrationState() == RegistrationState::TRYING) {
+        if (getKeepAliveTopology() == KeepAliveTopology::ServiceRouteWithBackup
+            && isUsingBackupRoute()) {
+            enableActiveNoRouteFastProbe("backup-route-options-failure-register-in-progress");
+            enableMainRouteFastProbe("backup-route-options-failure-register-in-progress");
+        } else if (noResponse || isActiveNoRouteFastProbeEnabled()) {
+            enableActiveNoRouteFastProbe("active-route-options-failure-register-in-progress");
+        }
+        return;
+    }
+
+    if (getKeepAliveTopology() == KeepAliveTopology::ServiceRouteWithBackup) {
+        if (!isUsingBackupRoute()) {
+            mainRouteAvailable_.store(false);
+            disableActiveNoRouteFastProbe("main-route-options-failure");
+            switchRouteAndReregister(true, "main-route-options-failure");
+            enableMainRouteFastProbe("main-route-options-failure");
+            return;
+        }
+
+        enableActiveNoRouteFastProbe("backup-route-options-failure");
+        enableMainRouteFastProbe("backup-route-options-failure");
+        setRegistrationStateWithSignal(RegistrationState::ERROR_GENERIC, statusCode, true);
+        return;
+    }
+    if (noResponse || isActiveNoRouteFastProbeEnabled())
+        enableActiveNoRouteFastProbe("active-route-options-failure");
+    setRegistrationStateWithSignal(RegistrationState::ERROR_GENERIC, statusCode, true);
+}
+
+bool
+SIPAccount::sendStartupMainRouteProbe()
+{
+    if (!hasServiceRoute())
+        return false;
+
+    bool expected = false;
+    if (!startupMainRouteProbePending_.compare_exchange_strong(expected, true))
+        return true;
+
+    auto mainRouteIp = getServiceRouteIp();
+    if (!mainRouteIp) {
+        startupMainRouteProbePending_.store(false);
+        return false;
+    }
+
+    pjsip_tx_data* tdata = nullptr;
+    auto server_uri = getMainRouteKeepAliveUri();
+    pj_str_t pjServer = sip_utils::CONST_PJ_STR(server_uri);
+    auto contact = getContactHeader();
+    pj_str_t pjContact = sip_utils::CONST_PJ_STR(contact);
+
+    pj_status_t status = pjsip_endpt_create_request(link_.getEndpoint(),
+                                                    &pjsip_options_method,
+                                                    &pjServer,
+                                                    &pjContact,
+                                                    &pjServer,
+                                                    &pjContact,
+                                                    nullptr,
+                                                    -1,
+                                                    nullptr,
+                                                    &tdata);
+
+    if (status == PJ_SUCCESS && setUpTransmissionData(tdata, mainRouteIp)) {
+        status = pjsip_endpt_send_request(link_.getEndpoint(),
+                                          tdata,
+                                          -1,
+                                          this,
+                                          &startup_main_route_probe_on_complete);
+    } else if (status == PJ_SUCCESS) {
+        status = PJSIP_SC_TSX_TRANSPORT_ERROR;
+        pjsip_tx_data_dec_ref(tdata);
+    }
+
+    if (status == PJ_SUCCESS) {
+        SIP_CORE_INFO("KA_EVT: options-sent route=startup-main-probe");
+        return true;
+    }
+
+    startupMainRouteProbePending_.store(false);
+    mainRouteAvailable_.store(false);
+    switchRouteAndReregister(true, "startup-main-route-options-failure");
+    enableMainRouteFastProbe("startup-main-route-options-failure");
+    return false;
+}
+
 void
 SIPAccount::doRegister2_()
 {
     try {
-        bool result = switchTransport(config().transport);
+        bool result = switchTransportInternal(config().transport, false, false, nullptr);
         if (!result) {
             setRegistrationState(RegistrationState::ERROR_GENERIC);
+            return;
+        }
+
+        if (consumeShouldRunStartupMainRouteProbe()) {
+            sendStartupMainRouteProbe();
             return;
         }
 
@@ -1512,14 +2874,469 @@ SIPAccount::doUnregister(std::function<void(bool)> released_cb)
 }
 
 void
-SIPAccount::connectivityChanged()
+SIPAccount::doUnregisterFireAndForget()
 {
-    if (not isUsable()) {
-        // nothing to do
+    std::lock_guard<std::recursive_mutex> lock(configurationMutex_);
+
+    cancelKeepAliveTimer();
+    cancelMainRouteKeepAliveTimer();
+    cancelBackupRouteKeepAliveTimer();
+    cancelAutoReregistrationTimer();
+    resetAutoRegistration();
+
+    // If not registered, just clean up regc and mark unregistered.
+    if (!isRegistered()) {
+        destroyRegistrationInfo();
+        setRegistrationState(RegistrationState::UNREGISTERED);
         return;
     }
 
-    doRegister();
+    bRegister_ = false;
+    pjsip_regc* regc = getRegistrationInfo();
+    if (!regc) {
+        setRegistrationState(RegistrationState::UNREGISTERED);
+        return;
+    }
+
+    // Send UNREGISTER, then immediately destroy regc.
+    // pjsip_regc_destroy2(regc, PJ_TRUE) defers internal cleanup until the
+    // final response but suppresses the callback — the packet IS still sent.
+    try {
+        const pjsip_tpselector tp_sel = getTransportSelector();
+        if (!isTransportRecoveryActive() && tp_sel.type != PJSIP_TPSELECTOR_NONE) {
+            pjsip_tx_data* tdata = nullptr;
+            if (pjsip_regc_unregister(regc, &tdata) == PJ_SUCCESS) {
+                pjsip_regc_set_transport(regc, &tp_sel);
+                pjsip_regc_send(regc, tdata);
+            }
+        } else {
+            SIP_CORE_WARN("Skipping fire-and-forget unregister send for account %s: transport is "
+                          "being recovered",
+                          accountID_.c_str());
+        }
+    } catch (...) {
+        SIP_CORE_WARN("Fire-and-forget unregister send failed for account %s",
+                      accountID_.c_str());
+    }
+
+    // Always destroy regc — suppresses any future callback.
+    destroyRegistrationInfo();
+    setRegistrationState(RegistrationState::UNREGISTERED);
+}
+
+void
+SIPAccount::connectivityChanged()
+{
+    handleConnectivityChangedForced("connectivity-changed");
+}
+
+bool
+SIPAccount::hasRunningTransportForConnectivityChange() const
+{
+    if (isShuttingDown_.load() || !isUsable())
+        return false;
+
+    if (!transport_ || transportRecoveryPending_.load())
+        return false;
+
+    switch (transport_->getTransportType()) {
+    case libsip_core::TransportType::TCP:
+        return transport_->isConnected() || transportStatus_ == PJSIP_SC_OK;
+    case libsip_core::TransportType::UDP:
+        // UDP is connectionless; transport presence is sufficient for "running".
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool
+SIPAccount::shouldHandleConnectivityChange() const
+{
+    const bool shuttingDown = isShuttingDown_.load();
+    const bool usable = isUsable();
+    const bool hasTransport = static_cast<bool>(transport_);
+    const auto regState = getRegistrationState();
+    const bool hasRegistrationIntent = bRegister_ || regState != RegistrationState::UNREGISTERED
+                                       || hasTransport;
+    const bool hasRunningTransport = hasRunningTransportForConnectivityChange();
+    const bool pendingRecovery = transportRecoveryPending_.load();
+    const bool inRecoverableErrorState =
+        regState == RegistrationState::ERROR_GENERIC
+        || regState == RegistrationState::ERROR_HOST
+        || regState == RegistrationState::ERROR_SERVICE_UNAVAILABLE;
+    // Defense-in-depth: if the account is stuck in TRYING with a dead transport
+    // and no recovery pending, treat it as eligible so connectivityChanged can
+    // rescue it (e.g. when a transport-error recovery was debounced and the
+    // error-state fallback was not reached).
+    const bool stuckInTrying = (regState == RegistrationState::TRYING)
+                               && !hasRunningTransport
+                               && !pendingRecovery;
+    const bool eligible = !shuttingDown && usable && hasRegistrationIntent
+                          && (hasRunningTransport || inRecoverableErrorState || stuckInTrying);
+
+    SIP_CORE_DBG("Connectivity eligibility for account %s: eligible=%d, state=%s, bRegister=%d, "
+                 "transportPresent=%d, runningTransport=%d, recoverableError=%d, "
+                 "recoveryPending=%d, stuckTrying=%d, transportState=%d",
+                 accountID_.c_str(),
+                 eligible ? 1 : 0,
+                 Account::mapStateNumberToString(regState).c_str(),
+                 bRegister_ ? 1 : 0,
+                 hasTransport ? 1 : 0,
+                 hasRunningTransport ? 1 : 0,
+                 inRecoverableErrorState ? 1 : 0,
+                 pendingRecovery ? 1 : 0,
+                 stuckInTrying ? 1 : 0,
+                 static_cast<int>(transportStatus_));
+
+    return eligible;
+}
+
+void
+SIPAccount::handleConnectivityChangedForced(const char* reason)
+{
+    if (!shouldHandleConnectivityChange()) {
+        SIP_CORE_DBG("Skipping forced connectivity recovery for account %s: registrationIntent=%d, "
+                     "usable=%d, shuttingDown=%d",
+                     accountID_.c_str(),
+                     (bRegister_ || getRegistrationState() != RegistrationState::UNREGISTERED
+                      || transport_)
+                         ? 1
+                         : 0,
+                     isUsable() ? 1 : 0,
+                     isShuttingDown_.load() ? 1 : 0);
+        return;
+    }
+    prepareConnectivityRecovery(reason ? reason : "connectivity-changed");
+    dispatchPreparedConnectivityRecovery(reason ? reason : "connectivity-changed");
+}
+void
+SIPAccount::rebindCallsToCurrentTransportForConnectivityChange(const char* reason)
+{
+    auto callIds = getCallList();
+    if (callIds.empty())
+        return;
+
+    auto contactHdr = getContactHeader();
+    if (!transport_ || contactHdr.empty()) {
+        SIP_CORE_WARN("Cannot rebind %zu call(s) for account %s after connectivity change: "
+                      "transport=%p contact_empty=%d",
+                      callIds.size(),
+                      accountID_.c_str(),
+                      transport_.get(),
+                      contactHdr.empty() ? 1 : 0);
+        for (const auto& id : callIds) {
+            auto sipCall = std::dynamic_pointer_cast<SIPCall>(getCall(id));
+            if (sipCall)
+                sipCall->markConnectivityTransportRebindPending(reason ? reason
+                                                                        : "connectivity-changed");
+        }
+        return;
+    }
+
+    SIP_CORE_WARN("connectivity-recovery: rebind %zu call(s) account=%s (%s)",
+                  callIds.size(),
+                  accountID_.c_str(),
+                  reason ? reason : "unspecified");
+
+    for (const auto& id : callIds) {
+        auto sipCall = std::dynamic_pointer_cast<SIPCall>(getCall(id));
+        if (!sipCall)
+            continue;
+
+        SIP_CORE_WARN("[call:%s] Rebinding call to current account transport after connectivity "
+                      "change (transport=%p, contact=%s)",
+                      id.c_str(),
+                      transport_.get(),
+                      contactHdr.c_str());
+        // Pass keepRebindPending=true so the new transport's state listener does
+        // NOT hang the call up if the new transport flaps before the deferred
+        // re-INVITE is sent. The flag is cleared by onConnectivityReinviteFinalResponse
+        // (via clearConnectivityDialogRefreshState / resetConnectivityReinviteState).
+        sipCall->setSipTransport(transport_, contactHdr, /*keepRebindPending=*/true);
+        if (!sipCall->updateDialogTransport()) {
+            SIP_CORE_DBG("[call:%s] Dialog transport not updated during connectivity rebind",
+                         id.c_str());
+        }
+    }
+}
+
+void
+SIPAccount::failConnectivityRefreshForActiveCalls(const char* reason, int statusCode)
+{
+    const auto callIds = getCallList();
+    if (callIds.empty())
+        return;
+
+    SIP_CORE_ERR("Failing connectivity dialog refresh for %zu call(s) on account %s (%s, "
+                 "status=%d)",
+                 callIds.size(),
+                 accountID_.c_str(),
+                 reason ? reason : "unspecified",
+                 statusCode);
+
+    for (const auto& id : callIds) {
+        auto sipCall = std::dynamic_pointer_cast<SIPCall>(getCall(id));
+        if (!sipCall)
+            continue;
+
+        const auto callState = sipCall->getState();
+        const auto connState = sipCall->getConnectionState();
+        if (connState != Call::ConnectionState::CONNECTED
+            || (callState != Call::CallState::ACTIVE && callState != Call::CallState::HOLD)) {
+            continue;
+        }
+
+        sipCall->forceConnectivityDialogRefreshFailure(reason, statusCode);
+    }
+}
+
+void
+SIPAccount::reinviteActiveCalls()
+{
+    auto callIds = getCallList();
+    if (callIds.empty())
+        return;
+
+    SIP_CORE_WARN("connectivity-recovery: reinviteActiveCalls account=%s call_count=%zu",
+                  accountID_.c_str(),
+                  callIds.size());
+
+    auto contactHdr = getContactHeader();
+    if (!transport_ || contactHdr.empty()) {
+        SIP_CORE_WARN("connectivity-recovery: reinviteActiveCalls deferred for account %s: "
+                      "transport=%p contact_empty=%d — keeping calls alive and re-arming "
+                      "pendingReinviteAfterRegister so the next register-200 retries.",
+                      accountID_.c_str(),
+                      transport_.get(),
+                      contactHdr.empty() ? 1 : 0);
+        for (const auto& id : callIds) {
+            auto sipCall = std::dynamic_pointer_cast<SIPCall>(getCall(id));
+            if (!sipCall)
+                continue;
+            sipCall->markConnectivityTransportRebindPending(
+                "reinviteActiveCalls-no-transport-or-contact");
+            sipCall->pendingConnectivityReinvite_.store(true);
+        }
+        // Re-arm so the next successful register fires reinviteActiveCalls() again.
+        pendingReinviteAfterRegister_.store(true);
+        return;
+    }
+
+    for (const auto& id : callIds) {
+        auto call = getCall(id);
+        if (!call)
+            continue;
+
+        auto sipCall = std::dynamic_pointer_cast<SIPCall>(call);
+        if (!sipCall)
+            continue;
+
+        // Reset retry state for a fresh connectivity change cycle
+        sipCall->resetConnectivityReinviteState();
+
+        const auto callState = sipCall->getState();
+        const auto connState = sipCall->getConnectionState();
+
+        if (connState != Call::ConnectionState::CONNECTED
+            || (callState != Call::CallState::ACTIVE && callState != Call::CallState::HOLD)) {
+
+            // Outgoing calls still in setup (TRYING/PROGRESSING/RINGING): the original
+            // INVITE was sent on the old transport with the old Via address. The 200 OK
+            // from the callee will be routed to that (now dead) address and never arrive.
+            // There is no SIP mechanism to rebind an in-flight client INVITE transaction,
+            // so we must CANCEL the call and re-dial on the new transport.
+            if (sipCall->getCallType() == Call::CallType::OUTGOING
+                && connState != Call::ConnectionState::CONNECTED) {
+                SIP_CORE_WARN("[call:%s] Outgoing call in setup phase (%s) during connectivity "
+                              "change — cancelling and scheduling re-dial",
+                              id.c_str(),
+                              sipCall->getStateStr().c_str());
+
+                auto peerNumber = sipCall->getPeerNumber();
+                auto mediaList = sipCall->currentMediaList();
+
+                // Best-effort CANCEL on old transport + cleanup
+                sipCall->hangup(0);
+
+                // Re-dial on the new transport after a short delay
+                std::weak_ptr<SIPAccount> wAcc
+                    = std::dynamic_pointer_cast<SIPAccount>(shared_from_this());
+                Manager::instance().scheduleTaskIn(
+                    [wAcc, peerNumber, mediaList] {
+                        auto acc = wAcc.lock();
+                        if (!acc || !acc->isUsable() || acc->isShuttingDown_.load())
+                            return;
+
+                        SIP_CORE_WARN("Re-dialing %s after connectivity change",
+                                      peerNumber.c_str());
+                        try {
+                            acc->newOutgoingCall(peerNumber, mediaList);
+                        } catch (const std::exception& e) {
+                            SIP_CORE_ERR("Failed to re-dial after connectivity change: %s",
+                                         e.what());
+                        }
+                    },
+                    std::chrono::milliseconds(500));
+                continue;
+            }
+
+            // Fix 5: Non-outgoing calls (e.g. incoming ringing) — defer re-INVITE
+            SIP_CORE_WARN("[call:%s] Not in re-invitable state (%s), deferring connectivity "
+                          "re-INVITE",
+                          id.c_str(),
+                          sipCall->getStateStr().c_str());
+            sipCall->pendingConnectivityReinvite_.store(true);
+            sipCall->setSipTransport(transport_, contactHdr);
+            if (!sipCall->updateDialogTransport()) {
+                SIP_CORE_DBG("[call:%s] Dialog transport not updated while deferring connectivity "
+                             "re-INVITE",
+                             id.c_str());
+            }
+
+            // Register a state listener to trigger reinvite when call becomes eligible
+            std::weak_ptr<SIPCall> wCall = sipCall;
+            call->addStateListener(
+                [wCall](Call::CallState cs, Call::ConnectionState cn, int) -> bool {
+                    if (cn == Call::ConnectionState::CONNECTED
+                        && (cs == Call::CallState::ACTIVE || cs == Call::CallState::HOLD)) {
+                        if (auto c = wCall.lock()) {
+                            c->tryDeferredConnectivityReinvite();
+                        }
+                        return false; // remove listener after triggering
+                    }
+                    // Remove listener if call is over
+                    if (cs == Call::CallState::OVER || cn == Call::ConnectionState::DISCONNECTED)
+                        return false;
+                    return true; // keep listening
+                });
+            continue;
+        }
+
+        SIP_CORE_WARN("connectivity-recovery: reinviteActiveCalls reached active call %s; "
+                      "updating transport and sending re-INVITE",
+                      id.c_str());
+
+        sipCall->setSipTransport(transport_, contactHdr, /*keepRebindPending=*/true);
+
+        auto result = sipCall->reinviteOnConnectivityChange();
+        if (result == PJ_EPENDING) {
+            // Transaction or PJSIP state was pending, deferred re-INVITE was registered.
+            // Schedule a follow-up so the re-INVITE actually fires even when no
+            // separate state-change hook (e.g. onMediaNegotiationComplete /
+            // onAnswered) wakes it up for an already-CONFIRMED call.
+            SIP_CORE_DBG("[call:%s] Re-INVITE deferred (pending), scheduling followup",
+                         id.c_str());
+            scheduleConnectivityReinviteFollowup(sipCall, std::chrono::milliseconds(500));
+        } else if (result != PJ_SUCCESS) {
+            // Fix 4: Retry with backoff instead of immediate hangup
+            scheduleConnectivityReinviteRetry(sipCall);
+        }
+    }
+}
+
+void
+SIPAccount::scheduleConnectivityReinviteFollowup(const std::shared_ptr<SIPCall>& sipCall,
+                                                 std::chrono::milliseconds delay)
+{
+    if (!sipCall)
+        return;
+
+    auto& retryCount = sipCall->connectivityReinviteRetryCount_;
+    if (retryCount >= SIPCall::MAX_CONNECTIVITY_REINVITE_RETRIES) {
+        SIP_CORE_ERR("[call:%s] connectivity-recovery: re-INVITE follow-up retry budget "
+                     "exhausted (%u/%u)",
+                     sipCall->getCallId().c_str(),
+                     retryCount,
+                     SIPCall::MAX_CONNECTIVITY_REINVITE_RETRIES);
+        sipCall->forceConnectivityDialogRefreshFailure(
+            "connectivity-reinvite-followup-budget-exhausted",
+            PJSIP_SC_REQUEST_TIMEOUT);
+        return;
+    }
+
+    retryCount++;
+    SIP_CORE_WARN("[call:%s] connectivity-recovery: scheduling re-INVITE follow-up %u/%u in "
+                  "%lld ms",
+                  sipCall->getCallId().c_str(),
+                  retryCount,
+                  SIPCall::MAX_CONNECTIVITY_REINVITE_RETRIES,
+                  static_cast<long long>(delay.count()));
+
+    std::weak_ptr<SIPCall> wCall = sipCall;
+    std::weak_ptr<SIPAccount> wAcc = std::dynamic_pointer_cast<SIPAccount>(shared_from_this());
+    Manager::instance().scheduleTaskIn(
+        [wCall, wAcc] {
+            auto acc = wAcc.lock();
+            auto call = wCall.lock();
+            if (!acc || !call)
+                return;
+            if (call->getConnectionState() == Call::ConnectionState::DISCONNECTED
+                || call->getState() == Call::CallState::OVER)
+                return;
+            if (!call->pendingConnectivityReinvite_.load()) {
+                // Already cleared by another path (state-change listener, finalResponse).
+                return;
+            }
+            SIP_CORE_WARN("[call:%s] connectivity-recovery: re-INVITE follow-up firing",
+                          call->getCallId().c_str());
+            const auto result = call->reinviteOnConnectivityChange();
+            if (result == PJ_EPENDING) {
+                // Still not eligible — try again later within budget.
+                acc->scheduleConnectivityReinviteFollowup(call, std::chrono::milliseconds(1000));
+            } else if (result != PJ_SUCCESS) {
+                acc->scheduleConnectivityReinviteRetry(call);
+            }
+        },
+        delay);
+}
+
+void
+SIPAccount::scheduleConnectivityReinviteRetry(const std::shared_ptr<SIPCall>& sipCall)
+{
+    auto& retryCount = sipCall->connectivityReinviteRetryCount_;
+    if (retryCount >= SIPCall::MAX_CONNECTIVITY_REINVITE_RETRIES) {
+        SIP_CORE_ERR("[call:%s] Re-INVITE failed after %u retries, hanging up",
+                     sipCall->getCallId().c_str(),
+                     retryCount);
+        sipCall->forceConnectivityDialogRefreshFailure("connectivity-reinvite-retries-exhausted",
+                                                       PJSIP_SC_REQUEST_TIMEOUT);
+        return;
+    }
+
+    retryCount++;
+    const auto delayMs = std::chrono::milliseconds(1000 * (1 << (retryCount - 1))); // 1s, 2s, 4s
+
+    SIP_CORE_WARN("[call:%s] Re-INVITE failed, scheduling retry %u/%u in %lld ms",
+                  sipCall->getCallId().c_str(),
+                  retryCount,
+                  SIPCall::MAX_CONNECTIVITY_REINVITE_RETRIES,
+                  static_cast<long long>(delayMs.count()));
+
+    std::weak_ptr<SIPCall> wCall = sipCall;
+    std::weak_ptr<SIPAccount> wAcc = std::dynamic_pointer_cast<SIPAccount>(shared_from_this());
+    Manager::instance().scheduleTaskIn(
+        [wCall, wAcc] {
+            auto acc = wAcc.lock();
+            auto call = wCall.lock();
+            if (!acc || !call)
+                return;
+            if (call->getConnectionState() == Call::ConnectionState::DISCONNECTED
+                || call->getState() == Call::CallState::OVER)
+                return;
+
+            SIP_CORE_WARN("[call:%s] Retrying connectivity re-INVITE (attempt %u)",
+                          call->getCallId().c_str(),
+                          call->connectivityReinviteRetryCount_);
+
+            auto result = call->reinviteOnConnectivityChange();
+            if (result == PJ_EPENDING) {
+                // Will be retried when transaction completes
+            } else if (result != PJ_SUCCESS) {
+                acc->scheduleConnectivityReinviteRetry(call);
+            }
+        },
+        delayMs);
 }
 
 void
@@ -1627,8 +3444,7 @@ SIPAccount::setUpTransmissionData(pjsip_tx_data* tdata, const IpAddr& ip)
         return false;
     }
 
-    if (transport_->getTransportType() == TransportType::UDP
-        && length > sizeof(pj_sockaddr_in)) {
+    if (transport_->getTransportType() == TransportType::UDP && length > sizeof(pj_sockaddr_in)) {
         SIP_CORE_WARN("setUpTransmissionData: skipping IPv6 target (%u bytes) on UDP transport "
                       "to avoid pj_ioqueue_sendto assert",
                       length);
@@ -1649,49 +3465,64 @@ SIPAccount::setUpTransmissionData(pjsip_tx_data* tdata, const IpAddr& ip)
 void
 SIPAccount::onRegister(pjsip_regc_cbparam* param)
 {
+    if (isShuttingDown_.load()) {
+        SIP_CORE_DBG("Ignoring onRegister for shutting-down account %s", accountID_.c_str());
+        return;
+    }
+
     if (param->regc != getRegistrationInfo())
         return;
+    const bool optionsKeepAliveMode = isOptionsKeepAliveMode();
+    const bool dualRouteOptionsMode = optionsKeepAliveMode
+                                      && getKeepAliveTopology()
+                                             == KeepAliveTopology::ServiceRouteWithBackup;
 
     if (param->status != PJ_SUCCESS) {
         // cancel ka timer if everything is BAD
         SIP_CORE_ERR("SIP registration error %d", param->status);
         cancelBackupRouteKeepAliveTimer();
         pendingBackupKeepAliveStart_.store(false);
+        const unsigned failureCode = param->code > 0 ? param->code : PJSIP_SC_TSX_TRANSPORT_ERROR;
+
+        if (dualRouteOptionsMode && isUsingBackupRoute() && !mainRouteAvailable_.load()) {
+            destroyRegistrationInfo();
+            if (updateActiveKeepAliveTargetFromActualIpAddress()) {
+                enableActiveNoRouteFastProbe("backup-route-registration-transport-failure");
+                registerKeepAliveTimer();
+            }
+            enableMainRouteFastProbe("backup-route-registration-transport-failure");
+            setRegistrationStateWithSignal(RegistrationState::ERROR_GENERIC, failureCode, true);
+            return;
+        }
+
+        if (shouldRecoverTransport(PJSIP_TP_STATE_DISCONNECTED, param->status)) {
+            destroyRegistrationInfo();
+            if (scheduleTransportRecovery("registration-error", param->status)) {
+                return;
+            }
+            // Recovery was debounced — fall through to set error state
+        }
 
         // Try backup route if not already using it
-        if (!isUsingBackupRoute() && hasBackServiceRoute()) {
+        if (dualRouteOptionsMode && !isUsingBackupRoute() && hasBackServiceRoutes()) {
             SIP_CORE_WARN("Registration failed, trying backup route");
-            destroyRegistrationInfo();
-            switchToBackupRoute();
-            doRegister();
+            mainRouteAvailable_.store(false);
+            switchRouteAndReregister(true, "registration-failed-main-route");
+            enableMainRouteFastProbe("registration-failed-main-route");
             return;
         }
 
         destroyRegistrationInfo();
-        setRegistrationState(RegistrationState::ERROR_GENERIC, param->code);
+        if (optionsKeepAliveMode && updateActiveKeepAliveTargetFromActualIpAddress()) {
+            enableActiveNoRouteFastProbe("registration-transport-failure");
+            registerKeepAliveTimer();
+        }
+        setRegistrationStateWithSignal(RegistrationState::ERROR_GENERIC, failureCode, true);
     } else if (param->code < 0 || param->code >= 300) {
         SIP_CORE_ERR("SIP registration failed, status=%d (%.*s)",
                      param->code,
                      (int) param->reason.slen,
                      param->reason.ptr);
-
-        std::string reason = sip_utils::as_string(param->reason);
-
-        // socket is broken, may be interface is broken
-        // so re-create transport now from scratch
-
-        if (reason.find("PJ_ESOCKETSTOP") != std::string::npos) {
-            SIP_CORE_WARN("Trying to re-create socket from scratch...");
-            cancelBackupRouteKeepAliveTimer();
-            cancelKeepAliveTimer();
-            cancelMainRouteKeepAliveTimer();
-            setTransport(nullptr);
-            pjsip_regc_destroy2(regc_, true);
-            switchTransport(libsip_core::TransportType::UDP);
-            sendRegister();
-            return;
-        }
-
 
         cancelBackupRouteKeepAliveTimer();
         pendingBackupKeepAliveStart_.store(false);
@@ -1702,34 +3533,58 @@ SIPAccount::onRegister(pjsip_regc_cbparam* param)
         case PJSIP_SC_REQUEST_TIMEOUT:
         case PJSIP_SC_SERVICE_UNAVAILABLE:
         case PJSIP_SC_NOT_FOUND:
-            shouldRetryBackup = !isUsingBackupRoute() && hasBackServiceRoute();
+            shouldRetryBackup = dualRouteOptionsMode && !isUsingBackupRoute()
+                                && hasBackServiceRoutes();
             break;
         }
 
         if (shouldRetryBackup) {
             SIP_CORE_WARN("Registration failed with code %d, trying backup route", param->code);
+            mainRouteAvailable_.store(false);
             destroyRegistrationInfo();
-            switchToBackupRoute();
-            doRegister();
+            switchRouteAndReregister(true, "registration-code-failure-main-route");
+            enableMainRouteFastProbe("registration-code-failure-main-route");
             return;
         }
 
+        if (isTransportFailureFromOptions(param->code)) {
+            destroyRegistrationInfo();
+            if (scheduleTransportRecovery("registration-transport-error", param->code)) {
+                return;
+            }
+            // Recovery was debounced — fall through to set error state + schedule reregistration
+        }
+
         destroyRegistrationInfo();
+        if (dualRouteOptionsMode && isUsingBackupRoute() && !mainRouteAvailable_.load()) {
+            if (updateActiveKeepAliveTargetFromActualIpAddress()) {
+                enableActiveNoRouteFastProbe("backup-route-registration-code-failure");
+                registerKeepAliveTimer();
+            }
+            enableMainRouteFastProbe("backup-route-registration-code-failure");
+        } else if (optionsKeepAliveMode && updateActiveKeepAliveTargetFromActualIpAddress()) {
+            if (param->code == PJSIP_SC_REQUEST_TIMEOUT || isActiveNoRouteFastProbeEnabled()) {
+                enableActiveNoRouteFastProbe("registration-code-failure");
+                registerKeepAliveTimer();
+            }
+        }
         switch (param->code) {
         case PJSIP_SC_FORBIDDEN:
-            setRegistrationState(RegistrationState::ERROR_AUTH, param->code);
+            setRegistrationStateWithSignal(RegistrationState::ERROR_AUTH, param->code, true);
             break;
         case PJSIP_SC_NOT_FOUND:
-            setRegistrationState(RegistrationState::ERROR_HOST, param->code);
+            setRegistrationStateWithSignal(RegistrationState::ERROR_HOST, param->code, true);
             break;
         case PJSIP_SC_REQUEST_TIMEOUT:
-            setRegistrationState(RegistrationState::ERROR_HOST, param->code);
+            setRegistrationStateWithSignal(RegistrationState::ERROR_HOST, param->code, true);
             break;
         case PJSIP_SC_SERVICE_UNAVAILABLE:
-            setRegistrationState(RegistrationState::ERROR_SERVICE_UNAVAILABLE, param->code);
+            setRegistrationStateWithSignal(RegistrationState::ERROR_SERVICE_UNAVAILABLE,
+                                           param->code,
+                                           true);
             break;
         default:
-            setRegistrationState(RegistrationState::ERROR_GENERIC, param->code);
+            setRegistrationStateWithSignal(RegistrationState::ERROR_GENERIC, param->code, true);
         }
     } else if (PJSIP_IS_STATUS_IN_CLASS(param->code, 200)) {
         // Update auto registration flag
@@ -1751,6 +3606,9 @@ SIPAccount::onRegister(pjsip_regc_cbparam* param)
                 SIP_CORE_DBG("Unregistration success");
                 setRegistrationState(RegistrationState::UNREGISTERED, param->code);
             } else {
+                SIP_CORE_INFO("KA_EVT: register-2xx account=%s code=%d",
+                              accountID_.c_str(),
+                              param->code);
                 const pj_str_t applicationProxy = CONST_PJ_STR("Application-Proxy");
                 auto* applicationProxyHdr = (pjsip_generic_string_hdr*)
                     pjsip_msg_find_hdr_by_name(param->rdata->msg_info.msg,
@@ -1775,23 +3633,22 @@ SIPAccount::onRegister(pjsip_regc_cbparam* param)
                     pjsip_regc_set_route_set(param->regc,
                                              sip_utils::createRouteSet(activeRoute,
                                                                        link_.getPool()));
+                if (!isUsingBackupRoute() && hasServiceRoute())
+                    mainRouteAvailable_.store(true);
 
                 setRegistrationState(RegistrationState::REGISTERED, param->code);
+                disableActiveNoRouteFastProbe("register-2xx");
+                resetOptionsRecoveryWindow();
+                resetRawKeepAliveRecoveryWindow();
 
-                if (needsResubscribe_.exchange(false)) {
-                    SIP_CORE_DBG("Resubscribing to events");
-                    auto events = getSIPEvents();
+                runPostRegisterRecoverySync();
 
-                    for (const auto& event : events->getEventSubscriptions()) {
-                        event->subscribe();
-                    }
-
-                    auto pres = getPresence();
-
-                    for (const auto& sub : pres->getClientSubscriptions()) {
-                        sub->subscribe();
-                    }
-                }
+                // Capture the connectivity-reinvite trigger BEFORE the kaTarget
+                // PJ_ASSERT_ON_FAIL block below: if pjsip_rdata_get_tsx() returns
+                // null on this 2xx, the assert returns from this function and the
+                // deferred re-INVITE would otherwise be silently dropped — which
+                // matches the user-observed "RE-REGISTER yes, RE-INVITE no" pattern.
+                const bool runConnectivityReinvite = pendingReinviteAfterRegister_.exchange(false);
 
                 /* https://github.com/pjsip/pjproject/issues/1607:
                  * Calculate the destination address from the original request. Some
@@ -1804,17 +3661,32 @@ SIPAccount::onRegister(pjsip_regc_cbparam* param)
                     pjsip_tx_data* req;
 
                     tsx = pjsip_rdata_get_tsx(param->rdata);
-                    PJ_ASSERT_ON_FAIL(tsx, return);
-
-                    req = tsx->last_tx;
-
-                    pj_memcpy(&kaTarget.socket, &req->tp_info.dst_addr, req->tp_info.dst_addr_len);
-                    kaTarget.length = pj_sockaddr_get_len(&kaTarget.socket);
+                    if (!tsx) {
+                        SIP_CORE_WARN("connectivity-recovery: pjsip_rdata_get_tsx returned NULL on "
+                                      "register-2xx for account %s; skipping kaTarget update but "
+                                      "still firing re-INVITE if pending",
+                                      accountID_.c_str());
+                    } else {
+                        req = tsx->last_tx;
+                        pj_memcpy(&kaTarget.socket,
+                                  &req->tp_info.dst_addr,
+                                  req->tp_info.dst_addr_len);
+                        kaTarget.length = pj_sockaddr_get_len(&kaTarget.socket);
+                    }
                 }
 
                 // only now set timer
                 registerKeepAliveTimer();
                 startBackupKeepAliveAfterRegister();
+
+                // If a connectivity recovery deferred the reinvite, execute it now.
+                // (Captured BEFORE the kaTarget block so a NULL tsx cannot drop it.)
+                if (runConnectivityReinvite) {
+                    SIP_CORE_WARN("connectivity-recovery: reinvite scheduled after register "
+                                  "firing now for account %s",
+                                  accountID_.c_str());
+                    reinviteActiveCalls();
+                }
             }
         }
     }
@@ -1872,11 +3744,18 @@ SIPAccount::sendUnregister()
     if (!regc)
         throw VoipLinkException("Registration structure is NULL");
 
+    const pjsip_tpselector tp_sel = getTransportSelector();
+    if (isTransportRecoveryActive() || tp_sel.type == PJSIP_TPSELECTOR_NONE) {
+        SIP_CORE_WARN("Skipping network unregister for account %s: transport is being recovered",
+                      accountID_.c_str());
+        destroyRegistrationInfo();
+        setRegistrationState(RegistrationState::UNREGISTERED);
+        return;
+    }
+
     pjsip_tx_data* tdata = nullptr;
     if (pjsip_regc_unregister(regc, &tdata) != PJ_SUCCESS)
         throw VoipLinkException("Unable to unregister sip account");
-
-    const pjsip_tpselector tp_sel = getTransportSelector();
     if (pjsip_regc_set_transport(regc, &tp_sel) != PJ_SUCCESS)
         throw VoipLinkException("Unable to set transport");
 
@@ -1927,8 +3806,13 @@ SIPAccount::hostnameMatch(std::string_view hostname) const
 bool
 SIPAccount::proxyMatch(std::string_view hostname) const
 {
-    if (hostname == config().serviceRoute || hostname == config().backServiceRoute)
+    if (hostname == config().serviceRoute)
         return true;
+
+    for(auto route : config().backServiceRoutes) {
+        if (hostname == route)
+            return true;
+    }
     const auto a = ip_utils::getAddrList(hostname);
     const auto b = ip_utils::getAddrList(config().hostname);
     return ip_utils::haveCommonAddr(a, b);
@@ -1981,7 +3865,6 @@ SIPAccount::getFromUri() const
 std::string
 SIPAccount::getToUri(const std::string& username) const
 {
-
     if (username.size() >= 5 && username.compare(0, 5, "<sip:") == 0) {
         return username;
     }
@@ -2028,8 +3911,8 @@ SIPAccount::getServerUri() const
 std::string
 SIPAccount::getActiveServiceRoute() const
 {
-    if (usingBackupRoute_ && hasBackServiceRoute()) {
-        return config().backServiceRoute;
+    if (isUsingBackupRoute() && hasBackServiceRoutes()) {
+        return activeBackupRoute_.first;
     }
     return config().serviceRoute;
 }
@@ -2037,23 +3920,28 @@ SIPAccount::getActiveServiceRoute() const
 void
 SIPAccount::switchToBackupRoute()
 {
-    if (!hasBackServiceRoute()) {
-        SIP_CORE_WARN("No backup service route available");
+    if (!hasBackServiceRoutes()) {
+        SIP_CORE_WARN("No backup service routes available");
         return;
     }
 
-    if (usingBackupRoute_) {
+    if (isUsingBackupRoute()) {
         SIP_CORE_DBG("Already using backup service route");
         return;
     }
 
-    needsResubscribe_ = true;
+    markTransportRebindRequired("switch-to-backup-route");
+    iterateActiveBackServiceRoute();
 
-    SIP_CORE_WARN("Switching to backup service route: %s", config().backServiceRoute.c_str());
-    usingBackupRoute_ = true;
+    SIP_CORE_WARN("Switching to backup service route: %s", getActiveBackServiceRoute().first.c_str());
+    mainRouteAvailable_.store(false);
 
     // Stop backup route keep-alive since backup becomes active route
     cancelBackupRouteKeepAliveTimer();
+    disableActiveNoRouteFastProbe("switch-to-backup-route");
+
+    disableMainRouteFastProbe("switch-to-backup-route");
+    updateActiveKeepAliveTargetFromActualIpAddress();
 
     // Start the separate keep-alive to monitor main route availability
     registerMainRouteKeepAliveTimer();
@@ -2062,18 +3950,39 @@ SIPAccount::switchToBackupRoute()
 void
 SIPAccount::switchToMainRoute()
 {
-    if (!usingBackupRoute_) {
+    if (!isUsingBackupRoute()) {
         SIP_CORE_DBG("Already using main service route");
         return;
     }
 
-    needsResubscribe_ = true;
+    markTransportRebindRequired("switch-to-main-route");
 
     SIP_CORE_WARN("Switching back to main service route: %s", config().serviceRoute.c_str());
-    usingBackupRoute_ = false;
+    activeBackupRoute_ = {};
+    disableActiveNoRouteFastProbe("switch-to-main-route");
+
+    disableMainRouteFastProbe("switch-to-main-route");
+    updateActiveKeepAliveTargetFromActualIpAddress();
 
     // Stop the main route keep-alive timer
     cancelMainRouteKeepAliveTimer();
+}
+
+void
+SIPAccount::iterateActiveBackServiceRoute()
+{
+    if(config().backServiceRoutes.size() == 0 
+        || config().backServiceRoutes.size() != backServiceRouteIps_.size())
+        return;
+
+    activeBackupRouteIdx_++;
+    if(config().backServiceRoutes.size() <= activeBackupRouteIdx_)
+        activeBackupRouteIdx_ = 0;
+
+    activeBackupRoute_ = { 
+        config().backServiceRoutes[activeBackupRouteIdx_], 
+        backServiceRouteIps_[activeBackupRouteIdx_] 
+    };
 }
 
 IpAddr
@@ -2191,7 +4100,6 @@ SIPAccount::printContactHeader(const std::string& username,
             << ";pn-prid=" << deviceKey;
     }
     contact << ">";
-
     return contact.str();
 }
 
@@ -2292,10 +4200,16 @@ SIPAccount::supportPresence(int function, bool enabled)
 MatchRank
 SIPAccount::matches(std::string_view userName, std::string_view server) const
 {
-    SIP_CORE_DBG("calling matches: current serviceRoute is %s, current backServiceRoute is %s, "
+    std::string routes;
+    for(auto r: config().backServiceRoutes) {
+        routes += r + "/";
+    }
+    if (!routes.empty())
+        routes.pop_back();
+    SIP_CORE_DBG("calling matches: current serviceRoute is %s, current backServiceRoutes are %s, "
                  "username is %s",
                  config().serviceRoute.c_str(),
-                 config().backServiceRoute.c_str(),
+                 routes.c_str(),
                  config().username.c_str());
     if (fullMatch(userName, server)) {
         SIP_CORE_DBG("Matching account id in request is a fullmatch %.*s@%.*s",
@@ -2329,8 +4243,18 @@ SIPAccount::destroyRegistrationInfo()
 {
     if (!regc_)
         return;
-    // pjsip_regc_destroy(regc_);
+
+    auto* regc = regc_;
     regc_ = nullptr;
+
+    const auto status = pjsip_regc_destroy2(regc, PJ_TRUE);
+    if (status != PJ_SUCCESS) {
+        SIP_CORE_WARN("Failed to destroy registration client for account %s: %s",
+                      accountID_.c_str(),
+                      sip_utils::sip_strerror(status).c_str());
+    }
+
+    resetViaTransport();
 }
 
 void
@@ -2499,7 +4423,7 @@ SIPAccount::autoReregTimerCb()
     /* Start re-registration */
     ++auto_rereg_.attempt_cnt;
     try {
-        sendRegister();
+        doRegister();
     } catch (const VoipLinkException& e) {
         SIP_CORE_ERR("Exception during SIP registration: %s", e.what());
         scheduleReregistration();

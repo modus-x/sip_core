@@ -36,6 +36,7 @@
 #include <chrono>
 #include <memory>
 #include <shared_mutex>
+#include <unordered_map>
 #include <vector>
 #include <tuple>
 
@@ -65,24 +66,42 @@ using OnSourcesUpdatedCb = std::function<void(std::vector<SourceInfo>&&)>;
 
 enum class Layout { GRID, ONE_BIG_WITH_SMALL, ONE_BIG };
 
+struct AudioOnlySource
+{
+    std::string callId;
+    std::string streamId;
+    std::string overlayLabel;
+};
+
 class VideoMixer : public VideoGenerator, public VideoFramePassiveReader
 {
     using VideoToStream = std::map<Observable<std::shared_ptr<MediaFrame>>*, StreamInfo>;
+    using AudioOnlySourceKey = std::pair<std::string, std::string>;
+    using AudioOnlySources = std::map<AudioOnlySourceKey, AudioOnlySource>;
+
 public:
     struct Parameters
     {
         int width;
         int height;
         AVPixelFormat format {AV_PIX_FMT_YUV422P};
-        double grid_aspect {1.}; // = 0 to match mixer aspect
-        int padding {5};
-        int border_size {8};
+        double grid_aspect {16.0 / 9.0}; // rectangular tiles; = 0 to match mixer aspect
+        // Tight, Teams-like spacing: every tile is inset by (padding+border_size)
+        // on each side (see VideoMixer::calc_position), so the inter-tile gap is
+        // 2*(padding+border_size) and the outer margin is (padding+border_size).
+        // These match the Flutter SPLITTED gallery tiles (1px padding + 3px
+        // active-speaker border) so the composited/MIXED stream reads the same as
+        // the split view. border_size also sets the baked active-speaker frame
+        // thickness (drawbox t=). Raise them for a looser grid / bolder frame.
+        int padding {1};
+        int border_size {3};
         std::string active_border_color {"CornflowerBlue@1"}; // ffmpeg compatible colors only
-        std::string inactive_border_color {"Blue@1"};         // ffmpeg compatible colors only
+        std::string inactive_border_color {"Blue@0"};         // invisible: only the active speaker is framed
         bool remove_black_borders {true};
-    #ifdef RING_ACCEL
-        bool useHardware { true };
-    #endif
+        int voice_inactive_hold_ms {500};
+#ifdef RING_ACCEL
+        bool useHardware {true};
+#endif
     };
 
     VideoMixer(const std::string& id, const std::string& localInput = {}, bool attachHost = true);
@@ -106,7 +125,7 @@ public:
      * @note previous inputs will be stopped, new inputs won't be automatically turned on.
      * until these inputs are not attached, black frames will be sent
      */
-    void switchInputs(const std::vector<std::string>& inputs);
+    void switchInputs(const std::vector<std::string>& inputs, bool muted = false);
 
     /**
      * Stop all inputs
@@ -128,6 +147,7 @@ public:
     void setVoiceActivity(const std::string& streamId, bool state);
     void setVoiceActivity(const std::map<std::string, bool>& states);
     void setVoiceActivity(const std::map<std::string, bool>&& states);
+    void setVoiceInactiveHoldMs(int holdMs);
 
     bool hasActive()
     {
@@ -145,16 +165,16 @@ public:
 
     void setVideoLayout(Layout newLayout);
 
-    Layout getVideoLayout() 
+    Layout getVideoLayout()
     {
         std::shared_lock lk(rwMutex_);
-        return currentLayout_; 
+        return currentLayout_;
     }
 
-    void setOnSourcesUpdated(OnSourcesUpdatedCb&& cb) 
+    void setOnSourcesUpdated(OnSourcesUpdatedCb&& cb)
     {
         std::unique_lock lk(rwMutex_);
-        onSourcesUpdated_ = std::move(cb); 
+        onSourcesUpdated_ = std::move(cb);
     }
 
     MediaStream getStream(const std::string& name) const;
@@ -170,20 +190,15 @@ public:
 
     std::shared_ptr<SinkClient>& getSink() { return sink_; }
 
-    void addAudioOnlySource(const std::string& callId, const std::string& streamId)
-    {
-        std::unique_lock lock(rwMutex_);
-        audioOnlySources_.insert({callId, streamId});
-        updateLayout();
-    }
+    // Definitions live in video_mixer.cpp because they touch
+    // audioOnlyRenderSources_, whose value type std::unique_ptr<VideoMixerSource>
+    // requires the complete (private) VideoMixerSource definition for its
+    // destructor.
+    void addAudioOnlySource(const std::string& callId,
+                            const std::string& streamId,
+                            const std::string& overlayLabel = {});
 
-    void removeAudioOnlySource(const std::string& callId, const std::string& streamId)
-    {
-        std::unique_lock lock(rwMutex_);
-        if (audioOnlySources_.erase({callId, streamId})) {
-            updateLayout();
-        }
-    }
+    void removeAudioOnlySource(const std::string& callId, const std::string& streamId);
 
     void attachVideo(Observable<std::shared_ptr<MediaFrame>>* frame,
                      const std::string& callId,
@@ -216,26 +231,28 @@ private:
     void calc_position(std::unique_ptr<VideoMixerSource>& source,
                        const std::shared_ptr<VideoFrame>& input,
                        int index,
-                       bool isActive);
+                       bool isActive,
+                       const std::string& callId = {});
 
     gripRect calc_position_rel(std::unique_ptr<VideoMixerSource>& source,
-                       const std::shared_ptr<VideoFrame>& input,
-                       int index,
-                       bool isActive);
-    
-    gripRect calc_position_fixed(std::unique_ptr<VideoMixerSource>& source,
-                       const std::shared_ptr<VideoFrame>& input,
-                       int index,
-                       bool isActive);
+                               const std::shared_ptr<VideoFrame>& input,
+                               int index,
+                               bool isActive);
 
-    bool initBorderFilterSoftware(MediaFilter& filter,
-                                  std::string inputName,
-                                  int format,
-                                  int x,
-                                  int y,
-                                  int width,
-                                  int height,
-                                  bool active);
+    gripRect calc_position_fixed(std::unique_ptr<VideoMixerSource>& source,
+                                 const std::shared_ptr<VideoFrame>& input,
+                                 int index,
+                                 bool isActive);
+
+    bool initBorderFilter(MediaFilter& filter,
+                          std::string inputName,
+                          int format,
+                          int x,
+                          int y,
+                          int width,
+                          int height,
+                          bool active,
+                          bool withText);
 #ifdef RING_ACCEL
     bool initMainFilterHardware(MediaFilter& filter,
                                std::string inputName,
@@ -251,11 +268,18 @@ private:
     int getHWFrame(const std::shared_ptr<VideoFrame>& input, std::shared_ptr<VideoFrame>& output);
     std::shared_ptr<VideoFrame> getUnlinkedHWFrame(const VideoFrame& input);
     std::shared_ptr<VideoFrame> getHWFrameFromSWFrame(const VideoFrame& input);
-    video::HardwareAccel* initHWAccel();
 #endif
 
     int addLayoutUpdate(const char* reason);
     void consumeLayoutUpdates(int count, const char* reason);
+    void applyVoiceActivityStateLocked(const std::string& streamId,
+                                       bool state,
+                                       std::chrono::steady_clock::time_point now,
+                                       bool& layoutChanged);
+    void removeStaleVoiceStatesLocked(const std::map<std::string, bool>& states,
+                                      bool& layoutChanged);
+    bool expireVoiceHoldsLocked(std::chrono::steady_clock::time_point now);
+    static int clampVoiceInactiveHoldMs(int holdMs);
 
     void startSink();
     void stopSink();
@@ -265,7 +289,8 @@ private:
                        const std::shared_ptr<VideoFrame> frame,
                        int& i,
                        const std::string& streamId,
-                       bool isVoiceActive);
+                       bool isVoiceActive,
+                       const std::string& callId = {});
 
     // Process any pending observer detaches in a safe context
     void processPendingDetaches();
@@ -273,18 +298,19 @@ private:
     // Enqueue an observable to be detached from sources_ without blocking
     void enqueueDetach(Observable<std::shared_ptr<MediaFrame>>* ob);
 
-    std::string getCallDisplayName(const std::unique_ptr<VideoMixer::VideoMixerSource>& source);
+    std::string getCallDisplayName(const std::unique_ptr<VideoMixer::VideoMixerSource>& source,
+                                   const std::string& fallbackCallId = {});
 
     const std::string id_;
     int width_ = 0;
     int height_ = 0;
     AVPixelFormat format_ = AV_PIX_FMT_YUV422P;
-    double grid_aspect_ {1.};
-    int padding_ {5};
+    double grid_aspect_ {16.0 / 9.0};
+    int padding_ {1}; // kept in sync with Parameters::padding (Teams-tight gaps)
     const std::string borderFilterName_ = "border";
-    int border_size_ {8};
+    int border_size_ {3}; // kept in sync with Parameters::border_size
     std::string active_border_color_ {"CornflowerBlue@1"}; // ffmpeg declared colors only
-    std::string inactive_border_color_ {"Blue@1"};         // ffmpeg declared colors only
+    std::string inactive_border_color_ {"Blue@0"};         // invisible: only the active speaker is framed
     bool remove_black_borders_ {true};
     std::shared_mutex rwMutex_;
 
@@ -293,6 +319,9 @@ private:
     std::chrono::time_point<std::chrono::steady_clock> nextProcess_;
     std::mutex localInputsMtx_;
     std::vector<std::shared_ptr<VideoInput>> localInputs_ {};
+    /// When true, sources created by attached() start in muted state.
+    /// Set by switchInputs(muted=true) around the startInputs() call.
+    std::atomic<bool> nextLocalSourceMuted_ {false};
     void stopInput(const std::shared_ptr<VideoFrameActiveWriter>& input);
 
     std::mutex scaler_mutex_;
@@ -311,19 +340,37 @@ private:
     std::mutex pendingDetachMtx_ {};
     std::vector<Observable<std::shared_ptr<MediaFrame>>*> pendingDetaches_ {};
 
-    // pair streamId -> activity state
-    std::map<std::string, bool> voiceActivity_;
+    // pair streamId -> raw voice activity state
+    std::map<std::string, bool> voiceActivityRaw_;
+    // pair streamId -> effective display activity state
+    std::map<std::string, bool> voiceActivityDisplay_;
+    // pair streamId -> inactive deadline while applying hold
+    std::map<std::string, std::chrono::steady_clock::time_point> voiceInactiveDeadlines_;
+    int voiceInactiveHoldMs_ {500};
 
-    // pair callId -> streamId
-    // in case of local participant, it will be empty
-    std::set<std::pair<std::string, std::string>> audioOnlySources_;
+    AudioOnlySources audioOnlySources_;
+    // Persistent render-side state for each audio-only placeholder so that
+    // VideoMixer::process() can cache geometry/border filter across frames
+    // and only recompute when the layout actually changes (mirrors the
+    // needsUpdate gating used for video sources).
+    std::map<AudioOnlySourceKey, std::unique_ptr<VideoMixerSource>> audioOnlyRenderSources_;
     std::string activeStream_ {};
+
+    // Stable source ordering: maps streamId -> first-seen insertion index.
+    // Survives detach/reattach cycles so grid positions stay consistent.
+    std::unordered_map<std::string, int> stableOrder_;
+    int nextStableIndex_ {0};
 
     std::atomic_int layoutUpdated_ {0};
     OnSourcesUpdatedCb onSourcesUpdated_ {};
 
     int64_t startTime_;
     int64_t lastTimestamp_;
+
+    // Display-name cache populated once per frame in process() *before* rwMutex_
+    // to avoid calling Manager::getCallFromCallID() under the shared lock.
+    // Keyed by callId. Only accessed from the mixer thread.
+    std::unordered_map<std::string, std::string> displayNameCache_;
 
 #ifdef RING_ACCEL
     std::atomic_bool enableAccel_ = true;

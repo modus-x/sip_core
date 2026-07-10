@@ -45,8 +45,90 @@ constexpr static const char* MUTEAUDIO = "muteAudio";
 // Future
 constexpr static const char* MUTEVIDEO = "muteVideo";
 constexpr static const char* VOICEACTIVITY = "voiceActivity";
+// Screen-share self-announce (top-level, like LAYOUT)
+constexpr static const char* SHARESTATE = "shareState";
 
 } // namespace ProtocolKeys
+
+namespace ConfOrder {
+
+namespace {
+
+Json::Value
+deviceOrder(const std::string& accountUri, const std::string& deviceId, Json::Value&& deviceVal)
+{
+    Json::Value devices;
+    devices[deviceId] = std::move(deviceVal);
+    Json::Value account;
+    account[ProtocolKeys::DEVICES] = std::move(devices);
+    Json::Value root;
+    root[accountUri] = std::move(account);
+    root[ProtocolKeys::PROTOVERSION] = 1;
+    return root;
+}
+
+Json::Value
+mediaOrder(const std::string& accountUri,
+           const std::string& deviceId,
+           const std::string& streamId,
+           const char* key,
+           bool state)
+{
+    Json::Value media;
+    media[key] = state;
+    Json::Value medias;
+    medias[streamId] = std::move(media);
+    Json::Value deviceVal;
+    deviceVal[ProtocolKeys::MEDIAS] = std::move(medias);
+    return deviceOrder(accountUri, deviceId, std::move(deviceVal));
+}
+
+} // namespace
+
+Json::Value
+raiseHand(const std::string& accountUri, const std::string& deviceId, bool state)
+{
+    Json::Value deviceVal;
+    deviceVal[ProtocolKeys::RAISEHAND] = state;
+    return deviceOrder(accountUri, deviceId, std::move(deviceVal));
+}
+
+Json::Value
+hangupParticipant(const std::string& accountUri, const std::string& deviceId)
+{
+    Json::Value deviceVal;
+    deviceVal[ProtocolKeys::HANGUP] = TRUE_STR;
+    return deviceOrder(accountUri, deviceId, std::move(deviceVal));
+}
+
+Json::Value
+muteAudio(const std::string& accountUri,
+          const std::string& deviceId,
+          const std::string& streamId,
+          bool state)
+{
+    return mediaOrder(accountUri, deviceId, streamId, ProtocolKeys::MUTEAUDIO, state);
+}
+
+Json::Value
+setActiveStream(const std::string& accountUri,
+                const std::string& deviceId,
+                const std::string& streamId,
+                bool state)
+{
+    return mediaOrder(accountUri, deviceId, streamId, ProtocolKeys::ACTIVE, state);
+}
+
+Json::Value
+shareState(bool state)
+{
+    Json::Value root;
+    root[ProtocolKeys::PROTOVERSION] = 1;
+    root[ProtocolKeys::SHARESTATE] = state;
+    return root;
+}
+
+} // namespace ConfOrder
 
 void
 ConfProtocolParser::parse()
@@ -68,22 +150,35 @@ ConfProtocolParser::parse()
 void
 ConfProtocolParser::parseV0()
 {
-    if (!checkAuthorization_ || !raiseHandUri_ || !setLayout_ || !setActiveParticipant_
-        || !muteParticipant_ || !kickParticipant_) {
-        SIP_CORE_ERR() << "Missing methods for ConfProtocolParser";
+    // checkAuthorization_ is the only hard requirement: every other handler is
+    // optional and skipped individually. Requiring the full handler set here
+    // used to silently drop EVERY incoming order when one optional handler was
+    // left unregistered.
+    if (!checkAuthorization_) {
+        SIP_CORE_ERR() << "Missing checkAuthorization method for ConfProtocolParser";
         return;
     }
-    // Check if all lambdas set
     auto isPeerModerator = checkAuthorization_(peerId_);
     if (data_.isMember(ProtocolKeys::HANDRAISED)) {
         auto state = data_[ProtocolKeys::HANDSTATE].asString() == TRUE_STR;
         auto uri = data_[ProtocolKeys::HANDRAISED].asString();
-        if (peerId_ == uri) {
+        if (!raiseHandUri_) {
+            SIP_CORE_WARN() << "No handler for conference order key "
+                            << ProtocolKeys::HANDRAISED;
+        } else if (peerId_ == uri) {
             // In this case, the user want to change their state
-            raiseHandUri_(uri, state);
+            raiseHandUri_(std::string(peerId_), uri, state);
         } else if (!state && isPeerModerator) {
             // In this case a moderator can lower the hand
-            raiseHandUri_(uri, state);
+            raiseHandUri_(std::string(peerId_), uri, state);
+        } else {
+            // Clients stamp self-actions with their typed login (e.g. "m12"),
+            // while the host knows the sender only by the uri it dialed (e.g.
+            // "74112") — the two need not match. Anything that is not a
+            // moderator lowering someone else can only be the sender acting
+            // on its OWN hand, so apply it to the SIP-layer sender instead of
+            // silently dropping it (2026-07-09 remote raise-hand bug).
+            raiseHandUri_(std::string(peerId_), std::string(peerId_), state);
         }
     }
     if (!isPeerModerator) {
@@ -92,17 +187,18 @@ ConfProtocolParser::parseV0()
                   peerId_.data());
         return;
     }
-    if (data_.isMember(ProtocolKeys::LAYOUT)) {
+    if (setLayout_ && data_.isMember(ProtocolKeys::LAYOUT)) {
         setLayout_(data_[ProtocolKeys::LAYOUT].asInt());
     }
-    if (data_.isMember(ProtocolKeys::ACTIVEPART)) {
+    if (setActiveParticipant_ && data_.isMember(ProtocolKeys::ACTIVEPART)) {
         setActiveParticipant_(data_[ProtocolKeys::ACTIVEPART].asString());
     }
-    if (data_.isMember(ProtocolKeys::MUTEPART) && data_.isMember(ProtocolKeys::MUTESTATE)) {
+    if (muteParticipant_ && data_.isMember(ProtocolKeys::MUTEPART)
+        && data_.isMember(ProtocolKeys::MUTESTATE)) {
         muteParticipant_(data_[ProtocolKeys::MUTEPART].asString(),
                          data_[ProtocolKeys::MUTESTATE].asString() == TRUE_STR);
     }
-    if (data_.isMember(ProtocolKeys::HANGUPPART)) {
+    if (kickParticipant_ && data_.isMember(ProtocolKeys::HANGUPPART)) {
         kickParticipant_(data_[ProtocolKeys::HANGUPPART].asString());
     }
 }
@@ -110,20 +206,35 @@ ConfProtocolParser::parseV0()
 void
 ConfProtocolParser::parseV1()
 {
-    if (!checkAuthorization_ || !setLayout_ || !raiseHand_ || !hangupParticipant_
-        || !muteStreamAudio_ || !setActiveStream_) {
-        SIP_CORE_ERR() << "Missing methods for ConfProtocolParser";
+    // checkAuthorization_ is the only hard requirement (see parseV0).
+    if (!checkAuthorization_) {
+        SIP_CORE_ERR() << "Missing checkAuthorization method for ConfProtocolParser";
         return;
     }
 
     auto isPeerModerator = checkAuthorization_(peerId_);
     for (Json::Value::const_iterator itr = data_.begin(); itr != data_.end(); itr++) {
         auto key = itr.key();
+        if (key == ProtocolKeys::PROTOVERSION)
+            continue;
+        if (key == ProtocolKeys::SHARESTATE) {
+            // Self-announce: any participant may declare its OWN screen-share
+            // start/stop. The host authorises/arbitrates (moderator takeover)
+            // when resolving peerId_; no moderator gate here.
+            if (shareState_)
+                shareState_(std::string(peerId_), itr->asBool());
+            continue;
+        }
         if (isPeerModerator && key == ProtocolKeys::LAYOUT) {
             // Note: can be removed soon
-            setLayout_(itr->asInt());
+            if (setLayout_)
+                setLayout_(itr->asInt());
         } else {
             auto accValue = *itr;
+            // Non-account scalar keys (e.g. "layout" from a non-moderator):
+            // isMember() on a non-object Json::Value throws Json::LogicError.
+            if (!accValue.isObject())
+                continue;
             if (accValue.isMember(ProtocolKeys::DEVICES)) {
                 auto accountUri = key.asString();
                 for (Json::Value::const_iterator itrd = accValue[ProtocolKeys::DEVICES].begin();
@@ -131,41 +242,60 @@ ConfProtocolParser::parseV1()
                      itrd++) {
                     auto deviceId = itrd.key().asString();
                     auto deviceValue = *itrd;
-                    if (deviceValue.isMember(ProtocolKeys::RAISEHAND)) {
+                    if (!deviceValue.isObject())
+                        continue;
+                    if (raiseHand_ && deviceValue.isMember(ProtocolKeys::RAISEHAND)) {
                         auto newState = deviceValue[ProtocolKeys::RAISEHAND].asBool();
                         if (peerId_ == accountUri || (!newState && isPeerModerator))
-                            raiseHand_(deviceId, newState);
+                            raiseHand_(std::string(peerId_), accountUri, deviceId, newState);
+                        else
+                            // Self-action stamped with the sender's typed
+                            // login (see the parseV0 hand block): apply it to
+                            // the SIP-layer sender rather than dropping it.
+                            raiseHand_(std::string(peerId_),
+                                       std::string(peerId_),
+                                       deviceId,
+                                       newState);
                     }
-                    if (isPeerModerator && deviceValue.isMember(ProtocolKeys::HANGUP)) {
+                    if (hangupParticipant_ && isPeerModerator
+                        && deviceValue.isMember(ProtocolKeys::HANGUP)) {
                         hangupParticipant_(accountUri, deviceId);
                     }
                     if (deviceValue.isMember(ProtocolKeys::MEDIAS)) {
-                        for (Json::Value::const_iterator itrm = accValue[ProtocolKeys::MEDIAS]
-                                                                    .begin();
-                             itrm != accValue[ProtocolKeys::MEDIAS].end();
+                        // The media actions live under THIS device's "medias"
+                        // object, not under the account object.
+                        const auto& medias = deviceValue[ProtocolKeys::MEDIAS];
+                        for (Json::Value::const_iterator itrm = medias.begin();
+                             itrm != medias.end();
                              itrm++) {
                             auto streamId = itrm.key().asString();
                             auto mediaVal = *itrm;
-                            if (mediaVal.isMember(ProtocolKeys::VOICEACTIVITY)) {
+                            if (!mediaVal.isObject())
+                                continue;
+                            if (voiceActivity_
+                                && mediaVal.isMember(ProtocolKeys::VOICEACTIVITY)) {
                                 voiceActivity_(streamId,
                                                mediaVal[ProtocolKeys::VOICEACTIVITY].asBool());
                             }
                             if (isPeerModerator) {
-                                if (mediaVal.isMember(ProtocolKeys::MUTEVIDEO)
-                                    && !muteStreamVideo_) {
-                                    // Note: For now, it's not implemented so not set
+                                if (muteStreamVideo_
+                                    && mediaVal.isMember(ProtocolKeys::MUTEVIDEO)) {
+                                    // Dispatched only once an implementation
+                                    // registers the handler.
                                     muteStreamVideo_(accountUri,
                                                      deviceId,
                                                      streamId,
                                                      mediaVal[ProtocolKeys::MUTEVIDEO].asBool());
                                 }
-                                if (mediaVal.isMember(ProtocolKeys::MUTEAUDIO)) {
+                                if (muteStreamAudio_
+                                    && mediaVal.isMember(ProtocolKeys::MUTEAUDIO)) {
                                     muteStreamAudio_(accountUri,
                                                      deviceId,
                                                      streamId,
                                                      mediaVal[ProtocolKeys::MUTEAUDIO].asBool());
                                 }
-                                if (mediaVal.isMember(ProtocolKeys::ACTIVE)) {
+                                if (setActiveStream_
+                                    && mediaVal.isMember(ProtocolKeys::ACTIVE)) {
                                     setActiveStream_(streamId,
                                                      mediaVal[ProtocolKeys::ACTIVE].asBool());
                                 }

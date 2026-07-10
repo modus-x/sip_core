@@ -140,6 +140,7 @@ public:
      */
     std::shared_ptr<AudioLayer> getAudioDriver();
 
+
     inline std::unique_ptr<AudioDeviceGuard> startAudioStream(AudioDeviceType stream)
     {
         return std::make_unique<AudioDeviceGuard>(*this, stream);
@@ -155,7 +156,8 @@ public:
      */
     std::string outgoingCall(const std::string& accountId,
                              const std::string& callee,
-                             const std::vector<libsip_core::MediaMap>& mediaList = {});
+                             const std::vector<libsip_core::MediaMap>& mediaList = {},
+                             const std::map<std::string, std::string>& headers = {});
 
     /**
      * Functions which occur with a user's action
@@ -268,7 +270,8 @@ public:
                          const std::string& callId1,
                          const std::string& account2Id,
                          const std::string& callId2,
-                         bool attached);
+                         bool attached,
+                         bool muteLocalPlayback = false);
 
     /**
      * Create a conference from a list of participant
@@ -350,6 +353,13 @@ public:
      * Acts on the audio streams and audio files
      */
     void stopTone();
+
+    /**
+     * Called when an outgoing call enters early media (183 with SDP).
+     * Stops any local ringback tone and ensures the playback device is active
+     * so the server-provided RTP audio is audible.
+     */
+    void onCallEarlyMedia(Call& call);
 
     /**
      * Notify the user that the recipient of the call has answered and the put the
@@ -496,6 +506,24 @@ public:
     void setAudioDevice(int index, AudioDeviceType streamType);
 
     void startAudio();
+    /**
+     * Recreate the audio layer after a platform audio-device hot-plug event,
+     * then notify clients and active calls.
+     */
+    void recoverAudioDevices();
+
+    /**
+     * Called when audio devices are added/removed.
+     * Notifies active calls and conferences to recover their audio pipelines.
+     */
+    void onAudioDevicesChanged();
+
+    /**
+     * Called when video devices are added/removed.
+     * Notifies active calls and conferences to recover their video pipelines.
+     */
+    void onVideoDevicesChanged();
+
 
     /**
      * Get list of supported audio output device
@@ -552,6 +580,14 @@ public:
     bool isVADEnabled() const;
 
     void setVADState(bool state);
+
+    int32_t getVADSensitivity() const;
+
+    void setVADSensitivity(int32_t sensitivity);
+
+    int32_t getConferenceVoiceInactiveHoldMs() const;
+
+    void setConferenceVoiceInactiveHoldMs(int32_t holdMs);
 
     void setAudioProcessor(const std::string& processor);
 
@@ -668,6 +704,27 @@ public:
      * Handle played music when an incoming call occurs
      */
     void playRingtone(const std::string& accountID);
+
+    /**
+     * Set a custom ringtone for the currently ringing incoming call.
+     * Used by the client when the INVITE carried an Alert-Info header and
+     * the client has resolved the desired ringtone file.
+     *
+     * If the call is still in the Alert-Info wait window, the scheduled
+     * fallback to the default ringtone is cancelled and the supplied
+     * ringtone is played.
+     *
+     * @param accountId The account on which the call is incoming
+     * @param callId    The call id reported via IncomingCallWithMedia
+     * @param ringtonePath Absolute path to the ringtone file (WAV/MP3)
+     * @return true if the custom ringtone was scheduled for playback,
+     *         false if there is no pending Alert-Info call with this id
+     *         or if playback could not be started (default ringtone is
+     *         played as a fallback in the latter case).
+     */
+    bool setRingtoneForIncomingCall(const std::string& accountId,
+                                    const std::string& callId,
+                                    const std::string& ringtonePath);
 
     /**
      * Handle played music when a congestion occurs
@@ -820,6 +877,12 @@ public:
     void unregisterAccounts();
 
     /**
+     * Fire-and-forget unregister for all SIP accounts (used during shutdown).
+     * Sends UNREGISTER without waiting for server response.
+     */
+    void unregisterAccountsImmediate();
+
+    /**
      * Create a new outgoing call
      * @param toUrl Destination address
      * @param accountId local account
@@ -829,7 +892,8 @@ public:
      */
     std::shared_ptr<Call> newOutgoingCall(std::string_view toUrl,
                                           const std::string& accountId,
-                                          const std::vector<libsip_core::MediaMap>& mediaList);
+                                          const std::vector<libsip_core::MediaMap>& mediaList,
+                                          const std::map<std::string, std::string>& headers = {});
 
     CallFactory callFactory;
 

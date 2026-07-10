@@ -73,6 +73,13 @@ public:
 
     void setRecorderCallback(const std::function<void(const MediaStream& ms)>& cb);
 
+    /**
+     * Clear the pending recorder-attach flag.
+     * Called by attachLocalRecorder() after successfully attaching, so that
+     * readFromDevice() stops retrying the callback on every frame.
+     */
+    void clearPendingRecorderAttach() { settingMS_.store(false); }
+
 private:
     void readFromDevice();
     void readFromFile();
@@ -86,6 +93,10 @@ private:
     std::string id_;
     bool muteState_ = false;
     bool forceMuteNoDevice_ = false;
+    unsigned int consecutiveEmptyFrames_ = 0;  // Track empty frames to detect broken device
+    // One audio-layer recovery attempt per capture-stall episode (macOS
+    // watchdog in readFromDevice); re-armed when frames flow again.
+    bool stallRecoveryAttempted_ = false;
     uint64_t sent_samples = 0;
     mutable std::mutex fmtMutex_ {};
     AudioFormat format_;

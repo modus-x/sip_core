@@ -44,6 +44,7 @@
 #include <thread> // hardware_concurrency
 #include <chrono>
 #include <algorithm>
+#include <vector>
 
 namespace sip_core {
 
@@ -54,14 +55,12 @@ const constexpr auto jitterBufferMaxDelay_ = std::chrono::milliseconds(50);
 // maximum number of times accelerated decoding can fail in a row before falling back to software
 const constexpr unsigned MAX_ACCEL_FAILURES {5};
 
-MediaDemuxer::
-MediaDemuxer()
+MediaDemuxer::MediaDemuxer()
     : inputCtx_(avformat_alloc_context())
     , startTime_(AV_NOPTS_VALUE)
 {}
 
-MediaDemuxer::~
-MediaDemuxer()
+MediaDemuxer::~MediaDemuxer()
 {
     if (inputCtx_)
         avformat_close_input(&inputCtx_);
@@ -69,20 +68,24 @@ MediaDemuxer()
 }
 
 const char*
-MediaDemuxer::getStatusStr(Status status)
+MediaDemuxer::getStatusStr(DecodeStatus status)
 {
     switch (status) {
-    case Status::Success:
+    case DecodeStatus::Success:
         return "Success";
-    case Status::EndOfFile:
+    case DecodeStatus::FrameFinished:
+        return "Frame finished";
+    case DecodeStatus::EndOfFile:
         return "End of file";
-    case Status::ReadBufferOverflow:
+    case DecodeStatus::ReadBufferOverflow:
         return "Read overflow";
-    case Status::ReadError:
+    case DecodeStatus::ReadError:
         return "Read error";
-    case Status::FallBack:
+    case DecodeStatus::DecodeError:
+        return "Decode error";
+    case DecodeStatus::FallBack:
         return "Fallback";
-    case Status::RestartRequired:
+    case DecodeStatus::RestartRequired:
         return "Restart required";
     default:
         return "Undefined";
@@ -92,6 +95,19 @@ MediaDemuxer::getStatusStr(Status status)
 int
 MediaDemuxer::openInput(const DeviceParams& params)
 {
+
+    // Re-allocate context if it was freed by a previous failed avformat_open_input() call.
+    // avformat_open_input() frees and NULLs *ps on failure, so retries need a fresh context.
+    if (!inputCtx_) {
+        inputCtx_ = avformat_alloc_context();
+        if (!inputCtx_)
+            return -ENOMEM;
+        if (interruptCb_) {
+            inputCtx_->interrupt_callback.callback = interruptCb_;
+            inputCtx_->interrupt_callback.opaque = interruptOpaque_;
+        }
+    }
+    av_dict_free(&options_);
     inputParams_ = params;
     auto iformat = av_find_input_format(params.format.c_str());
 
@@ -100,34 +116,48 @@ MediaDemuxer::openInput(const DeviceParams& params)
 
     std::string filter;
     if (params.format == "lavfi" && params.input == "gfxcapture") {
+        std::vector<std::string> opts;
+
         if (not params.window_id.empty()) {
-            if(params.window_id.rfind("0x", 0) == 0) // starts with
-                filter += fmt::format("monitor_idx=window:hwnd={}:", params.window_id);
-            else
-                filter += fmt::format("monitor_idx={}:", params.window_id);
-        }
-        else {
-            filter += "monitor_idx=0";
+            if (params.window_id.rfind("0x", 0) == 0) { // starts with
+                // Explicit HWND capture (window can be resized; resize_mode controls behavior).
+                opts.emplace_back(fmt::format("hwnd={}", params.window_id));
+            } else {
+                // Monitor index capture.
+                opts.emplace_back(fmt::format("monitor_idx={}", params.window_id));
+            }
+        } else {
+            opts.emplace_back("monitor_idx=0");
         }
 
-        if (params.width and params.height)
-            filter += fmt::format("width={}:height={}:", params.width, params.height);
+        // Force a stable output canvas size when requested (or when params were probed upstream).
+        if (params.width and params.height) {
+            opts.emplace_back(fmt::format("width={}", params.width));
+            opts.emplace_back(fmt::format("height={}", params.height));
+        }
+
+        // Keep RTP stream stable on window resize by fitting the content into the canvas.
+        opts.emplace_back("resize_mode=scale_aspect");
 
         if (params.framerate)
-            filter += fmt::format("max_framerate={}:", params.framerate.real());
+            opts.emplace_back(fmt::format("max_framerate={}", params.framerate.real()));
 
-        filter.pop_back(); // remove last ':'
+        for (size_t i = 0; i < opts.size(); ++i) {
+            if (i)
+                filter += ":";
+            filter += opts[i];
+        }
+
         filter += ",hwdownload,format=bgra";
         if (not params.pixel_format.empty())
             filter += fmt::format(",format={}", params.pixel_format);
         else {
             filter += ",format=yuv420p";
         }
-    }
-    else {
-        if (params.width and 
-            params.height and 
-            params.input != "video=screen-capture-recorder") // video_size option doesn't work for this filter
+    } else {
+        if (params.width and params.height
+            and params.input != "video=screen-capture-recorder") // video_size option doesn't work
+                                                                 // for this filter
         {
             auto sizeStr = fmt::format("{}x{}", params.width, params.height);
             av_dict_set(&options_, "video_size", sizeStr.c_str(), 0);
@@ -155,7 +185,10 @@ MediaDemuxer::openInput(const DeviceParams& params)
                             0);
             }
 #else
-                av_dict_set(&options_, "framerate", sip_core::to_string(params.framerate.real()).c_str(), 0);
+            av_dict_set(&options_,
+                        "framerate",
+                        sip_core::to_string(params.framerate.real()).c_str(),
+                        0);
 #endif
         }
 
@@ -186,7 +219,7 @@ MediaDemuxer::openInput(const DeviceParams& params)
     std::string input = params.name;
 #else
     std::string input = params.input;
-    if (params.format == "lavfi" && params.input == "gfxcapture") {        
+    if (params.format == "lavfi" && params.input == "gfxcapture") {
         input += "=";
         input += std::move(filter);
     }
@@ -200,6 +233,11 @@ MediaDemuxer::openInput(const DeviceParams& params)
                  params.width,
                  params.height,
                  params.framerate.real());
+
+    if (params.format == "video4linux2") {
+        // Ensure libavformat performs non-blocking demuxer I/O during probing.
+        inputCtx_->flags |= AVFMT_FLAG_NONBLOCK;
+    }
 
     av_opt_set_int(
         inputCtx_,
@@ -215,6 +253,7 @@ MediaDemuxer::openInput(const DeviceParams& params)
                      libav_utils::getError(ret).c_str());
     } else {
         if (params.format == "video4linux2") {
+            inputCtx_->flags |= AVFMT_FLAG_NONBLOCK;
             inputCtx_->flags |= AVFMT_FLAG_NOBUFFER;
         }
         baseWidth_ = inputCtx_->streams[0]->codecpar->width;
@@ -244,25 +283,31 @@ MediaDemuxer::seekFrame(int, int64_t timestamp)
     return false;
 }
 
-void
+int
 MediaDemuxer::findStreamInfo()
 {
-    if (not streamInfoFound_) {
-        inputCtx_->max_analyze_duration = 60 * AV_TIME_BASE;
-        inputCtx_->probesize = 50000000;
-        int err;
-        SIP_CORE_WARN() << "findStreamInfo " << "for " << inputCtx_->url << " START";
-        if ((err = avformat_find_stream_info(inputCtx_, nullptr)) < 0) {
-            SIP_CORE_ERR() << "findStreamInfo "
-                           << "for " << inputCtx_->url
-                           << " FINISH Could not find stream info: " << libav_utils::getError(err);
-            return;
-        }
-        SIP_CORE_WARN() << "findStreamInfo FINISH "
-                        << "for " << inputCtx_->url;
-        // flushInternalBuffers();
-        streamInfoFound_ = true;
+    if (streamInfoFound_) {
+        return 0;
     }
+    if (!inputCtx_) {
+        return AVERROR(EINVAL);
+    }
+    inputCtx_->max_analyze_duration = 60 * AV_TIME_BASE;
+    inputCtx_->probesize = 50000000;
+    int err;
+    SIP_CORE_WARN() << "findStreamInfo "
+                    << "for " << inputCtx_->url << " START";
+    if ((err = avformat_find_stream_info(inputCtx_, nullptr)) < 0) {
+        SIP_CORE_ERR() << "findStreamInfo "
+                       << "for " << inputCtx_->url
+                       << " FINISH Could not find stream info: " << libav_utils::getError(err);
+        return err;
+    }
+    SIP_CORE_WARN() << "findStreamInfo FINISH "
+                    << "for " << inputCtx_->url;
+    // flushInternalBuffers();
+    streamInfoFound_ = true;
+    return 0;
 }
 
 int
@@ -274,13 +319,18 @@ MediaDemuxer::selectStream(AVMediaType type)
 void
 MediaDemuxer::setInterruptCallback(int (*cb)(void*), void* opaque)
 {
-    if (cb) {
-        inputCtx_->interrupt_callback.callback = cb;
-        inputCtx_->interrupt_callback.opaque = opaque;
-    } else {
-        inputCtx_->interrupt_callback.callback = 0;
+    interruptCb_ = cb;
+    interruptOpaque_ = opaque;
+    if (inputCtx_) {
+        if (cb) {
+            inputCtx_->interrupt_callback.callback = cb;
+            inputCtx_->interrupt_callback.opaque = opaque;
+        } else {
+            inputCtx_->interrupt_callback.callback = 0;
+        }
     }
 }
+
 void
 MediaDemuxer::setNeedFrameCb(std::function<void()> cb)
 {
@@ -352,7 +402,7 @@ MediaDemuxer::pushFrameFrom(
     cb(*packet.get());
 }
 
-MediaDemuxer::Status
+DecodeStatus
 MediaDemuxer::demuxe()
 {
     auto packet = std::unique_ptr<AVPacket, std::function<void(AVPacket*)>>(av_packet_alloc(),
@@ -364,17 +414,17 @@ MediaDemuxer::demuxe()
 
     int ret = av_read_frame(inputCtx_, packet.get());
     if (ret == AVERROR(EAGAIN)) {
-        return Status::Success;
+        return DecodeStatus::Success;
     } else if (ret == AVERROR_EOF) {
-        return Status::EndOfFile;
+        return DecodeStatus::EndOfFile;
     } else if (ret < 0) {
         SIP_CORE_ERR("Couldn't read frame: %s\n", libav_utils::getError(ret).c_str());
-        return Status::ReadError;
+        return DecodeStatus::ReadError;
     }
 
     auto streamIndex = packet->stream_index;
     if (static_cast<unsigned>(streamIndex) >= streams_.size() || streamIndex < 0) {
-        return Status::Success;
+        return DecodeStatus::Success;
     }
 
     AVStream* stream = inputCtx_->streams[streamIndex];
@@ -382,16 +432,16 @@ MediaDemuxer::demuxe()
         std::lock_guard<std::mutex> lk {videoBufferMutex_};
         videoBuffer_.push(std::move(packet));
         if (videoBuffer_.size() >= 90) {
-            return Status::ReadBufferOverflow;
+            return DecodeStatus::ReadBufferOverflow;
         }
     } else {
         std::lock_guard<std::mutex> lk {audioBufferMutex_};
         audioBuffer_.push(std::move(packet));
         if (audioBuffer_.size() >= 300) {
-            return Status::ReadBufferOverflow;
+            return DecodeStatus::ReadBufferOverflow;
         }
     }
-    return Status::Success;
+    return DecodeStatus::Success;
 }
 
 void
@@ -400,7 +450,7 @@ MediaDemuxer::setIOContext(MediaIOHandle* ioctx)
     inputCtx_->pb = ioctx->getContext();
 }
 
-MediaDemuxer::Status
+DecodeStatus
 MediaDemuxer::decode()
 {
     if (inputParams_.format == "x11grab") {
@@ -410,7 +460,7 @@ MediaDemuxer::decode()
             baseWidth_ = codecpar->width;
             inputParams_.height = ((baseHeight_ >> 3) << 3);
             inputParams_.width = ((baseWidth_ >> 3) << 3);
-            return Status::RestartRequired;
+            return DecodeStatus::RestartRequired;
         }
     }
 
@@ -421,40 +471,44 @@ MediaDemuxer::decode()
     int ret = av_read_frame(inputCtx_, packet.get());
 
     if (ret == AVERROR(EAGAIN)) {
+        constexpr auto kMinEagainSleep = std::chrono::milliseconds(2);
         /*no data available. Calculate time until next frame.
          We do not use the emulated frame mechanism from the decoder because it will affect all
          platforms. With the current implementation, the demuxer will be waiting just in case when
          av_read_frame returns EAGAIN. For some platforms, av_read_frame is blocking and it will
          never happen.
          */
-        if (inputParams_.framerate.numerator() == 0)
-            return Status::Success;
+        if (inputParams_.framerate.numerator() == 0) {
+            std::this_thread::sleep_for(kMinEagainSleep);
+            return DecodeStatus::Success;
+        }
         rational<double> frameTime = 1e6 / inputParams_.framerate;
-        int64_t timeToSleep = lastReadPacketTime_ - av_gettime_relative()
-                              + frameTime.real<int64_t>();
+        auto now = av_gettime_relative();
+        if (lastReadPacketTime_ <= 0)
+            lastReadPacketTime_ = now;
+        int64_t timeToSleep = lastReadPacketTime_ - now + frameTime.real<int64_t>();
         if (timeToSleep <= 0) {
-            return Status::Success;
+            std::this_thread::sleep_for(kMinEagainSleep);
+            return DecodeStatus::Success;
         }
         std::this_thread::sleep_for(std::chrono::microseconds(timeToSleep));
-        return Status::Success;
+        return DecodeStatus::Success;
     } else if (ret == AVERROR_EOF) {
-        return Status::EndOfFile;
+        return DecodeStatus::EndOfFile;
     } else if (ret == AVERROR(EACCES)) {
-        return Status::RestartRequired;
+        return DecodeStatus::RestartRequired;
     } else if (ret < 0) {
         auto media = inputCtx_->streams[0]->codecpar->codec_type;
         const auto type = media == AVMediaType::AVMEDIA_TYPE_AUDIO
                               ? "AUDIO"
                               : (media == AVMediaType::AVMEDIA_TYPE_VIDEO ? "VIDEO" : "UNSUPPORTED");
-        SIP_CORE_ERR("Couldn't read [%s] frame: %s\n",
-                     type,
-                     libav_utils::getError(ret).c_str());
-        return Status::ReadError;
+        SIP_CORE_ERR("Couldn't read [%s] frame: %s\n", type, libav_utils::getError(ret).c_str());
+        return DecodeStatus::ReadError;
     }
 
     auto streamIndex = packet->stream_index;
     if (static_cast<unsigned>(streamIndex) >= streams_.size() || streamIndex < 0) {
-        return Status::Success;
+        return DecodeStatus::Success;
     }
 
     lastReadPacketTime_ = av_gettime_relative();
@@ -463,13 +517,12 @@ MediaDemuxer::decode()
     if (cb) {
         DecodeStatus ret = cb(*packet.get());
         if (ret == DecodeStatus::FallBack)
-            return Status::FallBack;
+            return DecodeStatus::FallBack;
     }
-    return Status::Success;
+    return DecodeStatus::Success;
 }
 
-MediaDecoder::
-MediaDecoder(const std::shared_ptr<MediaDemuxer>& demuxer, int index)
+MediaDecoder::MediaDecoder(const std::shared_ptr<MediaDemuxer>& demuxer, int index)
     : demuxer_(demuxer)
     , avStream_(demuxer->getStream(index))
 {
@@ -477,8 +530,9 @@ MediaDecoder(const std::shared_ptr<MediaDemuxer>& demuxer, int index)
     setupStream();
 }
 
-MediaDecoder::
-MediaDecoder(const std::shared_ptr<MediaDemuxer>& demuxer, int index, MediaObserver observer)
+MediaDecoder::MediaDecoder(const std::shared_ptr<MediaDemuxer>& demuxer,
+                           int index,
+                           MediaObserver observer)
     : demuxer_(demuxer)
     , avStream_(demuxer->getStream(index))
     , callback_(std::move(observer))
@@ -493,27 +547,23 @@ MediaDecoder::emitFrame(bool isAudio)
     demuxer_->emitFrame(isAudio);
 }
 
-MediaDecoder::
-MediaDecoder()
+MediaDecoder::MediaDecoder()
     : demuxer_(new MediaDemuxer)
 {}
 
-MediaDecoder::
-MediaDecoder(MediaObserver o)
+MediaDecoder::MediaDecoder(MediaObserver o)
     : demuxer_(new MediaDemuxer)
     , callback_(std::move(o))
 {}
 
-MediaDecoder::
-MediaDecoder(MediaObserver o, int width, int height)
+MediaDecoder::MediaDecoder(MediaObserver o, int width, int height)
     : demuxer_(new MediaDemuxer)
     , callback_(std::move(o))
     , width_(width)
     , height_(height)
 {}
 
-MediaDecoder::~
-MediaDecoder()
+MediaDecoder::~MediaDecoder()
 {
 #ifdef RING_ACCEL
     if (decoderCtx_ && decoderCtx_->hw_device_ctx)
@@ -550,7 +600,11 @@ MediaDecoder::setIOContext(MediaIOHandle* ioctx)
 int
 MediaDecoder::setup(AVMediaType type)
 {
-    demuxer_->findStreamInfo();
+    auto ret = demuxer_->findStreamInfo();
+    if (ret < 0) {
+        SIP_CORE_ERR("Could not find stream info for type %i", static_cast<int>(type));
+        return -1;
+    }
     auto stream = demuxer_->selectStream(type);
     if (stream < 0) {
         SIP_CORE_ERR("No stream found for type %i", static_cast<int>(type));
@@ -576,9 +630,47 @@ MediaDecoder::setupStream()
         return -1; // failed
 
 #ifdef RING_ACCEL
-    ret = accelUpdateSize(&decoderCtx_, decoderCtx_->width, decoderCtx_->height);
-    if(ret < 0)
-        return ret;
+    // if there was a fallback to software decoding, do not enable accel
+    // it has been disabled already by the video_receive_thread/video_input
+    enableAccel_ &= Manager::instance().videoPreferences.getDecodingAccelerated();
+
+    if (enableAccel_ and not fallback_) {
+        auto APIs = video::HardwareAccel::getCompatibleAccel(decoderCtx_->codec_id,
+                                                             decoderCtx_->width,
+                                                             decoderCtx_->height,
+                                                             CODEC_DECODER);
+        for (const auto& it : APIs) {
+            accel_ = std::make_unique<video::HardwareAccel>(it); // save accel
+            auto ret = accel_->initAPI(false, nullptr);
+            if (ret < 0) {
+                accel_.reset();
+                continue;
+            }
+            // Free previous context before allocating a new one for this accel attempt
+            avcodec_free_context(&decoderCtx_);
+            if (prepareDecoderContext() < 0)
+                return -1; // failed
+            accel_->setDetails(decoderCtx_);
+            decoderCtx_->opaque = accel_.get();
+            decoderCtx_->pix_fmt = accel_->getFormat();
+            if (avcodec_open2(decoderCtx_, inputDecoder_, &options_) < 0) {
+                // Failed to open codec
+                SIP_CORE_WARN("Fail to open hardware decoder for %s with %s",
+                              avcodec_get_name(decoderCtx_->codec_id),
+                              it.getName().c_str());
+                avcodec_free_context(&decoderCtx_);
+                decoderCtx_ = nullptr;
+                accel_.reset();
+                continue;
+            } else {
+                // Succeed to open codec
+                SIP_CORE_WARN("Using hardware decoding for %s with %s",
+                              avcodec_get_name(decoderCtx_->codec_id),
+                              it.getName().c_str());
+                break;
+            }
+        }
+    }
 #endif
 
     SIP_CORE_DBG("Using %s (%s) decoder for %s",
@@ -586,19 +678,28 @@ MediaDecoder::setupStream()
                  inputDecoder_->name,
                  av_get_media_type_string(avStream_->codecpar->codec_type));
 
-    decoderCtx_->thread_count = std::max(1u, std::min(8u, std::thread::hardware_concurrency() / 2));
-    decoderCtx_->thread_type = FF_THREAD_SLICE;
     if (emulateRate_)
         SIP_CORE_DBG() << "Using framerate emulation";
     startTime_ = av_gettime(); // used to set pts after decoding, and for rate emulation
 
 #ifdef RING_ACCEL
     if (!accel_) {
-        SIP_CORE_WARN("Not using hardware decoding for %s",
-                      avcodec_get_name(decoderCtx_->codec_id));
+        // If hardware decoding failed, decoderCtx_ may be null - recreate it for software decoding
+        if (!decoderCtx_) {
+            if (prepareDecoderContext() < 0)
+                return -1;
+        }
+        // Set threading options for software decoder (must be done before avcodec_open2)
+        decoderCtx_->thread_count = std::max(1u,
+                                             std::min(8u, std::thread::hardware_concurrency() / 2));
+        decoderCtx_->thread_type = FF_THREAD_SLICE;
+        SIP_CORE_WARN("Not using hardware decoding for %s", avcodec_get_name(decoderCtx_->codec_id));
         ret = avcodec_open2(decoderCtx_, inputDecoder_, nullptr);
     }
 #else
+    // Set threading options for software decoder (must be done before avcodec_open2)
+    decoderCtx_->thread_count = std::max(1u, std::min(8u, std::thread::hardware_concurrency() / 2));
+    decoderCtx_->thread_type = FF_THREAD_SLICE;
     ret = avcodec_open2(decoderCtx_, inputDecoder_, nullptr);
 #endif
     if (ret < 0) {
@@ -610,51 +711,6 @@ MediaDecoder::setupStream()
 }
 
 #ifdef RING_ACCEL
-int
-MediaDecoder::accelUpdateSize(AVCodecContext** decoderCtx, int width, int height)
-{
-    // if there was a fallback to software decoding, do not enable accel
-    // it has been disabled already by the video_receive_thread/video_input
-    enableAccel_ &= Manager::instance().videoPreferences.getDecodingAccelerated();
-
-    if (enableAccel_ and not fallback_) {
-        auto APIs = video::HardwareAccel::getCompatibleAccel((*decoderCtx)->codec_id,
-                                                             width,
-                                                             height,
-                                                             CODEC_DECODER);
-        for (const auto& it : APIs) {
-            accel_ = std::make_unique<video::HardwareAccel>(it); // save accel
-            auto ret = accel_->initAPI(false, nullptr);
-            if (ret < 0) {
-                accel_.reset();
-                continue;
-            }
-            if (prepareDecoderContext() < 0)
-                return -1; // failed
-            accel_->setDetails((*decoderCtx));
-            (*decoderCtx)->opaque = accel_.get();
-            (*decoderCtx)->pix_fmt = accel_->getFormat();
-            if (avcodec_open2((*decoderCtx), inputDecoder_, &options_) < 0) {
-                // Failed to open codec
-                SIP_CORE_WARN("Fail to open hardware decoder for %s with %s",
-                              avcodec_get_name((*decoderCtx)->codec_id),
-                              it.getName().c_str());
-                avcodec_free_context(decoderCtx);
-                (*decoderCtx) = nullptr;
-                accel_.reset();
-                continue;
-            } else {
-                // Succeed to open codec
-                SIP_CORE_WARN("Using hardware decoding for %s with %s",
-                              avcodec_get_name((*decoderCtx)->codec_id),
-                              it.getName().c_str());
-                break;
-            }
-        }
-    }
-    return 0;
-}
-
 int MediaDecoder::getHWFrame(const std::shared_ptr<VideoFrame>& input, std::shared_ptr<VideoFrame>& output)
 {
 #if !defined(__APPLE__) && defined(RING_ACCEL)
@@ -877,7 +933,6 @@ MediaDecoder::decode(AVPacket& packet)
                                                               | AV_ROUND_PASS_MINMAX));
         lastTimestamp_ = frame->pts;
         if (emulateRate_ and packetTimestamp != AV_NOPTS_VALUE) {
-
             // when our stream started? actual timestamp.
             auto startTime = avStream_->start_time == AV_NOPTS_VALUE ? 0 : avStream_->start_time;
 
@@ -936,14 +991,14 @@ MediaDecoder::setSeekTime(int64_t time)
     seekTime_ = time;
 }
 
-MediaDemuxer::Status
+DecodeStatus
 MediaDecoder::decode()
 {
     auto ret = demuxer_->decode();
-    if (ret == MediaDemuxer::Status::RestartRequired) {
+    if (ret == DecodeStatus::RestartRequired) {
         avcodec_flush_buffers(decoderCtx_);
         setupStream();
-        ret = MediaDemuxer::Status::EndOfFile;
+        ret = DecodeStatus::EndOfFile;
     }
     return ret;
 }

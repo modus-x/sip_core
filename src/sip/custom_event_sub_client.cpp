@@ -219,6 +219,7 @@ CustomEventSubClient::client_evsub_on_state(pjsip_evsub* sub, pjsip_event* event
     /* Clear subscription */
     if (pjsip_evsub_get_state(sub) == PJSIP_EVSUB_STATE_TERMINATED) {
         pjsip_evsub_terminate(event_client->sub_, PJ_FALSE); // = NULL;
+        event_client->sub_ = NULL;
         event_client->dlg_ = NULL;
         event_client->rescheduleTimer(PJ_FALSE, 0);
         pjsip_evsub_set_mod_data(sub, modId_, NULL);
@@ -327,7 +328,6 @@ CustomEventSubClient::CustomEventSubClient(const std::string& uri,
     : manager_(manager)
     , uri_ {0, 0}
     , contact_ {0, 0}
-    , event_ {0, 0}
     , display_()
     , dlg_(NULL)
     , monitored_(false)
@@ -335,12 +335,14 @@ CustomEventSubClient::CustomEventSubClient(const std::string& uri,
     , cp_()
     , pool_(0)
     , sub_(NULL)
+    , desired_(true)
     , term_code_(0)
     , term_reason_()
     , timer_()
     , user_data_(NULL)
     , lock_count_(0)
     , lock_flag_(0)
+    , event_ {0, 0}
 {
     pj_caching_pool_init(&cp_, &pj_pool_factory_default_policy, 0);
     pool_ = pj_pool_create(&cp_.factory, "Events_sub_client", 512, 512, NULL);
@@ -352,8 +354,7 @@ CustomEventSubClient::CustomEventSubClient(const std::string& uri,
 CustomEventSubClient::~CustomEventSubClient()
 {
     SIP_CORE_DBG("Destroying event_client object with uri %.*s", (int) uri_.slen, uri_.ptr);
-    rescheduleTimer(PJ_FALSE, 0);
-    unsubscribe();
+    invalidateDialog("destroy", false, false);
     pj_pool_release(pool_);
 }
 
@@ -361,6 +362,50 @@ bool
 CustomEventSubClient::isSubscribed()
 {
     return monitored_;
+}
+
+void
+CustomEventSubClient::refreshContact(const std::string& contactHeader)
+{
+    contact_ = pj_strdup3(pool_, contactHeader.c_str());
+}
+
+void
+CustomEventSubClient::invalidateDialog(const char* reason,
+                                       bool preserveDesired,
+                                       bool emitStateSignal)
+{
+    SIP_CORE_WARN("Invalidating event subscription [%.*s] %.*s locally (%s)",
+                  (int) getEvent().size(),
+                  getEvent().data(),
+                  (int) getURI().size(),
+                  getURI().data(),
+                  reason ? reason : "unspecified");
+
+    rescheduleTimer(PJ_FALSE, 0);
+
+    if (!preserveDesired)
+        desired_ = false;
+
+    if (sub_) {
+        pjsip_evsub_set_mod_data(sub_, modId_, NULL);
+        pjsip_evsub_terminate(sub_, PJ_FALSE);
+    }
+
+    sub_ = NULL;
+    dlg_ = NULL;
+    monitored_ = false;
+    term_code_ = 0;
+    term_reason_.ptr = NULL;
+    term_reason_.slen = 0;
+
+    if (emitStateSignal) {
+        emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(
+            manager_->getAccount()->getAccountID(),
+            std::string(getURI()),
+            std::string(getEvent()),
+            PJ_FALSE);
+    }
 }
 
 std::string_view
@@ -497,30 +542,25 @@ CustomEventSubClient::unsubscribe()
     pjsip_tx_data* tdata;
     pj_status_t retStatus;
 
-    if (sub_ == NULL or dlg_ == NULL) {
-        SIP_CORE_WARN("CustomEventSubClient already unsubscribed. Sending result to client.");
+    auto* account = manager_->getAccount();
+    const bool shouldInvalidateLocally = sub_ == NULL || dlg_ == NULL
+                                         || account->isTransportRecoveryActive()
+                                         || !account->getTransport();
+    if (shouldInvalidateLocally
+        || pjsip_evsub_get_state(sub_) == PJSIP_EVSUB_STATE_TERMINATED) {
+        if (shouldInvalidateLocally) {
+            SIP_CORE_WARN("CustomEventSubClient unsubscribe is using local cleanup for [%.*s] %.*s",
+                          (int) getEvent().size(),
+                          getEvent().data(),
+                          (int) getURI().size(),
+                          getURI().data());
+        } else {
+            SIP_CORE_WARN(
+                "event_client already unsubscribed sub=TERMINATED. Sending result to client.");
+        }
         unlock();
-        emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(manager_->getAccount()
-                                                                              ->getAccountID(),
-                                                                          std::string(getURI()),
-                                                                          std::string(getEvent()),
-                                                                          PJ_FALSE);
-
-        return false;
-    }
-
-    if (pjsip_evsub_get_state(sub_) == PJSIP_EVSUB_STATE_TERMINATED) {
-        SIP_CORE_WARN(
-            "event_client already unsubscribed sub=TERMINATED. Sending result to client.");
-        sub_ = NULL;
-        unlock();
-        emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(manager_->getAccount()
-                                                                              ->getAccountID(),
-                                                                          std::string(getURI()),
-                                                                          std::string(getEvent()),
-                                                                          PJ_FALSE);
-
-        return false;
+        invalidateDialog("unsubscribe-local", true, true);
+        return true;
     }
 
     /* Unsubscribe means send a subscribe with timeout=0s*/
@@ -535,10 +575,9 @@ CustomEventSubClient::unsubscribe()
     }
 
     if (retStatus != PJ_SUCCESS and sub_) {
-        pjsip_evsub_terminate(sub_, PJ_FALSE);
-        sub_ = NULL;
         SIP_CORE_WARN("Unable to unsubscribe sip events (%d)", retStatus);
         unlock();
+        invalidateDialog("unsubscribe-send-failed", true, true);
         return false;
     }
 
@@ -549,16 +588,11 @@ CustomEventSubClient::unsubscribe()
 bool
 CustomEventSubClient::subscribe()
 {
-    if (sub_ and dlg_) { // do not bother if already subscribed
-        pjsip_evsub_terminate(sub_, PJ_FALSE);
-        emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(manager_->getAccount()
-                                                                              ->getAccountID(),
-                                                                          std::string(getURI()),
-                                                                          std::string(getEvent()),
-                                                                          PJ_TRUE);
-        SIP_CORE_DBG("CustomEventSubClient %.*s: already subscribed. Refresh it.",
+    if (sub_ || dlg_) {
+        SIP_CORE_DBG("CustomEventSubClient %.*s: resetting stale dialog before subscribe retry.",
                      (int) uri_.slen,
                      uri_.ptr);
+        invalidateDialog("subscribe-refresh", true, false);
     }
 
     // subscribe
@@ -578,6 +612,21 @@ CustomEventSubClient::subscribe()
                  event_.ptr,
                  (int) uri_.slen,
                  uri_.ptr);
+
+    if (acc->isTransportRecoveryActive() || !acc->getTransport()
+        || acc->getRegistrationState() != RegistrationState::REGISTERED) {
+        acc->needsResubscribe_.store(true);
+        SIP_CORE_WARN("Deferring event subscription [%.*s] %.*s until account is REGISTERED "
+                      "(transportRecovery=%d, hasTransport=%d, regState=%d)",
+                      (int) getEvent().size(),
+                      getEvent().data(),
+                      (int) getURI().size(),
+                      getURI().data(),
+                      acc->isTransportRecoveryActive() ? 1 : 0,
+                      acc->getTransport() ? 1 : 0,
+                      static_cast<int>(acc->getRegistrationState()));
+        return false;
+    }
 
     /* Create UAC dialog */
     pj_str_t from = pj_strdup3(pool_, acc->getFromUri().c_str());
@@ -623,6 +672,7 @@ CustomEventSubClient::subscribe()
         if (dlg_) {
             pjsip_dlg_dec_lock(dlg_);
         }
+        dlg_ = NULL;
         return false;
     }
 
@@ -645,6 +695,7 @@ CustomEventSubClient::subscribe()
         if (dlg_) {
             pjsip_dlg_dec_lock(dlg_);
         }
+        dlg_ = NULL;
 
         return false;
     }
@@ -664,6 +715,12 @@ CustomEventSubClient::subscribe()
         if (dlg_) {
             pjsip_dlg_dec_lock(dlg_);
         }
+        if (sub_) {
+            pjsip_evsub_set_mod_data(sub_, modId_, NULL);
+            pjsip_evsub_terminate(sub_, PJ_FALSE);
+            sub_ = NULL;
+        }
+        dlg_ = NULL;
         return false;
     }
 
@@ -679,9 +736,7 @@ CustomEventSubClient::subscribe()
     if (status != PJ_SUCCESS) {
         if (dlg_)
             pjsip_dlg_dec_lock(dlg_);
-        if (sub_)
-            pjsip_evsub_terminate(sub_, PJ_FALSE);
-        sub_ = NULL;
+        invalidateDialog("subscribe-init-failed", true, false);
         emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(manager_->getAccount()
                                                                               ->getAccountID(),
                                                                           std::string(getURI()),
@@ -698,9 +753,7 @@ CustomEventSubClient::subscribe()
     if (status != PJ_SUCCESS) {
         if (dlg_)
             pjsip_dlg_dec_lock(dlg_);
-        if (sub_)
-            pjsip_evsub_terminate(sub_, PJ_FALSE);
-        sub_ = NULL;
+        invalidateDialog("subscribe-send-failed", true, false);
         emitSignal<libsip_core::PresenceSignal::SubscriptionStateChanged>(manager_->getAccount()
                                                                               ->getAccountID(),
                                                                           std::string(getURI()),

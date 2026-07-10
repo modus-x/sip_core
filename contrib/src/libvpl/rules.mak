@@ -2,7 +2,11 @@
 LIBVPL_VERSION := 2.16.0
 LIBVPL_URL := https://nexus.svetlocal.ru/repository/github-artifacts/libvpl-$(LIBVPL_VERSION).tar.gz
 
+ifdef HAVE_LINUX
+ifndef HAVE_ANDROID
 PKGS += libvpl
+endif
+endif
 
 # DEPS_libvpl = libvpl_gpu
 

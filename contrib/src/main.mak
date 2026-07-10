@@ -134,15 +134,19 @@ endif
 endif
 
 ifdef HAVE_MACOSX
-MIN_OSX_VERSION=10.15
+MIN_OSX_VERSION ?= 10.15
 CC=xcrun cc
 CXX=xcrun c++
 AR=xcrun ar
 LD=xcrun ld
 STRIP=xcrun strip
 RANLIB=xcrun ranlib
-EXTRA_CXXFLAGS += -stdlib=libc++
-EXTRA_LDFLAGS += -mmacosx-version-min=$(MIN_OSX_VERSION) -Wl,-syslibroot,$(MACOSX_SDK)
+EXTRA_MACOSX_ARCH_FLAGS = -arch $(ARCH)
+EXTRA_CFLAGS += $(EXTRA_MACOSX_ARCH_FLAGS) -mmacosx-version-min=$(MIN_OSX_VERSION)
+EXTRA_CXXFLAGS += $(EXTRA_MACOSX_ARCH_FLAGS) -mmacosx-version-min=$(MIN_OSX_VERSION) \
+	-stdlib=libc++
+EXTRA_LDFLAGS += $(EXTRA_MACOSX_ARCH_FLAGS) -mmacosx-version-min=$(MIN_OSX_VERSION) \
+	-Wl,-syslibroot,$(MACOSX_SDK)
 ifeq ($(ARCH),x86_64)
 EXTRA_COMMON += -m64
 else ifeq ($(ARCH),arm64)
@@ -210,13 +214,13 @@ endif
 
 cppcheck = $(shell $(CC) $(CFLAGS) -E -dM - < /dev/null | grep -E $(1))
 
-EXTRA_CPPFLAGS += -I$(PREFIX)/include
 EXTRA_LDFLAGS += -L$(PREFIX)/lib
 
 CPPFLAGS := $(CPPFLAGS) $(EXTRA_CPPFLAGS)
 CFLAGS := $(CFLAGS) $(EXTRA_CPPFLAGS) $(EXTRA_COMMON) $(EXTRA_CFLAGS)
 CXXFLAGS := $(CXXFLAGS) $(EXTRA_CPPFLAGS) $(EXTRA_COMMON) $(EXTRA_CXXFLAGS)
 LDFLAGS := $(LDFLAGS) $(EXTRA_LDFLAGS)
+ASFLAGS := $(ASFLAGS) $(EXTRA_ASFLAGS)
 # Do not export those! Use HOSTVARS.
 
 # Do the FPU detection, after we have figured out our compilers and flags.
@@ -290,7 +294,7 @@ else
 ZCAT ?= $(error Gunzip client (zcat) not found!)
 endif
 
-ifeq ($(shell sha512sum --version >/dev/null 2>&1 || echo FAIL),)
+ifeq ($(shell sha512sum --help 2>&1 | grep -q '\-\-check' || echo FAIL),)
 SHA512SUM = sha512sum --check
 else ifeq ($(shell shasum --version >/dev/null 2>&1 || echo FAIL),)
 SHA512SUM = shasum -a 512 --check
@@ -337,12 +341,14 @@ HOSTVARS_NOPIC := $(HOSTTOOLS) \
 	CPPFLAGS="$(CPPFLAGS)" \
 	CFLAGS="$(CFLAGS)" \
 	CXXFLAGS="$(CXXFLAGS)" \
-	LDFLAGS="$(LDFLAGS)"
+	LDFLAGS="$(LDFLAGS)" \
+	ASFLAGS="$(ASFLAGS)"
 HOSTVARS := $(HOSTTOOLS) \
 	CPPFLAGS="$(CPPFLAGS) $(PIC)" \
 	CFLAGS="$(CFLAGS) $(PIC)" \
 	CXXFLAGS="$(CXXFLAGS) $(PIC)" \
-	LDFLAGS="$(LDFLAGS)"
+	LDFLAGS="$(LDFLAGS)" \
+	ASFLAGS="$(ASFLAGS)"
 
 # git_download procedure
 # $1: The URL of the Git repository.
@@ -542,6 +548,7 @@ ifdef HAVE_DARWIN_OS
 	echo "set(CMAKE_C_FLAGS \"$(CFLAGS)\")" >> $@
 	echo "set(CMAKE_CXX_FLAGS \"$(CXXFLAGS)\")" >> $@
 	echo "set(CMAKE_LD_FLAGS \"$(LDFLAGS)\")" >> $@
+	echo "set(CMAKE_AS_FLAGS \"$(ASFLAGS)\")" >> $@
 	echo "set(CMAKE_AR ar CACHE FILEPATH "Archiver")" >> $@
 ifdef HAVE_IOS
 	echo "set(CMAKE_OSX_SYSROOT $(IOS_SDK))" >> $@

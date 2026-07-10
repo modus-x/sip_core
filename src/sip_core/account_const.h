@@ -207,6 +207,7 @@ constexpr static const char MIN_QUALITY[] = "CodecInfo.min_quality";
 constexpr static const char MAX_QUALITY[] = "CodecInfo.max_quality";
 constexpr static const char CHANNEL_NUMBER[] = "CodecInfo.channelNumber";
 constexpr static const char AUTO_QUALITY_ENABLED[] = "CodecInfo.autoQualityEnabled";
+constexpr static const char SHARE_PREFERENCE[] = "CodecInfo.sharePreference";
 
 } // namespace CodecInfo
 

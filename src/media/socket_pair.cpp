@@ -20,8 +20,8 @@
  *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301 USA.
  */
 
-#include "connectivity/ip_utils.h"   // MUST BE INCLUDED FIRST
-#include "libav_deps.h" // THEN THIS ONE AFTER
+#include "connectivity/ip_utils.h" // MUST BE INCLUDED FIRST
+#include "libav_deps.h"            // THEN THIS ONE AFTER
 
 #include "socket_pair.h"
 #include "libav_utils.h"
@@ -32,11 +32,14 @@
 #include <string>
 #include <algorithm>
 #include <iterator>
+#include <random>
+#include <sstream>
 
 extern "C" {
 #include "srtp.h"
 }
 
+#include <cerrno>
 #include <cstring>
 #include <stdexcept>
 #include <unistd.h>
@@ -133,7 +136,7 @@ ff_network_wait_fd(int fd)
 }
 
 static int
-udp_socket_create(int family, int port)
+create_nonblocking_udp_socket(int family)
 {
     int udp_fd = -1;
 
@@ -157,31 +160,229 @@ udp_socket_create(int family, int port)
     if (udp_fd < 0) {
         SIP_CORE_ERR("socket() failed");
         strErr();
-        return -1;
-    }
-
-    auto bind_addr = ip_utils::getAnyHostAddr(family);
-    if (not bind_addr.isIpv4() and not bind_addr.isIpv6()) {
-        SIP_CORE_ERR("No IPv4/IPv6 host found for family %u", family);
-        close(udp_fd);
-        return -1;
-    }
-
-    bind_addr.setPort(port);
-    SIP_CORE_DBG("use local address: %s", bind_addr.toString(true, true).c_str());
-    if (::bind(udp_fd, bind_addr, bind_addr.getLength()) < 0) {
-        SIP_CORE_ERR("bind() failed");
-        strErr();
-        close(udp_fd);
-        udp_fd = -1;
     }
 
     return udp_fd;
 }
 
-SocketPair::SocketPair(const char* uri, int localPort)
+static void
+close_socket_handle(int& handle) noexcept
 {
-    openSockets(uri, localPort);
+    if (handle >= 0) {
+        if (close(handle))
+            strErr();
+        handle = -1;
+    }
+}
+
+static int
+last_socket_error_code()
+{
+#ifdef _WIN32
+    return WSAGetLastError();
+#else
+    return errno;
+#endif
+}
+
+static std::string
+last_socket_error_message(int err)
+{
+#ifdef _WIN32
+    return "winsock error";
+#else
+    return std::strerror(err);
+#endif
+}
+
+static bool
+bind_udp_socket(int handle, int family, uint16_t port, const char* mediaKind, const char* component)
+{
+    auto bind_addr = ip_utils::getAnyHostAddr(family);
+    if (not bind_addr.isIpv4() and not bind_addr.isIpv6()) {
+        SIP_CORE_ERR("[%s] No IPv4/IPv6 wildcard host found for family %u", mediaKind, family);
+        return false;
+    }
+
+    bind_addr.setPort(port);
+    SIP_CORE_DBG("[%s] trying %s socket on local address %s",
+                 mediaKind,
+                 component,
+                 bind_addr.toString(true, true).c_str());
+
+    if (::bind(handle, bind_addr, bind_addr.getLength()) < 0) {
+        const auto err = last_socket_error_code();
+        SIP_CORE_WARN("[%s] bind failed for %s socket %s: (%d) %s",
+                      mediaKind,
+                      component,
+                      bind_addr.toString(true, true).c_str(),
+                      err,
+                      last_socket_error_message(err).c_str());
+        return false;
+    }
+
+    return true;
+}
+
+static std::mutex&
+reservation_mutex()
+{
+    static std::mutex mutex;
+    return mutex;
+}
+
+static std::mt19937&
+reservation_rng()
+{
+    static std::mt19937 rng {std::random_device {}()};
+    return rng;
+}
+
+ReservedSocketPair::ReservedSocketPair(
+    uint16_t family, int rtpHandle, int rtcpHandle, uint16_t rtpPort, uint16_t rtcpPort) noexcept
+    : family_(family)
+    , rtpHandle_(rtpHandle)
+    , rtcpHandle_(rtcpHandle)
+    , rtpPort_(rtpPort)
+    , rtcpPort_(rtcpPort)
+{}
+
+ReservedSocketPair::~ReservedSocketPair()
+{
+    reset();
+}
+
+ReservedSocketPair::ReservedSocketPair(ReservedSocketPair&& other) noexcept
+{
+    *this = std::move(other);
+}
+
+ReservedSocketPair&
+ReservedSocketPair::operator=(ReservedSocketPair&& other) noexcept
+{
+    if (this == &other)
+        return *this;
+
+    reset();
+    family_ = other.family_;
+    rtpHandle_ = other.rtpHandle_;
+    rtcpHandle_ = other.rtcpHandle_;
+    rtpPort_ = other.rtpPort_;
+    rtcpPort_ = other.rtcpPort_;
+
+    other.family_ = AF_UNSPEC;
+    other.rtpHandle_ = -1;
+    other.rtcpHandle_ = -1;
+    other.rtpPort_ = 0;
+    other.rtcpPort_ = 0;
+    return *this;
+}
+
+bool
+ReservedSocketPair::valid() const noexcept
+{
+    return (family_ == AF_INET || family_ == AF_INET6) && rtpHandle_ >= 0 && rtcpHandle_ >= 0
+           && rtpPort_ != 0 && rtcpPort_ != 0;
+}
+
+void
+ReservedSocketPair::reset() noexcept
+{
+    close_socket_handle(rtpHandle_);
+    close_socket_handle(rtcpHandle_);
+    family_ = AF_UNSPEC;
+    rtpPort_ = 0;
+    rtcpPort_ = 0;
+}
+
+int
+ReservedSocketPair::releaseRtpHandle() noexcept
+{
+    auto handle = rtpHandle_;
+    rtpHandle_ = -1;
+    return handle;
+}
+
+int
+ReservedSocketPair::releaseRtcpHandle() noexcept
+{
+    auto handle = rtcpHandle_;
+    rtcpHandle_ = -1;
+    return handle;
+}
+
+ReservedSocketPair
+reserveSocketPairInRange(uint16_t family,
+                         const std::pair<uint16_t, uint16_t>& range,
+                         const char* mediaKind)
+{
+    if (family != AF_INET && family != AF_INET6) {
+        throw std::runtime_error("Unsupported RTP socket family");
+    }
+
+    if (range.first == 0 || range.second <= range.first) {
+        throw std::runtime_error("Invalid RTP port range");
+    }
+
+    const uint16_t firstCandidate = (range.first % 2 == 0) ? range.first : range.first + 1;
+    const uint16_t upperBound = static_cast<uint16_t>(range.second - 1);
+    const uint16_t lastCandidate = (upperBound % 2 == 0) ? upperBound
+                                                         : static_cast<uint16_t>(upperBound - 1);
+
+    if (firstCandidate > lastCandidate) {
+        std::ostringstream oss;
+        oss << "No free " << mediaKind << " RTP/RTCP pair available in configured range ["
+            << range.first << "-" << range.second << "]";
+        SIP_CORE_ERR("%s", oss.str().c_str());
+        throw std::runtime_error(oss.str());
+    }
+    const auto pairCount = static_cast<uint32_t>(((lastCandidate - firstCandidate) / 2u) + 1u);
+
+    std::lock_guard<std::mutex> lk(reservation_mutex());
+    std::uniform_int_distribution<uint32_t> startDist(0, pairCount - 1u);
+    const auto startIndex = startDist(reservation_rng());
+
+    for (uint32_t attempt = 0; attempt < pairCount; ++attempt) {
+        const auto candidateIndex = (startIndex + attempt) % pairCount;
+        const auto rtpPort = static_cast<uint16_t>(firstCandidate + candidateIndex * 2u);
+        const auto rtcpPort = static_cast<uint16_t>(rtpPort + 1);
+
+        int rtpHandle = create_nonblocking_udp_socket(family);
+        if (rtpHandle < 0) {
+            throw std::runtime_error("Failed to create RTP socket");
+        }
+
+        if (!bind_udp_socket(rtpHandle, family, rtpPort, mediaKind, "RTP")) {
+            close_socket_handle(rtpHandle);
+            continue;
+        }
+
+        int rtcpHandle = create_nonblocking_udp_socket(family);
+        if (rtcpHandle < 0) {
+            close_socket_handle(rtpHandle);
+            throw std::runtime_error("Failed to create RTCP socket");
+        }
+
+        if (!bind_udp_socket(rtcpHandle, family, rtcpPort, mediaKind, "RTCP")) {
+            close_socket_handle(rtpHandle);
+            close_socket_handle(rtcpHandle);
+            continue;
+        }
+
+        SIP_CORE_WARN("[%s] reserved local RTP/RTCP ports %u/%u", mediaKind, rtpPort, rtcpPort);
+        return ReservedSocketPair {family, rtpHandle, rtcpHandle, rtpPort, rtcpPort};
+    }
+
+    std::ostringstream oss;
+    oss << "No free " << mediaKind << " RTP/RTCP pair available in configured range ["
+        << range.first << "-" << range.second << "]";
+    SIP_CORE_ERR("%s", oss.str().c_str());
+    throw std::runtime_error(oss.str());
+}
+
+SocketPair::SocketPair(const char* uri, ReservedSocketPair&& reserved)
+{
+    openSockets(uri, std::move(reserved));
 }
 
 SocketPair::~SocketPair()
@@ -211,16 +412,66 @@ SocketPair::saveRtcpRRPacket(uint8_t* buf, size_t len)
     if (header->pt != 201) // 201 = RR PT
         return;
 
+    storeValidatedRR(*header);
+}
+
+void
+SocketPair::storeValidatedRR(const rtcpRRHeader& header)
+{
+    // Only accept report blocks that are about OUR outgoing stream. This
+    // filters SRTCP ciphertext (we cannot decrypt SRTCP, so a compliant
+    // secure peer's reports would parse as garbage) and reports meant for
+    // other SSRCs. Skipped while our SSRC is still unknown (receive-only).
+    auto ourSsrc = ourOutSsrc_.load(std::memory_order_relaxed);
+    if (ourSsrc != 0 and Swap4Bytes(header.id) != ourSsrc) {
+        SIP_CORE_DBG("Dropping RTCP report block about SSRC %x (ours is %x)",
+                     Swap4Bytes(header.id),
+                     ourSsrc);
+        return;
+    }
+
     std::lock_guard<std::mutex> lock(rtcpInfo_mutex_);
 
     if (listRtcpRRHeader_.size() >= MAX_LIST_SIZE) {
         listRtcpRRHeader_.pop_front();
     }
 
-    lastRtcpRRHeader_ = *header;
-    listRtcpRRHeader_.emplace_back(*header);
+    lastRtcpRRHeader_ = header;
+    listRtcpRRHeader_.emplace_back(header);
 
     cvRtcpPacketReadyToRead_.notify_one();
+}
+
+void
+SocketPair::handleIncomingSR(uint8_t* buf, size_t len)
+{
+    if (len < sizeof(rtcpSRHeader))
+        return;
+
+    auto sr = reinterpret_cast<rtcpSRHeader*>(buf);
+
+    // Middle 32 bits of the peer's NTP timestamp -> LSR of our next RR;
+    // arrival time -> DLSR (RFC 3550 §6.4.1).
+    uint32_t msb = Swap4Bytes(sr->timestampMSB);
+    uint32_t lsb = Swap4Bytes(sr->timestampLSB);
+    peerSrNtpMid_ = (msb << 16) | (lsb >> 16);
+    peerSrArrival_ = clock::now();
+
+    // A compound SR from a standards-compliant peer may carry report blocks
+    // about our own sending; treat the first block like an RR so the
+    // loss-based bitrate adaptation can consume it.
+    constexpr size_t reportBlockSize = 24;
+    if (sr->rc > 0 and len >= sizeof(rtcpSRHeader) + reportBlockSize) {
+        rtcpRRHeader rr {};
+        rr.version = sr->version;
+        rr.rc = sr->rc;
+        rr.pt = 201;
+        rr.len = sr->len;
+        rr.ssrc = sr->ssrc;
+        // Wire layout of a report block matches rtcpRRHeader from `id` on.
+        memcpy(&rr.id, buf + sizeof(rtcpSRHeader), reportBlockSize);
+        storeValidatedRR(rr);
+    }
 }
 
 void
@@ -235,6 +486,15 @@ SocketPair::saveRtcpREMBPacket(uint8_t* buf, size_t len)
 
     if (header->uid != 0x424D4552) // uid must be "REMB"
         return;
+
+    // Decode the carried estimate directly from the wire bytes — the struct
+    // bitfields are byte-order-scrambled on little-endian hosts.
+    // Byte 16 = NumSSRC, byte 17 = BRExp(6) | mantissa hi 2 bits, 18-19 = mantissa.
+    if (len >= 20) {
+        uint8_t expo = buf[17] >> 2;
+        uint32_t mant = (uint32_t(buf[17] & 0x3) << 16) | (uint32_t(buf[18]) << 8) | buf[19];
+        lastRembBps_.store(uint64_t(mant) << expo, std::memory_order_relaxed);
+    }
 
     std::lock_guard<std::mutex> lock(rtcpInfo_mutex_);
 
@@ -295,8 +555,9 @@ SocketPair::createSRTP(const char* out_suite,
 void
 SocketPair::interrupt()
 {
+    if (interrupted_.exchange(true))
+        return;
     SIP_CORE_WARN("[%p] Interrupting RTP sockets", this);
-    interrupted_ = true;
     cv_.notify_all();
     cvRtcpPacketReadyToRead_.notify_all();
 }
@@ -317,18 +578,93 @@ SocketPair::stopSendOp(bool state)
 }
 
 void
-SocketPair::closeSockets()
+SocketPair::flushReadQueue()
 {
-    if (rtcpHandle_ > 0 and close(rtcpHandle_))
-        strErr();
-    if (rtpHandle_ > 0 and close(rtpHandle_))
-        strErr();
+    // System-socket path: drain the kernel UDP receive buffers for both
+    // RTP and RTCP. The sockets are already created in non-blocking mode
+    // (SOCK_NONBLOCK on Linux/Android, F_SETFL O_NONBLOCK on Apple,
+    // FIONBIO on Windows), so recvfrom() will return -1/EAGAIN once the
+    // buffer is empty. We discard everything we read.
+    if (rtpHandle_ >= 0 || rtcpHandle_ >= 0) {
+        char drainBuf[RTP_MAX_PACKET_LENGTH];
+        struct sockaddr_storage from;
+        socklen_t from_len;
+        unsigned drainedRtp = 0;
+        unsigned drainedRtcp = 0;
+        // Cap the drain loops so a flooded socket cannot stall the caller.
+        constexpr unsigned MAX_DRAIN_PACKETS = 4096;
+        if (rtpHandle_ >= 0) {
+            for (; drainedRtp < MAX_DRAIN_PACKETS; ++drainedRtp) {
+                from_len = sizeof(from);
+                int n = recvfrom(rtpHandle_,
+                                 drainBuf,
+                                 sizeof(drainBuf),
+                                 0,
+                                 reinterpret_cast<struct sockaddr*>(&from),
+                                 &from_len);
+                if (n <= 0) {
+                    break;
+                }
+            }
+        }
+        if (rtcpHandle_ >= 0) {
+            for (; drainedRtcp < MAX_DRAIN_PACKETS; ++drainedRtcp) {
+                from_len = sizeof(from);
+                int n = recvfrom(rtcpHandle_,
+                                 drainBuf,
+                                 sizeof(drainBuf),
+                                 0,
+                                 reinterpret_cast<struct sockaddr*>(&from),
+                                 &from_len);
+                if (n <= 0) {
+                    break;
+                }
+            }
+        }
+        if (drainedRtp || drainedRtcp) {
+            SIP_CORE_DBG("[%p] flushReadQueue drained %u RTP + %u RTCP datagrams",
+                         this,
+                         drainedRtp,
+                         drainedRtcp);
+        }
+        return;
+    }
+
+    // ICE / non-system-socket path: clear the in-memory queues.
+    std::unique_lock<std::mutex> lk(dataBuffMutex_);
+    const auto rtpCount = rtpDataBuff_.size();
+    const auto rtcpCount = rtcpDataBuff_.size();
+    rtpDataBuff_.clear();
+    rtcpDataBuff_.clear();
+    if (rtpCount || rtcpCount) {
+        SIP_CORE_DBG("[%p] flushReadQueue cleared %zu RTP + %zu RTCP queued ICE datagrams",
+                     this,
+                     rtpCount,
+                     rtcpCount);
+    }
 }
 
 void
-SocketPair::openSockets(const char* uri, int local_rtp_port)
+SocketPair::closeSockets()
 {
-    SIP_CORE_DBG("Creating rtp socket for uri %s on port %d", uri, local_rtp_port);
+    close_socket_handle(rtcpHandle_);
+    close_socket_handle(rtpHandle_);
+    localFamily_ = AF_UNSPEC;
+    localRtpPort_ = 0;
+    localRtcpPort_ = 0;
+}
+
+void
+SocketPair::openSockets(const char* uri, ReservedSocketPair&& reserved)
+{
+    if (!reserved) {
+        throw std::runtime_error("Reserved socket pair is invalid");
+    }
+
+    SIP_CORE_DBG("Creating rtp socket for uri %s using reserved local ports %u/%u",
+                 uri,
+                 reserved.rtpPort(),
+                 reserved.rtcpPort());
 
     char hostname[256];
     char path[1024];
@@ -336,7 +672,8 @@ SocketPair::openSockets(const char* uri, int local_rtp_port)
 
     av_url_split(NULL, 0, NULL, 0, hostname, sizeof(hostname), &dst_rtp_port, path, sizeof(path), uri);
 
-    const int local_rtcp_port = local_rtp_port + 1;
+    const auto local_rtp_port = reserved.rtpPort();
+    const auto local_rtcp_port = reserved.rtcpPort();
     const int dst_rtcp_port = dst_rtp_port + 1;
 
     rtpDestAddr_ = IpAddr {hostname};
@@ -344,20 +681,44 @@ SocketPair::openSockets(const char* uri, int local_rtp_port)
     rtcpDestAddr_ = IpAddr {hostname};
     rtcpDestAddr_.setPort(dst_rtcp_port);
 
-    // Open local sockets (RTP/RTCP)
-    if ((rtpHandle_ = udp_socket_create(rtpDestAddr_.getFamily(), local_rtp_port)) == -1
-        or (rtcpHandle_ = udp_socket_create(rtcpDestAddr_.getFamily(), local_rtcp_port)) == -1) {
-        closeSockets();
-        SIP_CORE_ERR("[%p] Sockets creation failed", this);
-        throw std::runtime_error("Sockets creation failed");
+    if (rtpDestAddr_.getFamily() != reserved.family()) {
+        SIP_CORE_ERR("[%p] Reserved socket family %u does not match remote RTP family %u",
+                     this,
+                     reserved.family(),
+                     rtpDestAddr_.getFamily());
+        throw std::runtime_error("Reserved socket family mismatch");
     }
 
+    rtpHandle_ = reserved.releaseRtpHandle();
+    rtcpHandle_ = reserved.releaseRtcpHandle();
+    localFamily_ = reserved.family();
+    localRtpPort_ = local_rtp_port;
+    localRtcpPort_ = local_rtcp_port;
+
     SIP_CORE_WARN("SocketPair: local{%d,%d} / %s{%d,%d}",
-              local_rtp_port,
-              local_rtcp_port,
-              hostname,
-              dst_rtp_port,
-              dst_rtcp_port);
+                  local_rtp_port,
+                  local_rtcp_port,
+                  hostname,
+                  dst_rtp_port,
+                  dst_rtcp_port);
+}
+
+ReservedSocketPair
+SocketPair::releaseLocalReservation() noexcept
+{
+    if ((localFamily_ != AF_INET && localFamily_ != AF_INET6) || rtpHandle_ < 0 || rtcpHandle_ < 0
+        || localRtpPort_ == 0 || localRtcpPort_ == 0) {
+        return {};
+    }
+
+    auto reserved
+        = ReservedSocketPair {localFamily_, rtpHandle_, rtcpHandle_, localRtpPort_, localRtcpPort_};
+    rtpHandle_ = -1;
+    rtcpHandle_ = -1;
+    localFamily_ = AF_UNSPEC;
+    localRtpPort_ = 0;
+    localRtcpPort_ = 0;
+    return reserved;
 }
 
 MediaIOHandle*
@@ -503,9 +864,8 @@ SocketPair::readCallback(uint8_t* buf, int buf_size)
         if (len > 0) {
             auto header = reinterpret_cast<rtcpRRHeader*>(buf);
             // 201 = RR PT
-            if (header->pt == 201) {
-                lastDLSR_ = Swap4Bytes(header->dlsr);
-                // SIP_CORE_WARN("Read RR, lastDLSR : %d", lastDLSR_);
+            if (header->pt == 201 && static_cast<size_t>(len) >= sizeof(rtcpRRHeader)) {
+                lastDLSR_.store(Swap4Bytes(header->dlsr), std::memory_order_relaxed);
                 lastRR_time = std::chrono::steady_clock::now();
                 saveRtcpRRPacket(buf, len);
             }
@@ -514,7 +874,7 @@ SocketPair::readCallback(uint8_t* buf, int buf_size)
                 saveRtcpREMBPacket(buf, len);
             // 200 = SR PT
             else if (header->pt == 200) {
-                // not used yet
+                handleIncomingSR(buf, len);
             } else {
                 SIP_CORE_DBG("Can't read RTCP: unknown packet type %u", header->pt);
             }
@@ -533,6 +893,12 @@ SocketPair::readCallback(uint8_t* buf, int buf_size)
 
     if (not fromRTCP && (buf_size < static_cast<int>(MINIMUM_RTP_HEADER_SIZE)))
         return len;
+
+    // RFC 3550 receive statistics + periodic Receiver Reports. RTP headers
+    // are cleartext even under SRTP, so this runs before decryption and for
+    // plain RTP alike. Enabled per media type via enableRtcpReports().
+    if (not fromRTCP and rtcpReportClockRate_.load(std::memory_order_relaxed) != 0)
+        processIncomingRtpStats(buf, len);
 
     // SRTP decrypt
     if (not fromRTCP and srtpContext_ and srtpContext_->srtp_in.aes) {
@@ -600,7 +966,66 @@ SocketPair::writeData(const uint8_t* buf, int buf_size)
 
     if (noWrite_)
         return buf_size;
+
+    return 0;
 }
+
+int 
+SocketPair::readData(uint8_t* buf, int buf_size)
+{
+    auto datatype = waitForData();
+    if (datatype < 0)
+        return datatype;
+
+    if (datatype & static_cast<int>(DataType::RTP))
+        return readDataNoBlock(buf, buf_size);
+    
+    return 0;
+}
+
+
+int
+SocketPair::readDataNoBlock(uint8_t* buf, int buf_size)
+{
+    int len = readRtpData(buf, buf_size);
+    if (len <= 0)
+        return len;
+
+    if (buf_size < static_cast<int>(MINIMUM_RTP_HEADER_SIZE))
+        return len;
+
+    // SRTP decrypt
+    if (srtpContext_ and srtpContext_->srtp_in.aes) {
+        int32_t gradient = 0;
+        int32_t deltaT = 0;
+        float abs = 0.0f;
+        bool res_parse = false;
+        bool res_delay = false;
+
+        res_parse = parse_RTP_ext(buf, &abs);
+        bool marker = (buf[1] & 0x80) >> 7;
+
+        if (res_parse)
+            res_delay = getOneWayDelayGradient(abs, marker, &gradient, &deltaT);
+
+        // rtpDelayCallback_ is not set for audio
+        if (rtpDelayCallback_ and res_delay)
+            rtpDelayCallback_(gradient, deltaT);
+
+        auto err = ff_srtp_decrypt(&srtpContext_->srtp_in, buf, &len);
+        if (packetLossCallback_ and (buf[2] << 8 | buf[3]) != lastSeqNumIn_ + 1)
+            packetLossCallback_();
+        lastSeqNumIn_ = buf[2] << 8 | buf[3];
+        if (err < 0)
+            SIP_CORE_WARN("decrypt error %d", err);
+    }
+
+    if (len != 0)
+        return len;
+    else
+        return AVERROR_EOF;
+}
+
 
 int
 SocketPair::writeCallback(const uint8_t* buf, int buf_size)
@@ -610,6 +1035,15 @@ SocketPair::writeCallback(const uint8_t* buf, int buf_size)
 
     int ret;
     bool isRTCP = RTP_PT_IS_RTCP(buf[1]);
+
+    // Track our outgoing RTP SSRC (it changes whenever the FFmpeg muxer is
+    // recreated, e.g. on a sender restart): it is the reporter identity of
+    // our Receiver Reports and the validation key for inbound report blocks.
+    if (not isRTCP and buf_size >= 12) {
+        uint32_t ssrc = (uint32_t(buf[8]) << 24) | (uint32_t(buf[9]) << 16)
+                        | (uint32_t(buf[10]) << 8) | uint32_t(buf[11]);
+        ourOutSsrc_.store(ssrc, std::memory_order_relaxed);
+    }
     unsigned int ts_LSB, ts_MSB;
     double currentSRTS, currentLatency;
 
@@ -650,17 +1084,19 @@ SocketPair::writeCallback(const uint8_t* buf, int buf_size)
 
         currentSRTS = ts_MSB + (ts_LSB / pow(2, 32));
 
-        if (lastSRTS_ != 0 && lastDLSR_ != 0) {
-            if (histoLatency_.size() >= MAX_LIST_SIZE)
-                histoLatency_.pop_front();
+        {
+            std::lock_guard<std::mutex> lock(latencyMutex_);
+            if (lastSRTS_ != 0 && lastDLSR_.load(std::memory_order_relaxed) != 0) {
+                if (histoLatency_.size() >= MAX_LIST_SIZE)
+                    histoLatency_.pop_front();
 
-            currentLatency = (currentSRTS - lastSRTS_) / 2;
-            // SIP_CORE_WARN("Current Latency : %f from sender %X", currentLatency, header->ssrc);
-            histoLatency_.push_back(currentLatency);
+                currentLatency = (currentSRTS - lastSRTS_) / 2;
+                histoLatency_.push_back(currentLatency);
+            }
+
+            lastSRTS_ = currentSRTS;
         }
 
-        lastSRTS_ = currentSRTS;
-        
         std::lock_guard<std::mutex> lock(rtcpInfo_mutex_);
         lastRtcpSRHeader_ = *header;
 
@@ -678,10 +1114,160 @@ SocketPair::writeCallback(const uint8_t* buf, int buf_size)
 double
 SocketPair::getLastLatency()
 {
+    std::lock_guard<std::mutex> lock(latencyMutex_);
     if (not histoLatency_.empty())
         return histoLatency_.back();
     else
         return -1;
+}
+
+void
+SocketPair::enableRtcpReports(uint32_t rtpClockRate)
+{
+    rtcpReportClockRate_.store(rtpClockRate, std::memory_order_relaxed);
+}
+
+void
+SocketPair::processIncomingRtpStats(uint8_t* buf, int len)
+{
+    // Cleartext RTP header: V(2) P X CC | M PT | seq(16) | ts(32) | ssrc(32)
+    if (len < 12 or (buf[0] >> 6) != 2)
+        return;
+
+    const uint16_t seq = uint16_t(buf[2]) << 8 | buf[3];
+    const uint32_t rtpTs = (uint32_t(buf[4]) << 24) | (uint32_t(buf[5]) << 16)
+                           | (uint32_t(buf[6]) << 8) | uint32_t(buf[7]);
+    const uint32_t ssrc = (uint32_t(buf[8]) << 24) | (uint32_t(buf[9]) << 16)
+                          | (uint32_t(buf[10]) << 8) | uint32_t(buf[11]);
+    const auto now = clock::now();
+
+    if (not seqInit_ or ssrc != remoteSsrc_) {
+        // First packet, or the peer restarted its sender (fresh SSRC):
+        // (re)base the whole statistics block (RFC 3550 A.1 init).
+        remoteSsrc_ = ssrc;
+        seqInit_ = true;
+        maxSeq_ = seq;
+        seqCycles_ = 0;
+        baseSeqExt_ = seq;
+        receivedPkts_ = 1;
+        expectedPrior_ = 0;
+        receivedPrior_ = 0;
+        jitterQ4_ = 0;
+        transitInit_ = false;
+        rateWindowBytes_ = static_cast<uint64_t>(len);
+        rateWindowStart_ = now;
+        lastRRSent_ = now;
+        return;
+    }
+
+    receivedPkts_++;
+    rateWindowBytes_ += static_cast<uint64_t>(len);
+
+    const uint16_t udelta = static_cast<uint16_t>(seq - maxSeq_);
+    if (udelta < 0x8000) {
+        if (seq < maxSeq_) // wrapped
+            seqCycles_ += 0x10000;
+        maxSeq_ = seq;
+    } // else: duplicate or reordered — counts as received only
+
+    // Interarrival jitter, RFC 3550 A.8, in RTP timestamp units.
+    const uint32_t clockRate = rtcpReportClockRate_.load(std::memory_order_relaxed);
+    const int64_t arrivalTicks
+        = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count()
+          * int64_t(clockRate) / 1000000;
+    const int64_t transit = arrivalTicks - int64_t(rtpTs);
+    if (transitInit_) {
+        int64_t d = transit - lastTransit_;
+        if (d < 0)
+            d = -d;
+        // Ignore absurd samples (RTP timestamp wrap once per ~13 h at 90 kHz).
+        if (d < int64_t(clockRate)) {
+            int64_t j = int64_t(jitterQ4_) + d - ((int64_t(jitterQ4_) + 8) >> 4);
+            jitterQ4_ = j > 0 ? uint32_t(j) : 0;
+        }
+    }
+    lastTransit_ = transit;
+    transitInit_ = true;
+
+    // Incoming media rate over a ~500 ms sliding window.
+    const auto winMs
+        = std::chrono::duration_cast<std::chrono::milliseconds>(now - rateWindowStart_).count();
+    if (winMs >= 500) {
+        lastRateBps_.store(rateWindowBytes_ * 8000 / uint64_t(winMs), std::memory_order_relaxed);
+        rateWindowBytes_ = 0;
+        rateWindowStart_ = now;
+    }
+
+    if (now - lastRRSent_ >= std::chrono::seconds(1)) {
+        lastRRSent_ = now;
+        sendReceiverReport();
+    }
+}
+
+void
+SocketPair::sendReceiverReport()
+{
+    // Reporter identity: reuse our outgoing RTP SSRC (unknown until we have
+    // sent at least one packet — video calls are bidirectional in practice).
+    const uint32_t ourSsrc = ourOutSsrc_.load(std::memory_order_relaxed);
+    if (ourSsrc == 0 or not seqInit_)
+        return;
+
+    // RFC 3550 A.3 interval statistics.
+    const uint32_t extMax = seqCycles_ + maxSeq_;
+    const uint32_t expected = extMax - baseSeqExt_ + 1;
+    const uint32_t expectedInterval = expected - expectedPrior_;
+    const uint32_t receivedInterval = receivedPkts_ - receivedPrior_;
+    expectedPrior_ = expected;
+    receivedPrior_ = receivedPkts_;
+
+    const int32_t lostInterval = int32_t(expectedInterval) - int32_t(receivedInterval);
+    uint8_t fraction = 0;
+    if (expectedInterval > 0 and lostInterval > 0) {
+        uint32_t f = (uint32_t(lostInterval) << 8) / expectedInterval;
+        fraction = f > 255 ? 255 : uint8_t(f);
+    }
+
+    int32_t cumLost = int32_t(expected) - int32_t(receivedPkts_);
+    if (cumLost > 0x7fffff)
+        cumLost = 0x7fffff;
+    else if (cumLost < 0)
+        cumLost = 0;
+
+    const uint32_t jitter = jitterQ4_ >> 4;
+
+    uint32_t dlsr = 0;
+    const uint32_t lsr = peerSrNtpMid_;
+    if (lsr != 0) {
+        const auto sinceSr = std::chrono::duration_cast<std::chrono::microseconds>(clock::now()
+                                                                                   - peerSrArrival_)
+                                 .count();
+        dlsr = uint32_t(sinceSr * 65536 / 1000000);
+    }
+
+    uint8_t pkt[32];
+    auto be32 = [](uint8_t* p, uint32_t v) {
+        p[0] = uint8_t(v >> 24);
+        p[1] = uint8_t(v >> 16);
+        p[2] = uint8_t(v >> 8);
+        p[3] = uint8_t(v);
+    };
+    pkt[0] = 0x81; // V=2, P=0, RC=1
+    pkt[1] = 201;  // RR
+    pkt[2] = 0;
+    pkt[3] = 7; // length in 32-bit words minus one
+    be32(pkt + 4, ourSsrc);
+    be32(pkt + 8, remoteSsrc_);
+    pkt[12] = fraction;
+    pkt[13] = uint8_t(cumLost >> 16);
+    pkt[14] = uint8_t(cumLost >> 8);
+    pkt[15] = uint8_t(cumLost);
+    be32(pkt + 16, extMax);
+    be32(pkt + 20, jitter);
+    be32(pkt + 24, lsr);
+    be32(pkt + 28, dlsr);
+
+    writeData(pkt, sizeof(pkt));
 }
 
 void

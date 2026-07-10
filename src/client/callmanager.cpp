@@ -32,6 +32,7 @@
 #include "sip/sipaccount.h"
 #include "audio/audiolayer.h"
 #include "media/media_attribute.h"
+#include "conference_protocol.h"
 #include "string_utils.h"
 
 #include "logger.h"
@@ -46,24 +47,27 @@ registerCallHandlers(const std::map<std::string, std::shared_ptr<CallbackWrapper
 }
 
 std::string
-placeCall(const std::string& accountId, const std::string& to)
+placeCall(const std::string& accountId,
+          const std::string& to,
+          const std::map<std::string, std::string>& headers)
 {
     // TODO. Remove ASAP.
     SIP_CORE_WARN("This API is deprecated, use placeCallWithMedia() instead");
-    return placeCallWithMedia(accountId, to, {});
+    return placeCallWithMedia(accountId, to, {}, headers);
 }
 
 std::string
 placeCallWithMedia(const std::string& accountId,
                    const std::string& to,
-                   const std::vector<libsip_core::MediaMap>& mediaList)
+                   const std::vector<libsip_core::MediaMap>& mediaList,
+                   const std::map<std::string, std::string>& headers)
 {
     // Check if a destination number is available
     if (to.empty()) {
         SIP_CORE_DBG("No number entered - Call aborted");
         return {};
     } else {
-        return sip_core::Manager::instance().outgoingCall(accountId, to, mediaList);
+        return sip_core::Manager::instance().outgoingCall(accountId, to, mediaList, headers);
     }
 }
 
@@ -86,6 +90,16 @@ bool
 refuse(const std::string& accountId, const std::string& callId)
 {
     return sip_core::Manager::instance().refuseCall(accountId, callId);
+}
+
+bool
+setRingtoneForIncomingCall(const std::string& accountId,
+                           const std::string& callId,
+                           const std::string& ringtonePath)
+{
+    return sip_core::Manager::instance().setRingtoneForIncomingCall(accountId,
+                                                                    callId,
+                                                                    ringtonePath);
 }
 
 bool
@@ -206,13 +220,15 @@ joinParticipant(const std::string& accountId,
                 const std::string& sel_callId,
                 const std::string& account2Id,
                 const std::string& drag_callId,
-                bool attached)
+                bool attached,
+                bool muteLocalPlayback)
 {
     return sip_core::Manager::instance().joinParticipant(accountId,
                                                          sel_callId,
                                                          account2Id,
                                                          drag_callId,
-                                                         attached);
+                                                         attached,
+                                                         muteLocalPlayback);
 }
 
 void
@@ -227,7 +243,11 @@ setConferenceLayout(const std::string& accountId, const std::string& confId, uin
 {
     if (const auto account = sip_core::Manager::instance().getAccount(accountId)) {
         if (auto conf = account->getConference(confId)) {
-            conf->setLayout(layout);
+            // Marshal to the main thread: every REMOTE-driven conference
+            // mutation (incoming INFO, mixer rebuild) is already serialized
+            // there — a host FFI call running concurrently is last-writer-wins
+            // nondeterminism on confInfo_/layout under rapid mode churn.
+            sip_core::runOnMainThread([conf, layout] { conf->setLayout(layout); });
         } else if (auto call = account->getCall(confId)) {
             Json::Value root;
             root["layout"] = layout;
@@ -316,6 +336,26 @@ unholdConference(const std::string& accountId, const std::string& confId)
     return sip_core::Manager::instance().unHoldConference(accountId, confId);
 }
 
+bool
+muteConferenceLocalPlayback(const std::string& accountId, const std::string& confId, bool mute)
+{
+    if (const auto account = sip_core::Manager::instance().getAccount(accountId)) {
+        if (auto conf = account->getConference(confId)) {
+            conf->muteLocalPlayback(mute);
+            return true;
+        }
+
+        if (auto call = account->getCall(confId)) {
+            if (auto conf = call->getConference()) {
+                conf->muteLocalPlayback(mute);
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
 std::map<std::string, std::string>
 getConferenceDetails(const std::string& accountId, const std::string& confId)
 {
@@ -327,7 +367,8 @@ getConferenceDetails(const std::string& accountId, const std::string& confId)
                     {"VIDEO_SOURCE", conf->getVideoInput()},
 #endif
                     {"RECORDING", conf->isRecording() ? sip_core::TRUE_STR : sip_core::FALSE_STR}, 
-                    {"LAYOUT", std::to_string(conf->getLayout())}, 
+                    {"LAYOUT", std::to_string(conf->getLayout())},
+                    {"IS_PLAYBACK_MUTED", conf->isLocalPlaybackMuted() ? sip_core::TRUE_STR : sip_core::FALSE_STR},
                     };
     return {};
 }
@@ -507,11 +548,9 @@ switchInput(const std::string& accountId, const std::string& callId, const std::
 {
     if (const auto account = sip_core::Manager::instance().getAccount(accountId)) {
         if (auto conf = account->getConference(callId)) {
-            conf->switchInput(resource);
-            return true;
+            return conf->switchInput(resource);
         } else if (auto call = account->getCall(callId)) {
-            call->switchInput(resource);
-            return true;
+            return call->switchInput(resource);
         }
     }
     return false;
@@ -587,20 +626,8 @@ muteStream(const std::string& accountId,
             conf->muteStream(accountUri, deviceId, streamId, state);
         } else if (auto call = account->getCall(confId)) {
             if (call->conferenceProtocolVersion() == 1) {
-                Json::Value sinkVal;
-                sinkVal["muteAudio"] = state;
-                Json::Value mediasObj;
-                mediasObj[streamId] = sinkVal;
-                Json::Value deviceVal;
-                deviceVal["medias"] = mediasObj;
-                Json::Value deviceObj;
-                deviceObj[deviceId] = deviceVal;
-                Json::Value accountVal;
-                deviceVal["devices"] = deviceObj;
-                Json::Value root;
-                root[accountUri] = deviceVal;
-                root["version"] = 1;
-                call->sendConfOrder(root);
+                call->sendConfOrder(
+                    sip_core::ConfOrder::muteAudio(accountUri, deviceId, streamId, state));
             } else if (call->conferenceProtocolVersion() == 0) {
                 Json::Value root;
                 root["muteParticipant"] = accountUri;
@@ -639,7 +666,9 @@ setActiveStream(const std::string& accountId,
     if (const auto account = sip_core::Manager::instance().getAccount<sip_core::SIPAccount>(
             accountId)) {
         if (auto conf = account->getConference(confId)) {
-            conf->setActiveStream(streamId, state);
+            // Same marshaling rationale as setConferenceLayout above.
+            sip_core::runOnMainThread(
+                [conf, streamId, state] { conf->setActiveStream(streamId, state); });
         } else if (auto call = std::static_pointer_cast<sip_core::SIPCall>(
                        account->getCall(confId))) {
             call->setActiveMediaStream(accountUri, deviceId, streamId, state);
@@ -659,16 +688,7 @@ hangupParticipant(const std::string& accountId,
         } else if (auto call = std::static_pointer_cast<sip_core::SIPCall>(
                        account->getCall(confId))) {
             if (call->conferenceProtocolVersion() == 1) {
-                Json::Value deviceVal;
-                deviceVal["hangup"] = sip_core::TRUE_STR;
-                Json::Value deviceObj;
-                deviceObj[deviceId] = deviceVal;
-                Json::Value accountVal;
-                deviceVal["devices"] = deviceObj;
-                Json::Value root;
-                root[accountUri] = deviceVal;
-                root["version"] = 1;
-                call->sendConfOrder(root);
+                call->sendConfOrder(sip_core::ConfOrder::hangupParticipant(accountUri, deviceId));
             } else if (call->conferenceProtocolVersion() == 0) {
                 Json::Value root;
                 root["hangupParticipant"] = accountUri;
@@ -687,11 +707,7 @@ raiseParticipantHand(const std::string& accountId,
     SIP_CORE_ERR() << "raiseParticipantHand is deprecated, please use raiseHand";
     if (const auto account = sip_core::Manager::instance().getAccount(accountId)) {
         if (auto conf = account->getConference(confId)) {
-            if (auto call = std::static_pointer_cast<sip_core::SIPCall>(
-                    conf->getCallFromPeerID(peerId))) {
-                if (auto transport = call->getTransport())
-                    conf->setHandRaised(std::string(transport->deviceId()), state);
-            }
+            conf->setHandRaised(peerId, "", state);
         } else if (auto call = account->getCall(confId)) {
             Json::Value root;
             root["handRaised"] = peerId;
@@ -711,23 +727,14 @@ raiseHand(const std::string& accountId,
     if (const auto account = sip_core::Manager::instance().getAccount<sip_core::SIPAccount>(
             accountId)) {
         if (auto conf = account->getConference(confId)) {
-            auto device = deviceId;
-            conf->setHandRaised(device, state);
+            conf->setHandRaised(accountUri.empty() ? account->getUsername() : accountUri,
+                                deviceId,
+                                state);
         } else if (auto call = std::static_pointer_cast<sip_core::SIPCall>(
                        account->getCall(confId))) {
             if (call->conferenceProtocolVersion() == 1) {
-                Json::Value deviceVal;
-                deviceVal["raiseHand"] = state;
-                Json::Value deviceObj;
-                std::string device = deviceId;
-                deviceObj[device] = deviceVal;
-                Json::Value accountVal;
-                deviceVal["devices"] = deviceObj;
-                Json::Value root;
                 std::string uri = accountUri.empty() ? account->getUsername() : accountUri;
-                root[uri] = deviceVal;
-                root["version"] = 1;
-                call->sendConfOrder(root);
+                call->sendConfOrder(sip_core::ConfOrder::raiseHand(uri, deviceId, state));
             } else if (call->conferenceProtocolVersion() == 0) {
                 Json::Value root;
                 root["handRaised"] = account->getUsername();

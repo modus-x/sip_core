@@ -70,6 +70,22 @@ audioConfigurationQueueIOS()
     return queue;
 }
 
+static constexpr unsigned
+streamTypeMask(AudioDeviceType type)
+{
+    switch (type) {
+    case AudioDeviceType::PLAYBACK:
+        return 1u << 0;
+    case AudioDeviceType::CAPTURE:
+        return 1u << 1;
+    case AudioDeviceType::RINGTONE:
+        return 1u << 2;
+    case AudioDeviceType::ALL:
+    default:
+        return (1u << 0) | (1u << 1) | (1u << 2);
+    }
+}
+
 // AudioLayer implementation.
 CoreLayer::CoreLayer(const AudioPreference& pref)
     : AudioLayer(pref)
@@ -334,16 +350,19 @@ CoreLayer::bindCallbacks()
                                   sizeof(AURenderCallbackStruct)));
 }
 
-// deviceType if not used here :)
-// called by core to start audio stream
+// called by core to start audio stream; the type is tracked in
+// activeStreamMask_ so stopStream() knows when the last user is gone
 void
 CoreLayer::startStream(AudioDeviceType stream)
 {
     dispatch_async(audioConfigurationQueueIOS(), ^{
-        SIP_CORE_DBG("iOS CoreLayer startStream");
+        SIP_CORE_DBG("iOS CoreLayer startStream [type=%d]", (int) stream);
         const std::lock_guard<std::mutex> lock(layerLock_);
 
-        // if started, exit
+        activeStreamMask_ |= streamTypeMask(stream);
+
+        // if started, exit — the PlayAndRecord unit already serves
+        // every stream type, no per-type reconfiguration is needed
         if (status_ == Status::Started) {
             SIP_CORE_DBG("iOS CoreLayer startStream already started, exiting");
             return;
@@ -401,12 +420,38 @@ CoreLayer::destroyAudioLayer()
 void
 CoreLayer::stopStream(AudioDeviceType stream)
 {
+    // dispatch_sync (not async): ~CoreLayer() relies on stopStream(ALL)
+    // having fully torn the unit down before the object is destroyed.
     dispatch_sync(audioConfigurationQueueIOS(), ^{
+        SIP_CORE_DBG("iOS CoreLayer stopStream [type=%d]", (int) stream);
+
+        activeStreamMask_ &= ~streamTypeMask(stream);
+
+        // Drop leftover tone/ringtone samples in any case.
+        flushUrgent();
+
+        // Not running (e.g. a failed start left the retry state) — nothing
+        // to tear down, and flushMain() must not run here: it would wipe
+        // every RingBufferPool buffer, including live audio of unrelated
+        // streams.
+        if (status_ != Status::Started)
+            return;
+
+        if (activeStreamMask_ != 0) {
+            // Other stream types still depend on the single full-duplex
+            // VoiceProcessingIO unit — e.g. an answered call's CAPTURE /
+            // PLAYBACK when the RINGTONE guard lingers out 750 ms after
+            // pickup. Tearing the unit down here silenced the whole call
+            // until the audio layer was recreated (same defect as the
+            // macOS layer, fixed there first).
+            SIP_CORE_DBG("iOS CoreLayer stopStream: unit kept alive, remaining mask=0x%x",
+                         activeStreamMask_);
+            return;
+        }
+
         destroyAudioLayer();
+        flushMain();
     });
-    /* Flush the ring buffers */
-    flushUrgent();
-    flushMain();
 }
 
 OSStatus
@@ -442,7 +487,7 @@ CoreLayer::write(AudioUnitRenderActionFlags* ioActionFlags,
 
     if (auto toPlay = getPlayback(currentOutFormat, inNumberFrames)) {
         const auto& frame = *toPlay->pointer();
-        for (int i = 0; i < frame.channels; ++i) {
+        for (int i = 0; i < frame.ch_layout.nb_channels; ++i) {
             std::copy_n((Float32*) frame.extended_data[i],
                         inNumberFrames,
                         (Float32*) ioData->mBuffers[i].mData);

@@ -99,9 +99,10 @@ publish(const std::string& accountID, bool status, const std::string& note)
     if (auto sipaccount = sip_core::Manager::instance().getAccount<SIPAccount>(accountID)) {
         auto pres = sipaccount->getPresence();
         if (pres and pres->isEnabled() and pres->isSupported(PRESENCE_FUNCTION_PUBLISH)) {
-            SIP_CORE_DBG("Send Presence (acc:%s, status %s).",
+            SIP_CORE_DBG("Send Presence (acc:%s, status %s, note:%s).",
                          accountID.c_str(),
-                         status ? "online" : "offline");
+                         status ? "online" : "offline",
+                         note.c_str());
             pres->sendPresence(status, note);
         }
     } else

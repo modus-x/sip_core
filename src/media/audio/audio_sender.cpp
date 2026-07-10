@@ -26,6 +26,7 @@
  #include "media_encoder.h"
  #include "media_io_handle.h"
  #include "media_stream.h"
+ #include "audio/g729_encoder.h"
  
  #include <memory>
  #include <algorithm>
@@ -60,7 +61,12 @@
      bool
      AudioSender::setup(SocketPair& socketPair)
      {
-         audioEncoder_.reset(new MediaEncoder);
+         if (args_.codec->systemCodecInfo.avcodecId == AV_CODEC_ID_G729) {
+             audioEncoder_.reset(new g729MediaEncoder(mtu_, args_.annex_b));
+         }
+         else {
+             audioEncoder_.reset(new MediaEncoder);
+         }
          muxContext_.reset(socketPair.createIOContext(mtu_));
  
          try {
@@ -231,8 +237,16 @@
  
          return audioEncoder_->setPacketLoss(pl);
      }
- 
- 
+
+     void
+     AudioSender::natPing()
+     {
+         if (audioEncoder_) {
+             audioEncoder_->sendDummyPacket();
+         }
+     }
+
+
      unsigned int
      AudioSender::createDtmfPayload(RtpDtmfPayload* payload, bool* first, bool* last)
      {

@@ -28,16 +28,15 @@
 #include "observer.h"
 #include "socket_pair.h"
 #include "threadloop.h"
+#include "media_decoder_base.h"
 
 #include <functional>
+#include <cstdint>
 #include <sstream>
 
 #include "audio-processing/null_audio_processor.h"
 #if HAVE_WEBRTC_AP
 #include "audio-processing/webrtc.h"
-#endif
-#if HAVE_SPEEXDSP
-#include "audio-processing/speex.h"
 #endif
 
 namespace sip_core {
@@ -64,6 +63,7 @@ public:
     void stopReceiver();
     void setMuted(bool muted);
     void setVAD(bool active);
+    void setVadSensitivity(int32_t sensitivity);
     
 
     void setSuccessfulSetupCb(const std::function<void(MediaType, bool)>& cb)
@@ -83,6 +83,8 @@ private:
 
     void createAudioProcessor();
     void destroyAudioProcessor();
+    void applyVadSensitivityLocked();
+    static int clampVadSensitivity(int32_t sensitivity);
 
     std::mutex audioProcessorMutex_ {};
     std::unique_ptr<AudioProcessor> audioProcessor_;
@@ -100,7 +102,7 @@ private:
     DeviceParams args_;
 
     std::istringstream stream_;
-    std::unique_ptr<MediaDecoder> audioDecoder_;
+    std::unique_ptr<MediaDecoderBase> audioDecoder_;
     std::unique_ptr<MediaIOHandle> sdpContext_;
     std::unique_ptr<MediaIOHandle> demuxContext_;
 
@@ -117,6 +119,7 @@ private:
     std::function<void(const MediaStream& ms)> recorderCallback_;
 
     bool muteState_ {false};
+    int vadSensitivity_ {3};
 };
 
 } // namespace sip_core

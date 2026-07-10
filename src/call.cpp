@@ -565,10 +565,6 @@ void Call::localVoice(bool state)
 
     } else {
         // we are in a one-to-one call
-        // send voice activity over SIP
-        // TODO: change the streamID once multiple streams are supported
-        // thisPtr->sendVoiceActivity("-1", voice);
-
         // TODO: maybe emit signal here for local voice activity
     }
 }
@@ -656,6 +652,10 @@ Call::setConferenceInfo(const std::string& msg)
                 newInfo.w = json["w"].asInt();
             if (json.isMember("h"))
                 newInfo.h = json["h"].asInt();
+            if (json.isMember("layout"))
+                newInfo.layout = json["layout"].asInt();
+            if (json.isMember("seq"))
+                newInfo.seq = json["seq"].asUInt64();
         } else {
             // old confInfo
             for (const auto& participantInfo : json) {
@@ -669,7 +669,39 @@ Call::setConferenceInfo(const std::string& msg)
     }
 
     {
+        int shareCount = 0;
+        // Per-row dump: aggregate counts alone cannot answer "did MY videoMuted
+        // flip" during conference forensics (2026-07-09 un-mute investigation).
+        std::string rows;
+        for (const auto& p : newInfo) {
+            if (p.isSharing)
+                ++shareCount;
+            rows += " {" + p.uri + "|sink=" + p.sinkId + "|vMuted="
+                    + (p.videoMuted ? "1" : "0") + (p.isSharing ? "|sharing" : "") + "}";
+        }
+        SIP_CORE_WARN("[sharedbg] remote recv confInfo: participants=%zu sharing=%d layout=%d confParticipant=%d%s",
+                      newInfo.size(),
+                      shareCount,
+                      newInfo.layout,
+                      (int) isConferenceParticipant(),
+                      rows.c_str());
+    }
+    {
         std::lock_guard<std::mutex> lk(confInfoMutex_);
+        // Wire-reorder defense: apply is a wholesale replace, so a reordered
+        // stale snapshot silently reverts layout/share/badges. A LARGE
+        // backward jump is a new conference/host epoch (the host seeds seq
+        // from wall-clock ms) — accept it and re-latch. seq==0 = legacy host.
+        if (newInfo.seq != 0 && lastConfInfoSeq_ != 0 && newInfo.seq <= lastConfInfoSeq_
+            && lastConfInfoSeq_ - newInfo.seq < 60000) {
+            SIP_CORE_WARN("[call:%s] dropping stale confInfo seq=%llu (last applied %llu)",
+                          id_.c_str(),
+                          static_cast<unsigned long long>(newInfo.seq),
+                          static_cast<unsigned long long>(lastConfInfoSeq_));
+            return;
+        }
+        if (newInfo.seq != 0)
+            lastConfInfoSeq_ = newInfo.seq;
         if (not isConferenceParticipant()) {
             // confID_ empty -> participant set confInfo with the received one
             confInfo_ = std::move(newInfo);
@@ -692,7 +724,6 @@ Call::setConferenceInfo(const std::string& msg)
 void
 Call::setConferenceVoiceActivity(const std::string& msg)
 {
-    ConfInfo newInfo;
     Json::Value json;
     std::string err;
     Json::CharReaderBuilder rbuilder;
@@ -702,32 +733,69 @@ Call::setConferenceVoiceActivity(const std::string& msg)
     }
 
     if (not isConferenceParticipant()) {
-        
-        if(!json.isObject())
-            return;
+        struct VoiceUpdate
+        {
+            std::string uri;
+            std::string sinkId;
+            bool state;
+        };
 
-        for (const auto& participantInfo : json) {
+        std::vector<VoiceUpdate> updates;
+        auto parseUpdate = [&updates](const Json::Value& participantInfo) {
+            if (!participantInfo.isObject() || !participantInfo.isMember("state"))
+                return;
+            VoiceUpdate update {
+                participantInfo.isMember("uri") ? participantInfo["uri"].asString() : "",
+                participantInfo.isMember("sinkId") ? participantInfo["sinkId"].asString() : "",
+                participantInfo["state"].asBool(),
+            };
+            if (update.uri.empty() && update.sinkId.empty())
+                return;
+            updates.emplace_back(std::move(update));
+        };
 
-            if (!participantInfo.isObject() || !participantInfo.isMember("uri") || 
-                     !participantInfo.isMember("state") || !participantInfo.isMember("sinkId"))
-                continue;
-                
-            auto uri = participantInfo["uri"].asString();
-            auto sinkId = participantInfo["sinkId"].asString();
-            auto state = participantInfo["state"].asBool();
-            
-            {
-                std::lock_guard<std::mutex> lk(confInfoMutex_);
-                // confID_ empty -> participant set confInfo with the received one
-                auto participant = std::find_if(confInfo_.begin(), confInfo_.end(), [&uri] (const ParticipantInfo& p) {
-                    return uri == p.uri;
-                });
+        if (json.isArray()) {
+            for (const auto& participantInfo : json)
+                parseUpdate(participantInfo);
+        } else if (json.isObject() && json.isMember("p") && json["p"].isArray()) {
+            for (const auto& participantInfo : json["p"])
+                parseUpdate(participantInfo);
+        } else if (json.isObject()) {
+            parseUpdate(json);
+        }
 
-                if(participant != confInfo_.end()) {
-                    participant->voiceActivity = state;
+        bool hasChanges = false;
+        std::vector<std::map<std::string, std::string>> updatedInfos;
+        {
+            std::lock_guard<std::mutex> lk(confInfoMutex_);
+            for (const auto& update : updates) {
+                auto participant = confInfo_.end();
+                if (!update.sinkId.empty()) {
+                    participant = std::find_if(confInfo_.begin(),
+                                               confInfo_.end(),
+                                               [&update](const ParticipantInfo& p) {
+                                                   return update.sinkId == p.sinkId;
+                                               });
+                }
+                if (participant == confInfo_.end() && !update.uri.empty()) {
+                    participant = std::find_if(confInfo_.begin(),
+                                               confInfo_.end(),
+                                               [&update](const ParticipantInfo& p) {
+                                                   return update.uri == p.uri;
+                                               });
+                }
+
+                if (participant != confInfo_.end() && participant->voiceActivity != update.state) {
+                    participant->voiceActivity = update.state;
+                    hasChanges = true;
                 }
             }
+            if (hasChanges)
+                updatedInfos = confInfo_.toVectorMapStringString();
         }
+
+        if (hasChanges)
+            sip_core::emitSignal<libsip_core::CallSignal::OnConferenceInfosUpdated>(id_, updatedInfos);
     } else if (auto conf = conf_.lock()) {
         conf->setVoiceActivity(json);
     }

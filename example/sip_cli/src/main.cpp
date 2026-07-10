@@ -21,16 +21,14 @@
 
 #define ACCOUNT_ID "test_acc"
 
-std::string username = "kirill.yakovlev";
-std::string password = "!QAZxsw2";
+std::string username = "dev_user";
+std::string password = "12345";
 std::string domain = "192.168.92.43";
 std::string binding = "";
 
 std::atomic_bool g_needFinish(false);
-std::queue<std::vector<std::string>> g_command_queue;
-std::mutex g_queue_mutex;
 
-void consoleInputLoop();
+void consoleInputLoop(CallController&);
 std::string getPassword(const std::string& prompt);
 std::string getInput(const std::string& prompt);
 std::vector<std::string> split(const std::string& s);
@@ -41,11 +39,11 @@ main(int argc, char* argv[])
     std::cout << "SIP core Console App started." << std::endl;
     std::cout << "Available commands:\n\tcall <callee>,\n\tadd <callee>,\n\tdel <callee>,\n\tmove <from> <to>,\n\t"
                  "conf <callee1> ... <calleeN>,\n\tswitch <device>,\n\thold,\n\tresume,\n\thangup,\n\tcapOn,\n\t"
-                 "capOff,\n\tvideo,\n\tgpu,\n\treregister,\n\tunregister,\n\tsubscribe,\n\tunsubscribe,\n\tpublish,\n\texit"
-              << std::endl << std::endl;
+                 "capOff,\n\tvideo,\n\tgpu,\n\treregister,\n\tunregister,\n\tsubscribe,\n\tunsubscribe,\n\tpublish,\n\tdtmf\n\texit"
+              << std::endl;
 
     CallController controller(ACCOUNT_ID, true);
-    if (not controller.init()) {
+    if (!controller.init()) {
         std::cerr << "Error: can't initialize sip." << std::endl;
         return 1;
     }
@@ -101,7 +99,7 @@ main(int argc, char* argv[])
         std::cerr << parser;
     }
     
-    std::thread input_thread(consoleInputLoop);
+    std::thread input_thread(consoleInputLoop, std::ref(controller));
 
     // controller.setAudioCaptureDevice(1);
     // print audio captures
@@ -149,17 +147,27 @@ main(int argc, char* argv[])
     }
 
     while (true) {
-        controller.proccesEvents();
+        controller.proccesEvents(500);
+    }
 
-        std::vector<std::string> tokens;
-        {
-            std::lock_guard<std::mutex> lock(g_queue_mutex);
-            if (g_command_queue.empty())
-                continue;
+    g_needFinish.store(true);
+    std::cout << "Press enter to exit..." << std::endl;
 
-            tokens = g_command_queue.front();
-            g_command_queue.pop();
-        }
+    if (input_thread.joinable())
+        input_thread.join();
+
+    return 0;
+}
+
+void
+consoleInputLoop(CallController& controller)
+{
+    std::string line;
+    while (!g_needFinish.load()) {
+        getline(std::cin, line);
+        std::vector<std::string> tokens = split(line);
+        if (tokens.empty())
+            continue;
 
         std::string command = tokens[0];
         transform(command.begin(), command.end(), command.begin(), ::tolower);
@@ -398,6 +406,18 @@ main(int argc, char* argv[])
             } else {
                 std::cout << "Reregister successfully sent" << std::endl;
             }
+        } else if (command == "dtmf") {
+            if(tokens.size() != 2) {
+                std::cerr << "Error: Usage - dtmf <dtmf code>."
+                          << std::endl;
+                continue;
+            }
+            if(!controller.playDTMF(tokens[1], 0.1, 0)) {
+                std::cerr << "Error: failed to play dtmf." << std::endl;
+                continue;
+            }
+            
+            std::cout << "Dtmf sent." << std::endl;
         } else {
             std::cerr << "Error: Unknown command. \nFull list of commands:\n call <callee> - "
                          "initiates call with given ID,\n add <callee> - adds new participant to "
@@ -408,34 +428,12 @@ main(int argc, char* argv[])
                          "hold - put current call on hold.\n resume - resume current call.\n "
                          "hangup - hangup current call.\n capOn - start capture of active call in "
                          "a local file.\n capOff - stops capture of video.\n video - enables video "
-                         "transfer.\ngpu - toggles hardware acceleration.\ninfo - get current call "
-                         "infos.\n reregister - force reregistration.\n unregister - unregister user."
-                         "\n subscribe <uri1>... - subscribe to events.\n unsubscribe <uri1>... - "
-                         "unsubscribe from events.\nexit - exit program." << std::endl << std::endl;
-        }
-    }
-
-    g_needFinish.store(true);
-    if (input_thread.joinable())
-        input_thread.join();
-
-    std::cout << "Exiting..." << std::endl;
-    return 0;
-}
-
-void
-consoleInputLoop()
-{
-    std::string line;
-    while (!g_needFinish.load()) {
-        getline(std::cin, line);
-        std::vector<std::string> tokens = split(line);
-        if (tokens.empty())
-            continue;
-
-        {
-            std::lock_guard<std::mutex> lock(g_queue_mutex);
-            g_command_queue.push(tokens);
+                         "transfer.\n gpu - toggles hardware acceleration.\n info - get current "
+                         "call infos.\n reregister - force reregistration.\n unregister - "
+                         "unregister user.\n subscribe <uri1>... - subscribe to events.\n "
+                         "unsubscribe <uri1>... - unsubscribe from events.\n"
+                         "dtmf <dtmf code> - send dtmf code for active call.\n"
+                         "exit - exit program." << std::endl;
         }
     }
 }

@@ -40,6 +40,11 @@
 
 #include <vector>
 #include <map>
+#include <cstdint>
+#include <atomic>
+#include <chrono>
+#include <utility>
+#include <deque>
 
 namespace sip_core {
 
@@ -155,6 +160,12 @@ public:
      * @param destroy_transport If true, attempt to destroy the transport.
      */
     void sendUnregister();
+
+    /**
+     * Fire-and-forget unregistration for use during shutdown.
+     * Sends UNREGISTER and immediately destroys regc (callback suppressed).
+     */
+    void doUnregisterFireAndForget();
 
     const pjsip_cred_info* getCredInfo() const { return cred_.data(); }
 
@@ -276,11 +287,26 @@ public:
 
     bool hasServiceRoute() const { return not config().serviceRoute.empty(); }
 
-    std::string getBackServiceRoute() const { return config().backServiceRoute; }
+    std::vector<std::string> getBackServiceRoutes() const { return config().backServiceRoutes; }
 
-    bool hasBackServiceRoute() const { return not config().backServiceRoute.empty(); }
+    bool hasBackServiceRoutes() const { return not config().backServiceRoutes.empty(); }
+
+    std::pair<std::string, IpAddr> getActiveBackServiceRoute() const { return activeBackupRoute_; }
+    void iterateActiveBackServiceRoute();
 
     const IpAddr& getActualIpAddress() const;
+    enum class KeepAliveTopology {
+        NoRoute,
+        ServiceRoute,
+        ServiceRouteWithBackup,
+    };
+
+    static KeepAliveTopology resolveKeepAliveTopology(bool hasServiceRoute, bool hasBackServiceRoute);
+    static bool shouldUseOptionsForKeepAlive(KeepAliveType keepAliveType, bool isUdpTransport);
+    static bool shouldUseStartupMainRouteProbe(bool optionsKeepAliveMode,
+                                               KeepAliveTopology topology,
+                                               bool usingBackupRoute,
+                                               bool skipStartupProbe);
 
     /**
      * Get the currently active service route (main or backup)
@@ -290,7 +316,7 @@ public:
     /**
      * Check if currently using backup service route
      */
-    bool isUsingBackupRoute() const { return usingBackupRoute_; }
+    bool isUsingBackupRoute() const { return !activeBackupRoute_.first.empty(); }
 
     /**
      * Switch to backup service route
@@ -301,6 +327,44 @@ public:
      * Switch back to main service route
      */
     void switchToMainRoute();
+    void switchRouteAndReregister(bool useBackup,
+                                  const char* reason,
+                                  bool skipMainRouteStartupProbe = false);
+
+    bool isOptionsSuccess200(int statusCode) const;
+    bool isTransportFailureFromOptions(int statusCode) const;
+    bool isRouteFailureFromOptions(int statusCode) const;
+    static uint32_t resolveMainRouteProbeIntervalSec(uint32_t keepAliveIntervalSec,
+                                                     bool fastProbeEnabled);
+    static uint32_t resolveActiveKeepAliveIntervalSec(uint32_t keepAliveIntervalSec,
+                                                      bool fastProbeEnabled,
+                                                      bool noRouteMode);
+    static bool shouldEnableMainRouteFastProbeForStatusCode(int statusCode);
+    static bool shouldDisableMainRouteFastProbeForStatusCode(int statusCode);
+    static bool shouldEnableActiveNoRouteFastProbeForStatusCode(int statusCode);
+    static bool shouldDisableActiveNoRouteFastProbeForStatusCode(int statusCode);
+    static bool isTransientOptionsFailureCode(int statusCode);
+    static bool isHardOptionsFailureCode(int statusCode);
+    static bool shouldSuppressOptionsRecoveryAttempt(std::deque<int64_t>& attemptMs,
+                                                     int64_t nowMs,
+                                                     size_t maxAttempts,
+                                                     int64_t windowMs);
+    bool isMainRouteFastProbeEnabled() const;
+    uint32_t getMainRouteProbeIntervalSec() const;
+    bool isNoRouteKeepAliveMode() const;
+    bool isActiveNoRouteFastProbeEnabled() const;
+    uint32_t getActiveKeepAliveIntervalSec() const;
+    void enableMainRouteFastProbe(const char* reason);
+    void disableMainRouteFastProbe(const char* reason);
+    void rescheduleMainRouteProbeNow(uint32_t seconds);
+    void enableActiveNoRouteFastProbe(const char* reason, bool rescheduleNow = true);
+    void disableActiveNoRouteFastProbe(const char* reason);
+    void rescheduleActiveKeepAliveNow(uint32_t seconds);
+    bool isTransientOptionsFailure(int statusCode) const;
+    bool isHardOptionsFailure(int statusCode) const;
+    void handleNoBackupOptionsRouteFailure(int statusCode);
+    void handleUdpRawKeepAliveSendFailure(pj_status_t status);
+    bool scheduleTransportRecovery(const char* reason, pj_status_t status);
 
     virtual bool getSrtpFallback() const override { return config().srtpFallback; }
 
@@ -330,12 +394,13 @@ public:
 
     bool isRegistrationRefreshEnabled() const { return config().registrationRefreshEnabled; }
 
-    void setTransport(const std::shared_ptr<SipTransport>& = nullptr);
+    bool setTransport(const std::shared_ptr<SipTransport>& = nullptr);
 
     bool switchTransport(libsip_core::TransportType transportType) override;
 
     /**
-     * Try to register a new keepalive registration timer (only for UDP!) with current KA interval from config!
+     * Try to register a new keepalive registration timer (only for UDP!) with current KA interval
+     * from config!
      */
     void registerKeepAliveTimer();
 
@@ -365,6 +430,11 @@ public:
     void cancelBackupRouteKeepAliveTimer();
 
     /**
+     * Cancels the automatic re-registration timer.
+     */
+    void cancelAutoReregistrationTimer();
+
+    /**
      * Check if we should switch back to main route when calls end.
      * Called when a call is detached from the account.
      */
@@ -388,7 +458,10 @@ public:
     // current transport type
     inline pjsip_transport_type_e getTransportType() const
     {
-        return transport_->getPjSipTransportType();
+        if (transport_)
+            return transport_->getPjSipTransportType();
+        return config().transport == libsip_core::TransportType::TCP ? PJSIP_TRANSPORT_TCP
+                                                                     : PJSIP_TRANSPORT_UDP;
     }
 
     /**
@@ -428,7 +501,9 @@ public:
      * @return a shared pointer on the created call.
      */
     std::shared_ptr<Call> newOutgoingCall(
-        std::string_view toUrl, const std::vector<libsip_core::MediaMap>& mediaList) override;
+        std::string_view toUrl,
+        const std::vector<libsip_core::MediaMap>& mediaList,
+        const std::map<std::string, std::string>& headers = {}) override;
 
     /**
      * Create incoming SIPCall.
@@ -451,6 +526,26 @@ public:
                              bool onlyConnected = false) override;
 
     void connectivityChanged() override;
+    bool hasRunningTransportForConnectivityChange() const;
+    bool shouldHandleConnectivityChange() const;
+    void handleConnectivityChangedForced(const char* reason);
+    void prepareConnectivityRecovery(const char* reason);
+    void dispatchPreparedConnectivityRecovery(const char* reason);
+    bool isTransportRecoveryActive() const
+    {
+        return transportRecoveryPending_.load() || connectivityRecoveryInProgress_.load();
+    }
+    void rebindCallsToCurrentTransportForConnectivityChange(const char* reason);
+    void reinviteActiveCalls();
+    void scheduleConnectivityReinviteRetry(const std::shared_ptr<SIPCall>& sipCall);
+    /**
+     * Schedule a delayed follow-up that retries reinviteOnConnectivityChange()
+     * for a single call. Used when the re-INVITE was deferred (PJ_EPENDING /
+     * PJ_EBUSY / SDP-refresh-failed) and there is no other state-change hook
+     * to wake it up. Reuses the same retry budget as scheduleConnectivityReinviteRetry().
+     */
+    void scheduleConnectivityReinviteFollowup(const std::shared_ptr<SIPCall>& sipCall,
+                                              std::chrono::milliseconds delay);
 
     std::string getUserUri() const override;
 
@@ -519,20 +614,20 @@ public:
      * Flag indicating if main route is available (last keep-alive succeeded)
      * Public to allow access from static keep-alive callback
      */
-    bool mainRouteAvailable_ {false};
-
+    std::atomic<bool> mainRouteAvailable_ {false};
 
     void setCredentials(const std::vector<SipAccountConfig::Credentials>& creds);
-
 
     // set explicit transport destination and params for tdata
     bool setUpTransmissionData(pjsip_tx_data* tdata);
     bool setUpTransmissionData(pjsip_tx_data* tdata, const IpAddr& ip);
 
     const IpAddr& getServiceRouteIp() { return serviceRouteIp_; };
-    const IpAddr& getBackServiceRouteIp() { return backServiceRouteIp_; };
+    const std::vector<IpAddr>& getBackServiceRouteIps() { return backServiceRouteIps_; };
 
     std::atomic<bool> needsResubscribe_ {false};
+    std::atomic<bool> needsRepublish_ {false};
+    std::atomic<bool> pendingTransportRebind_ {false};
     std::string callUri_ {};
 
     void startBackupKeepAliveAfterRegister();
@@ -541,6 +636,38 @@ public:
     std::atomic<bool> pendingBackupKeepAliveStart_ {false};
 
     std::mutex switchFromCallRetry;
+    std::atomic<bool> routeSwitchPending_ {false};
+    std::atomic<bool> transportSwitchPending_ {false};
+    std::atomic<bool> transportRecoveryPending_ {false};
+    std::atomic<bool> connectivityRecoveryRequested_ {false};
+    std::atomic<bool> isShuttingDown_ {false};
+
+    /**
+     * When true, reinviteActiveCalls() will be called from onRegister()
+     * after successful registration, instead of immediately from recoverTransport().
+     */
+    std::atomic<bool> pendingReinviteAfterRegister_ {false};
+
+    /**
+     * Flag indicating that connectivity recovery is in progress.
+     * Transport-dependent operations should be skipped or deferred.
+     */
+    std::atomic<bool> connectivityRecoveryInProgress_ {false};
+    /**
+     * Latched in prepareConnectivityRecovery() and consumed in recoverTransport()
+     * so the duplicate prepareTransportReset() in the head of recoverTransport()
+     * is skipped when the connectivity-prepare step already ran for this event.
+     */
+    std::atomic<bool> prepareTransportResetDone_ {false};
+    std::atomic<bool> mainRouteFastProbeEnabled_ {false};
+    std::atomic<bool> activeNoRouteFastProbeEnabled_ {false};
+    std::atomic<bool> startupMainRouteProbePending_ {false};
+    std::atomic<bool> skipMainRouteStartupProbeOnce_ {false};
+    std::atomic<int64_t> lastTransportRecoveryMs_ {0};
+    std::mutex optionsRecoveryMutex_;
+    std::deque<int64_t> optionsRecoveryAttemptMs_;
+    std::mutex rawKeepAliveRecoveryMutex_;
+    std::deque<int64_t> rawKeepAliveRecoveryAttemptMs_;
 
 private:
     void doRegister1_();
@@ -550,7 +677,27 @@ private:
     // be updated (as the contact header)after the registration.
     bool initContactAddress();
     void updateContactHeader();
+public:
+    void emitRegistrationStateSignal(RegistrationState state, unsigned details_code);
+    void setRegistrationStateWithSignal(RegistrationState state,
+                                        unsigned details_code,
+                                        bool forceEmit);
+    bool updateActiveKeepAliveTargetFromActualIpAddress();
+    bool isOptionsKeepAliveMode() const;
+    KeepAliveTopology getKeepAliveTopology() const;
+    bool shouldRunStartupMainRouteProbe() const;
+    bool consumeShouldRunStartupMainRouteProbe();
+    std::string getServerUriForTarget(const std::string& target) const;
+    std::string getActiveKeepAliveUri() const;
+    std::string getMainRouteKeepAliveUri() const;
+    std::string getBackupRouteKeepAliveUri() const;
+    void handleStartupMainRouteProbeResult(int statusCode);
+    void handleActiveRouteOptionsSuccess(int statusCode);
+    void handleActiveRouteOptionsFailure(int statusCode);
+    void reregisterCurrentRoute(const char* reason);
+    bool sendStartupMainRouteProbe();
 
+private:
 
     NON_COPYABLE(SIPAccount);
 
@@ -575,6 +722,26 @@ private:
      */
     virtual void onTransportStateChanged(pjsip_transport_state state,
                                          const pjsip_transport_state_info* info);
+    bool switchTransportInternal(libsip_core::TransportType transportType,
+                                 bool persistConfig,
+                                 bool markRebind,
+                                 bool* changed = nullptr);
+    void scheduleConnectivityRecovery(const char* reason);
+    void recoverTransport(const std::string& reason, pj_status_t status);
+    bool scheduleRecoveryInternal(const char* reason, pj_status_t status, bool debounced);
+    bool shouldRecoverTransport(pjsip_transport_state state, pj_status_t status) const;
+    bool isBenignTransportShutdown(pjsip_transport_state state, pj_status_t status) const;
+    void markTransportRebindRequired(const char* reason);
+    void prepareTransportReset(const char* reason, bool resetNetworkRuntimeState);
+    void failConnectivityRefreshForActiveCalls(const char* reason, int statusCode);
+    void runPostRegisterRecoverySync();
+    std::pair<std::string, pj_uint16_t> currentLocalBinding() const;
+    void resetViaTransport();
+    void resetNetworkRuntimeStateForConnectivityChange();
+    void resetOptionsRecoveryWindow();
+    bool shouldSuppressOptionsRecovery();
+    void resetRawKeepAliveRecoveryWindow();
+    bool shouldSuppressRawKeepAliveRecovery();
 
     struct
     {
@@ -607,9 +774,9 @@ private:
      */
     std::string printContactHeader(const std::string& username,
                                    const std::string& displayName,
-                                          const std::string& address,
-                                          pj_uint16_t port,
-                                          const std::string& deviceKey = {});
+                                   const std::string& address,
+                                   pj_uint16_t port,
+                                   const std::string& deviceKey = {});
 
     /**
      * Resolved IP of hostname_ (for registration)
@@ -619,13 +786,12 @@ private:
     /**
      * Resolved IP of serviceRoute_ (for registration)
      */
-     IpAddr serviceRouteIp_;
-
+    IpAddr serviceRouteIp_;
 
     /**
      * Resolved IP of backServiceRoute_ (for registration)
      */
-     IpAddr backServiceRouteIp_;
+    std::vector<IpAddr> backServiceRouteIps_;
 
     /**
      * The pjsip client registration information
@@ -697,6 +863,10 @@ private:
     std::string contactHeader_;
     // Contact address (the address part of a SIP URI)
     IpAddr contactAddress_ {};
+    mutable std::mutex localBindingMutex_;
+    std::string lastLocalBindingAddress_ {};
+    pj_uint16_t lastLocalBindingPort_ {0};
+    bool hasLocalBindingSnapshot_ {false};
     pjsip_transport* via_tp_ {nullptr};
 
     /**
@@ -718,11 +888,12 @@ private:
     pj_uint16_t publishedPortUsed_ {sip_utils::DEFAULT_SIP_PORT};
 
     /**
-     * Flag indicating if backup service route is currently being used
+     * If usingBackupRoute_ flag is set, this string 
+     * represends current <backRoute, ip>, otherwise empty
      */
-    bool usingBackupRoute_ {false};
 
-
+     std::pair<std::string, IpAddr> activeBackupRoute_;
+     int activeBackupRouteIdx_ = -1;
 };
 
 } // namespace sip_core

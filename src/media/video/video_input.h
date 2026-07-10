@@ -36,6 +36,8 @@
 #include <mutex>
 #include <condition_variable>
 #include <array>
+#include <cstdint>
+#include <chrono>
 
 #if __APPLE__
 #import "TargetConditionals.h"
@@ -53,12 +55,23 @@ class SinkClient;
 
 enum class VideoInputMode { ManagedByClient, ManagedByDaemon, Undefined };
 
-class VideoInput : public VideoGenerator
+// Preflights the macOS Screen Recording (TCC) permission without triggering
+// the system prompt; always true on other platforms.
+bool hasScreenCaptureAccess();
+
+class VideoInput : public VideoGenerator,
+                   public std::enable_shared_from_this<VideoInput>
 {
 public:
     VideoInput(VideoInputMode inputMode = VideoInputMode::Undefined,
                const std::string& id_ = "local");
     ~VideoInput();
+
+    // Call exactly once on a freshly-constructed shared_ptr<VideoInput>.
+    // Installs the shared_from_this() backref the worker-thread lambdas
+    // need, then runs switchInput(id). Constructor cannot do this itself
+    // because shared_from_this() throws bad_weak_ptr inside the ctor.
+    void initialize(const std::string& id);
 
     // as VideoGenerator
     const std::string& getName() const { return currentResource_; }
@@ -96,12 +109,15 @@ public:
 #else
     void stopInput();
     void startInput();
+    void suspendForHold();
+    void resumeAfterHold();
 #endif
 
     void setSuccessfulSetupCb(const std::function<void(MediaType, bool)>& cb)
     {
         onSuccessfulSetup_ = cb;
     }
+    void setFailedSetupCb(const std::function<void(MediaType)>& cb) { onFailedSetup_ = cb; }
 
     /**
      * Restart stopped video input
@@ -109,6 +125,11 @@ public:
      * and this input must be restarted
      */
     void restart();
+
+    /**
+     * Whether this input was stopped because the capture device was disconnected.
+     */
+    bool wasStoppedByDeviceDisconnect() const { return stoppedByDeviceDisconnect_.load(); }
 
     std::shared_future<DeviceParams> switchInput(const std::string& resource);
 
@@ -120,7 +141,11 @@ private:
     // full MRL (camera:// + suffix)
     std::string currentResource_;
     std::atomic<bool> switchPending_ = {false};
+    std::atomic_bool switchInProgress_ {false};
     std::atomic_bool isStopped_ = {false};
+    std::atomic<int64_t> startupDeadlineUs_ {0};
+    enum class StartupAbortReason : uint8_t { None, StopRequested, Timeout };
+    std::atomic<StartupAbortReason> startupAbortReason_ {StartupAbortReason::None};
 
     DeviceParams decOpts_;
     std::promise<DeviceParams> foundDecOpts_;
@@ -128,9 +153,18 @@ private:
     bool emulateRate_ = false;
 
     std::atomic_bool decOptsFound_ {false};
+    std::atomic_bool captureStarted_ {false};
+    std::atomic_bool captureStartPending_ {false};
+    std::atomic_bool suspendedForHold_ {false};
+    std::atomic_bool stoppedByDeviceDisconnect_ {false};
 
-    // set value to promise. you can listen for another thread for foundDecOpts_, which it returned from switchInput
+    // set value to promise. you can listen for another thread for foundDecOpts_, which it returned
+    // from switchInput
     void foundDecOpts(const DeviceParams& params);
+    void notifyCaptureStarted();
+    void notifyCaptureStopped(bool force = false);
+    void notifySetupFailed(bool stopCapture = true);
+    void emitDeviceOpenError(const std::string& failedInput);
 
     void clearOptions();
 
@@ -140,10 +174,14 @@ private:
     bool initAVFoundation(const std::string& display);
     bool initFile(std::string path);
     bool initWindowsCapture(const std::string& params);
-    #if defined(_WIN32) && defined(USE_DSHOW_SCREEN_CAPTURE)
+#if defined(_WIN32) && defined(USE_DSHOW_SCREEN_CAPTURE)
     bool initScreenCaptureRecorder(const std::string& params);
-    #endif
+#endif
     bool isCapturing() const noexcept;
+    bool shouldInterruptDecoderIo() noexcept;
+    bool isStartupDeadlineExceeded() const noexcept;
+    void setStartupDeadline(std::chrono::steady_clock::time_point deadline) noexcept;
+    void clearStartupDeadline() noexcept;
 
     void switchDevice();
     bool capturing_ {false};
@@ -151,6 +189,31 @@ private:
     void deleteDecoder();
     std::unique_ptr<MediaDecoder> decoder_;
     std::shared_ptr<SinkClient> sink_;
+
+    // Decoders whose capture thread was detached on a stop timeout: that
+    // thread may still be blocked inside decode(), so the decoder must stay
+    // alive until the input is destroyed (see parkAbandonedDecoder()).
+    std::vector<std::unique_ptr<MediaDecoder>> abandonedDecoders_;
+    void parkAbandonedDecoder();
+
+    // Last-wins queue for switch requests arriving while one is in flight.
+    std::mutex pendingSwitchMutex_;
+    std::string pendingSwitchResource_;
+    bool hasPendingSwitch_ {false};
+    std::shared_future<DeviceParams> runPendingSwitch(const std::string& justCompleted,
+                                                      std::shared_future<DeviceParams> result);
+
+    // Worker-thread lifetime guard. loop_ lambdas capture this by value, so
+    // it outlives ~VideoInput when the thread is detached after a joinFor()
+    // timeout. Each callback checks `aborted`, then locks `owner` to a strong
+    // shared_ptr<VideoInput> for the body of the call — preventing destruction
+    // mid-callback. Between callbacks the worker holds no strong ref.
+    struct ThreadGuard
+    {
+        std::weak_ptr<VideoInput> owner;
+        std::atomic_bool aborted {false};
+    };
+    std::shared_ptr<ThreadGuard> threadGuard_;
     ThreadLoop loop_;
 
     // for ThreadLoop
@@ -174,6 +237,7 @@ private:
     std::atomic_bool paused_ {true};
 
     std::function<void(MediaType, bool)> onSuccessfulSetup_;
+    std::function<void(MediaType)> onFailedSetup_;
     std::function<void(const MediaStream& ms)> recorderCallback_;
 };
 

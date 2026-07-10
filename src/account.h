@@ -180,7 +180,9 @@ public:
      * @return The created call
      */
     virtual std::shared_ptr<Call> newOutgoingCall(
-        std::string_view toUrl, const std::vector<libsip_core::MediaMap>& mediaList)
+        std::string_view toUrl,
+        const std::vector<libsip_core::MediaMap>& mediaList,
+        const std::map<std::string, std::string>& headers = {})
         = 0;
 
     /**
@@ -296,6 +298,11 @@ public:
     // is playing ringtone?
     bool getRingtoneEnabled() const { return ringtoneEnabled_; }
     void setRingtoneEnabled(bool enabled);
+
+    // Number of seconds to wait for the client to push a custom ringtone
+    // for an incoming call carrying an Alert-Info header. 0 disables the wait.
+    int getPauseAfterAlertInfo() const { return config().pauseAfterAlertInfo; }
+    void setPauseAfterAlertInfo(int seconds);
     std::string getDisplayName() const { return config().displayName; }
     std::string getMailBox() const { return config().mailbox; }
 

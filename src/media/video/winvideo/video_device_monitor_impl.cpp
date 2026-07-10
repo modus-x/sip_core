@@ -29,15 +29,15 @@
 #include <SetupAPI.h>
 
 #include <algorithm>
+#include <condition_variable>
 #include <string>
 #include <thread>
 #include <vector>
 #include <cctype>
+#include <mutex>
 
 namespace sip_core {
 namespace video {
-
-
 
 constexpr GUID guidCamera
     = {0xe5323777, 0xf976, 0x4f5b, 0x9b, 0x55, 0xb9, 0x46, 0x99, 0xc4, 0x6e, 0x44};
@@ -56,61 +56,49 @@ private:
     VideoDeviceMonitor* monitor_;
 
     void run();
+    void notifyInitialSnapshotApplied();
+    void reconcileCurrentDevices();
 
     std::vector<std::string> enumerateVideoInputDevices();
 
     std::thread thread_;
-    HWND hWnd_;
+    HWND hWnd_ {nullptr};
+    std::mutex stateMutex_;
+    std::condition_variable stateCv_;
+    bool initialSnapshotApplied_ {false};
     static LRESULT CALLBACK WinProcCallback(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 };
 
 VideoDeviceMonitorImpl::VideoDeviceMonitorImpl(VideoDeviceMonitor* monitor)
     : monitor_(monitor)
     , thread_()
-{
-    HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
-    if (FAILED(hr)) {
-        SIP_CORE_ERR() << "Can't initialize COM.";
-    }
-}
+{}
 
 void
 VideoDeviceMonitorImpl::start()
 {
-    HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
-    if (FAILED(hr)) {
-        SIP_CORE_ERR() << "Cannot initialize COM";
-    }
-    // Enumerate the initial capture device list.
-    auto captureDeviceList = enumerateVideoInputDevices();
-    for (auto node : captureDeviceList) {
-        monitor_->addDevice(node);
-    }
     thread_ = std::thread(&VideoDeviceMonitorImpl::run, this);
+
+    std::unique_lock<std::mutex> lk(stateMutex_);
+    stateCv_.wait(lk, [this] { return initialSnapshotApplied_; });
 }
 
 VideoDeviceMonitorImpl::~VideoDeviceMonitorImpl()
 {
-    SendMessage(hWnd_, WM_DESTROY, 0, 0);
+    if (hWnd_)
+        PostMessage(hWnd_, WM_CLOSE, 0, 0);
     if (thread_.joinable())
         thread_.join();
-
-    CoUninitialize();
 }
 
-std::string
-getDeviceUniqueName(PDEV_BROADCAST_DEVICEINTERFACE_A pbdi)
+void
+VideoDeviceMonitorImpl::notifyInitialSnapshotApplied()
 {
-    std::string unique_name = pbdi->dbcc_name;
-
-    std::transform(unique_name.begin(), unique_name.end(), unique_name.begin(), [](unsigned char c) {
-        return std::tolower(c);
-    });
-
-    auto pos = unique_name.find_last_of("#");
-    unique_name = unique_name.substr(0, pos);
-
-    return unique_name;
+    {
+        std::lock_guard<std::mutex> lk(stateMutex_);
+        initialSnapshotApplied_ = true;
+    }
+    stateCv_.notify_all();
 }
 
 bool
@@ -150,7 +138,7 @@ VideoDeviceMonitorImpl::WinProcCallback(HWND hWnd, UINT message, WPARAM wParam, 
 {
     LRESULT lRet = 1;
     static HDEVNOTIFY hDeviceNotify;
-    VideoDeviceMonitorImpl* pThis;
+    auto* pThis = reinterpret_cast<VideoDeviceMonitorImpl*>(GetWindowLongPtr(hWnd, GWLP_USERDATA));
 
     switch (message) {
     case WM_CREATE: {
@@ -169,26 +157,12 @@ VideoDeviceMonitorImpl::WinProcCallback(HWND hWnd, UINT message, WPARAM wParam, 
     case WM_DEVICECHANGE: {
         switch (wParam) {
         case DBT_DEVICEREMOVECOMPLETE:
-        case DBT_DEVICEARRIVAL: {
-            PDEV_BROADCAST_DEVICEINTERFACE_A pbdi = (PDEV_BROADCAST_DEVICEINTERFACE_A) lParam;
-            auto unique_name = getDeviceUniqueName(pbdi);
-            if (!unique_name.empty()) {
-                SIP_CORE_DBG() << unique_name
-                               << ((wParam == DBT_DEVICEARRIVAL) ? " plugged" : " unplugged");
-                if (pThis = reinterpret_cast<VideoDeviceMonitorImpl*>(
-                        GetWindowLongPtr(hWnd, GWLP_USERDATA))) {
-                    if (wParam == DBT_DEVICEARRIVAL) {
-                        auto captureDeviceList = pThis->enumerateVideoInputDevices();
-                        for (auto id : captureDeviceList) {
-                            if (id.find(unique_name) != std::string::npos)
-                                pThis->monitor_->addDevice(id);
-                        }
-                    } else if (wParam == DBT_DEVICEREMOVECOMPLETE) {
-                        pThis->monitor_->removeDevice(unique_name);
-                    }
-                }
+        case DBT_DEVICEARRIVAL:
+            if (pThis) {
+                SIP_CORE_DBG() << "Camera device change detected, refreshing snapshot";
+                pThis->reconcileCurrentDevices();
             }
-        } break;
+            break;
         default:
             break;
         }
@@ -215,19 +189,44 @@ VideoDeviceMonitorImpl::WinProcCallback(HWND hWnd, UINT message, WPARAM wParam, 
 void
 VideoDeviceMonitorImpl::run()
 {
+    const HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    const bool comInitialized = SUCCEEDED(hr);
+    if (!comInitialized) {
+        SIP_CORE_ERR() << "Cannot initialize COM";
+        notifyInitialSnapshotApplied();
+        return;
+    }
+
     // Create a dummy window with the sole purpose to receive device change messages.
     static const wchar_t* className = L"Message";
     static const wchar_t* windowName = L"devicenotifications";
     WNDCLASSEX wx = {};
     wx.cbSize = sizeof(WNDCLASSEX);
     wx.lpfnWndProc = WinProcCallback;
-    wx.hInstance = reinterpret_cast<HINSTANCE>(GetModuleHandle(0));
+    auto instance = reinterpret_cast<HINSTANCE>(GetModuleHandle(nullptr));
+    wx.hInstance = instance;
     wx.lpszClassName = className;
-    if (RegisterClassEx(&wx)) {
-        // Pass this as lpParam so WinProcCallback can access members of VideoDeviceMonitorImpl.
-        hWnd_ = CreateWindowEx(
-            0, className, windowName, 0, 0, 0, 0, 0, HWND_MESSAGE, NULL, NULL, this);
+
+    const ATOM classAtom = RegisterClassEx(&wx);
+    if (!classAtom && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
+        SIP_CORE_ERR() << "Cannot register device monitor window class";
+        notifyInitialSnapshotApplied();
+        CoUninitialize();
+        return;
     }
+
+    // Pass this as lpParam so WinProcCallback can access members of VideoDeviceMonitorImpl.
+    hWnd_ = CreateWindowEx(
+        0, className, windowName, 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, instance, this);
+    if (!hWnd_) {
+        SIP_CORE_ERR() << "Cannot create device monitor window";
+        notifyInitialSnapshotApplied();
+        CoUninitialize();
+        return;
+    }
+
+    reconcileCurrentDevices();
+    notifyInitialSnapshotApplied();
 
     // Run the message loop that will finish once a WM_DESTROY message
     // has been sent, allowing the thread to join.
@@ -239,6 +238,14 @@ VideoDeviceMonitorImpl::run()
             DispatchMessage(&msg);
         }
     }
+
+    CoUninitialize();
+}
+
+void
+VideoDeviceMonitorImpl::reconcileCurrentDevices()
+{
+    monitor_->reconcileDevices(enumerateVideoInputDevices());
 }
 
 std::vector<std::string>
@@ -282,10 +289,15 @@ VideoDeviceMonitorImpl::enumerateVideoInputDevices()
 
         hr = CreateBindCtx(0, &bind_ctx);
         if (hr != S_OK) {
+            pPropBag->Release();
+            pMoniker->Release();
             continue;
         }
         hr = pMoniker->GetDisplayName(bind_ctx, NULL, &olestr);
         if (hr != S_OK) {
+            bind_ctx->Release();
+            pPropBag->Release();
+            pMoniker->Release();
             continue;
         }
         auto unique_name = to_string(olestr);
@@ -295,7 +307,10 @@ VideoDeviceMonitorImpl::enumerateVideoInputDevices()
             deviceList.push_back(std::string("video=") + unique_name);
         }
 
+        CoTaskMemFree(olestr);
+        bind_ctx->Release();
         pPropBag->Release();
+        pMoniker->Release();
     }
     pEnum->Release();
 

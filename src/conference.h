@@ -36,6 +36,7 @@
 #include "audio/audio_input.h"
 #include "conference_protocol.h"
 #include "media_attribute.h"
+#include "sip_core/media_const.h"
 
 #include <json/json.h>
 
@@ -75,6 +76,13 @@ struct ParticipantInfo
     bool voiceActivity {false};
     bool recording {false};
     std::string callId;
+    bool isSharing {false}; // participant is sharing its desktop (screen share)
+    // Marks the row that IS the destination participant. Stamped only in the
+    // per-destination copies built by Conference::getConfInfoHostUri — never
+    // true in the host's own confInfo_. Lets clients detect their own row
+    // without guessing identities (their Account.username is a login, e.g.
+    // n.plaksin, while the row uri is the extension the host dialed).
+    bool isMe {false};
 
     void fromJson(const Json::Value& v)
     {
@@ -93,6 +101,8 @@ struct ParticipantInfo
         handRaised = v["handRaised"].asBool();
         voiceActivity = v["voiceActivity"].asBool();
         recording = v["recording"].asBool();
+        isSharing = v["isSharing"].asBool();
+        isMe = v["me"].asBool(); // absent on old hosts -> false
     }
 
     Json::Value toJson() const
@@ -113,6 +123,8 @@ struct ParticipantInfo
         val["handRaised"] = handRaised;
         val["voiceActivity"] = voiceActivity;
         val["recording"] = recording;
+        val["isSharing"] = isSharing;
+        val["me"] = isMe;
         return val;
     }
 
@@ -133,7 +145,9 @@ struct ParticipantInfo
                 {"handRaised", handRaised ? "true" : "false"},
                 {"voiceActivity", voiceActivity ? "true" : "false"},
                 {"callId", callId},
-                {"recording", recording ? "true" : "false"}};
+                {"recording", recording ? "true" : "false"},
+                {"isSharing", isSharing ? "true" : "false"},
+                {"me", isMe ? "true" : "false"}};
     }
 
     friend bool operator==(const ParticipantInfo& p1, const ParticipantInfo& p2)
@@ -144,7 +158,8 @@ struct ParticipantInfo
                and p1.audioLocalMuted == p2.audioLocalMuted
                and p1.audioModeratorMuted == p2.audioModeratorMuted
                and p1.isModerator == p2.isModerator and p1.handRaised == p2.handRaised
-               and p1.voiceActivity == p2.voiceActivity and p1.recording == p2.recording;
+               and p1.voiceActivity == p2.voiceActivity and p1.recording == p2.recording
+               and p1.isSharing == p2.isSharing;
     }
 
     friend bool operator!=(const ParticipantInfo& p1, const ParticipantInfo& p2)
@@ -159,10 +174,16 @@ struct ConfInfo : public std::vector<ParticipantInfo>
     int w {0};
     int v {1}; // Supported conference protocol version
     int layout {0};
+    // Monotonic snapshot counter stamped by the host once per broadcast.
+    // Receivers drop a snapshot older than the last applied one — the only
+    // defense against wire/PBX reordering under rapid share/spotlight churn
+    // (apply is a wholesale replace, so one stale snapshot silently reverts
+    // layout/share/badges). 0 = legacy sender, always applied.
+    uint64_t seq {0};
 
     friend bool operator==(const ConfInfo& c1, const ConfInfo& c2)
     {
-        if (c1.h != c2.h or c1.w != c2.w)
+        if (c1.h != c2.h or c1.w != c2.w or c1.layout != c2.layout)
             return false;
         if (c1.size() != c2.size())
             return false;
@@ -203,6 +224,16 @@ public:
      * Destructor for this class, decrement static counter
      */
     ~Conference();
+
+    /**
+     * Register the VideoMixer onSourcesUpdated callback. MUST be called once,
+     * right after the Conference is owned by a shared_ptr, because the callback
+     * captures weak_from_this() by value: that is the only way the VideoMixer
+     * process() thread can reach back into this Conference without dereferencing
+     * a raw `this` (which would be a use-after-free during teardown).
+     * weak_from_this()/shared_from_this() is not valid inside the constructor.
+     */
+    void attachVideoMixerCallbacks();
 
     /**
      * Return the conference id
@@ -348,10 +379,31 @@ public:
      */
     bool toggleRecording() override;
 
-    void switchInput(const std::string& input);
+    bool switchInput(const std::string& input);
     void setActiveParticipant(const std::string& participant_id);
-    void setActiveStream(const std::string& streamId, bool state);
-    void setLayout(int layout);
+    // sendInfo=false lets multi-step transitions (share start/stop) stamp
+    // active+layout+isSharing first and broadcast ONE coalesced snapshot —
+    // two per transition meant the second could be lost/reordered, leaving
+    // remotes spotlight-active-but-GRID.
+    void setActiveStream(const std::string& streamId, bool state, bool sendInfo = true);
+    void setLayout(int layout, bool sendInfo = true);
+
+    /**
+     * A participant (peerId empty ⇒ the local host) announced it started/stopped
+     * sharing its desktop. The host arbitrates a single active sharer: the first
+     * to share is accepted; a moderator (or the host) may take over and preempt
+     * the current sharer; a non-moderator is denied while someone else shares.
+     * On accept the sharer's stream is promoted to Layout::ONE_BIG for everyone;
+     * on stop the layout returns to GRID.
+     */
+    void onShareState(const std::string& peerId, bool state);
+
+    /**
+     * End the current screen share (sharer muted its desktop source or left).
+     * Called from the confInfo builder when the active sharer stops producing
+     * video. Idempotent — a no-op when nobody is sharing.
+     */
+    void endCurrentShare();
 
     void onConfOrder(const std::string& callId, const std::string& order);
 
@@ -372,12 +424,28 @@ public:
     void updateConferenceInfo(ConfInfo confInfo);
     void setModerator(const std::string& uri, const bool& state);
     void hangupParticipant(const std::string& accountUri, const std::string& deviceId = "");
-    void setHandRaised(const std::string& uri, const bool& state);
+    /**
+     * Raise/lower a participant's hand. The participant is resolved from the
+     * account uri (deviceId is vestigial over plain SIP); the state itself is
+     * keyed by the host-side call id ("host" for the local host). When the
+     * order came over the wire, senderUri carries the SIP-layer sender
+     * identity: clients stamp self-actions with their typed login, which the
+     * host cannot resolve (it knows the peer by the uri it dialed), so an
+     * unresolvable accountUri is retried as the sender.
+     */
+    void setHandRaised(const std::string& accountUri,
+                       const std::string& deviceId,
+                       const bool& state,
+                       const std::string& senderUri = {});
     void setVoiceActivity(const std::string& id, const bool& newState);
+    void setVoiceActivityForCall(const std::string& callId, const bool& newState);
     void setVoiceActivity(const Json::Value& json);
+    void setVoiceInactiveHoldMs(int holdMs);
 
     void muteParticipant(const std::string& uri, const bool& state);
     void muteLocalHost(bool is_muted, const std::string& mediaType);
+    void muteLocalPlayback(bool muted);
+    bool isLocalPlaybackMuted() const { return localPlaybackMuted_; }
     // bool isRemoteParticipant(const std::string& uri);
     void mergeConfInfo(ConfInfo& newInfo, const std::string& peerURI);
 
@@ -404,7 +472,8 @@ public:
     /**
      * Announce to the client that medias are successfully negotiated
      */
-    void reportMediaNegotiationStatus();
+    void reportMediaNegotiationStatus(
+        const std::string& event = libsip_core::Media::MediaNegotiationStatusEvents::NEGOTIATION_SUCCESS);
 
     /**
      * Retrieve current medias list
@@ -438,7 +507,8 @@ private:
 
     static std::shared_ptr<Call> getCall(const std::string& callId);
     bool isModerator(std::string_view uri) const;
-    bool isHandRaised(std::string_view uri) const;
+    /** `id` is a host-side call id, or "host" for the local host. */
+    bool isHandRaised(std::string_view id) const;
     bool isVoiceActive(std::string_view uri) const;
     void updateModerators();
     void updateHandsRaised();
@@ -455,9 +525,47 @@ private:
 
     mutable std::mutex confInfoMutex_ {};
     ConfInfo confInfo_ {};
+    // Seed with wall-clock ms so a re-created conference (or a new host after
+    // a host swap) always starts above any seq a remote latched from the
+    // previous epoch (see ConfInfo::seq).
+    std::atomic<uint64_t> confInfoSeq_ {static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch())
+            .count())};
+
+    // Screen-share arbitration. `activeSharerStreamId_` is the mixer stream id
+    // of the single participant currently sharing its desktop (empty = nobody).
+    // `sharerHadVideo_` gates share-stop detection: the confInfo builder only
+    // treats a muted sharer as "stopped" once it has seen at least one live
+    // frame, so the brief no-frame window right after a share starts does not
+    // immediately cancel it.
+    mutable std::mutex sharerMtx_ {};
+    std::string activeSharerStreamId_ {};
+    bool sharerHadVideo_ {false};
+    // Layout that was active when the current share started, so stop/leave
+    // restores what the conference looked like before (not a hardcoded GRID).
+    int layoutBeforeShare_ {0};
+    // Spotlight ("в центр внимания") that was active when the share started.
+    // Promoting the sharer overwrites the mixer's single activeStream_, so
+    // without this the pre-share spotlight is silently lost on share stop and
+    // a non-GRID restored layout is left with no active stream backing it.
+    std::string activeStreamBeforeShare_ {};
 
     void sendConferenceInfos();
+#ifdef ENABLE_VIDEO
+    // Share-stop tail shared by onShareState(stop) and endCurrentShare().
+    void restoreShareLayout(const std::string& sharerStreamId,
+                            int restoreLayout,
+                            const std::string& restoreActive);
+#endif
+    // Rate-limited entry point (called from updateVoiceActivity()). Voice state
+    // flips far faster than is useful to broadcast; flooding remote participants
+    // with confVoiceActivity INFO gets them dropped by strict SIP servers.
     void sendVoiceActivity();
+    // Actually emits the SIP INFO + client signal (the throttled work).
+    void doSendVoiceActivity();
+    // Trailing-edge send, runs on the Manager scheduler thread.
+    void flushVoiceActivity();
     std::shared_ptr<RingBuffer> ghostRingBuffer_;
 
 #ifdef ENABLE_VIDEO
@@ -470,11 +578,20 @@ private:
     std::set<std::string, std::less<>> moderators_ {};
     std::set<std::string, std::less<>> participantsMuted_ {};
     std::set<std::string, std::less<>> handsRaised_;
+    bool localPlaybackMuted_ {false};
 
     bool attachHost_;
 
     // stream IDs
     std::set<std::string, std::less<>> streamsVoiceActive {};
+
+    // Voice-activity SIP INFO throttle (leading + trailing edge). The first
+    // change is sent immediately; bursts of flips within VOICE_ACTIVITY_MIN_INTERVAL
+    // collapse into a single trailing send carrying the latest state.
+    std::mutex voiceActivityMutex_ {};
+    std::chrono::steady_clock::time_point lastVoiceActivitySent_ {};
+    bool voiceActivitySendPending_ {false};
+    static constexpr std::chrono::milliseconds VOICE_ACTIVITY_MIN_INTERVAL {250};
 
     void initRecorder(std::shared_ptr<MediaRecorder>& rec);
     void deinitRecorder(std::shared_ptr<MediaRecorder>& rec);
@@ -484,7 +601,6 @@ private:
     ConfInfo getConfInfoHostUri(std::string_view localHostURI, std::string_view destURI);
     std::string voiceActivivtyToString(const ConfInfo&);
     bool isHost(std::string_view uri) const;
-    bool isHostDevice(std::string_view deviceId) const;
 
     /**
      * If the local host is participating in the conference (attached

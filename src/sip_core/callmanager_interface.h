@@ -40,12 +40,15 @@ namespace libsip_core {
     const std::map<std::string, std::shared_ptr<CallbackWrapperBase>>&);
 
 /* Call related methods */
-LIBSIP_CORE_PUBLIC std::string placeCall(const std::string& accountId, const std::string& to);
+LIBSIP_CORE_PUBLIC std::string placeCall(const std::string& accountId,
+                                         const std::string& to,
+                                         const std::map<std::string, std::string>& headers = {});
 
 LIBSIP_CORE_PUBLIC std::string placeCallWithMedia(
     const std::string& accountId,
     const std::string& to,
-    const std::vector<std::map<std::string, std::string>>& mediaList);
+    const std::vector<std::map<std::string, std::string>>& mediaList,
+    const std::map<std::string, std::string>& headers = {});
 LIBSIP_CORE_PUBLIC bool refuse(const std::string& accountId, const std::string& callId);
 LIBSIP_CORE_PUBLIC bool accept(const std::string& accountId, const std::string& callId);
 LIBSIP_CORE_PUBLIC bool hangUp(const std::string& accountId, const std::string& callId);
@@ -96,7 +99,8 @@ LIBSIP_CORE_PUBLIC bool joinParticipant(const std::string& accountId,
                                         const std::string& sel_callId,
                                         const std::string& account2Id,
                                         const std::string& drag_callId,
-                                        bool attached);
+                                        bool attached,
+                                        bool muteLocalPlayback = false);
 
 LIBSIP_CORE_PUBLIC void createConfFromParticipantList(const std::string& accountId,
                                                       const std::vector<std::string>& participants);
@@ -119,6 +123,9 @@ LIBSIP_CORE_PUBLIC bool joinConference(const std::string& accountId,
 LIBSIP_CORE_PUBLIC bool hangUpConference(const std::string& accountId, const std::string& confId);
 LIBSIP_CORE_PUBLIC bool holdConference(const std::string& accountId, const std::string& confId);
 LIBSIP_CORE_PUBLIC bool unholdConference(const std::string& accountId, const std::string& confId);
+LIBSIP_CORE_PUBLIC bool muteConferenceLocalPlayback(const std::string& accountId,
+                                                    const std::string& confId,
+                                                    bool mute);
 LIBSIP_CORE_PUBLIC std::vector<std::string> getConferenceList(const std::string& accountId);
 LIBSIP_CORE_PUBLIC std::vector<std::string> getParticipantList(const std::string& accountId,
                                                                const std::string& confId);
@@ -187,6 +194,17 @@ LIBSIP_CORE_PUBLIC void stopRecordedFilePlayback();
 LIBSIP_CORE_PUBLIC bool toggleRecording(const std::string& accountId, const std::string& callId);
 /* DEPRECATED */
 LIBSIP_CORE_PUBLIC void setRecording(const std::string& accountId, const std::string& callId);
+
+/**
+ * Set a custom ringtone for the currently ringing incoming call.
+ * Used by the client when the INVITE carried an Alert-Info header and
+ * the client has resolved the desired ringtone file (e.g. downloaded it
+ * over HTTPS). If the call is no longer in the Alert-Info wait window,
+ * this call is a no-op and returns false.
+ */
+LIBSIP_CORE_PUBLIC bool setRingtoneForIncomingCall(const std::string& accountId,
+                                                   const std::string& callId,
+                                                   const std::string& ringtonePath);
 
 LIBSIP_CORE_PUBLIC void recordPlaybackSeek(double value);
 LIBSIP_CORE_PUBLIC bool getIsRecording(const std::string& accountId, const std::string& callId);

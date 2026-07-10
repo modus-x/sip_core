@@ -3,9 +3,9 @@ index 2ff59ee..b1940d3 100644
 --- a/libavformat/rtpenc.c
 +++ b/libavformat/rtpenc.c
 @@ -48,52 +48,6 @@ static const AVClass rtp_muxer_class = {
- 
+
  #define RTCP_SR_SIZE 28
- 
+
 -static int is_supported(enum AVCodecID id)
 -{
 -    switch(id) {
@@ -64,6 +64,6 @@ index 2ff59ee..b1940d3 100644
 -
 -        return -1;
 -    }
- 
+
      if (s->payload_type < 0) {
          /* Re-validate non-dynamic payload types */

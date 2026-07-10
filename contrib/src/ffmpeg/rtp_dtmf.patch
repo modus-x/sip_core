@@ -1,25 +1,91 @@
 diff --git a/libavformat/rtpenc.c b/libavformat/rtpenc.c
-index c764fca..9976e7b 100644
+index 795229a..ac53f6a 100644
 --- a/libavformat/rtpenc.c
 +++ b/libavformat/rtpenc.c
-@@ -304,11 +304,15 @@ void ff_rtp_send_data(AVFormatContext *s1, const uint8_t *buf1, int len, int m)
- #else
+@@ -48,54 +48,6 @@ static const AVClass rtp_muxer_class = {
+ 
+ #define RTCP_SR_SIZE 28
+ 
+-static int is_supported(enum AVCodecID id)
+-{
+-    switch(id) {
+-    case AV_CODEC_ID_DIRAC:
+-    case AV_CODEC_ID_H261:
+-    case AV_CODEC_ID_H263:
+-    case AV_CODEC_ID_H263P:
+-    case AV_CODEC_ID_H264:
+-    case AV_CODEC_ID_HEVC:
+-    case AV_CODEC_ID_MPEG1VIDEO:
+-    case AV_CODEC_ID_MPEG2VIDEO:
+-    case AV_CODEC_ID_MPEG4:
+-    case AV_CODEC_ID_AAC:
+-    case AV_CODEC_ID_MP2:
+-    case AV_CODEC_ID_MP3:
+-    case AV_CODEC_ID_PCM_ALAW:
+-    case AV_CODEC_ID_PCM_MULAW:
+-    case AV_CODEC_ID_PCM_S8:
+-    case AV_CODEC_ID_PCM_S16BE:
+-    case AV_CODEC_ID_PCM_S16LE:
+-    case AV_CODEC_ID_PCM_S24BE:
+-    case AV_CODEC_ID_PCM_U16BE:
+-    case AV_CODEC_ID_PCM_U16LE:
+-    case AV_CODEC_ID_PCM_U8:
+-    case AV_CODEC_ID_MPEG2TS:
+-    case AV_CODEC_ID_AMR_NB:
+-    case AV_CODEC_ID_AMR_WB:
+-    case AV_CODEC_ID_VORBIS:
+-    case AV_CODEC_ID_THEORA:
+-    case AV_CODEC_ID_VP8:
+-    case AV_CODEC_ID_VP9:
+-    case AV_CODEC_ID_AV1:
+-    case AV_CODEC_ID_ADPCM_G722:
+-    case AV_CODEC_ID_ADPCM_G726:
+-    case AV_CODEC_ID_ADPCM_G726LE:
+-    case AV_CODEC_ID_ILBC:
+-    case AV_CODEC_ID_MJPEG:
+-    case AV_CODEC_ID_SPEEX:
+-    case AV_CODEC_ID_OPUS:
+-    case AV_CODEC_ID_RAWVIDEO:
+-    case AV_CODEC_ID_BITPACKED:
+-    case AV_CODEC_ID_G728:
+-        return 1;
+-    default:
+-        return 0;
+-    }
+-}
+-
+ static int rtp_write_header(AVFormatContext *s1)
+ {
+     RTPMuxContext *s = s1->priv_data;
+@@ -107,11 +59,6 @@ static int rtp_write_header(AVFormatContext *s1)
+         return AVERROR(EINVAL);
+     }
+     st = s1->streams[0];
+-    if (!is_supported(st->codecpar->codec_id)) {
+-        av_log(s1, AV_LOG_ERROR, "Unsupported codec %s\n", avcodec_get_name(st->codecpar->codec_id));
+-
+-        return -1;
+-    }
+ 
+     if (s->payload_type < 0) {
+         /* Re-validate non-dynamic payload types */
+@@ -361,11 +308,14 @@ void ff_rtp_send_data(AVFormatContext *s1, const uint8_t *buf1, int len, int m)
+ 
+     /* build the RTP header */
      avio_w8(s1->pb, RTP_VERSION << 6);
- #endif
 -    avio_w8(s1->pb, (s->payload_type & 0x7f) | ((m & 0x01) << 7));
 +    avio_w8(s1->pb, ((s->flags & FF_RTP_FLAG_DTMF) ? 101 : s->payload_type & 0x7f) | ((m & 0x01) << 7));
      avio_wb16(s1->pb, s->seq);
      avio_wb32(s1->pb, s->timestamp);
      avio_wb32(s1->pb, s->ssrc);
  
-+    if (s->flags & FF_RTP_FLAG_DTMF) {
++    if (s->flags & FF_RTP_FLAG_DTMF)
 +        s->flags &= ~FF_RTP_FLAG_DTMF;
-+    }
 +
- #ifdef EXT_ABS_SEND_TIME
-     avio_wb16(s1->pb, 0xBEDE);      // magic word
-     avio_wb16(s1->pb, 0x0001);      // length=1
-@@ -496,12 +500,29 @@ static int rtp_send_ilbc(AVFormatContext *s1, const uint8_t *buf, int size)
+     avio_write(s1->pb, buf1, len);
+     avio_flush(s1->pb);
+ 
+@@ -541,12 +491,28 @@ static int rtp_send_ilbc(AVFormatContext *s1, const uint8_t *buf, int size)
  static int rtp_write_packet(AVFormatContext *s1, AVPacket *pkt)
  {
      RTPMuxContext *s = s1->priv_data;
@@ -27,7 +93,6 @@ index c764fca..9976e7b 100644
 -    int rtcp_bytes;
      int size= pkt->size;
  
-+    // send dtmf
 +    if (pkt->flags & FF_RTP_FLAG_DTMF) {
 +        av_log(s1, AV_LOG_DEBUG, "%d: write DTMF len=%d\n", pkt->stream_index, size);
 +        int m = 0;
@@ -52,7 +117,7 @@ index c764fca..9976e7b 100644
          RTCP_TX_RATIO_DEN;
      if ((s->first_packet || ((rtcp_bytes >= RTCP_SR_SIZE) &&
 diff --git a/libavformat/rtpenc.h b/libavformat/rtpenc.h
-index 70ea85b..95bd0c0 100644
+index ba88bfe..8ec223d 100644
 --- a/libavformat/rtpenc.h
 +++ b/libavformat/rtpenc.h
 @@ -70,6 +70,9 @@ typedef struct RTPMuxContext RTPMuxContext;
@@ -64,4 +129,4 @@ index 70ea85b..95bd0c0 100644
 +#define FF_RTP_FLAG_FORCE_MARKER 128
  
  #define FF_RTP_FLAG_OPTS(ctx, fieldname) \
-     { "rtpflags", "RTP muxer flags", offsetof(ctx, fieldname), AV_OPT_TYPE_FLAGS, {.i64 = 0}, INT_MIN, INT_MAX, AV_OPT_FLAG_ENCODING_PARAM, "rtpflags" }, \
+     { "rtpflags", "RTP muxer flags", offsetof(ctx, fieldname), AV_OPT_TYPE_FLAGS, {.i64 = 0}, INT_MIN, INT_MAX, AV_OPT_FLAG_ENCODING_PARAM, .unit = "rtpflags" }, \

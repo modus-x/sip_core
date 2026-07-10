@@ -65,24 +65,28 @@ VideoSender::VideoSender(const std::string& dest,
     videoEncoder_->addStream(args.codec->systemCodecInfo);
     videoEncoder_->setInitSeqVal(seqVal);
     videoEncoder_->setIOContext(muxContext_->getContext());
-    muted_.store(args.onHold);
 }
 
 void
 VideoSender::setSource(const std::string& source)
 {
+    std::lock_guard<std::mutex> lock(encoderMutex_);
     videoEncoder_->setSource(source);
 }
 
 void
 VideoSender::natPing()
 {
+    std::lock_guard<std::mutex> lock(encoderMutex_);
+    // Legacy RTP keepalive: sends an empty RTP packet.
+    // Muted video NAT keepalive should use sendBlackFrame() (decodable media packet).
     videoEncoder_->sendDummyPacket();
 }
 
 void
 VideoSender::encodeAndSendVideo(const std::shared_ptr<VideoFrame>& input_frame)
 {
+    std::lock_guard<std::mutex> lock(encoderMutex_);
     int angle = input_frame->getOrientation();
     if (rotation_ != angle) {
         rotation_ = angle;
@@ -100,11 +104,6 @@ VideoSender::encodeAndSendVideo(const std::shared_ptr<VideoFrame>& input_frame)
             --forceKeyFrame_;
         }
 
-        if (muted_.load()) {
-            sendBlackFrame(stream_.width, stream_.height);
-            return;
-        }
-
         if (videoEncoder_->encode(input_frame, is_keyframe, frameNumber_++) < 0)
             SIP_CORE_ERR("encoding failed");
     }
@@ -117,6 +116,8 @@ VideoSender::encodeAndSendVideo(const std::shared_ptr<VideoFrame>& input_frame)
 void
 VideoSender::sendBlackFrame(int width, int height)
 {
+    std::lock_guard<std::mutex> lock(encoderMutex_);
+    // Send a decodable black frame for muted-video NAT keepalive and stream continuity.
     auto black_frame = std::make_shared<VideoFrame>();
     black_frame->reserve(AV_PIX_FMT_YUV420P, width, height);
     libav_utils::fillWithBlack(black_frame->pointer());
@@ -142,18 +143,21 @@ VideoSender::forceKeyFrame()
 uint16_t
 VideoSender::getLastSeqValue()
 {
+    std::lock_guard<std::mutex> lock(encoderMutex_);
     return videoEncoder_->getLastSeqValue();
 }
 
 void
 VideoSender::setChangeOrientationCallback(std::function<void(int)> cb)
 {
+    std::lock_guard<std::mutex> lock(encoderMutex_);
     changeOrientationCallback_ = std::move(cb);
 }
 
 int
 VideoSender::setBitrate(uint64_t br)
 {
+    std::lock_guard<std::mutex> lock(encoderMutex_);
     // The encoder may be destroy during a bitrate change
     // when a codec parameter like auto quality change
     if (!videoEncoder_)

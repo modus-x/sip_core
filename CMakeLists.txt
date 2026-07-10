@@ -2,10 +2,27 @@ cmake_minimum_required(VERSION 3.25)
 
 cmake_policy(VERSION 3.25...3.31)
 
+# Single source of truth: VERSION file at repo root.
+# Format: BASE[-SUFFIX] e.g. "0.18.14" or "0.18.14-test".
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION.txt" SIP_CORE_VERSION_FULL
+     LIMIT_COUNT 1)
+string(STRIP "${SIP_CORE_VERSION_FULL}" SIP_CORE_VERSION_FULL)
+
+string(REGEX MATCH "^([0-9]+\\.[0-9]+\\.[0-9]+)(.*)$" _ "${SIP_CORE_VERSION_FULL}")
+set(SIP_CORE_VERSION_BASE "${CMAKE_MATCH_1}")
+set(SIP_CORE_VERSION_SUFFIX "${CMAKE_MATCH_2}")
+
+if(NOT SIP_CORE_VERSION_BASE)
+  message(FATAL_ERROR "Could not parse VERSION file content '${SIP_CORE_VERSION_FULL}'. Expected X.Y.Z[-suffix].")
+endif()
+
 project(
   sip_core
-  VERSION 0.16.3
+  VERSION ${SIP_CORE_VERSION_BASE}
   LANGUAGES C CXX)
+
+# Re-expose full version (with suffix) for downstream consumers.
+set(SIP_CORE_VERSION_FULL "${SIP_CORE_VERSION_BASE}${SIP_CORE_VERSION_SUFFIX}")
 
 set(BUILD_NUMBER 1)
 
@@ -35,6 +52,12 @@ option(ENABLE_CLI_EXAMPLE "Build with CLI example" OFF)
 option(ENABLE_VIDEO "Build with video support" ON)
 option(HW_ACCEL "Build with video hardware acceleration support" ON)
 option(BUILD_DEPS "Build deps" ON)
+option(CONFERENCE_METADATA
+       "Send conference metadata over SIP and disable conference border text overlays"
+       ON)
+option(ENABLE_RQM
+       "Stream fragmented MP4 over RTP (payload 111) instead of plain H.264 — used by the RQM recording flow"
+       OFF)
 
 set(PREBUILD_DEPS_PATHS
     ""
@@ -196,17 +219,6 @@ if(NOT MSVC AND BUILD_DEPS)
   endif()
 
   foreach(TARGET ${TARGETS})
-    if(APPLE AND NOT IOS)
-      getarch(${TARGET} TARGET_ARCH)
-      message(STATUS "Building on macOS for ${TARGET}...")
-      set(ENV{LDFLAGS}
-          "-arch ${TARGET_ARCH} -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
-      set(ENV{CFLAGS}
-          "-arch ${TARGET_ARCH} -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
-      set(ENV{CXXFLAGS}
-          "-arch ${TARGET_ARCH} -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
-    endif()
-
     message(STATUS "building native dependencies for ${TARGET}")
 
     set(CONTRIB_BUILD_PATH ${CMAKE_CURRENT_SOURCE_DIR}/contrib/build-${TARGET})
@@ -324,8 +336,8 @@ if(MSVC)
                  FILES ${Source_Files__media__video__uwpvideo})
   endif()
 
-  source_group("Source Files\\media\\audio\\portaudio"
-               FILES ${Source_Files__media__audio__portaudio})
+  source_group("Source Files\\media\\audio\\wasapi"
+               FILES ${Source_Files__media__audio__wasapi})
   source_group("Source Files\\media\\video\\winvideo"
                FILES ${Source_Files__media__video__winvideo})
 endif()
@@ -373,7 +385,7 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
        ${CMAKE_CURRENT_SOURCE_DIR}/src/media/audio/pulseaudio/audiostream.cpp
        ${CMAKE_CURRENT_SOURCE_DIR}/src/media/audio/pulseaudio/pulselayer.cpp)
 elseif(MSVC)
-  list(APPEND ALL_FILES ${ALL_FILES} "${Source_Files__media__audio__portaudio}"
+  list(APPEND ALL_FILES ${ALL_FILES} "${Source_Files__media__audio__wasapi}"
        "${Source_Files__media__video__uwpvideo}"
        "${Source_Files__media__video__winvideo}")
 elseif(APPLE)
@@ -421,9 +433,12 @@ target_compile_definitions(
     LIBSIP_CORE_BUILD
     # define exports Conditionally add compile definitions based on platform
     $<$<OR:$<BOOL:${LINUX}>,$<BOOL:${MSVC}>,$<BOOL:${ANDROID}>>:HAVE_WEBRTC_AP>
-    $<$<OR:$<BOOL:${LINUX}>,$<BOOL:${MSVC}>,$<BOOL:${ANDROID}>>:HAVE_SPEEXDSP>
+    # Use static yaml-cpp
+    YAML_CPP_STATIC_DEFINE
+    CONFERENCE_METADATA=$<BOOL:${CONFERENCE_METADATA}>
     # Building shared library
-    SIP_CORE_EXPORTS)
+    SIP_CORE_EXPORTS
+    BCG729_STATIC)
 
 if(IOS)
   target_compile_definitions(${PROJECT_NAME} PUBLIC TARGET_OS_IOS)
@@ -435,6 +450,10 @@ endif()
 
 if(HW_ACCEL)
   target_compile_definitions(${PROJECT_NAME} PUBLIC RING_ACCEL)
+endif()
+
+if(ENABLE_RQM)
+  target_compile_definitions(${PROJECT_NAME} PUBLIC RQM)
 endif()
 
 if(ANDROID)
@@ -476,9 +495,7 @@ if(MSVC)
       "${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/http_parser;"
       "${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/jsoncpp/include;"
       "${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/yaml-cpp/include;"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/speexdsp/include;"
       "${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/webrtc-audio-processing;"
-      "${CMAKE_CURRENT_SOURCE_DIR}/contrib/native-win32/portaudio/include;"
       $<$<CONFIG:Debug>:${DEPS_DEBUG}/include>
       $<$<CONFIG:Release>:${DEPS_RELEASE}/include>
       $<$<CONFIG:RelWithDebInfo>:${DEPS_RELEASE}/include>
@@ -564,6 +581,10 @@ if(MSVC)
             Strmiids.lib
             OleAut32.lib
             Shlwapi.lib
+            Mmdevapi.lib
+            Avrt.lib
+            Ksuser.lib
+            uuid.lib
             optimized
             ${DEPS_RELEASE}/lib/avcodec.lib
             optimized
@@ -599,15 +620,13 @@ if(MSVC)
             optimized
             ${DEPS_RELEASE}/lib/x64/OpenCL.lib
             optimized
-            ${DEPS_RELEASE}/libyaml-cppmd.lib
+            ${DEPS_RELEASE}/yaml-cpp.lib
             optimized
             ${DEPS_RELEASE}/fmt.lib
             optimized
-            ${DEPS_RELEASE}/libspeexdsp.lib
-            optimized
             ${DEPS_RELEASE}/webrtc-audio-processing.lib
             optimized
-            ${DEPS_RELEASE}/portaudio_static_x64.lib
+            ${DEPS_RELEASE}/bcg729.lib
             debug
             ${DEPS_DEBUG}/lib/avcodec.lib
             debug
@@ -643,15 +662,13 @@ if(MSVC)
             debug
             ${DEPS_DEBUG}/lib/x64/OpenCL.lib
             debug
-            ${DEPS_DEBUG}/libyaml-cppmdd.lib
+            ${DEPS_DEBUG}/yaml-cppd.lib
             debug
             ${DEPS_DEBUG}/fmtd.lib
             debug
-            ${DEPS_DEBUG}/libspeexdsp.lib
-            debug
             ${DEPS_DEBUG}/webrtc-audio-processing.lib
             debug
-            ${DEPS_DEBUG}/portaudio_static_x64.lib
+            ${DEPS_DEBUG}/bcg729.lib
             # this is for dependencies to work with frames emmitted by our
             # library
     PUBLIC
@@ -659,6 +676,9 @@ if(MSVC)
       bcrypt.lib
       ncrypt.lib
       Crypt32.lib
+      # timeGetTime/timeBeginPeriod for webrtc-audio-processing; previously pulled
+      # in transitively by portaudio. PUBLIC so consumers (tests, sip_cli) resolve it.
+      Winmm.lib
       debug
       ${DEPS_DEBUG}/lib/avutil.lib
       debug
@@ -743,15 +763,14 @@ else()
     pkg_search_module(swresample_${TARGET} REQUIRED IMPORTED_TARGET
                       libswresample)
     pkg_search_module(swscale_${TARGET} REQUIRED IMPORTED_TARGET libswscale)
-	    pkg_search_module(avutil_${TARGET} REQUIRED IMPORTED_TARGET GLOBAL
-	                      libavutil)
-	    pkg_search_module(yaml_${TARGET} REQUIRED IMPORTED_TARGET yaml-cpp)
-	    pkg_search_module(json_${TARGET} REQUIRED IMPORTED_TARGET jsoncpp)
-	    pkg_search_module(speex_${TARGET} REQUIRED IMPORTED_TARGET speex)
-	    pkg_search_module(speexdsp_${TARGET} REQUIRED IMPORTED_TARGET speexdsp)
-	    pkg_search_module(zlib_${TARGET} REQUIRED IMPORTED_TARGET zlib)
+    pkg_search_module(avutil_${TARGET} REQUIRED IMPORTED_TARGET GLOBAL
+                      libavutil)
+    pkg_search_module(yaml_${TARGET} REQUIRED IMPORTED_TARGET yaml-cpp)
+    pkg_search_module(json_${TARGET} REQUIRED IMPORTED_TARGET jsoncpp)
+    pkg_search_module(zlib_${TARGET} REQUIRED IMPORTED_TARGET zlib)
 	    pkg_search_module(fontconfig_${TARGET} REQUIRED IMPORTED_TARGET fontconfig)
 	    pkg_search_module(harfbuzz_${TARGET} REQUIRED IMPORTED_TARGET harfbuzz)
+	    pkg_search_module(libbcg729_${TARGET} REQUIRED IMPORTED_TARGET libbcg729)
 
     # LD_FLAGS are broken on Apple, erase them
     if(APPLE)
@@ -787,12 +806,11 @@ else()
 	             PkgConfig::swscale_${TARGET}
 	             PkgConfig::yaml_${TARGET}
 	             PkgConfig::json_${TARGET}
-	             PkgConfig::speex_${TARGET}
-	             PkgConfig::speexdsp_${TARGET}
 	             PkgConfig::fmt_${TARGET}
 	             PkgConfig::zlib_${TARGET}
 	             PkgConfig::fontconfig_${TARGET}
 	             PkgConfig::harfbuzz_${TARGET}
+	             PkgConfig::libbcg729_${TARGET}
 	      # for passing video frames to external libraries
 	      PUBLIC PkgConfig::avutil_${TARGET})
 
@@ -831,9 +849,13 @@ else()
                                                     "-framework CFNetwork")
     endif()
 
+    # do not forget to link iconv on macOS!
+    target_link_libraries(${PROJECT_NAME} PRIVATE iconv)
+
     target_link_libraries(
       ${PROJECT_NAME} PRIVATE resolv "-framework AudioToolbox"
-                              "-framework CoreAudio" "-framework Accelerate")
+                              "-framework CoreAudio" "-framework Accelerate"
+                              "-framework CoreGraphics")
   endif()
 
   if(ANDROID)
@@ -849,10 +871,48 @@ else()
             -Wno-deprecated
             -Wno-deprecated-declarations
             -Wno-unknown-pragmas)
-  target_compile_definitions(${PROJECT_NAME} PRIVATE PJ_AUTOCONF=1)
+  target_compile_definitions(${PROJECT_NAME} PRIVATE PJ_AUTOCONF=1 YAML_CPP_STATIC_DEFINE)
 
   if(APPLE)
     target_compile_definitions(${PROJECT_NAME} PUBLIC HAVE_COREAUDIO)
+  endif()
+endif()
+
+# Tests
+include(CTest)
+if(BUILD_TESTING)
+  add_executable(video_input_tests tests/video_input_tests.cpp)
+  target_link_libraries(video_input_tests PRIVATE ${PROJECT_NAME})
+  add_test(NAME video_input_tests COMMAND video_input_tests)
+
+  add_executable(sipaccount_recovery_tests tests/sipaccount_recovery_tests.cpp)
+  target_link_libraries(sipaccount_recovery_tests PRIVATE ${PROJECT_NAME})
+  add_test(NAME sipaccount_recovery_tests COMMAND sipaccount_recovery_tests)
+  add_executable(sdp_offer_validation_tests tests/sdp_offer_validation_tests.cpp)
+  target_link_libraries(sdp_offer_validation_tests PRIVATE ${PROJECT_NAME})
+  add_test(NAME sdp_offer_validation_tests COMMAND sdp_offer_validation_tests)
+
+  add_executable(socket_pair_reservation_tests tests/socket_pair_reservation_tests.cpp)
+  target_link_libraries(socket_pair_reservation_tests PRIVATE ${PROJECT_NAME})
+  add_test(NAME socket_pair_reservation_tests COMMAND socket_pair_reservation_tests)
+
+  add_executable(media_recorder_tests tests/media_recorder_tests.cpp)
+  target_link_libraries(media_recorder_tests PRIVATE ${PROJECT_NAME})
+  add_test(NAME media_recorder_tests COMMAND media_recorder_tests)
+
+  add_executable(conference_protocol_tests tests/conference_protocol_tests.cpp)
+  target_link_libraries(conference_protocol_tests PRIVATE ${PROJECT_NAME})
+  add_test(NAME conference_protocol_tests COMMAND conference_protocol_tests)
+
+  if(APPLE AND NOT IOS)
+    # Pure-logic unit tests for the CoreAudio device-change snapshot helpers
+    # that suppress VoiceProcessingIO's VPAggregate churn (root cause of the
+    # 3-5 s audio startup delay at call establishment).
+    add_executable(coreaudio_device_filter_tests
+                   tests/coreaudio_device_filter_tests.cpp
+                   src/media/audio/coreaudio/osx/device_signature.cpp)
+    target_include_directories(coreaudio_device_filter_tests PRIVATE src)
+    add_test(NAME coreaudio_device_filter_tests COMMAND coreaudio_device_filter_tests)
   endif()
 endif()
 

@@ -79,7 +79,7 @@ AudioFile::AudioFile(const std::string& fileName, unsigned int sampleRate, bool 
     if (decoder->setupAudio() < 0)
         throw AudioFileException("Decoder setup failed: " + fileName);
 
-    while (decoder->decode() != MediaDemuxer::Status::EndOfFile)
+    while (decoder->decode() != DecodeStatus::EndOfFile)
         ;
 
     delete buffer_;

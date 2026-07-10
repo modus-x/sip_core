@@ -57,36 +57,68 @@ constexpr const char* TRANSPORT_STATE_STR[] = {"CONNECTED",
                                                "UNKNOWN STATE"};
 constexpr const size_t TRANSPORT_STATE_SZ = std::size(TRANSPORT_STATE_STR);
 
-static bool brokerDestroying {false};
+namespace {
+
+std::string
+transportKey(const IpAddr& ipAddress)
+{
+    return ipAddress.toString(true);
+}
+
+bool
+isUdpType(pjsip_transport_type_e type)
+{
+    return type == PJSIP_TRANSPORT_UDP || type == PJSIP_TRANSPORT_UDP6;
+}
+
+bool
+isTcpType(pjsip_transport_type_e type)
+{
+    return type == PJSIP_TRANSPORT_TCP || type == PJSIP_TRANSPORT_TCP6;
+}
+
+} // namespace
 
 void
 UDPTransport::deleteTransport(pjsip_transport* t)
 {
-    // pjsip_transport_dec_ref(t);
+    if (!t)
+        return;
+
+    const auto status = pjsip_transport_dec_ref(t);
+    if (status != PJ_SUCCESS) {
+        SIP_CORE_WARN("Failed to decrement UDP transport ref: %s",
+                      sip_utils::sip_strerror(status).c_str());
+    }
 }
 
 UDPTransport::UDPTransport(pjsip_transport* t)
     : SipTransport()
     , transport_(nullptr, &deleteTransport)
 {
-    //    if (not t or pjsip_transport_add_ref(t) != PJ_SUCCESS)
-    //        throw std::runtime_error("invalid transport for UDP, because cannot add ref");
+    if (!t || pjsip_transport_add_ref(t) != PJ_SUCCESS)
+        throw std::runtime_error("invalid transport for UDP, because cannot add ref");
 
-    // Set pointer here, right after the successful pjsip_transport_add_ref
     transport_.reset(t);
-    //
-    //    SIP_CORE_DEBUG("UDPTransport@{} tr={} rc={:d}",
-    //                   fmt::ptr(this),
-    //                   fmt::ptr(transport_.get()),
-    //                   pj_atomic_get(transport_->ref_cnt));
+    SIP_CORE_DEBUG("UDPTransport@{} tr={}", fmt::ptr(this), fmt::ptr(transport_.get()));
 }
 
 UDPTransport::~UDPTransport()
 {
-    //    SIP_CORE_DEBUG("~UDPTransport@{} tr={} rc={:d}",
-    //                   fmt::ptr(this),
-    //                   fmt::ptr(transport_.get()),
-    //                   pj_atomic_get(transport_->ref_cnt));
+    SIP_CORE_DEBUG("~UDPTransport@{} tr={}", fmt::ptr(this), fmt::ptr(transport_.get()));
+}
+
+void
+UDPTransport::shutdown()
+{
+    if (auto* tp = transport_.get()) {
+        auto status = pjsip_transport_shutdown(tp);
+        if (status != PJ_SUCCESS) {
+            SIP_CORE_WARN("Failed to shutdown UDP transport %p: %s",
+                          tp,
+                          sip_utils::sip_strerror(status).c_str());
+        }
+    }
 }
 
 TCPTransport::TCPTransport(pjsip_tpfactory* factory)
@@ -97,10 +129,28 @@ TCPTransport::TCPTransport(pjsip_tpfactory* factory)
 
 TCPTransport::~TCPTransport()
 {
-    if (!brokerDestroying) {
-        get_factory()->destroy(get_factory());
-    }
+    shutdown();
     SIP_CORE_DEBUG("~TCPTransport@{} tf={}", fmt::ptr(this), fmt::ptr(connection_factory_));
+}
+
+void
+TCPTransport::shutdown()
+{
+    auto* factory = connection_factory_;
+    if (!factory)
+        return;
+
+    bool expected = false;
+    if (!destroyed_.compare_exchange_strong(expected, true))
+        return;
+
+    connection_factory_ = nullptr;
+    auto status = factory->destroy(factory);
+    if (status != PJ_SUCCESS) {
+        SIP_CORE_WARN("Failed to destroy TCP listener %p: %s",
+                      factory,
+                      sip_utils::sip_strerror(status).c_str());
+    }
 }
 
 bool
@@ -181,57 +231,133 @@ SipTransportBroker::transportStateChanged(pjsip_transport* tp,
                                           pjsip_transport_state state,
                                           const pjsip_transport_state_info* info)
 {
-    std::lock_guard<std::mutex> const lock(transportMapMutex_);
+    if (!tp)
+        return;
 
-    // construct IpAddr from pjsip_transport state
+    std::shared_ptr<SipTransport> sipTransport;
+    const auto pjsipType = pjsip_transport_get_type_from_flag(tp->flag);
+
+    {
+        std::lock_guard<std::mutex> const lock(transportMapMutex_);
+
+        if (isUdpType(pjsipType)) {
+            auto it = udpTransportIndex_.find(tp);
+            if (it == udpTransportIndex_.end())
+                return;
+
+            auto mapIt = udpTransports_.find(it->second);
+            if (mapIt != udpTransports_.end())
+                sipTransport = mapIt->second;
+
+            if (!SipTransport::isAlive(state)) {
+                udpTransports_.erase(it->second);
+                udpTransportIndex_.erase(it);
+            } else if (!sipTransport) {
+                udpTransportIndex_.erase(it);
+            }
+        } else if (isTcpType(pjsipType)) {
+            auto* factory = tp->factory;
+            if (!factory)
+                return;
+
+            auto it = tcpTransportIndex_.find(factory);
+            if (it == tcpTransportIndex_.end())
+                return;
+
+            auto mapIt = tcpTransports_.find(it->second);
+            if (mapIt != tcpTransports_.end())
+                sipTransport = mapIt->second;
+
+            if (!SipTransport::isAlive(state)) {
+                tcpTransports_.erase(it->second);
+                tcpTransportIndex_.erase(it);
+            } else if (!sipTransport) {
+                tcpTransportIndex_.erase(it);
+            }
+        } else {
+            return;
+        }
+    }
+
+    if (!sipTransport)
+        return;
+
     auto ipAddress = IpAddr(tp->local_addr);
-
     SIP_CORE_DBG() << "transportStateChanged for " << ipAddress << " ptp " << tp << " info "
                    << tp->info << " state: " << SipTransport::stateToStr(state);
-
-    // First make sure that this transport is handled by us
-    // and remove it from any mapping if destroy pending or done.
-    std::shared_ptr<SipTransport> sipTransport;
-
-    auto pjsipType = pjsip_transport_get_type_from_flag(tp->flag);
-
-    if (pjsipType == PJSIP_TRANSPORT_TCP) {
-        sipTransport = tcpTransport_.lock();
-    } else if (pjsipType == PJSIP_TRANSPORT_UDP) {
-        sipTransport = udpTransport_.lock();
-    }
-    // what is this transport ???
-    else {
-        return;
-    }
-
-    // all destroyed transport related data should be erased from memory
-    // ignore if we called shutdown on broker before (meaning maps are not useful anymore)
-    if (!isDestroying_ && state == PJSIP_TP_STATE_DESTROY) {
-        SIP_CORE_DBG("destroying pjsip_transport@%p {SipTransport@%p}", tp, sipTransport.get());
-    }
-
-    // Propagate the event to the appropriate transport
-    // Note the SipTransport may not be in our mappings!!! (if marked as dead)
-    if (sipTransport)
-        sipTransport->stateCallback(state, info);
+    sipTransport->stateCallback(state, info);
 }
 
 void
 SipTransportBroker::shutdown()
 {
-    std::unique_lock<std::mutex> const lock(transportMapMutex_);
-    isDestroying_ = true;
-    brokerDestroying = true;
+    std::vector<std::shared_ptr<UDPTransport>> udpTransports;
+    std::vector<std::shared_ptr<TCPTransport>> tcpTransports;
 
-    // stop all transports that still exist
-    //    if (auto udp = udpTransport_.lock()) {
-    //        pjsip_transport_shutdown(udp->get());
-    //    }
-    //
-    //    if (auto tcp = tcpTransport_.lock()) {
-    //        tcp->get_factory()->destroy(tcp->get_factory());
-    //    }
+    {
+        std::lock_guard<std::mutex> const lock(transportMapMutex_);
+        if (isDestroying_.exchange(true))
+            return;
+
+        for (const auto& [_, transport] : udpTransports_) {
+            if (transport)
+                udpTransports.emplace_back(transport);
+        }
+        for (const auto& [_, transport] : tcpTransports_) {
+            if (transport)
+                tcpTransports.emplace_back(transport);
+        }
+
+        udpTransports_.clear();
+        udpTransportIndex_.clear();
+        tcpTransports_.clear();
+        tcpTransportIndex_.clear();
+    }
+
+    for (const auto& transport : udpTransports)
+        transport->shutdown();
+
+    for (const auto& transport : tcpTransports)
+        transport->shutdown();
+}
+
+void
+SipTransportBroker::resetForConnectivityChange()
+{
+    std::vector<std::shared_ptr<UDPTransport>> udpTransports;
+    std::vector<std::shared_ptr<TCPTransport>> tcpTransports;
+
+    {
+        std::lock_guard<std::mutex> const lock(transportMapMutex_);
+        if (isDestroying_)
+            return;
+
+        for (const auto& [_, transport] : udpTransports_) {
+            if (transport)
+                udpTransports.emplace_back(transport);
+        }
+        for (const auto& [_, transport] : tcpTransports_) {
+            if (transport)
+                tcpTransports.emplace_back(transport);
+        }
+
+        udpTransports_.clear();
+        udpTransportIndex_.clear();
+        tcpTransports_.clear();
+        tcpTransportIndex_.clear();
+    }
+
+    SIP_CORE_WARN("Connectivity change: resetting SIP transports (udp=%zu, tcp=%zu)",
+                  udpTransports.size(),
+                  tcpTransports.size());
+
+    for (const auto& transport : udpTransports)
+        transport->shutdown();
+
+    for (const auto& transport : tcpTransports)
+        transport->shutdown();
+
+    SIP_CORE_DBG("Connectivity change: SIP transport cache reset complete");
 }
 
 std::shared_ptr<UDPTransport>
@@ -242,18 +368,41 @@ SipTransportBroker::getUdpTransport(const IpAddr& ipAddress)
         return nullptr;
     }
 
-    std::lock_guard<std::mutex> const lock(transportMapMutex_);
+    const auto key = transportKey(ipAddress);
 
-    if (auto spt = udpTransport_.lock()) {
-        SIP_CORE_DBG("Reusing udp transport for %s", ipAddress.toString(true).c_str());
-        return std::static_pointer_cast<UDPTransport>(spt);
+    // Look up existing transport under the lock.
+    {
+        std::lock_guard<std::mutex> const lock(transportMapMutex_);
+        if (isDestroying_)
+            return nullptr;
+
+        auto it = udpTransports_.find(key);
+        if (it != udpTransports_.end() && it->second) {
+            SIP_CORE_DBG("Reusing udp transport for %s", ipAddress.toString(true).c_str());
+            return it->second;
+        }
     }
 
-    // if we are here, we need to create new transport, because old is destroyed
-    // or was not even created
+    // Create outside the lock to avoid lock-ordering deadlock with PJSIP
+    // transport-manager mutex (acquired by pjsip_transport_shutdown callbacks).
     auto ret = createUdpTransport(ipAddress);
-    if (ret) {
-        udpTransport_ = ret;
+    if (!ret || !ret->get())
+        return nullptr;
+
+    // Re-acquire lock and insert, checking for a concurrent insertion.
+    {
+        std::lock_guard<std::mutex> const lock(transportMapMutex_);
+        if (isDestroying_)
+            return nullptr;
+
+        auto it = udpTransports_.find(key);
+        if (it != udpTransports_.end() && it->second) {
+            // Another thread already created one — use theirs.
+            return it->second;
+        }
+
+        udpTransports_[key] = ret;
+        udpTransportIndex_[ret->get()] = key;
     }
     return ret;
 }
@@ -289,18 +438,53 @@ SipTransportBroker::getTcpTransport(const IpAddr& ipAddress)
         return nullptr;
     }
 
-    std::lock_guard<std::mutex> const lock(transportMapMutex_);
+    const auto key = transportKey(ipAddress);
 
-    if (auto spt = tcpTransport_.lock()) {
-        SIP_CORE_DBG("Reusing tcp transport for %s", ipAddress.toString(true).c_str());
-        return std::static_pointer_cast<TCPTransport>(spt);
+    // Look up existing transport under the lock.
+    {
+        std::lock_guard<std::mutex> const lock(transportMapMutex_);
+        if (isDestroying_)
+            return nullptr;
+
+        auto it = tcpTransports_.find(key);
+        if (it != tcpTransports_.end() && it->second) {
+            if (it->second->get_factory()) {
+                SIP_CORE_DBG("Reusing tcp transport for %s", ipAddress.toString(true).c_str());
+                return it->second;
+            } else {
+                // Clean stale key and stale reverse index entries.
+                for (auto idxIt = tcpTransportIndex_.begin(); idxIt != tcpTransportIndex_.end();) {
+                    if (idxIt->second == key) {
+                        idxIt = tcpTransportIndex_.erase(idxIt);
+                    } else {
+                        ++idxIt;
+                    }
+                }
+                tcpTransports_.erase(it);
+            }
+        }
     }
 
-    // if we are here, we need to create new transport, because old is destroyed
-    // or was not even created
+    // Create outside the lock to avoid lock-ordering deadlock with PJSIP
+    // transport-manager mutex (acquired by pjsip_transport_shutdown callbacks).
     auto ret = createTcpTransport(ipAddress);
-    if (ret) {
-        tcpTransport_ = ret;
+    if (!ret || !ret->get_factory())
+        return nullptr;
+
+    // Re-acquire lock and insert, checking for a concurrent insertion.
+    {
+        std::lock_guard<std::mutex> const lock(transportMapMutex_);
+        if (isDestroying_)
+            return nullptr;
+
+        auto it = tcpTransports_.find(key);
+        if (it != tcpTransports_.end() && it->second && it->second->get_factory()) {
+            // Another thread already created one — use theirs.
+            return it->second;
+        }
+
+        tcpTransports_[key] = ret;
+        tcpTransportIndex_[ret->get_factory()] = key;
     }
     return ret;
 }

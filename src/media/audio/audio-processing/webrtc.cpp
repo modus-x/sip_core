@@ -19,6 +19,7 @@
 #include "webrtc.h"
 
 #include <webrtc/modules/audio_processing/include/audio_processing.h>
+#include <algorithm>
 
 namespace sip_core {
 
@@ -116,14 +117,11 @@ WebRTCAudioProcessor::enableVoiceActivityDetection(bool enabled)
     if (apm->voice_detection()->Enable(enabled) != webrtcNoError) {
         SIP_CORE_ERR("[webrtc-ap] [audiolayer] Error enabling voice activation detection");
     }
-    if (apm->voice_detection()->set_likelihood(webrtc::VoiceDetection::kVeryLowLikelihood)
-        != webrtcNoError) {
-        SIP_CORE_ERR("[webrtc-ap] [audiolayer] Error setting voice detection likelihood");
-    }
     // asserted to be 10 in voice_detection_impl.cc
     if (apm->voice_detection()->set_frame_size_ms(10) != webrtcNoError) {
         SIP_CORE_ERR("[webrtc-ap] [audiolayer] Error setting voice detection frame size");
     }
+    setVadSensitivity(vadSensitivity_);
 }
 
 void
@@ -135,6 +133,33 @@ WebRTCAudioProcessor::setWebRtcParams(const libsip_core::WebRtcParams& params)
         apm->gain_control()->set_compression_gain_db(params.compressionGainDb);
     }
 
+}
+
+void
+WebRTCAudioProcessor::setVadSensitivity(int sensitivity)
+{
+    vadSensitivity_ = std::clamp(sensitivity, 0, 3);
+
+    webrtc::VoiceDetection::Likelihood likelihood = webrtc::VoiceDetection::kHighLikelihood;
+    switch (vadSensitivity_) {
+    case 3:
+        likelihood = webrtc::VoiceDetection::kVeryLowLikelihood;
+        break;
+    case 2:
+        likelihood = webrtc::VoiceDetection::kLowLikelihood;
+        break;
+    case 1:
+        likelihood = webrtc::VoiceDetection::kModerateLikelihood;
+        break;
+    case 0:
+    default:
+        likelihood = webrtc::VoiceDetection::kHighLikelihood;
+        break;
+    }
+
+    if (apm->voice_detection()->set_likelihood(likelihood) != webrtcNoError) {
+        SIP_CORE_ERR("[webrtc-ap] [audiolayer] Error setting voice detection likelihood");
+    }
 }
 
 std::shared_ptr<AudioFrame>

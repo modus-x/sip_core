@@ -224,8 +224,17 @@ MediaFilter::readOutput()
 }
 
 void
+MediaFilter::setOutputFrameSize(unsigned frameSize)
+{
+    if (initialized_ && output_)
+        av_buffersink_set_frame_size(output_, frameSize);
+}
+
+void
 MediaFilter::flush()
 {
+    if (!initialized_)
+        return;
     for (size_t i = 0; i < inputs_.size(); ++i) {
         int ret = av_buffersrc_add_frame_flags(inputs_[i], nullptr, 0);
         if (ret < 0) {

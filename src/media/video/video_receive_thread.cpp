@@ -109,6 +109,12 @@ VideoReceiveThread::setup()
         },
         args_.width,
         args_.height));
+    // Drop-to-live on the RECEIVE path: skip rendering frames whose capture
+    // time has fallen behind wall-clock by >200ms, so a slow local pipeline
+    // catches up to live instead of accumulating an unbounded backlog (the
+    // ~10s latency bug). Mirrors the capture-side call in video_input.cpp;
+    // the drop logic itself lives in MediaDecoder::decode().
+    videoDecoder_->enableLateFrameDrop(std::chrono::milliseconds(200));
     videoDecoder_->setContextCallback([this]() {
         if (recorderCallback_)
             recorderCallback_(getInfo());
@@ -243,14 +249,14 @@ VideoReceiveThread::decodeFrame()
         }
     }
     auto status = videoDecoder_->decode();
-    if (status == MediaDemuxer::Status::EndOfFile) {
+    if (status == DecodeStatus::EndOfFile) {
         SIP_CORE_DBG("[{:p}] End of file", fmt::ptr(this));
         loop_.stop();
-    } else if (status == MediaDemuxer::Status::ReadError) {
+    } else if (status == DecodeStatus::ReadError) {
         SIP_CORE_ERROR("[{:p}] Decoding error: %d",
                        fmt::ptr(this),
                        MediaDemuxer::getStatusStr(status));
-    } else if (status == MediaDemuxer::Status::FallBack) {
+    } else if (status == DecodeStatus::FallBack) {
         SIP_CORE_DBG("[{:p}] fallback", fmt::ptr(this));
         isVideoConfigured_ = false;
         if (keyFrameRequestCallback_)
@@ -300,6 +306,18 @@ VideoReceiveThread::configureVideoOutput()
         onSuccessfulSetup_(MEDIA_VIDEO, 1);
 
     return isVideoConfigured_ = true;
+}
+
+void
+VideoReceiveThread::publishBlackFrame()
+{
+    if (dstWidth_ > 0 && dstHeight_ > 0) {
+        auto blackFrame = std::make_shared<VideoFrame>();
+        blackFrame->reserve(AV_PIX_FMT_YUV420P, dstWidth_, dstHeight_);
+        libav_utils::fillWithBlack(blackFrame->pointer());
+        publishFrame(blackFrame);
+        SIP_CORE_DBG("VideoReceiveThread [%p] Published black frame %dx%d", this, dstWidth_, dstHeight_);
+    }
 }
 
 void

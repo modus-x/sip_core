@@ -157,6 +157,10 @@ LIBSIP_CORE_PUBLIC bool isAgcEnabled();
 LIBSIP_CORE_PUBLIC void setAgcState(bool enabled);
 LIBSIP_CORE_PUBLIC bool isVADEnabled();
 LIBSIP_CORE_PUBLIC void setVADState(bool enabled);
+LIBSIP_CORE_PUBLIC int32_t getVADSensitivity();
+LIBSIP_CORE_PUBLIC void setVADSensitivity(int32_t sensitivity);
+LIBSIP_CORE_PUBLIC int32_t getConferenceVoiceInactiveHoldMs();
+LIBSIP_CORE_PUBLIC void setConferenceVoiceInactiveHoldMs(int32_t holdMs);
 
 LIBSIP_CORE_PUBLIC void setAutoAnswer(const std::string& accountId, bool enable);
 LIBSIP_CORE_PUBLIC void muteDtmf(bool mute);
@@ -176,7 +180,7 @@ LIBSIP_CORE_PUBLIC bool isInitialized();
 
 LIBSIP_CORE_PUBLIC std::string getRecordPath();
 LIBSIP_CORE_PUBLIC std::string getHomePath();
-LIBSIP_CORE_PUBLIC void setRecordPath(const std::string& recPath);
+LIBSIP_CORE_PUBLIC bool setRecordPath(const std::string& recPath);
 LIBSIP_CORE_PUBLIC bool getIsAlwaysRecording();
 LIBSIP_CORE_PUBLIC void setIsAlwaysRecording(bool rec);
 LIBSIP_CORE_PUBLIC bool getRecordPreview();

@@ -115,6 +115,23 @@ public:
     bool isAudioMeterActive(const std::string& id);
     void setAudioMeterState(const std::string& id, bool state);
 
+    /**
+     * Mark a ring buffer ID so that getData(DEFAULT_ID) skips it.
+     * Used by Conference::muteLocalPlayback to silence participants
+     * in the local speaker output without affecting inter-participant audio.
+     */
+    void setLocalPlaybackMuted(const std::string& id, bool muted);
+
+    /**
+     * Mark a reader ID so that getData(id) / getAvailableData(id) skip the
+     * local capture buffer (DEFAULT_ID) when mixing.  Used by
+     * Conference::muteLocalHost / muteHost to silence the host microphone
+     * toward conference participants in a race-proof way: even if an async
+     * re-bind re-attaches the capture buffer to this reader, its mix will
+     * not contain the microphone.
+     */
+    void setMicMuted(const std::string& id, bool muted);
+
 private:
     NON_COPYABLE(RingBufferPool);
 
@@ -132,6 +149,19 @@ private:
     void removeReaderFromRingBuffer(const std::shared_ptr<RingBuffer>& rbuf,
                                     const std::string& call_id);
 
+    /**
+     * Returns true if @rbuf must be excluded from the mix computed for
+     * @call_id (local playback mute or host mic mute).  When the excluded
+     * buffer is the capture buffer (DEFAULT_ID), the pending frame is
+     * consumed and dropped so the read offset keeps advancing and no stale
+     * microphone audio bursts out on un-mute.  Caller must hold stateLock_.
+     * Shared by getData() / getAvailableData() so the two paths cannot drift.
+     */
+    bool skipMutedBuffer(const std::shared_ptr<RingBuffer>& rbuf,
+                         const std::string& call_id,
+                         bool filterPlayback,
+                         bool filterMic);
+
     // A cache of created RingBuffers listed by IDs.
     std::map<std::string, std::weak_ptr<RingBuffer>> ringBufferMap_ {};
 
@@ -143,6 +173,14 @@ private:
     AudioFormat internalAudioFormat_ {AudioFormat::DEFAULT()};
 
     std::shared_ptr<RingBuffer> defaultRingBuffer_;
+
+    // Ring buffer IDs whose audio should be skipped when mixing for
+    // local playback (DEFAULT_ID).  Protected by stateLock_.
+    std::set<std::string> localPlaybackMutedIds_;
+
+    // Reader IDs whose mixed frames must not include the local capture
+    // buffer (DEFAULT_ID).  Protected by stateLock_.
+    std::set<std::string> micMutedIds_;
 };
 
 } // namespace sip_core

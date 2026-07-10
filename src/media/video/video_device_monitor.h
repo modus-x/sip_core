@@ -63,6 +63,12 @@ public:
                    const std::vector<std::map<std::string, std::string>>& devInfo = {});
     void removeDevice(const std::string& node);
     void removeDeviceViaInput(const std::string& path);
+    void reconcileDevices(const std::vector<std::string>& deviceIds);
+
+    /**
+     * Check if a device with the given id exists (is still connected)
+     */
+    bool deviceExists(const std::string& id) const;
 
     /**
      * Params for libav
@@ -96,6 +102,8 @@ private:
 
     std::vector<VideoDevice>::iterator findDeviceById(const std::string& id);
     std::vector<VideoDevice>::const_iterator findDeviceById(const std::string& id) const;
+    std::vector<std::string> getPhysicalDeviceIdsUnlocked() const;
+    void refreshDefaultDeviceUnlocked();
 
     std::unique_ptr<VideoDeviceMonitorImpl> monitorImpl_;
 
