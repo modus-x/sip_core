@@ -35,7 +35,7 @@ diff --git a/libavfilter/opencl/sv_participant.cl b/libavfilter/opencl/sv_partic
 new file mode 100644
 --- /dev/null
 +++ b/libavfilter/opencl/sv_participant.cl
-@@ -0,0 +1,313 @@
+@@ -0,0 +1,310 @@
 +/*
 + * This file is part of FFmpeg.
 + *
@@ -219,22 +219,19 @@ new file mode 100644
 +        else {
 +            overlay_rel = overlay_rel - overlay_offset;
 +
-+            int xin = (dir & 2) ? (overlay_target_size.y - 1 - overlay_rel.y) : overlay_rel.y;
-+            int yin = (dir & 1) ? (overlay_target_size.x - 1 - overlay_rel.x) : overlay_rel.x;
++            int xin = (dir & 2) ? (actual_target_size.y - 1 - overlay_rel.y) : overlay_rel.y;
++            int yin = (dir & 1) ? (actual_target_size.x - 1 - overlay_rel.x) : overlay_rel.x;
 +            if (dir & 4) {
 +                overlay_rel.x = yin;
 +                overlay_rel.y = xin;
-+                overlay_val = scale_lankzos(overlay, overlay_rel - overlay_offset,
++                overlay_val = scale_lankzos(overlay, overlay_rel,
 +                                            overlay_target_size, cx, cy, flt_size);
 +            } else {
 +                overlay_rel.x = xin;
 +                overlay_rel.y = yin;
-+                overlay_val = scale_lankzos(overlay, overlay_rel - overlay_offset,
++                overlay_val = scale_lankzos(overlay, overlay_rel,
 +                                            overlay_target_size.yx, cx, cy, flt_size);
 +            }
-+
-+            overlay_val = scale_lankzos(overlay, overlay_rel,
-+                                        overlay_target_size, cx, cy, flt_size);
 +        }
 +
 +        write_imagef(dst, global_loc, overlay_val);
@@ -333,7 +330,7 @@ new file mode 100644
 +    }
 +    else 
 +    {
-+        int2 overlay_rel = global_loc - (int2)(overlay_box.x, overlay_box.y) - overlay_offset;
++        int2 overlay_rel = global_loc - (int2)(overlay_box.x, overlay_box.y);
 +        float4 overlay_val;
 +        if (overlay_rel.x < overlay_offset.x ||
 +            overlay_rel.y < overlay_offset.y ||
@@ -364,7 +361,7 @@ diff --git a/libavfilter/vf_sv_participant_opencl.c b/libavfilter/vf_sv_particip
 new file mode 100644
 --- /dev/null
 +++ b/libavfilter/vf_sv_participant_opencl.c
-@@ -0,0 +1,1780 @@
+@@ -0,0 +1,1786 @@
 +/*
 + * This file is part of FFmpeg.
 + *
@@ -787,13 +784,13 @@ new file mode 100644
 +            FT_Glyph tmp_glyph = glyph->glyph;
 +            if (FT_Glyph_To_Bitmap(&tmp_glyph, FT_RENDER_MODE_NORMAL, &shift, 0)) {
 +                ret = AVERROR_EXTERNAL;
-+                goto error;
++                return ret;
 +            }
 +            glyph->bglyph[idx] = (FT_BitmapGlyph)tmp_glyph;
 +            if (glyph->bglyph[idx]->bitmap.pixel_mode == FT_PIXEL_MODE_MONO) {
 +                av_log(ctx, AV_LOG_ERROR, "Monocromatic (1bpp) fonts are not supported.\n");
 +                ret = AVERROR(EINVAL);
-+                goto error;
++                return ret;
 +            }
 +        }
 +    }
@@ -1544,10 +1541,18 @@ new file mode 100644
 +    return 0;
 +
 +fail:
-+    if (ctx->command_queue)
++    if (ctx->command_queue) {
 +        clReleaseCommandQueue(ctx->command_queue);
-+    if (ctx->kernel)
++        ctx->command_queue = NULL;
++    }
++    if (ctx->kernel) {
 +        clReleaseKernel(ctx->kernel);
++        ctx->kernel = NULL;
++    }
++    if (ctx->ocf.program) {
++        clReleaseProgram(ctx->ocf.program);
++        ctx->ocf.program = NULL;
++    }
 +    return err;
 +}
 +
@@ -1661,7 +1666,7 @@ new file mode 100644
 +
 +        
 +        if (ctx->text) {
-+            if (err = prepare_text_mask(avctx, main_fc->device_ref) < 0)
++            if ((err = prepare_text_mask(avctx, main_fc->device_ref)) < 0)
 +                return err;
 +        }
 +
@@ -1968,8 +1973,8 @@ new file mode 100644
 +        }
 +
 +#if CONFIG_LIBFRIBIDI
-+        if (s->text_shaping)
-+            if ((err = shape_text(ctx)) < 0)
++        if (ctx->text_shaping)
++            if ((err = shape_text(avctx)) < 0)
 +                return err;
 +#endif
 +
@@ -2048,8 +2053,6 @@ new file mode 100644
 +        }
 +        av_freep(&ctx->cy);
 +    }
-+
-+    ctx->text_x_expr = ctx->text_y_expr = ctx->fontsize_expr = NULL;
 +
 +    av_tree_enumerate(ctx->glyphs, NULL, NULL, glyph_enu_free);
 +    av_tree_destroy(ctx->glyphs);
