@@ -29,6 +29,8 @@
 #include <string>
 #include <vector>
 #include <list>
+#include <map>
+#include <utility>
 
 extern "C" {
 #include <libavutil/hwcontext.h>
@@ -201,6 +203,9 @@ private:
 
     AVBufferRef* deviceCtx_ {nullptr};
     AVBufferRef* framesCtx_ {nullptr};
+    // Cached per-size hardware upload pools for CODEC_NONE transfers
+    // (conference mixer path); released in the destructor.
+    std::map<std::pair<int, int>, AVBufferRef*> uploadPools_;
 
     struct HardwareAPI;
     static std::vector<HardwareAPI> apiListDec_;

@@ -459,6 +459,7 @@ MediaEncoder::writeContainerToRtp(const uint8_t* buf, int buf_size)
             auto ret = accel_->initAPI(linkableHW_, framesCtx);
             if (ret < 0) {
                 accel_.reset();
+                avcodec_free_context(&encoderCtx);
                 encoderCtx = nullptr;
                 continue;
             }

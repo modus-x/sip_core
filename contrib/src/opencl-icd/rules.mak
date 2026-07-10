@@ -4,7 +4,9 @@ OPENCL_ICD_URL := https://nexus.svetlocal.ru/repository/github-artifacts/OpenCL-
 
 DEPS_opencl-icd += opencl-headers
 
-OPENCL_ICD_CMAKECONF = -DCMAKE_PREFIX_PATH=$(INSTALL_PREFIX)
+# Static: a shared ICD loader would add a runtime libOpenCL dependency that
+# nothing ships; the loader still dlopens vendor ICDs at runtime.
+OPENCL_ICD_CMAKECONF = -DCMAKE_PREFIX_PATH=$(PREFIX) -DBUILD_SHARED_LIBS=OFF
 
 $(TARBALLS)/OpenCL-ICD-Loader-$(OPENCL_ICD_VERSION).tar.gz:
 	$(call download,$(OPENCL_ICD_URL))

@@ -20,6 +20,7 @@
  */
 
 #include <algorithm>
+#include <mutex>
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
@@ -171,6 +172,8 @@ HardwareAccel::~HardwareAccel()
         av_buffer_unref(&deviceCtx_);
     if (framesCtx_)
         av_buffer_unref(&framesCtx_);
+    for (auto& pool : uploadPools_)
+        av_buffer_unref(&pool.second);
 }
 
 static AVPixelFormat
@@ -191,18 +194,27 @@ getFormatCb(AVCodecContext* codecCtx, const AVPixelFormat* formats)
                 return AV_PIX_FMT_NONE;
             }
 
-            AVBufferRef* frame_ctx = av_hwframe_ctx_alloc(codecCtx->hw_device_ctx);
-            if (!frame_ctx)
-                return AV_PIX_FMT_NONE;
+            // Let the decoder size the frames context (dimensions, alignment,
+            // pool size incl. reference frames); fall back to a manual setup
+            // for decoders that do not implement it.
+            AVBufferRef* frame_ctx = nullptr;
+            int ret = avcodec_get_hw_frames_parameters(codecCtx,
+                                                       codecCtx->hw_device_ctx,
+                                                       formats[i],
+                                                       &frame_ctx);
+            if (ret < 0) {
+                frame_ctx = av_hwframe_ctx_alloc(codecCtx->hw_device_ctx);
+                if (!frame_ctx)
+                    return AV_PIX_FMT_NONE;
 
-            auto ctx = reinterpret_cast<AVHWFramesContext*>(frame_ctx->data);
-            ctx->format = formats[i];
-            ctx->sw_format = accel->getSoftwareFormat();
-            ctx->width = codecCtx->width;
-            ctx->height = codecCtx->height;
-            ctx->initial_pool_size = 20; // TODO try other values
+                auto ctx = reinterpret_cast<AVHWFramesContext*>(frame_ctx->data);
+                ctx->format = formats[i];
+                ctx->sw_format = accel->getSoftwareFormat();
+                ctx->width = codecCtx->coded_width ? codecCtx->coded_width : codecCtx->width;
+                ctx->height = codecCtx->coded_height ? codecCtx->coded_height : codecCtx->height;
+                ctx->initial_pool_size = 20;
+            }
 
-            int ret = 0;
             if ((ret = av_hwframe_ctx_init(frame_ctx)) < 0) {
                 SIP_CORE_ERR("Failed to initialize hardware frame context: %s (%d)",
                         libav_utils::getError(ret).c_str(),
@@ -210,14 +222,15 @@ getFormatCb(AVCodecContext* codecCtx, const AVPixelFormat* formats)
                 av_buffer_unref(&frame_ctx);
                 return AV_PIX_FMT_NONE;
             }
-            
+
             // hardware tends to under-report supported levels
             codecCtx->hwaccel_flags |= AV_HWACCEL_FLAG_IGNORE_LEVEL;
 
             if (codecCtx->hw_frames_ctx)
                 av_buffer_unref(&codecCtx->hw_frames_ctx);
-            
-            codecCtx->hw_frames_ctx = av_buffer_ref(frame_ctx);
+
+            // transfer ownership of our only ref — no extra ref, no leak
+            codecCtx->hw_frames_ctx = frame_ctx;
             return formats[i];
         }
     }
@@ -252,6 +265,11 @@ HardwareAccel::init_device(const char* name, const char* device, int flags)
 int
 HardwareAccel::init_device_type(std::string& dev)
 {
+    // The DeviceState lists are shared static state mutated from every
+    // decoder/encoder/mixer thread that probes devices.
+    static std::mutex deviceProbeMtx;
+    std::lock_guard<std::mutex> probeLock(deviceProbeMtx);
+
     AVHWDeviceType check;
     const char* name;
     int err;
@@ -394,45 +412,49 @@ HardwareAccel::transfer(const VideoFrame& frame)
                 return nullptr;
             }
 
-            AVBufferRef* framesCtx = av_hwframe_ctx_alloc(deviceCtx_);
-            if (!framesCtx)
-                return nullptr;
+            // Reuse a cached per-size frames context: allocating and
+            // initializing a fresh GPU surface pool for every uploaded frame
+            // costs far more than the upload itself.
+            auto& pool = uploadPools_[{input->width, input->height}];
+            if (!pool) {
+                AVBufferRef* framesCtx = av_hwframe_ctx_alloc(deviceCtx_);
+                if (!framesCtx)
+                    return nullptr;
 
-            auto ctx = reinterpret_cast<AVHWFramesContext*>(framesCtx->data);
-            ctx->format = format_;
-            ctx->sw_format = swFormat_;
-            ctx->width = input->width;
-            ctx->height = input->height;
-            ctx->initial_pool_size = 20; // TODO try other values
+                auto ctx = reinterpret_cast<AVHWFramesContext*>(framesCtx->data);
+                ctx->format = format_;
+                ctx->sw_format = swFormat_;
+                ctx->width = input->width;
+                ctx->height = input->height;
+                ctx->initial_pool_size = 0; // dynamic: sizes vary with layout
 
-            if ((ret = av_hwframe_ctx_init(framesCtx)) < 0) {
-                SIP_CORE_ERR("Failed to initialize hardware frame context: %s (%d)",
-                        libav_utils::getError(ret).c_str(),
-                        ret);
-                av_buffer_unref(&framesCtx);
-                return nullptr;
+                if ((ret = av_hwframe_ctx_init(framesCtx)) < 0) {
+                    SIP_CORE_ERR("Failed to initialize hardware frame context: %s (%d)",
+                            libav_utils::getError(ret).c_str(),
+                            ret);
+                    av_buffer_unref(&framesCtx);
+                    uploadPools_.erase({input->width, input->height});
+                    return nullptr;
+                }
+                pool = framesCtx;
             }
 
-            if ((ret = av_hwframe_get_buffer(framesCtx, hwFrame, 0)) < 0) {
+            if ((ret = av_hwframe_get_buffer(pool, hwFrame, 0)) < 0) {
                 SIP_CORE_ERR() << "Failed to allocate hardware buffer: "
                         << libav_utils::getError(ret).c_str();
-                av_buffer_unref(&framesCtx);
                 return nullptr;
             }
 
             if (!hwFrame->hw_frames_ctx) {
                 SIP_CORE_ERR() << "Failed to allocate hardware buffer: Cannot allocate memory";
-                av_buffer_unref(&framesCtx);
                 return nullptr;
             }
 
             if ((ret = av_hwframe_transfer_data(hwFrame, input, 0)) < 0) {
                 SIP_CORE_ERR() << "Failed to push frame to GPU: " << libav_utils::getError(ret).c_str();
-                av_buffer_unref(&framesCtx);
                 return nullptr;
             }
 
-            av_buffer_unref(&framesCtx);
             hwFrame->pts = input->pts; // transfer does not copy timestamp
             return framePtr;
         }
@@ -537,10 +559,14 @@ HardwareAccel::linkFilter(MediaStream& ms, int width, int height)
                  libav_utils::getError(ret).c_str(),
                  ret);
         av_buffer_unref(&framesCtx);
+        // ms.frameRef stays null; the filter graph init fails cleanly and the
+        // mixer falls back to software mixing.
+        return;
     }
 
     ms.deviceRef = av_buffer_ref(deviceCtx_);
-    ms.frameRef = av_buffer_ref(framesCtx);
+    // transfer ownership of the alloc ref — the caller releases ms.frameRef
+    ms.frameRef = framesCtx;
 }
 
 bool
@@ -603,8 +629,9 @@ HardwareAccel::initAPI(bool linkable, AVBufferRef* framesCtx)
         if (linkable && framesCtx)
             link = linkHardware(framesCtx);
         if (type_ == CODEC_NONE) {
-            initFrame();
-            return 0;
+            // Filter-only accel (OpenCL mixing) is useless without a frames
+            // context; report failure so the caller can try the next API.
+            return initFrame() ? 0 : -1;
         }
         // we don't need frame context for videotoolbox and decoders
         if (hwType_ == AV_HWDEVICE_TYPE_VIDEOTOOLBOX ||

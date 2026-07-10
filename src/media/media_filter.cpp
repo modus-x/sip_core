@@ -115,7 +115,8 @@ MediaFilter::getInputParams(const std::string& inputName) const
     for (const auto& ms : inputParams_)
         if (ms.name == inputName)
             return ms;
-    return {};
+    static const MediaStream empty {};
+    return empty;
 }
 
 MediaStream
@@ -305,10 +306,13 @@ MediaFilter::initInputFilter(AVFilterInOut* in, const MediaStream& msp)
         buffersrcCtx = avfilter_graph_alloc_filter(graph_, buffersrc, name);
     }
     if (!buffersrcCtx) {
+        av_buffer_unref(&params->hw_frames_ctx);
         av_free(params);
         return fail("Failed to allocate filter graph input", AVERROR(ENOMEM));
     }
     ret = av_buffersrc_parameters_set(buffersrcCtx, params);
+    // buffersrc keeps its own reference; ours would leak otherwise
+    av_buffer_unref(&params->hw_frames_ctx);
     av_free(params);
     if (ret < 0)
         return fail("Failed to set filter graph input parameters", ret);
@@ -328,6 +332,11 @@ MediaFilter::initInputFilter(AVFilterInOut* in, const MediaStream& msp)
     inputs_.push_back(buffersrcCtx);
     inputParams_.emplace_back(msp);
     inputParams_.back().name = in->name;
+    // The stored copy must not alias the caller-owned AVBufferRefs: the
+    // producer releases them right after initialize() and nothing here reads
+    // them again — keeping the raw pointers would leave them dangling.
+    inputParams_.back().deviceRef = nullptr;
+    inputParams_.back().frameRef = nullptr;
     return ret;
 }
 

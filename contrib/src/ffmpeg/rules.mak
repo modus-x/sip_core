@@ -299,7 +299,9 @@ $(TARBALLS)/ffmpeg-$(FFMPEG_HASH).tar.gz:
 
 .sum-ffmpeg: ffmpeg-$(FFMPEG_HASH).tar.gz
 
-ffmpeg: ffmpeg-$(FFMPEG_HASH).tar.gz
+# Re-extract (and thus re-patch) whenever the recipe or any patch changes;
+# otherwise a stale source tree silently keeps building without new patches.
+ffmpeg: ffmpeg-$(FFMPEG_HASH).tar.gz $(SRC)/ffmpeg/rules.mak $(wildcard $(SRC)/ffmpeg/*.patch)
 	rm -Rf $@ $@-$(FFMPEG_HASH)
 	mkdir -p $@-$(FFMPEG_HASH)
 	(cd $@-$(FFMPEG_HASH) && tar x $(if ${BATCH_MODE},,-v) --strip-components=1 -f $<)
