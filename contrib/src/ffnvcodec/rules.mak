@@ -13,5 +13,7 @@ ffnvcodec: nv-codec-headers-$(FFNVCODEC_VERSION).tar.gz .sum-ffnvcodec
 	$(MOVE)
 
 .ffnvcodec: ffnvcodec
-	cd $< && $(HOSTVARS) DESTDIR=$(PREFIX) $(MAKE) install PREFIX=""
+	# absolute PREFIX (no DESTDIR): with PREFIX="" the generated ffnvcodec.pc
+	# had an empty prefix (-I/include), so ffmpeg's cuda check failed
+	cd $< && $(HOSTVARS) $(MAKE) install PREFIX="$(PREFIX)"
 	touch $@
