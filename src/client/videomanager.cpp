@@ -686,6 +686,30 @@ setEncodingAccelerated(bool state)
     }
 }
 
+std::string
+getHardwareAccelerationMode()
+{
+#ifdef RING_ACCEL
+    return sip_core::Manager::instance().videoPreferences.getHWAccelMode();
+#else
+    return "cpu";
+#endif
+}
+
+bool
+setHardwareAccelerationMode(const std::string& mode)
+{
+#ifdef RING_ACCEL
+    SIP_CORE_DBG("Setting hardware acceleration mode to '%s'", mode.c_str());
+    if (!sip_core::Manager::instance().videoPreferences.setHWAccelMode(mode))
+        return false;
+    sip_core::Manager::instance().saveConfig();
+    return true;
+#else
+    return mode == "cpu";
+#endif
+}
+
 #if defined(__ANDROID__) || defined(RING_UWP) || (defined(TARGET_OS_IOS) && TARGET_OS_IOS)
 void
 addVideoDevice(const std::string& node,

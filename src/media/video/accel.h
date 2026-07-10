@@ -174,6 +174,13 @@ public:
                                                        int width,
                                                        int height,
                                                        CodecType type);
+
+    /**
+     * @brief Whether any hardware acceleration device can actually be opened
+     * on this host. Probed once per process and cached.
+     */
+    static bool isGPUAvailable();
+
     int initAPI(bool linkable, AVBufferRef* framesCtx);
     bool dynBitrate() { return dynBitrate_; }
 

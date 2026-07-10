@@ -329,6 +329,20 @@ public:
         return false;
     }
 
+    /**
+     * Hardware acceleration mode:
+     *  - "auto"     use HW when available, demote to CPU when it fails or is
+     *               slower than realtime (weak iGPU);
+     *  - "hardware" HW required — selectable only when a usable GPU is present,
+     *               never silently demoted;
+     *  - "cpu"      never touch HW.
+     * The legacy decoding/encodingAccelerated booleans are kept in sync.
+     */
+    const std::string& getHWAccelMode() const { return hwAccelMode_; }
+    /// @returns false when the mode is unknown or "hardware" was requested
+    /// without a usable GPU.
+    bool setHWAccelMode(const std::string& mode);
+
     bool getRecordPreview() const { return recordPreview_; }
 
     void setRecordPreview(bool rec) { recordPreview_ = rec; }
@@ -351,6 +365,7 @@ public:
 private:
     bool decodingAccelerated_;
     bool encodingAccelerated_;
+    std::string hwAccelMode_ {"auto"};
     bool recordPreview_;
     int recordQuality_;
     std::string conferenceResolution_;

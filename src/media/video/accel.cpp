@@ -391,12 +391,12 @@ HardwareAccel::transfer(const VideoFrame& frame)
 
             if (!deviceCtx_) {
                 SIP_CORE_ERR() << "Cannot initialize hardware frames without a valid hardware device";
-                return false;
+                return nullptr;
             }
 
             AVBufferRef* framesCtx = av_hwframe_ctx_alloc(deviceCtx_);
             if (!framesCtx)
-                return false;
+                return nullptr;
 
             auto ctx = reinterpret_cast<AVHWFramesContext*>(framesCtx->data);
             ctx->format = format_;
@@ -410,6 +410,7 @@ HardwareAccel::transfer(const VideoFrame& frame)
                         libav_utils::getError(ret).c_str(),
                         ret);
                 av_buffer_unref(&framesCtx);
+                return nullptr;
             }
 
             if ((ret = av_hwframe_get_buffer(framesCtx, hwFrame, 0)) < 0) {
@@ -644,6 +645,23 @@ HardwareAccel::getCompatibleAccel(AVCodecID id, int width, int height, CodecType
         }
     }
     return l;
+}
+
+bool
+HardwareAccel::isGPUAvailable()
+{
+    static const bool available = [] {
+        auto apis = getCompatibleAccel(AV_CODEC_ID_H264, 1280, 720, CODEC_DECODER);
+        for (auto& api : apis) {
+            if (api.initAPI(false, nullptr) >= 0) {
+                SIP_CORE_INFO("GPU probe: %s is usable", api.getName().c_str());
+                return true;
+            }
+        }
+        SIP_CORE_WARN("GPU probe: no usable hardware acceleration device found");
+        return false;
+    }();
+    return available;
 }
 
 } // namespace video

@@ -327,7 +327,15 @@ consoleInputLoop(CallController& controller)
                 controller.enableVideo(true);
             }
         } else if (command == "gpu") {
-            if (controller.isHWAccelEnabled()) {
+            if (tokens.size() >= 2) {
+                // gpu <auto|hardware|cpu>
+                if (controller.setHWAccelMode(tokens[1]))
+                    std::cout << "Hardware acceleration mode: " << tokens[1] << std::endl;
+                else
+                    std::cerr << "Error: cannot switch to mode '" << tokens[1]
+                              << "' (unknown mode, or no usable GPU for 'hardware')."
+                              << std::endl;
+            } else if (controller.isHWAccelEnabled()) {
                 std::cout << "Disabling hardware acceleration..." << std::endl;
                 controller.enableHWAccel(false);
             }

@@ -53,6 +53,8 @@ public:
 
     void enableHWAccel(bool enable);
     bool isHWAccelEnabled() const;
+    bool setHWAccelMode(const std::string& mode);
+    std::string getHWAccelMode() const;
 
     bool setVideoDevice(const std::string& videoDevice);
     std::vector<std::string> getVideoDeviceList() const;

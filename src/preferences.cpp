@@ -56,6 +56,9 @@
 
 #ifdef ENABLE_VIDEO
 #include "client/videomanager.h"
+#ifdef RING_ACCEL
+#include "media/video/accel.h"
+#endif
 #endif
 
 #pragma GCC diagnostic push
@@ -129,6 +132,7 @@ static constexpr const char* ECHO_CANCEL_KEY {"echoCancel"};
 constexpr const char* const VideoPreferences::CONFIG_LABEL;
 static constexpr const char* DECODING_ACCELERATED_KEY {"decodingAccelerated"};
 static constexpr const char* ENCODING_ACCELERATED_KEY {"encodingAccelerated"};
+static constexpr const char* HWACCEL_MODE_KEY {"hwAccelMode"};
 static constexpr const char* RECORD_PREVIEW_KEY {"recordPreview"};
 static constexpr const char* RECORD_QUALITY_KEY {"recordQuality"};
 static constexpr const char* CONFERENCE_RESOLUTION_KEY {"conferenceResolution"};
@@ -508,6 +512,30 @@ VideoPreferences::VideoPreferences()
     , conferenceVoiceInactiveHoldMs_(500)
 {}
 
+bool
+VideoPreferences::setHWAccelMode(const std::string& mode)
+{
+    if (mode != "auto" && mode != "hardware" && mode != "cpu")
+        return false;
+#ifdef RING_ACCEL
+    if (mode == "hardware" && !video::HardwareAccel::isGPUAvailable()) {
+        SIP_CORE_WARN("Refusing hwAccelMode 'hardware': no usable GPU on this host");
+        return false;
+    }
+    hwAccelMode_ = mode;
+    const bool accel = (mode != "cpu");
+    setDecodingAccelerated(accel);
+    setEncodingAccelerated(accel);
+    return true;
+#else
+    // Without RING_ACCEL the build has no HW path at all.
+    if (mode != "cpu")
+        return false;
+    hwAccelMode_ = mode;
+    return true;
+#endif
+}
+
 void
 VideoPreferences::serialize(YAML::Emitter& out) const
 {
@@ -517,6 +545,7 @@ VideoPreferences::serialize(YAML::Emitter& out) const
 #ifdef RING_ACCEL
     out << YAML::Key << DECODING_ACCELERATED_KEY << YAML::Value << decodingAccelerated_;
     out << YAML::Key << ENCODING_ACCELERATED_KEY << YAML::Value << encodingAccelerated_;
+    out << YAML::Key << HWACCEL_MODE_KEY << YAML::Value << hwAccelMode_;
 #endif
     out << YAML::Key << CONFERENCE_RESOLUTION_KEY << YAML::Value << conferenceResolution_;
     out << YAML::Key << CONFERENCE_VOICE_INACTIVE_HOLD_MS_KEY << YAML::Value
@@ -543,6 +572,23 @@ VideoPreferences::unserialize(const YAML::Node& in)
         parseValue(node, ENCODING_ACCELERATED_KEY, encodingAccelerated_);
     } catch (...) {
         decodingAccelerated_ = true;
+        encodingAccelerated_ = false;
+    }
+    try {
+        parseValue(node, HWACCEL_MODE_KEY, hwAccelMode_);
+    } catch (...) {
+        hwAccelMode_ = "auto";
+    }
+    if (hwAccelMode_ != "auto" && hwAccelMode_ != "hardware" && hwAccelMode_ != "cpu") {
+        SIP_CORE_WARN("Unknown hwAccelMode '%s' in config, using 'auto'", hwAccelMode_.c_str());
+        hwAccelMode_ = "auto";
+    }
+    if (hwAccelMode_ == "hardware" && !video::HardwareAccel::isGPUAvailable()) {
+        SIP_CORE_WARN("hwAccelMode 'hardware' configured but no usable GPU found, using 'auto'");
+        hwAccelMode_ = "auto";
+    }
+    if (hwAccelMode_ == "cpu") {
+        decodingAccelerated_ = false;
         encodingAccelerated_ = false;
     }
 #endif

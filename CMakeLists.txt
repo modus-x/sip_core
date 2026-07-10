@@ -856,6 +856,13 @@ else()
       ${PROJECT_NAME} PRIVATE resolv "-framework AudioToolbox"
                               "-framework CoreAudio" "-framework Accelerate"
                               "-framework CoreGraphics")
+
+    if(NOT IOS)
+      # FFmpeg's hwcontext_opencl (GPU conference mixing) uses the system
+      # OpenCL framework on macOS; iOS has no OpenCL and builds FFmpeg
+      # without it.
+      target_link_libraries(${PROJECT_NAME} PRIVATE "-framework OpenCL")
+    endif()
   endif()
 
   if(ANDROID)

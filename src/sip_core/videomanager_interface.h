@@ -256,6 +256,15 @@ LIBSIP_CORE_PUBLIC void setDecodingAccelerated(bool state);
 LIBSIP_CORE_PUBLIC bool getEncodingAccelerated();
 LIBSIP_CORE_PUBLIC void setEncodingAccelerated(bool state);
 
+/**
+ * Hardware acceleration mode: "auto" | "hardware" | "cpu".
+ * setHardwareAccelerationMode returns false when the mode is unknown or
+ * "hardware" is requested on a host without a usable GPU (the mode is then
+ * left unchanged).
+ */
+LIBSIP_CORE_PUBLIC std::string getHardwareAccelerationMode();
+LIBSIP_CORE_PUBLIC bool setHardwareAccelerationMode(const std::string& mode);
+
 // player signal type definitions
 struct LIBSIP_CORE_PUBLIC MediaPlayerSignal
 {

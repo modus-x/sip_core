@@ -233,6 +233,12 @@ private:
     bool enableAccel_ = true;
     std::unique_ptr<video::HardwareAccel> accel_;
     unsigned short accelFailures_ = 0;
+
+    // AUTO-mode performance watchdog (see MediaDecoder::decode()).
+    int64_t hwPerfAccumUs_ {0};
+    unsigned hwPerfSamples_ {0};
+    unsigned hwPerfSlowWindows_ {0};
+    bool hwPerfDemotePending_ {false};
 #endif
 
 #ifdef ENABLE_VIDEO

@@ -606,6 +606,27 @@ CallController::enableHWAccel(bool enabled)
 }
 
 bool
+CallController::setHWAccelMode(const std::string& mode)
+{
+#ifdef RING_ACCEL
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
+    return libsip_core::setHardwareAccelerationMode(mode);
+#else
+    return mode == "cpu";
+#endif
+}
+
+std::string
+CallController::getHWAccelMode() const
+{
+#ifdef RING_ACCEL
+    return libsip_core::getHardwareAccelerationMode();
+#else
+    return "cpu";
+#endif
+}
+
+bool
 CallController::isHWAccelEnabled() const
 {
 #ifdef RING_ACCEL

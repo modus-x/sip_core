@@ -54,6 +54,9 @@ const unsigned jitterBufferMaxSize_ {1500};
 const constexpr auto jitterBufferMaxDelay_ = std::chrono::milliseconds(50);
 // maximum number of times accelerated decoding can fail in a row before falling back to software
 const constexpr unsigned MAX_ACCEL_FAILURES {5};
+// AUTO-mode HW performance window: frames per measurement window (~4 s at 30
+// fps); demotion needs two consecutive windows slower than the frame budget.
+const constexpr unsigned HW_PERF_WINDOW {120};
 
 MediaDemuxer::MediaDemuxer()
     : inputCtx_(avformat_alloc_context())
@@ -634,7 +637,14 @@ MediaDecoder::setupStream()
     // it has been disabled already by the video_receive_thread/video_input
     enableAccel_ &= Manager::instance().videoPreferences.getDecodingAccelerated();
 
-    if (enableAccel_ and not fallback_) {
+    hwPerfAccumUs_ = 0;
+    hwPerfSamples_ = 0;
+    hwPerfSlowWindows_ = 0;
+    hwPerfDemotePending_ = false;
+
+    // "hardware" mode never demotes to software: ignore previous fallbacks.
+    const bool strictHW = Manager::instance().videoPreferences.getHWAccelMode() == "hardware";
+    if (enableAccel_ and (strictHW or not fallback_)) {
         auto APIs = video::HardwareAccel::getCompatibleAccel(decoderCtx_->codec_id,
                                                              decoderCtx_->width,
                                                              decoderCtx_->height,
@@ -838,13 +848,31 @@ MediaDecoder::enableLateFrameDrop(std::chrono::microseconds threshold)
 DecodeStatus
 MediaDecoder::decode(AVPacket& packet)
 {
+#ifdef RING_ACCEL
+    if (accel_ && hwPerfDemotePending_) {
+        hwPerfDemotePending_ = false;
+        SIP_CORE_WARN("HW decoding slower than realtime for %s; falling back to software",
+                      avcodec_get_name(decoderCtx_->codec_id));
+        fallback_ = true;
+        accel_.reset();
+        avcodec_flush_buffers(decoderCtx_);
+        setupStream();
+        return DecodeStatus::FallBack;
+    }
+    const int64_t hwDecodeStart = (accel_ && inputDecoder_->type == AVMEDIA_TYPE_VIDEO)
+                                      ? av_gettime()
+                                      : 0;
+#endif
     int frameFinished = 0;
     auto ret = avcodec_send_packet(decoderCtx_, &packet);
     if (ret < 0 && ret != AVERROR(EAGAIN)) {
 #ifdef RING_ACCEL
         if (accel_) {
             SIP_CORE_WARN("Decoding error falling back to software");
-            fallback_ = true;
+            // "hardware" mode retries HW on the next setupStream instead of
+            // demoting to software.
+            if (Manager::instance().videoPreferences.getHWAccelMode() != "hardware")
+                fallback_ = true;
             accel_.reset();
             avcodec_flush_buffers(decoderCtx_);
             setupStream();
@@ -969,6 +997,33 @@ MediaDecoder::decode(AVPacket& packet)
         }
         if(output && videoFrame)
             f = std::static_pointer_cast<MediaFrame>(output);
+
+        // AUTO mode watchdog: demote to software when HW decode (including the
+        // GPU->CPU transfer above) cannot keep up with the stream framerate —
+        // integrated GPUs are sometimes slower than the CPU here. Two
+        // consecutive slow windows are required so device warm-up does not
+        // trigger a false demotion.
+        if (hwDecodeStart && accel_
+            && Manager::instance().videoPreferences.getHWAccelMode() == "auto") {
+            hwPerfAccumUs_ += av_gettime() - hwDecodeStart;
+            if (++hwPerfSamples_ >= HW_PERF_WINDOW) {
+                const double fps = std::max(1.0, av_q2d(decoderCtx_->framerate));
+                const int64_t budgetUs = static_cast<int64_t>(1e6 / fps);
+                const int64_t avgUs = hwPerfAccumUs_ / hwPerfSamples_;
+                hwPerfAccumUs_ = 0;
+                hwPerfSamples_ = 0;
+                if (avgUs > budgetUs) {
+                    if (++hwPerfSlowWindows_ >= 2) {
+                        SIP_CORE_WARN("HW decode averaging %lld us/frame (budget %lld us)",
+                                      static_cast<long long>(avgUs),
+                                      static_cast<long long>(budgetUs));
+                        hwPerfDemotePending_ = true;
+                    }
+                } else {
+                    hwPerfSlowWindows_ = 0;
+                }
+            }
+        }
 #endif
 
         if (callback_)
