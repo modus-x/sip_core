@@ -714,6 +714,29 @@ Sdp::addMediaDescription(const MediaAttribute& mediaAttr, const pjmedia_sdp_medi
         addRTCPAttribute(med, localVideoRtcpPort_);
     }
 
+#ifdef ENABLE_VIDEO
+    if (type == MediaType::MEDIA_VIDEO and not resolved.empty()) {
+        // Declare our maximum video bitrate: RFC 3890 b=TIAS (bit/s, payload
+        // only) plus the legacy b=AS (kbit/s) for peers that only read AS.
+        // Media-level b= caps what the PEER sends to us, so advertise the
+        // system maximum — the user's quality preset governs the outgoing
+        // direction only and must not throttle our receive.
+        auto videoCodec = std::static_pointer_cast<AccountVideoCodecInfo>(resolved.front().codec);
+        unsigned capKbps = videoCodec->systemCodecInfo.maxBitrate;
+        if (capKbps > 0 and med->bandw_count + 2 <= PJMEDIA_MAX_SDP_BANDW) {
+            auto* tias = PJ_POOL_ZALLOC_T(memPool_.get(), pjmedia_sdp_bandw);
+            pj_strdup2(memPool_.get(), &tias->modifier, "TIAS");
+            tias->value = capKbps * 1000;
+            med->bandw[med->bandw_count++] = tias;
+
+            auto* as = PJ_POOL_ZALLOC_T(memPool_.get(), pjmedia_sdp_bandw);
+            pj_strdup2(memPool_.get(), &as->modifier, "AS");
+            as->value = capKbps;
+            med->bandw[med->bandw_count++] = as;
+        }
+    }
+#endif
+
     char const* direction = mediaDirection(mediaAttr);
 
     med->attr[med->attr_count++] = pjmedia_sdp_attr_create(memPool_.get(), direction, NULL);

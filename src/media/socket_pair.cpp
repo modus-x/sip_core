@@ -412,16 +412,66 @@ SocketPair::saveRtcpRRPacket(uint8_t* buf, size_t len)
     if (header->pt != 201) // 201 = RR PT
         return;
 
+    storeValidatedRR(*header);
+}
+
+void
+SocketPair::storeValidatedRR(const rtcpRRHeader& header)
+{
+    // Only accept report blocks that are about OUR outgoing stream. This
+    // filters SRTCP ciphertext (we cannot decrypt SRTCP, so a compliant
+    // secure peer's reports would parse as garbage) and reports meant for
+    // other SSRCs. Skipped while our SSRC is still unknown (receive-only).
+    auto ourSsrc = ourOutSsrc_.load(std::memory_order_relaxed);
+    if (ourSsrc != 0 and Swap4Bytes(header.id) != ourSsrc) {
+        SIP_CORE_DBG("Dropping RTCP report block about SSRC %x (ours is %x)",
+                     Swap4Bytes(header.id),
+                     ourSsrc);
+        return;
+    }
+
     std::lock_guard<std::mutex> lock(rtcpInfo_mutex_);
 
     if (listRtcpRRHeader_.size() >= MAX_LIST_SIZE) {
         listRtcpRRHeader_.pop_front();
     }
 
-    lastRtcpRRHeader_ = *header;
-    listRtcpRRHeader_.emplace_back(*header);
+    lastRtcpRRHeader_ = header;
+    listRtcpRRHeader_.emplace_back(header);
 
     cvRtcpPacketReadyToRead_.notify_one();
+}
+
+void
+SocketPair::handleIncomingSR(uint8_t* buf, size_t len)
+{
+    if (len < sizeof(rtcpSRHeader))
+        return;
+
+    auto sr = reinterpret_cast<rtcpSRHeader*>(buf);
+
+    // Middle 32 bits of the peer's NTP timestamp -> LSR of our next RR;
+    // arrival time -> DLSR (RFC 3550 §6.4.1).
+    uint32_t msb = Swap4Bytes(sr->timestampMSB);
+    uint32_t lsb = Swap4Bytes(sr->timestampLSB);
+    peerSrNtpMid_ = (msb << 16) | (lsb >> 16);
+    peerSrArrival_ = clock::now();
+
+    // A compound SR from a standards-compliant peer may carry report blocks
+    // about our own sending; treat the first block like an RR so the
+    // loss-based bitrate adaptation can consume it.
+    constexpr size_t reportBlockSize = 24;
+    if (sr->rc > 0 and len >= sizeof(rtcpSRHeader) + reportBlockSize) {
+        rtcpRRHeader rr {};
+        rr.version = sr->version;
+        rr.rc = sr->rc;
+        rr.pt = 201;
+        rr.len = sr->len;
+        rr.ssrc = sr->ssrc;
+        // Wire layout of a report block matches rtcpRRHeader from `id` on.
+        memcpy(&rr.id, buf + sizeof(rtcpSRHeader), reportBlockSize);
+        storeValidatedRR(rr);
+    }
 }
 
 void
@@ -436,6 +486,15 @@ SocketPair::saveRtcpREMBPacket(uint8_t* buf, size_t len)
 
     if (header->uid != 0x424D4552) // uid must be "REMB"
         return;
+
+    // Decode the carried estimate directly from the wire bytes — the struct
+    // bitfields are byte-order-scrambled on little-endian hosts.
+    // Byte 16 = NumSSRC, byte 17 = BRExp(6) | mantissa hi 2 bits, 18-19 = mantissa.
+    if (len >= 20) {
+        uint8_t expo = buf[17] >> 2;
+        uint32_t mant = (uint32_t(buf[17] & 0x3) << 16) | (uint32_t(buf[18]) << 8) | buf[19];
+        lastRembBps_.store(uint64_t(mant) << expo, std::memory_order_relaxed);
+    }
 
     std::lock_guard<std::mutex> lock(rtcpInfo_mutex_);
 
@@ -815,7 +874,7 @@ SocketPair::readCallback(uint8_t* buf, int buf_size)
                 saveRtcpREMBPacket(buf, len);
             // 200 = SR PT
             else if (header->pt == 200) {
-                // not used yet
+                handleIncomingSR(buf, len);
             } else {
                 SIP_CORE_DBG("Can't read RTCP: unknown packet type %u", header->pt);
             }
@@ -834,6 +893,12 @@ SocketPair::readCallback(uint8_t* buf, int buf_size)
 
     if (not fromRTCP && (buf_size < static_cast<int>(MINIMUM_RTP_HEADER_SIZE)))
         return len;
+
+    // RFC 3550 receive statistics + periodic Receiver Reports. RTP headers
+    // are cleartext even under SRTP, so this runs before decryption and for
+    // plain RTP alike. Enabled per media type via enableRtcpReports().
+    if (not fromRTCP and rtcpReportClockRate_.load(std::memory_order_relaxed) != 0)
+        processIncomingRtpStats(buf, len);
 
     // SRTP decrypt
     if (not fromRTCP and srtpContext_ and srtpContext_->srtp_in.aes) {
@@ -970,6 +1035,15 @@ SocketPair::writeCallback(const uint8_t* buf, int buf_size)
 
     int ret;
     bool isRTCP = RTP_PT_IS_RTCP(buf[1]);
+
+    // Track our outgoing RTP SSRC (it changes whenever the FFmpeg muxer is
+    // recreated, e.g. on a sender restart): it is the reporter identity of
+    // our Receiver Reports and the validation key for inbound report blocks.
+    if (not isRTCP and buf_size >= 12) {
+        uint32_t ssrc = (uint32_t(buf[8]) << 24) | (uint32_t(buf[9]) << 16)
+                        | (uint32_t(buf[10]) << 8) | uint32_t(buf[11]);
+        ourOutSsrc_.store(ssrc, std::memory_order_relaxed);
+    }
     unsigned int ts_LSB, ts_MSB;
     double currentSRTS, currentLatency;
 
@@ -1045,6 +1119,155 @@ SocketPair::getLastLatency()
         return histoLatency_.back();
     else
         return -1;
+}
+
+void
+SocketPair::enableRtcpReports(uint32_t rtpClockRate)
+{
+    rtcpReportClockRate_.store(rtpClockRate, std::memory_order_relaxed);
+}
+
+void
+SocketPair::processIncomingRtpStats(uint8_t* buf, int len)
+{
+    // Cleartext RTP header: V(2) P X CC | M PT | seq(16) | ts(32) | ssrc(32)
+    if (len < 12 or (buf[0] >> 6) != 2)
+        return;
+
+    const uint16_t seq = uint16_t(buf[2]) << 8 | buf[3];
+    const uint32_t rtpTs = (uint32_t(buf[4]) << 24) | (uint32_t(buf[5]) << 16)
+                           | (uint32_t(buf[6]) << 8) | uint32_t(buf[7]);
+    const uint32_t ssrc = (uint32_t(buf[8]) << 24) | (uint32_t(buf[9]) << 16)
+                          | (uint32_t(buf[10]) << 8) | uint32_t(buf[11]);
+    const auto now = clock::now();
+
+    if (not seqInit_ or ssrc != remoteSsrc_) {
+        // First packet, or the peer restarted its sender (fresh SSRC):
+        // (re)base the whole statistics block (RFC 3550 A.1 init).
+        remoteSsrc_ = ssrc;
+        seqInit_ = true;
+        maxSeq_ = seq;
+        seqCycles_ = 0;
+        baseSeqExt_ = seq;
+        receivedPkts_ = 1;
+        expectedPrior_ = 0;
+        receivedPrior_ = 0;
+        jitterQ4_ = 0;
+        transitInit_ = false;
+        rateWindowBytes_ = static_cast<uint64_t>(len);
+        rateWindowStart_ = now;
+        lastRRSent_ = now;
+        return;
+    }
+
+    receivedPkts_++;
+    rateWindowBytes_ += static_cast<uint64_t>(len);
+
+    const uint16_t udelta = static_cast<uint16_t>(seq - maxSeq_);
+    if (udelta < 0x8000) {
+        if (seq < maxSeq_) // wrapped
+            seqCycles_ += 0x10000;
+        maxSeq_ = seq;
+    } // else: duplicate or reordered — counts as received only
+
+    // Interarrival jitter, RFC 3550 A.8, in RTP timestamp units.
+    const uint32_t clockRate = rtcpReportClockRate_.load(std::memory_order_relaxed);
+    const int64_t arrivalTicks
+        = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count()
+          * int64_t(clockRate) / 1000000;
+    const int64_t transit = arrivalTicks - int64_t(rtpTs);
+    if (transitInit_) {
+        int64_t d = transit - lastTransit_;
+        if (d < 0)
+            d = -d;
+        // Ignore absurd samples (RTP timestamp wrap once per ~13 h at 90 kHz).
+        if (d < int64_t(clockRate)) {
+            int64_t j = int64_t(jitterQ4_) + d - ((int64_t(jitterQ4_) + 8) >> 4);
+            jitterQ4_ = j > 0 ? uint32_t(j) : 0;
+        }
+    }
+    lastTransit_ = transit;
+    transitInit_ = true;
+
+    // Incoming media rate over a ~500 ms sliding window.
+    const auto winMs
+        = std::chrono::duration_cast<std::chrono::milliseconds>(now - rateWindowStart_).count();
+    if (winMs >= 500) {
+        lastRateBps_.store(rateWindowBytes_ * 8000 / uint64_t(winMs), std::memory_order_relaxed);
+        rateWindowBytes_ = 0;
+        rateWindowStart_ = now;
+    }
+
+    if (now - lastRRSent_ >= std::chrono::seconds(1)) {
+        lastRRSent_ = now;
+        sendReceiverReport();
+    }
+}
+
+void
+SocketPair::sendReceiverReport()
+{
+    // Reporter identity: reuse our outgoing RTP SSRC (unknown until we have
+    // sent at least one packet — video calls are bidirectional in practice).
+    const uint32_t ourSsrc = ourOutSsrc_.load(std::memory_order_relaxed);
+    if (ourSsrc == 0 or not seqInit_)
+        return;
+
+    // RFC 3550 A.3 interval statistics.
+    const uint32_t extMax = seqCycles_ + maxSeq_;
+    const uint32_t expected = extMax - baseSeqExt_ + 1;
+    const uint32_t expectedInterval = expected - expectedPrior_;
+    const uint32_t receivedInterval = receivedPkts_ - receivedPrior_;
+    expectedPrior_ = expected;
+    receivedPrior_ = receivedPkts_;
+
+    const int32_t lostInterval = int32_t(expectedInterval) - int32_t(receivedInterval);
+    uint8_t fraction = 0;
+    if (expectedInterval > 0 and lostInterval > 0) {
+        uint32_t f = (uint32_t(lostInterval) << 8) / expectedInterval;
+        fraction = f > 255 ? 255 : uint8_t(f);
+    }
+
+    int32_t cumLost = int32_t(expected) - int32_t(receivedPkts_);
+    if (cumLost > 0x7fffff)
+        cumLost = 0x7fffff;
+    else if (cumLost < 0)
+        cumLost = 0;
+
+    const uint32_t jitter = jitterQ4_ >> 4;
+
+    uint32_t dlsr = 0;
+    const uint32_t lsr = peerSrNtpMid_;
+    if (lsr != 0) {
+        const auto sinceSr = std::chrono::duration_cast<std::chrono::microseconds>(clock::now()
+                                                                                   - peerSrArrival_)
+                                 .count();
+        dlsr = uint32_t(sinceSr * 65536 / 1000000);
+    }
+
+    uint8_t pkt[32];
+    auto be32 = [](uint8_t* p, uint32_t v) {
+        p[0] = uint8_t(v >> 24);
+        p[1] = uint8_t(v >> 16);
+        p[2] = uint8_t(v >> 8);
+        p[3] = uint8_t(v);
+    };
+    pkt[0] = 0x81; // V=2, P=0, RC=1
+    pkt[1] = 201;  // RR
+    pkt[2] = 0;
+    pkt[3] = 7; // length in 32-bit words minus one
+    be32(pkt + 4, ourSsrc);
+    be32(pkt + 8, remoteSsrc_);
+    pkt[12] = fraction;
+    pkt[13] = uint8_t(cumLost >> 16);
+    pkt[14] = uint8_t(cumLost >> 8);
+    pkt[15] = uint8_t(cumLost);
+    be32(pkt + 16, extMax);
+    be32(pkt + 20, jitter);
+    be32(pkt + 24, lsr);
+    be32(pkt + 28, dlsr);
+
+    writeData(pkt, sizeof(pkt));
 }
 
 void

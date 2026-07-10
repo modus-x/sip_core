@@ -945,12 +945,32 @@ VideoInput::initX11(const std::string& display)
 }
 #endif
 
+bool
+hasScreenCaptureAccess()
+{
+#if defined(__APPLE__) && !(defined(TARGET_OS_IOS) && TARGET_OS_IOS)
+    if (__builtin_available(macOS 10.15, *))
+        return CGPreflightScreenCaptureAccess();
+#endif
+    return true;
+}
+
 // Desktop-only: drives avfoundation "Capture screen N" with CoreGraphics
 // display metrics (CGMainDisplayID does not exist on iOS).
 #if defined(__APPLE__) && !(defined(TARGET_OS_IOS) && TARGET_OS_IOS)
 bool
 VideoInput::initAVFoundation(const std::string& display)
 {
+    // Preflight TCC before FFmpeg's avfoundation open (which dispatch_sync's
+    // to the main queue); without permission it would silently stream the
+    // wallpaper instead of the screen.
+    if (!hasScreenCaptureAccess()) {
+        SIP_CORE_ERR("initAVFoundation: Screen recording permission denied for \"%s\"",
+                     display.c_str());
+        emitDeviceOpenError("Screen recording permission denied");
+        return false;
+    }
+
     size_t space = display.find(' ');
 
     clearOptions();
@@ -1405,6 +1425,17 @@ VideoInput::switchInput(const std::string& resource)
 #else
         ready = initX11(suffix);
 #endif
+        if (!ready) {
+            currentResource_ = previousResource;
+            decOpts_ = previousDecOpts;
+            emulateRate_ = previousEmulateRate;
+            switchPending_ = false;
+            foundDecOpts(DeviceParams {});
+            futureDecOpts_ = foundDecOpts_.get_future().share();
+            notifySetupFailed(false);
+            switchInProgress_.store(false);
+            return futureDecOpts_;
+        }
     } else if (prefix == libsip_core::Media::VideoProtocolPrefix::FILE) {
         recognized = true;
         /* Pathname */

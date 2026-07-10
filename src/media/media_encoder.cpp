@@ -268,6 +268,11 @@ MediaEncoder::writeContainerToRtp(const uint8_t* buf, int buf_size)
     void
     MediaEncoder::setOptions(const MediaDescription& args)
     {
+        if (args.codec and (args.codec->systemCodecInfo.mediaType & MEDIA_VIDEO)) {
+            auto vc = std::static_pointer_cast<AccountVideoCodecInfo>(args.codec);
+            sharePrefersMotion_ = vc->sharePrefersMotion;
+        }
+
 #ifdef RQM
         // no payload exists for fMP4. So we use some random value
     int payload_type = 111;
@@ -1259,14 +1264,13 @@ MediaEncoder::writeContainerToRtp(const uint8_t* buf, int buf_size)
     } else
 #endif
         {
-            if (source_.find("display") != std::string::npos) {
+            if (isDisplaySource()) {
                 // Desktop sharing: optimize for screen content
-                av_opt_set(encoderCtx, "preset", "veryslow", AV_OPT_SEARCH_CHILDREN);    // Balance speed/quality
-                av_opt_set(encoderCtx, "tune", "stillimage", AV_OPT_SEARCH_CHILDREN); // Low latency
-
-                auto quality = h264CrfFromQuality();
-
-                av_opt_set_double(encoderCtx, "crf", quality, AV_OPT_SEARCH_CHILDREN);
+                // (preset/crf are owned by initH264/initH265; x265 has no "stillimage" tune)
+                if (encoderCtx->codec_id == AV_CODEC_ID_HEVC)
+                    av_opt_set(encoderCtx, "tune", "zerolatency", AV_OPT_SEARCH_CHILDREN);
+                else
+                    av_opt_set(encoderCtx, "tune", "stillimage,zerolatency", AV_OPT_SEARCH_CHILDREN);
 
                 av_opt_set_int(encoderCtx, "refs", 1, AV_OPT_SEARCH_CHILDREN);          // Low latency
 
@@ -1467,6 +1471,8 @@ MediaEncoder::enableAccel(bool enableAccel)
             initH265(encoderCtx, br);
         } else if (avcodecId == AV_CODEC_ID_VP8) {
             initVP8(encoderCtx, br);
+        } else if (avcodecId == AV_CODEC_ID_VP9) {
+            initVP9(encoderCtx, br);
         } else if (avcodecId == AV_CODEC_ID_MPEG4) {
             initMPEG4(encoderCtx, br);
         } else if (avcodecId == AV_CODEC_ID_H263) {
@@ -1490,22 +1496,14 @@ MediaEncoder::enableAccel(bool enableAccel)
             return 0; // Restart needed
 
         // No need to restart encoder for h264, h263 and MPEG4
-        // Change parameters on the fly
+        // Change parameters on the fly (HEVC/VP8/VP9 already returned 0
+        // above — they need a full sender restart)
         if (codecId == AV_CODEC_ID_H264)
             initH264(encoderCtx, br);
-        if (codecId == AV_CODEC_ID_HEVC)
-            initH265(encoderCtx, br);
         else if (codecId == AV_CODEC_ID_H263P)
             initH263(encoderCtx, br);
         else if (codecId == AV_CODEC_ID_MPEG4)
             initMPEG4(encoderCtx, br);
-        else {
-            // restart encoder on runtime doesn't work for VP8
-            // stopEncoder();
-            // encoderCtx = initCodec(codecType, codecId, br);
-            // if (avcodec_open2(encoderCtx, outputCodec_, &options_) < 0)
-            //     throw MediaEncoderException("Could not open encoder");
-        }
         initAccel(encoderCtx, br);
         return 1; // OK
     }
@@ -1585,21 +1583,49 @@ MediaEncoder::enableAccel(bool enableAccel)
                     ", preset=%s, tune=%s",
                     br, crf, maxrate, bufsize, preset, tune);
 #else
-        // Use capped‐CRF (quality + rate constraints) to get “normal” quality
+        // Adaptive bitrate: capped-CRF with the VBV cap driven by the live
+        // target. libx264's reconfig_encoder() re-reads rc_max_rate and
+        // rc_buffer_size unconditionally on every frame, so re-invoking this
+        // function from setBitrate() takes effect mid-stream without an
+        // encoder restart. CRF stays the quality ceiling for uncongested
+        // moments; the VBV bounds the wire rate when the network is the
+        // limiting factor.
+        if (br < SystemCodecInfo::DEFAULT_MIN_BITRATE)
+            br = SystemCodecInfo::DEFAULT_MIN_BITRATE;
+        else if (br > SystemCodecInfo::DEFAULT_MAX_BITRATE)
+            br = SystemCodecInfo::DEFAULT_MAX_BITRATE;
+        int64_t maxrate = static_cast<int64_t>(br) * 1000;
+        int64_t bufsize = maxrate / 2; // ~0.5 s VBV: low latency, still absorbs bursts
+
+        if (isDisplaySource()) {
+            // Desktop sharing: RQM recorder bench recipe — free quantizer
+            // (no qmin/qmax), no no-scenecut, no intra-refresh. "detail"
+            // (default) favours crisp text; "motion" trades sharpness for
+            // smoother playback of moving content.
+            int crf = sharePrefersMotion_ ? 26 : 23;
+            const char* preset = "medium";
+
+            av_opt_set_int(encoderCtx, "crf", crf, AV_OPT_SEARCH_CHILDREN);
+            av_opt_set_int(encoderCtx, "maxrate", maxrate, AV_OPT_SEARCH_CHILDREN);
+            av_opt_set_int(encoderCtx, "bufsize", bufsize, AV_OPT_SEARCH_CHILDREN);
+            av_opt_set(encoderCtx, "preset", preset, AV_OPT_SEARCH_CHILDREN);
+            if (sharePrefersMotion_) {
+                // stillimage tuning (set by forcePresetX2645) hurts motion;
+                // plain zerolatency handles animated content better.
+                av_opt_set(encoderCtx, "tune", "zerolatency", AV_OPT_SEARCH_CHILDREN);
+            }
+
+            SIP_CORE_DEBUG("H264 display init: br={:d}, crf={:d}, maxrate={:d}, bufsize={:d}, "
+                           "preset={:s}, sharePref={:s}",
+                           br, crf, maxrate, bufsize, preset,
+                           sharePrefersMotion_ ? "motion" : "detail");
+        } else {
+        // Camera: capped-CRF (quality + rate constraints) for "normal" quality
 
         // Choose a CRF that gives good quality without too heavy data
         int crf = 28;  // moderate quality (lower is better quality but higher bitrate)
-        // Bound quantizer swings
-        int qmin = crf - 6;  // e.g. 17
-        int qmax = crf + 6;  // e.g. 29
-        if (qmin < 1) qmin = 1;
-
-        // Set VBV / VBV-constrained parameters
-        // maxrate = br (no exceeding the target)
-        int64_t maxrate = 1500000;
-        // buffsize: allow some fluctuation, but not overly large
-        // e.g. buffer = br * 2/3  (or br * 3/4) — you can tune this
-        int64_t bufsize = (1500000 * 2) / 3;
+        // NOTE: no qmin/qmax pinning — the quantizer must be free to rise so
+        // the VBV cap can actually be honoured at low adaptive targets.
 
         // Preset: pick a trade-off between speed and compression
         const char* preset = "medium";  // you might try "medium" if CPU allows
@@ -1608,8 +1634,6 @@ MediaEncoder::enableAccel(bool enableAccel)
         av_opt_set_int(encoderCtx, "crf", crf, AV_OPT_SEARCH_CHILDREN);
         av_opt_set_int(encoderCtx, "maxrate", maxrate, AV_OPT_SEARCH_CHILDREN);
         av_opt_set_int(encoderCtx, "bufsize", bufsize, AV_OPT_SEARCH_CHILDREN);
-        av_opt_set_int(encoderCtx, "qmin", qmin, AV_OPT_SEARCH_CHILDREN);
-        av_opt_set_int(encoderCtx, "qmax", qmax, AV_OPT_SEARCH_CHILDREN);
         av_opt_set(encoderCtx, "preset", preset, AV_OPT_SEARCH_CHILDREN);
 
         // Optionally disable scene cut to reduce spikes
@@ -1617,11 +1641,9 @@ MediaEncoder::enableAccel(bool enableAccel)
         // Intra refresh may help error resilience / refresh gradually
         av_opt_set_int(encoderCtx, "intra-refresh", 1, AV_OPT_SEARCH_CHILDREN);
 
-        SIP_CORE_DEBUG("H264 init for 720p: br=%" PRIu64
-                    ", crf=%d, maxrate=%" PRIu64
-                    ", bufsize=%" PRIu64
-                    ", qmin=%d, qmax=%d, preset=%s",
-                    br, crf, maxrate, bufsize, qmin, qmax, preset);
+        SIP_CORE_DEBUG("H264 init: br={:d}, crf={:d}, maxrate={:d}, bufsize={:d}, preset={:s}",
+                       br, crf, maxrate, bufsize, preset);
+        }
 #endif
     }
 
@@ -1685,7 +1707,7 @@ MediaEncoder::enableAccel(bool enableAccel)
             av_opt_set_int(encoderCtx, "error-resilient", 1, AV_OPT_SEARCH_CHILDREN);
             av_opt_set_int(encoderCtx,
                            "cpu-used",
-                           7,
+                           isDisplaySource() ? 4 : 7,
                            AV_OPT_SEARCH_CHILDREN); // value obtained from testing
             av_opt_set_int(encoderCtx, "lag-in-frames", 0, AV_OPT_SEARCH_CHILDREN);
             // allow encoder to drop frames if buffers are full and
@@ -1702,6 +1724,50 @@ MediaEncoder::enableAccel(bool enableAccel)
             av_opt_set_int(encoderCtx, "maxrate", maxBitrate, AV_OPT_SEARCH_CHILDREN);
             av_opt_set_int(encoderCtx, "bufsize", bufSize, AV_OPT_SEARCH_CHILDREN);
             SIP_CORE_DEBUG("VP8 encoder setup: crf={:d}, maxrate={:d}, bufsize={:d}",
+                           crf,
+                           maxBitrate / 1000,
+                           bufSize / 1000);
+        }
+    }
+
+    void
+    MediaEncoder::initVP9(AVCodecContext* encoderCtx, uint64_t br)
+    {
+        if (mode_ == RateMode::CQ) {
+            av_opt_set_int(encoderCtx, "g", 120, AV_OPT_SEARCH_CHILDREN);
+            av_opt_set_int(encoderCtx, "lag-in-frames", 0, AV_OPT_SEARCH_CHILDREN);
+            av_opt_set(encoderCtx, "deadline", "good", AV_OPT_SEARCH_CHILDREN);
+            av_opt_set_int(encoderCtx, "cpu-used", 0, AV_OPT_SEARCH_CHILDREN);
+            av_opt_set_int(encoderCtx, "row-mt", 1, AV_OPT_SEARCH_CHILDREN);
+            av_opt_set_int(encoderCtx, "qmax", 23, AV_OPT_SEARCH_CHILDREN);
+            av_opt_set_int(encoderCtx, "qmin", 0, AV_OPT_SEARCH_CHILDREN);
+            av_opt_set_int(encoderCtx, "crf", 18, AV_OPT_SEARCH_CHILDREN);
+            SIP_CORE_DEBUG("VP9 encoder setup: crf=18");
+        } else {
+            uint64_t maxBitrate = 1000 * br;
+            // 200 Kbit/s    -> CRF40
+            // 6 Mbit/s      -> CRF23
+            uint8_t crf = (uint8_t) std::round(LOGREG_PARAM_A + LOGREG_PARAM_B * std::log(maxBitrate));
+            uint64_t bufSize = maxBitrate / 2;
+
+            av_opt_set(encoderCtx, "quality", "realtime", AV_OPT_SEARCH_CHILDREN);
+            av_opt_set_int(encoderCtx, "error-resilient", 1, AV_OPT_SEARCH_CHILDREN);
+            av_opt_set_int(encoderCtx,
+                           "cpu-used",
+                           isDisplaySource() ? 5 : 7,
+                           AV_OPT_SEARCH_CHILDREN);
+            av_opt_set_int(encoderCtx, "row-mt", 1, AV_OPT_SEARCH_CHILDREN);
+            av_opt_set_int(encoderCtx, "lag-in-frames", 0, AV_OPT_SEARCH_CHILDREN);
+            if (isDisplaySource())
+                av_opt_set(encoderCtx, "tune-content", "screen", AV_OPT_SEARCH_CHILDREN);
+            av_opt_set_int(encoderCtx, "qmax", 56, AV_OPT_SEARCH_CHILDREN);
+            av_opt_set_int(encoderCtx, "qmin", 4, AV_OPT_SEARCH_CHILDREN);
+            crf = std::clamp((int) crf, 4, 56);
+            av_opt_set_int(encoderCtx, "crf", crf, AV_OPT_SEARCH_CHILDREN);
+            av_opt_set_int(encoderCtx, "b", maxBitrate, AV_OPT_SEARCH_CHILDREN);
+            av_opt_set_int(encoderCtx, "maxrate", maxBitrate, AV_OPT_SEARCH_CHILDREN);
+            av_opt_set_int(encoderCtx, "bufsize", bufSize, AV_OPT_SEARCH_CHILDREN);
+            SIP_CORE_DEBUG("VP9 encoder setup: crf={:d}, maxrate={:d}, bufsize={:d}",
                            crf,
                            maxBitrate / 1000,
                            bufSize / 1000);
@@ -1817,10 +1883,16 @@ MediaEncoder::enableAccel(bool enableAccel)
         return accel_->dynBitrate();
     }
 #endif
-        if (codecid != AV_CODEC_ID_VP8)
-            return true;
+        // libvpx only re-reads the quantizer ceiling at runtime, and the
+        // bundled libx265 wrapper has no reconfig path at all — both need a
+        // full sender restart for a real bitrate change. Only codecs whose
+        // FFmpeg wrapper genuinely re-reads rate fields per frame may return
+        // true here (x264 re-reads rc_max_rate/rc_buffer_size every frame).
+        if (codecid == AV_CODEC_ID_VP8 || codecid == AV_CODEC_ID_VP9
+            || codecid == AV_CODEC_ID_HEVC)
+            return false;
 
-        return false;
+        return true;
     }
 
     bool

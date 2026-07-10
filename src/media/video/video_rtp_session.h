@@ -173,13 +173,13 @@ private:
     bool check_RCTP_Info_RR(RTCPInfo&);
     bool check_RCTP_Info_REMB(uint64_t*);
     void adaptQualityAndBitrate();
-    void storeVideoBitrateInfo();
     void setupVideoBitrateInfo();
     void checkReceiver();
     float getPonderateLoss(float lastLoss);
     void delayMonitor(int gradient, int deltaT);
     void dropProcessing(RTCPInfo* rtcpi);
-    void delayProcessing(int br);
+    void delayProcessing(uint64_t rembBps);
+    void tryIncrease();
     void setNewBitrate(unsigned int newBR);
 
     // no packet loss can be calculated as no data in input
@@ -217,11 +217,21 @@ private:
     std::function<void(DeviceParams&)> localDeviceParamsChangedCallback_;
 
     // interval in seconds between RTCP checkings
-    std::chrono::seconds rtcp_checking_interval {4};
+    std::chrono::seconds rtcp_checking_interval {1};
 
     time_point lastMediaRestart_ {time_point::min()};
     time_point last_REMB_inc_ {time_point::min()};
     time_point last_REMB_dec_ {time_point::min()};
+    // GCC-style ramp-up state: hold after any decrease, only increase on
+    // fresh, clean feedback.
+    time_point lastBitrateDecrease_ {time_point::min()};
+    time_point lastBitrateIncrease_ {time_point::min()};
+    time_point lastFeedbackTime_ {time_point::min()};
+    float lastPondLoss_ {0.0f};
+    // Session-local adaptation state: the current bitrate is seeded from the
+    // account codec once per (re)negotiation and then owned by this session —
+    // adapted values are never written back to the shared codec object.
+    bool bitrateInfoInitialized_ {false};
 
     unsigned remb_dec_cnt_ {0};
 

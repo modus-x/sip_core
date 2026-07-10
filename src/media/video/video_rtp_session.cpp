@@ -54,6 +54,21 @@ constexpr auto DELAY_AFTER_RESTART = std::chrono::milliseconds(1000);
 constexpr auto EXPIRY_TIME_RTCP = std::chrono::seconds(2);
 constexpr auto DELAY_AFTER_REMB_INC = std::chrono::seconds(1);
 constexpr auto DELAY_AFTER_REMB_DEC = std::chrono::milliseconds(500);
+
+// GCC-style adaptation policy (draft-ietf-rmcat-gcc):
+//  - loss < 2%              -> multiplicative ramp-up (<= ~8%/s)
+//  - loss 2..10%            -> hold
+//  - loss > 10%             -> multiplicative decrease x(1 - 0.5*loss)
+//  - after any decrease     -> hold-down before increases resume
+//  - never ramp blindly     -> increases require fresh peer feedback
+constexpr float LOSS_INCREASE_THRESHOLD {2.0f};  // percent
+constexpr float LOSS_DECREASE_THRESHOLD {10.0f}; // percent
+constexpr float INCREASE_FACTOR {1.08f};
+constexpr auto HOLD_AFTER_DECREASE = std::chrono::seconds(3);
+constexpr auto FEEDBACK_FRESHNESS = std::chrono::seconds(6);
+// Legacy REMB nudge codes used by older clients (pre-absolute-estimate).
+constexpr uint64_t LEGACY_REMB_DEC {0x6803};
+constexpr uint64_t LEGACY_REMB_INC {0x7378};
 constexpr auto HOLD_BLACKOUT_PREROLL_INTERVAL = std::chrono::milliseconds(40);
 constexpr int HOLD_BLACKOUT_PREROLL_FRAMES = 3;
 
@@ -203,6 +218,10 @@ void
 VideoRtpSession::updateMedia(const MediaDescription& send, const MediaDescription& receive)
 {
     BaseType::updateMedia(send, receive);
+    // Re-seed the session bitrate from the (possibly user-updated) account
+    // codec on every negotiation — this is where setCodecDetails-triggered
+    // restarts land.
+    bitrateInfoInitialized_ = false;
     setupVideoBitrateInfo();
 }
 
@@ -383,6 +402,11 @@ VideoRtpSession::startSender()
         lastMediaRestart_ = clock::now();
         last_REMB_inc_ = clock::now();
         last_REMB_dec_ = clock::now();
+        // Stamp before the checker thread starts: `now - time_point::min()`
+        // overflows the duration rep, so these must never be min() when the
+        // adaptation loop runs. Also gives a natural hold-down at call start.
+        lastBitrateDecrease_ = clock::now();
+        lastBitrateIncrease_ = clock::now();
         if (autoQuality and not rtcpCheckerThread_.isRunning())
             rtcpCheckerThread_.start();
         else if (not autoQuality and rtcpCheckerThread_.isRunning()) {
@@ -628,6 +652,11 @@ VideoRtpSession::start()
         socketPair_->setRtpDelayCallback(
             [&](int gradient, int deltaT) { delayMonitor(gradient, deltaT); });
 
+        // Emit RFC 3550 Receiver Reports for the incoming video stream (the
+        // FFmpeg custom-IO demuxer never does) so the peer's loss-based
+        // adaptation has data to work with. 90 kHz video RTP clock.
+        socketPair_->enableRtcpReports(90000);
+
         if (send_.crypto and receive_.crypto) {
             socketPair_->createSRTP(receive_.crypto.getCryptoSuite().c_str(),
                                     receive_.crypto.getSrtpKeyInfo().c_str(),
@@ -683,12 +712,10 @@ VideoRtpSession::stop()
     rtcpCheckerThread_.join();
     lock.lock();
 
-    // reset default video quality if exist
-    if (videoBitrateInfo_.videoQualityCurrent != SystemCodecInfo::DEFAULT_NO_QUALITY)
-        videoBitrateInfo_.videoQualityCurrent = SystemCodecInfo::DEFAULT_CODEC_QUALITY;
-
-    videoBitrateInfo_.videoBitrateCurrent = SystemCodecInfo::DEFAULT_VIDEO_BITRATE;
-    storeVideoBitrateInfo();
+    // NOTE: adapted bitrate/quality are session-local (never written back to
+    // the shared account codec), so there is nothing to reset here — the old
+    // reset-to-default clobbered the user-configured bitrate for every other
+    // call leg of the account.
     // Persist the sender's last RTP sequence number across the full stop/start
     // cycle so that the next sender continues from where this one left off.
     // This is essential to avoid wire sequence-number discontinuities at
@@ -1161,13 +1188,14 @@ VideoRtpSession::check_RCTP_Info_RR(RTCPInfo& rtcpi)
 bool
 VideoRtpSession::check_RCTP_Info_REMB(uint64_t* br)
 {
+    // Drain the pending-REMB list (also resets the waitForRTCP predicate),
+    // then take the estimate decoded from raw wire bytes in SocketPair —
+    // the struct-bitfield parse is byte-order-scrambled on LE hosts.
     auto rtcpInfoVect = socketPair_->getRtcpREMB();
 
     if (!rtcpInfoVect.empty()) {
-        auto pkt = rtcpInfoVect.back();
-        auto temp = cc->parseREMB(pkt);
-        *br = (temp >> 10) | ((temp << 6) & 0xff00) | ((temp << 16) & 0x30000);
-        return true;
+        *br = socketPair_->takeLastRembBps();
+        return *br != 0;
     }
     return false;
 }
@@ -1186,6 +1214,8 @@ VideoRtpSession::adaptQualityAndBitrate()
     if (check_RCTP_Info_RR(rtcpi)) {
         dropProcessing(&rtcpi);
     }
+
+    tryIncrease();
 }
 
 void
@@ -1204,47 +1234,107 @@ VideoRtpSession::dropProcessing(RTCPInfo* rtcpi)
     }
 
     auto pondLoss = getPonderateLoss(rtcpi->packetLoss);
-    auto oldBitrate = videoBitrateInfo_.videoBitrateCurrent;
-    int newBitrate = oldBitrate;
+    lastPondLoss_ = pondLoss;
+    lastFeedbackTime_ = now;
 
-    // Fill histoLoss and histoJitter_ with samples
+    // Fill histoLoss with samples after a restart before deciding
     if (restartTimer < DELAY_AFTER_RESTART + std::chrono::seconds(1)) {
         return;
-    } else {
-        // If ponderate drops are inferior to 10% that mean drop are not from congestion but
-        // from network...
-        // ... we can increase
-        if (pondLoss >= 5.0f && rtcpi->packetLoss > 0.0f) {
-            newBitrate *= 1.0f - rtcpi->packetLoss / 150.0f;
-            histoLoss_.clear();
-            lastMediaRestart_ = now;
-            SIP_CORE_DBG(
-                "[BandwidthAdapt] Detected transmission bandwidth overuse, decrease bitrate "
-                "from "
-                "%u Kbps to %d Kbps, ratio %f (ponderate loss: %f%%, packet loss rate: %f%%)",
-                oldBitrate,
-                newBitrate,
-                (float) newBitrate / oldBitrate,
-                pondLoss,
-                rtcpi->packetLoss);
-        }
+    }
+
+    // GCC-style loss bands: < LOSS_INCREASE_THRESHOLD ramps up (tryIncrease),
+    // the middle band holds, above LOSS_DECREASE_THRESHOLD we cut by
+    // (1 - 0.5 * lossFraction).
+    if (pondLoss >= LOSS_DECREASE_THRESHOLD && rtcpi->packetLoss > 0.0f) {
+        auto oldBitrate = videoBitrateInfo_.videoBitrateCurrent;
+        int newBitrate = oldBitrate * (1.0f - rtcpi->packetLoss / 200.0f);
+        histoLoss_.clear();
+        lastMediaRestart_ = now;
+        lastBitrateDecrease_ = now;
+        SIP_CORE_DBG(
+            "[BandwidthAdapt] Detected transmission bandwidth overuse, decrease bitrate "
+            "from "
+            "%u Kbps to %d Kbps, ratio %f (ponderate loss: %f%%, packet loss rate: %f%%)",
+            oldBitrate,
+            newBitrate,
+            (float) newBitrate / oldBitrate,
+            pondLoss,
+            rtcpi->packetLoss);
+        setNewBitrate(newBitrate);
+    }
+}
+
+void
+VideoRtpSession::delayProcessing(uint64_t rembBps)
+{
+    lastFeedbackTime_ = clock::now();
+
+    unsigned oldBitrate = videoBitrateInfo_.videoBitrateCurrent;
+    int newBitrate = oldBitrate;
+    if (rembBps == LEGACY_REMB_DEC) // legacy nudge from an older client
+        newBitrate *= 0.85f;
+    else if (rembBps == LEGACY_REMB_INC)
+        newBitrate *= 1.05f;
+    else if (rembBps >= 1000) // absolute receiver estimate, bits/s
+        // Clamp while still unsigned: a forged REMB with a huge exponent must
+        // not truncate to a negative int.
+        newBitrate = static_cast<int>(
+            std::min<uint64_t>(rembBps / 1000, videoBitrateInfo_.videoBitrateMax));
+    else
+        return;
+
+    if (newBitrate < static_cast<int>(oldBitrate)) {
+        lastBitrateDecrease_ = clock::now();
+        SIP_CORE_DBG("[BandwidthAdapt] REMB estimate %lu bps caps bitrate %u -> %d Kbps",
+                     (unsigned long) rembBps,
+                     oldBitrate,
+                     newBitrate);
+    } else if (clock::now() - lastBitrateDecrease_ < HOLD_AFTER_DECREASE) {
+        // Don't let a REMB ramp-up fight the post-decrease hold-down.
+        return;
     }
 
     setNewBitrate(newBitrate);
 }
 
 void
-VideoRtpSession::delayProcessing(int br)
+VideoRtpSession::tryIncrease()
 {
-    int newBitrate = videoBitrateInfo_.videoBitrateCurrent;
-    if (br == 0x6803)
-        newBitrate *= 0.85f;
-    else if (br == 0x7378)
-        newBitrate *= 1.05f;
-    else
+    auto now = clock::now();
+
+    // Never ramp while locally muted: the black-frame keepalive draws ~zero
+    // loss, which would ratchet the target to max against unprobed capacity
+    // and cause a full-rate burst on unmute.
+    if (localMuted_.load())
         return;
 
-    setNewBitrate(newBitrate);
+    // Hold-down: never ramp right after a decrease or an encoder restart.
+    if (now - lastBitrateDecrease_ < HOLD_AFTER_DECREASE)
+        return;
+    if (now - lastMediaRestart_ < DELAY_AFTER_RESTART)
+        return;
+
+    // Only ramp on fresh feedback proving delivery (RR or REMB); a silent
+    // peer must never push us to the ceiling blindly.
+    if (lastFeedbackTime_ == time_point::min() || now - lastFeedbackTime_ > FEEDBACK_FRESHNESS)
+        return;
+
+    // The path must currently be clean.
+    if (lastPondLoss_ >= LOSS_INCREASE_THRESHOLD)
+        return;
+
+    // The checker thread wakes on every RTCP arrival, not just on the 1 s
+    // timeout — time-gate the ramp so it stays at ~8%/s regardless.
+    if (now - lastBitrateIncrease_ < std::chrono::seconds(1))
+        return;
+
+    unsigned current = videoBitrateInfo_.videoBitrateCurrent;
+    if (current >= videoBitrateInfo_.videoBitrateMax)
+        return;
+
+    // ~8%/s (draft-ietf-rmcat-gcc increase rate).
+    lastBitrateIncrease_ = now;
+    setNewBitrate(static_cast<unsigned>(current * INCREASE_FACTOR));
 }
 
 void
@@ -1255,7 +1345,6 @@ VideoRtpSession::setNewBitrate(unsigned int newBR)
 
     if (videoBitrateInfo_.videoBitrateCurrent != newBR) {
         videoBitrateInfo_.videoBitrateCurrent = newBR;
-        storeVideoBitrateInfo();
 
 #if __ANDROID__
         if (auto input_device = std::dynamic_pointer_cast<VideoInput>(videoLocal_))
@@ -1281,29 +1370,45 @@ VideoRtpSession::setupVideoBitrateInfo()
     auto codecVideo = std::static_pointer_cast<sip_core::AccountVideoCodecInfo>(send_.codec);
     if (codecVideo) {
         auto& info = codecVideo->systemCodecInfo;
-        videoBitrateInfo_ = {
-            codecVideo->bitrate,
-            info.minBitrate,
-            info.maxBitrate,
-            codecVideo->quality,
-            info.minQuality,
-            info.maxQuality,
-            videoBitrateInfo_.cptBitrateChecking,
-            videoBitrateInfo_.maxBitrateChecking,
-            videoBitrateInfo_.packetLostThreshold,
-        };
+        // Effective ceiling: system maximum, optionally lowered by the
+        // user-configured cap (quality preset in the client settings).
+        unsigned maxBitrate = info.maxBitrate;
+        if (codecVideo->userMaxBitrate > 0 && codecVideo->userMaxBitrate < maxBitrate)
+            maxBitrate = codecVideo->userMaxBitrate;
+
+        videoBitrateInfo_.videoBitrateMin = info.minBitrate;
+        videoBitrateInfo_.videoBitrateMax = maxBitrate;
+        videoBitrateInfo_.videoQualityCurrent = codecVideo->quality;
+        videoBitrateInfo_.videoQualityMin = info.minQuality;
+        videoBitrateInfo_.videoQualityMax = info.maxQuality;
+        videoBitrateInfo_.maxBitrateChecking = MAX_ADAPTATIVE_BITRATE_ITERATION;
+        videoBitrateInfo_.packetLostThreshold = PACKET_LOSS_THRESHOLD;
+
+        // The current bitrate is session-local adaptation state: seed it from
+        // the account codec once per negotiation, then only clamp it into the
+        // (possibly updated) bounds. It is never written back to the shared
+        // codec object — one leg's adaptation must not leak into other calls
+        // or into the user's configured value.
+        if (!bitrateInfoInitialized_) {
+            videoBitrateInfo_.videoBitrateCurrent
+                = std::min(std::max(codecVideo->bitrate, videoBitrateInfo_.videoBitrateMin),
+                           videoBitrateInfo_.videoBitrateMax);
+            bitrateInfoInitialized_ = true;
+        } else {
+            unsigned clamped = std::min(std::max(videoBitrateInfo_.videoBitrateCurrent,
+                                                 videoBitrateInfo_.videoBitrateMin),
+                                        videoBitrateInfo_.videoBitrateMax);
+            // A mid-session bound change (user lowered the quality preset via
+            // setCodecDetails) must actually reach the encoder on THIS leg
+            // too — setCodecDetails only restarts the foreground call's
+            // sender, so background/conference legs actuate here on their
+            // next checker tick.
+            if (clamped != videoBitrateInfo_.videoBitrateCurrent)
+                setNewBitrate(clamped);
+        }
     } else {
         videoBitrateInfo_
             = {0, 0, 0, 0, 0, 0, 0, MAX_ADAPTATIVE_BITRATE_ITERATION, PACKET_LOSS_THRESHOLD};
-    }
-}
-
-void
-VideoRtpSession::storeVideoBitrateInfo()
-{
-    if (auto codecVideo = std::static_pointer_cast<sip_core::AccountVideoCodecInfo>(send_.codec)) {
-        codecVideo->bitrate = videoBitrateInfo_.videoBitrateCurrent;
-        codecVideo->quality = videoBitrateInfo_.videoQualityCurrent;
     }
 }
 
@@ -1471,6 +1576,15 @@ VideoRtpSession::delayMonitor(int gradient, int deltaT)
     BandwidthUsage bwState = cc->get_bw_state(estimation, thresh);
     auto now = clock::now();
 
+    // REMB is only sent on OVERUSE, carrying a real receiver-side cap of
+    // 0.85 x measured incoming rate (GCC beta; during congestion the
+    // delivered rate approximates the path capacity). No REMB is sent on a
+    // clean path: with a capped-CRF encoder the delivered rate sits far
+    // below the target on static scenes, so a measured-rate-derived
+    // "increase" REMB would actually drag the target down toward the
+    // delivered rate. Clean-path ramp-up is the sender's job (tryIncrease,
+    // driven by loss-free Receiver Reports). While the measured rate is
+    // still unknown, the legacy nudge code keeps older senders adapting.
     if (bwState == BandwidthUsage::bwOverusing) {
         auto remb_timer_dec = now - last_REMB_dec_;
         if ((not remb_dec_cnt_) or (remb_timer_dec > DELAY_AFTER_REMB_DEC)) {
@@ -1482,21 +1596,15 @@ VideoRtpSession::delayMonitor(int gradient, int deltaT)
         if (remb_dec_cnt_ < MAX_REMB_DEC && remb_timer_dec < DELAY_AFTER_REMB_DEC) {
             remb_dec_cnt_++;
             SIP_CORE_WARN("VideoRtpSession [BandwidthAdapt] Detected reception bandwidth overuse");
-            uint8_t* buf = nullptr;
-            uint64_t br = 0x6803; // Decrease 3
+            uint64_t rate = socketPair_->getReceiveBitrateBps();
+            // Floor the absolute estimate at the codec minimum: a degenerate
+            // rate window (peer mute keepalive, keyframe gap, hold/unhold)
+            // must not ship a tiny REMB that freezes the peer's ramp-up.
+            constexpr uint64_t floorBps = uint64_t(SystemCodecInfo::DEFAULT_MIN_BITRATE) * 1000;
+            uint64_t br = rate > 0 ? std::max(static_cast<uint64_t>(rate * 0.85), floorBps)
+                                   : LEGACY_REMB_DEC;
             auto v = cc->createREMB(br);
-            buf = &v[0];
-            socketPair_->writeData(buf, v.size());
-            last_REMB_inc_ = clock::now();
-        }
-    } else if (bwState == BandwidthUsage::bwNormal) {
-        auto remb_timer_inc = now - last_REMB_inc_;
-        if (remb_timer_inc > DELAY_AFTER_REMB_INC) {
-            uint8_t* buf = nullptr;
-            uint64_t br = 0x7378; // INcrease
-            auto v = cc->createREMB(br);
-            buf = &v[0];
-            socketPair_->writeData(buf, v.size());
+            socketPair_->writeData(v.data(), v.size());
             last_REMB_inc_ = clock::now();
         }
     }

@@ -212,6 +212,12 @@ struct AccountVideoCodecInfo : AccountCodecInfo
     unsigned profileId;
     std::string parameters;
     bool isAutoQualityEnabled {true};
+    // User-configured ceiling for the adaptive bitrate loop, in Kbit/s.
+    // 0 = unset (use systemCodecInfo.maxBitrate).
+    unsigned userMaxBitrate {0};
+    // Screen-share encode preference: false = sharpness ("detail"),
+    // true = motion smoothness ("motion").
+    bool sharePrefersMotion {false};
 };
 bool operator==(SystemCodecInfo codec1, SystemCodecInfo codec2);
 

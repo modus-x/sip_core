@@ -237,6 +237,25 @@ public:
     bool waitForRTCP(std::chrono::seconds interval);
     double getLastLatency();
 
+    /**
+     * Enable RFC 3550 receive statistics + periodic Receiver Report emission
+     * for this socket pair. Media-specific (the RTP timestamp clock rate is
+     * needed for jitter); the video session enables it with 90000.
+     * The FFmpeg "sdp" demuxer never sends RRs on the custom-IO transport
+     * (it requires AVPF negotiation), so without this the remote peer's
+     * loss-based bitrate adaptation is blind.
+     */
+    void enableRtcpReports(uint32_t rtpClockRate);
+
+    /** Incoming media rate over the last measurement window, bits/s (0 if unknown). */
+    uint64_t getReceiveBitrateBps() const { return lastRateBps_.load(std::memory_order_relaxed); }
+
+    /**
+     * Bitrate estimate carried by the most recent REMB, decoded directly from
+     * the wire bytes (mantissa*2^exp), consumed on read. 0 = none pending.
+     */
+    uint64_t takeLastRembBps() { return lastRembBps_.exchange(0, std::memory_order_relaxed); }
+
     void setPacketLossCallback(std::function<void(void)> cb)
     {
         packetLossCallback_ = std::move(cb);
@@ -262,6 +281,10 @@ private:
     int readRtcpData(void* buf, int buf_size);
     void saveRtcpRRPacket(uint8_t* buf, size_t len);
     void saveRtcpREMBPacket(uint8_t* buf, size_t len);
+    void storeValidatedRR(const rtcpRRHeader& header);
+    void handleIncomingSR(uint8_t* buf, size_t len);
+    void processIncomingRtpStats(uint8_t* buf, int len);
+    void sendReceiverReport();
 
     std::mutex dataBuffMutex_;
     std::condition_variable cv_;
@@ -309,6 +332,37 @@ private:
     time_point arrival_TS {};
 
     TS_Frame svgTS = {};
+
+    // --- RFC 3550 receive statistics / Receiver Report emission ---
+    // 0 = reporting disabled (audio sessions keep the historical behavior).
+    std::atomic<uint32_t> rtcpReportClockRate_ {0};
+    // Our outgoing RTP SSRC (updated from every sent RTP packet — the FFmpeg
+    // muxer picks a fresh SSRC after each sender restart). Used both as the
+    // reporter identity in our RRs and to validate that inbound report blocks
+    // are about our stream (filters SRTCP ciphertext we cannot decrypt).
+    std::atomic<uint32_t> ourOutSsrc_ {0};
+    // Fields below are only touched on the receive thread (readCallback).
+    uint32_t remoteSsrc_ {0};
+    bool seqInit_ {false};
+    uint16_t maxSeq_ {0};
+    uint32_t seqCycles_ {0};
+    uint32_t baseSeqExt_ {0};
+    uint32_t receivedPkts_ {0};
+    uint32_t expectedPrior_ {0};
+    uint32_t receivedPrior_ {0};
+    uint32_t jitterQ4_ {0};
+    int64_t lastTransit_ {0};
+    bool transitInit_ {false};
+    time_point lastRRSent_ {};
+    // Peer Sender Report info for the LSR/DLSR fields of our RRs.
+    uint32_t peerSrNtpMid_ {0};
+    time_point peerSrArrival_ {};
+    // Incoming media rate measurement (~500 ms window).
+    uint64_t rateWindowBytes_ {0};
+    time_point rateWindowStart_ {};
+    std::atomic<uint64_t> lastRateBps_ {0};
+    // Most recent REMB estimate, decoded from raw wire bytes.
+    std::atomic<uint64_t> lastRembBps_ {0};
 };
 
 } // namespace sip_core

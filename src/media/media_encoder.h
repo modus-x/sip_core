@@ -115,8 +115,10 @@
      AVCodecContext* initCodec(AVMediaType mediaType, AVCodecID avcodecId, uint64_t br);
      void initH264(AVCodecContext* encoderCtx, uint64_t br);
      int h264CrfFromQuality() const;
+     bool isDisplaySource() const { return source_.find("display") != std::string::npos; }
      void initH265(AVCodecContext* encoderCtx, uint64_t br);
      void initVP8(AVCodecContext* encoderCtx, uint64_t br);
+     void initVP9(AVCodecContext* encoderCtx, uint64_t br);
      void initMPEG4(AVCodecContext* encoderCtx, uint64_t br);
      void initH263(AVCodecContext* encoderCtx, uint64_t br);
      void initOpus(AVCodecContext* encoderCtx);
@@ -241,6 +243,9 @@
      MediaStream videoOpts_;
      MediaStream audioOpts_;
      std::string videoCodec_;
+     // Screen-share encode preference lifted from the account video codec
+     // (CodecInfo.sharePreference): false = sharpness, true = motion.
+     bool sharePrefersMotion_ {false};
      std::string audioCodec_;
  
      std::string source_;

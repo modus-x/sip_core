@@ -55,6 +55,10 @@ class SinkClient;
 
 enum class VideoInputMode { ManagedByClient, ManagedByDaemon, Undefined };
 
+// Preflights the macOS Screen Recording (TCC) permission without triggering
+// the system prompt; always true on other platforms.
+bool hasScreenCaptureAccess();
+
 class VideoInput : public VideoGenerator,
                    public std::enable_shared_from_this<VideoInput>
 {

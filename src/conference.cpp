@@ -1541,6 +1541,27 @@ Conference::switchInput(const std::string& input)
         return false;
     }
 
+#ifdef __APPLE__
+    {
+        constexpr auto sep = libsip_core::Media::VideoProtocolPrefix::SEPARATOR;
+        const auto displayPrefix = std::string(libsip_core::Media::VideoProtocolPrefix::DISPLAY)
+                                   + sep;
+        if (normalizedInput.rfind(displayPrefix, 0) == 0 && !video::hasScreenCaptureAccess()) {
+            SIP_CORE_WARN("[conf %s] Rejecting desktop source: no screen recording permission",
+                          id_.c_str());
+            // Prefix must match the Dart-side video filter in
+            // available_devices_provider ("Failed to open video input").
+            emitSignal<libsip_core::ConfigurationSignal::DeviceOpenError>(
+                "Failed to open video input: Screen recording permission denied: "
+                    + normalizedInput,
+                true);
+            reportMediaNegotiationStatus(
+                libsip_core::Media::MediaNegotiationStatusEvents::NEGOTIATION_FAIL);
+            return false;
+        }
+    }
+#endif
+
     std::vector<MediaAttribute> newSources;
     auto firstVideo = true;
     // Rewrite hostSources (remove all except one video input)
