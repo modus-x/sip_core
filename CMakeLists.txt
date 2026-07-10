@@ -865,6 +865,26 @@ else()
     endif()
   endif()
 
+  if(LINUX AND NOT ANDROID)
+    # FFmpeg's hwcontext_opencl / sv_participant_opencl filter (GPU conference
+    # mixing) references the OpenCL ICD loader. contrib builds a static
+    # libOpenCL.a (-fPIC) for exactly this; link it explicitly so
+    # libsip_core_bindings.so resolves the cl* symbols (macOS uses
+    # -framework OpenCL, Windows OpenCL.lib). Prefer the contrib archive; fall
+    # back to a system libOpenCL only if the contrib one is absent.
+    find_library(SIP_CORE_OPENCL_LIB NAMES OpenCL
+                 PATHS ${CONTRIB_PATHS} PATH_SUFFIXES lib NO_DEFAULT_PATH)
+    if(NOT SIP_CORE_OPENCL_LIB)
+      find_library(SIP_CORE_OPENCL_LIB NAMES OpenCL)
+    endif()
+    if(SIP_CORE_OPENCL_LIB)
+      target_link_libraries(${PROJECT_NAME} PRIVATE ${SIP_CORE_OPENCL_LIB})
+    else()
+      message(WARNING "libOpenCL not found on Linux; FFmpeg OpenCL mixer "
+                      "symbols will be undefined in libsip_core_bindings.so")
+    endif()
+  endif()
+
   if(ANDROID)
     target_link_libraries(${PROJECT_NAME} PRIVATE OpenSLES log)
   endif()
