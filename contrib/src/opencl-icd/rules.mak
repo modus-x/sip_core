@@ -20,4 +20,8 @@ opencl-icd: OpenCL-ICD-Loader-$(OPENCL_ICD_VERSION).tar.gz .sum-opencl-icd
 .opencl-icd: opencl-icd toolchain.cmake
 	cd $< && $(HOSTVARS) cmake -E make_directory build && $(CMAKE) -B build ${OPENCL_ICD_CMAKECONF}
 	cd $</build && cmake --build . --target install
+	# static ICD loader dlopens vendor drivers at runtime; consumers linking
+	# via pkg-config --static need these on the link line
+	grep -q 'Libs.private' $(PREFIX)/lib/pkgconfig/OpenCL.pc || \
+		printf 'Libs.private: -ldl -lpthread\n' >> $(PREFIX)/lib/pkgconfig/OpenCL.pc
 	touch $@
