@@ -727,14 +727,12 @@ int MediaDecoder::getHWFrame(const std::shared_ptr<VideoFrame>& input, std::shar
     try {
         auto desc = av_pix_fmt_desc_get(static_cast<AVPixelFormat>(input->format()));
         bool isHardware = desc && (desc->flags & AV_PIX_FMT_FLAG_HWACCEL);
-        if (accel_ && accel_->isLinked() && isHardware) {
-            // Fully accelerated pipeline, skip main memory
+        if (isHardware) {
+            // Keep hardware frames GPU-resident on every platform (linked or
+            // not): consumers that need system memory (software sinks, mixer,
+            // recorder, encoder relay) download lazily and share one transfer
+            // per published frame via HardwareAccel::ensureSoftwareFrame.
             output = input;
-        } else if (isHardware) {
-            // Hardware decoded frame, transfer back to main memory
-            // Transfer to GPU if we have a hardware encoder
-            // Hardware decoders decode to NV12, but sip_core's supported software encoders want YUV420P
-            output = getUnlinkedHWFrame(*input.get());
         } else if (accel_) {
             // Software decoded frame with a hardware encoder, convert to accepted format first
             output = getHWFrameFromSWFrame(*input.get());
@@ -746,23 +744,11 @@ int MediaDecoder::getHWFrame(const std::shared_ptr<VideoFrame>& input, std::shar
         return -1;
     }
 #else
-        // macOS
+        // macOS: VideoToolbox frames pass through GPU-resident as well
         output = input;
 #endif
 
         return 0;
-}
-
-std::shared_ptr<VideoFrame>
-MediaDecoder::getUnlinkedHWFrame(const VideoFrame& input)
-{
-    std::shared_ptr<VideoFrame> framePtr;
-    if (!accel_) {
-        framePtr = scaler_.convertFormat(input, AV_PIX_FMT_YUV420P);
-    } else {
-        framePtr = accel_->transfer(input);
-    }
-    return framePtr;
 }
 
 std::shared_ptr<VideoFrame>
@@ -998,9 +984,11 @@ MediaDecoder::decode(AVPacket& packet)
         if(output && videoFrame)
             f = std::static_pointer_cast<MediaFrame>(output);
 
-        // AUTO mode watchdog: demote to software when HW decode (including the
-        // GPU->CPU transfer above) cannot keep up with the stream framerate —
-        // integrated GPUs are sometimes slower than the CPU here. Two
+        // AUTO mode watchdog: demote to software when HW decode cannot keep
+        // up with the stream framerate — integrated GPUs are sometimes slower
+        // than the CPU here. Measures decode only: since frames pass through
+        // GPU-resident, the GPU->CPU transfer happens lazily at consumers
+        // (ensureSoftwareFrame) and is no longer part of this budget. Two
         // consecutive slow windows are required so device warm-up does not
         // trigger a false demotion.
         if (hwDecodeStart && accel_

@@ -131,7 +131,7 @@
  
  #ifdef ENABLE_VIDEO
      int getHWFrame(const std::shared_ptr<VideoFrame>& input, std::shared_ptr<VideoFrame>& output);
-     std::shared_ptr<VideoFrame> getUnlinkedHWFrame(const VideoFrame& input);
+     std::shared_ptr<VideoFrame> getUnlinkedHWFrame(const std::shared_ptr<VideoFrame>& input);
      std::shared_ptr<VideoFrame> getHWFrameFromSWFrame(const VideoFrame& input);
      std::shared_ptr<VideoFrame> getScaledSWFrame(const VideoFrame& input);
  #endif

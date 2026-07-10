@@ -219,6 +219,11 @@ FFMPEGCONF += \
 	--enable-hwaccel=vp9_nvdec \
 	--enable-encoder=h264_nvenc
 
+# hwcontext_drm for av_hwframe_map(VAAPI -> DRM_PRIME) dmabuf export
+# (zero-copy GPU frames). The build host needs the libdrm dev headers
+# (pkg-config libdrm).
+FFMPEGCONF += --enable-libdrm
+
 endif
 
 # End HAVE_LINUX:

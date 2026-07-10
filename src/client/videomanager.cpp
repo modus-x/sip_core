@@ -34,6 +34,9 @@
 #ifdef ENABLE_VIDEO
 #include "video/sinkclient.h"
 #endif
+#ifdef RING_ACCEL
+#include "video/accel.h"
+#endif
 #include "client/ring_signal.h"
 #include "audio/ringbufferpool.h"
 #include "sip_core/media_const.h"
@@ -707,6 +710,16 @@ setHardwareAccelerationMode(const std::string& mode)
     return true;
 #else
     return mode == "cpu";
+#endif
+}
+
+bool
+isHardwareAccelerationAvailable()
+{
+#ifdef RING_ACCEL
+    return sip_core::video::HardwareAccel::isGPUAvailable();
+#else
+    return false;
 #endif
 }
 

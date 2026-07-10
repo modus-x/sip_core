@@ -213,6 +213,15 @@ getFormatCb(AVCodecContext* codecCtx, const AVPixelFormat* formats)
                 ctx->width = codecCtx->coded_width ? codecCtx->coded_width : codecCtx->width;
                 ctx->height = codecCtx->coded_height ? codecCtx->coded_height : codecCtx->height;
                 ctx->initial_pool_size = 20;
+            } else {
+                // Decoded frames now stay GPU-resident past the decode loop:
+                // downstream consumers hold surfaces (engine last-frame +
+                // in-flight present + glue latest-wins slot). Enlarge fixed
+                // pools so held surfaces cannot starve the decoder; 0 means a
+                // dynamic pool, which cannot starve.
+                auto ctx = reinterpret_cast<AVHWFramesContext*>(frame_ctx->data);
+                if (ctx->initial_pool_size > 0)
+                    ctx->initial_pool_size += 4;
             }
 
             if ((ret = av_hwframe_ctx_init(frame_ctx)) < 0) {
@@ -583,6 +592,103 @@ HardwareAccel::reserveFrame(AVFrame* frame)
     }
 
     return true;
+}
+
+namespace {
+
+// Shared lazy-download cache attached to published hardware frames through
+// AVFrame.opaque_ref. av_frame_ref()/av_frame_copy_props() propagate a new
+// reference to the same underlying buffer and av_frame_unref() drops it, so
+// every consumer of a published frame (sink clients, recorder, mixer, encoder
+// relay) sees the same cache and the GPU->CPU transfer runs at most once per
+// published frame and requested format. Destroyed with the last frame ref.
+struct SharedDownloadCache
+{
+    static constexpr uint32_t MAGIC = 0x53444331; // 'SDC1'
+    uint32_t magic {MAGIC};
+    std::mutex mtx;
+    // One entry per requested software format (NV12 for sinks/mixer, the
+    // stream format for the recorder); bounded, frames are transient.
+    std::vector<std::pair<AVPixelFormat, std::shared_ptr<VideoFrame>>> entries;
+};
+
+constexpr size_t DOWNLOAD_CACHE_MAX_FORMATS = 4;
+
+void
+freeDownloadCache(void* /*opaque*/, uint8_t* data)
+{
+    delete reinterpret_cast<SharedDownloadCache*>(data);
+}
+
+SharedDownloadCache*
+getDownloadCache(const AVFrame* frame)
+{
+    if (!frame->opaque_ref)
+        return nullptr;
+    auto* cache = reinterpret_cast<SharedDownloadCache*>(frame->opaque_ref->data);
+    return (cache && cache->magic == SharedDownloadCache::MAGIC) ? cache : nullptr;
+}
+
+} // namespace
+
+void
+HardwareAccel::attachDownloadCache(AVFrame* frame)
+{
+    if (!frame)
+        return;
+    auto desc = av_pix_fmt_desc_get(static_cast<AVPixelFormat>(frame->format));
+    if (!desc || !(desc->flags & AV_PIX_FMT_FLAG_HWACCEL))
+        return;
+    auto cache = std::make_unique<SharedDownloadCache>();
+    AVBufferRef* ref = av_buffer_create(reinterpret_cast<uint8_t*>(cache.get()),
+                                        sizeof(SharedDownloadCache),
+                                        freeDownloadCache,
+                                        nullptr,
+                                        AV_BUFFER_FLAG_READONLY);
+    if (!ref)
+        return; // consumers fall back to per-consumer downloads
+    cache.release();
+    av_buffer_unref(&frame->opaque_ref); // every publish gets a fresh cache
+    frame->opaque_ref = ref;
+}
+
+std::shared_ptr<VideoFrame>
+HardwareAccel::ensureSoftwareFrame(const std::shared_ptr<VideoFrame>& frame,
+                                   AVPixelFormat desired)
+{
+    if (!frame || !frame->pointer())
+        return {};
+    auto input = frame->pointer();
+    auto desc = av_pix_fmt_desc_get(static_cast<AVPixelFormat>(input->format));
+    if (!desc)
+        return {};
+    if (!(desc->flags & AV_PIX_FMT_FLAG_HWACCEL))
+        return frame;
+
+    auto download = [&]() -> std::shared_ptr<VideoFrame> {
+        try {
+            return transferToMainMemory(*frame, desired);
+        } catch (const std::runtime_error& e) {
+            SIP_CORE_ERR("ensureSoftwareFrame: GPU download failed: %s", e.what());
+            return {};
+        }
+    };
+
+    auto* cache = getDownloadCache(input);
+    if (!cache)
+        return download(); // unpublished frame: plain one-off download
+
+    // The transfer runs under the cache mutex so racing siblings wait for the
+    // first download instead of duplicating it — bounded by the single
+    // transfer each of them used to pay individually.
+    std::lock_guard<std::mutex> lk(cache->mtx);
+    for (const auto& entry : cache->entries)
+        if (entry.first == desired)
+            return entry.second;
+    auto sw = download();
+    if (sw && cache->entries.size() < DOWNLOAD_CACHE_MAX_FORMATS)
+        cache->entries.emplace_back(desired, sw);
+    return sw;
 }
 
 std::unique_ptr<VideoFrame>

@@ -184,6 +184,11 @@ struct LIBSIP_CORE_PUBLIC SinkTarget
     std::function<FrameBuffer()> pull;
     std::function<void(FrameBuffer)> push;
     int /* AVPixelFormat */ preferredFormat {-1 /* AV_PIX_FMT_NONE */};
+    // Opt-in to GPU-resident frames: when true, push may receive AVFrames
+    // whose format is a hardware pixel format (AV_PIX_FMT_D3D11 / VAAPI /
+    // VIDEOTOOLBOX). Such frames carry GPU handles and MUST NOT be fed to
+    // libswscale; the target has to export them or download them itself.
+    bool acceptsHardwareFrames {false};
 };
 
 using VideoCapabilities = std::map<std::string, std::map<std::string, std::vector<std::string>>>;
@@ -264,6 +269,12 @@ LIBSIP_CORE_PUBLIC void setEncodingAccelerated(bool state);
  */
 LIBSIP_CORE_PUBLIC std::string getHardwareAccelerationMode();
 LIBSIP_CORE_PUBLIC bool setHardwareAccelerationMode(const std::string& mode);
+
+/**
+ * True when a hardware decode device can actually be opened on this host
+ * (probed once, cached).
+ */
+LIBSIP_CORE_PUBLIC bool isHardwareAccelerationAvailable();
 
 // player signal type definitions
 struct LIBSIP_CORE_PUBLIC MediaPlayerSignal

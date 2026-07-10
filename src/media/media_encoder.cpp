@@ -2074,7 +2074,7 @@ MediaEncoder::sendDummyPacket()
             // Hardware decoded frame, transfer back to main memory
             // Transfer to GPU if we have a hardware encoder
             // Hardware decoders decode to NV12, but sip_core's supported software encoders want YUV420P
-            output = getUnlinkedHWFrame(*input.get());
+            output = getUnlinkedHWFrame(input);
         } else if (accel_) {
             // Software decoded frame with a hardware encoder, convert to accepted format first
             output = getHWFrameFromSWFrame(*input.get());
@@ -2095,10 +2095,13 @@ MediaEncoder::sendDummyPacket()
 
 #ifdef RING_ACCEL
 std::shared_ptr<VideoFrame>
-MediaEncoder::getUnlinkedHWFrame(const VideoFrame& input)
+MediaEncoder::getUnlinkedHWFrame(const std::shared_ptr<VideoFrame>& input)
 {
     AVPixelFormat pix = (accel_ ? accel_->getSoftwareFormat() : AV_PIX_FMT_NV12);
-    std::shared_ptr<VideoFrame> framePtr = video::HardwareAccel::transferToMainMemory(input, pix);
+    // Shared, memoized download; used read-only below (convert or upload).
+    std::shared_ptr<VideoFrame> framePtr = video::HardwareAccel::ensureSoftwareFrame(input, pix);
+    if (!framePtr)
+        return nullptr;
     if (!accel_) {
         framePtr = scaler_.convertFormat(*framePtr, AV_PIX_FMT_YUV420P);
     } else {

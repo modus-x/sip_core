@@ -68,6 +68,34 @@ public:
                                                             AVPixelFormat desiredFormat);
 
     /**
+     * @brief Attaches a shared lazy-download cache to a published hardware frame.
+     *
+     * Must be called by the producer before the frame fans out to consumers
+     * (VideoGenerator::publishFrame does this). av_frame_ref propagates a new
+     * reference to the same cache buffer via AVFrame.opaque_ref, so every
+     * consumer of the published frame shares one cache. No-op for software
+     * frames or on allocation failure (consumers then download individually).
+     */
+    static void attachDownloadCache(AVFrame* frame);
+
+    /**
+     * @brief Returns a software copy of @frame, downloading at most once.
+     *
+     * If @frame is already software it is returned unchanged. If it is a
+     * hardware frame, the GPU->CPU transfer runs once per published frame and
+     * format; sibling consumers (cropped conference sinks, recorder, mixer,
+     * encoder relay) reuse the memoized download through the cache attached
+     * by attachDownloadCache. Returns nullptr on download failure (logged) —
+     * callers must drop the frame, never block or retry.
+     *
+     * The returned frame is shared between consumers: treat it as immutable.
+     * Take a private ref (e.g. MediaFrame::copyFrom) before touching mutable
+     * per-ref state such as pts or the crop fields.
+     */
+    static std::shared_ptr<VideoFrame> ensureSoftwareFrame(
+        const std::shared_ptr<VideoFrame>& frame, AVPixelFormat desired = AV_PIX_FMT_NV12);
+
+    /**
      * @brief Constructs a HardwareAccel object
      *
      * Made public so std::unique_ptr can access it. Should not be called.

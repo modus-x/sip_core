@@ -92,19 +92,17 @@ struct MediaRecorder::StreamObserver : public Observer<std::shared_ptr<MediaFram
         if (info.isVideo) {
             std::shared_ptr<VideoFrame> framePtr;
 #ifdef RING_ACCEL
-            auto desc = av_pix_fmt_desc_get(
-                (AVPixelFormat) (std::static_pointer_cast<VideoFrame>(m))->format());
-            if (desc && (desc->flags & AV_PIX_FMT_FLAG_HWACCEL)) {
-                try {
-                    framePtr = sip_core::video::HardwareAccel::transferToMainMemory(
-                        *std::static_pointer_cast<VideoFrame>(m), AV_PIX_FMT_NV12);
-                } catch (const std::runtime_error& e) {
-                    SIP_CORE_ERR("Accel failure: %s", e.what());
-                    return;
-                }
-            } else
+            // Shared, memoized download (read-only use below, no private ref
+            // needed); no-op for software frames.
+            framePtr = sip_core::video::HardwareAccel::ensureSoftwareFrame(
+                std::static_pointer_cast<VideoFrame>(m), AV_PIX_FMT_NV12);
+            if (!framePtr) {
+                SIP_CORE_ERR("Accel failure: dropping frame, GPU download failed");
+                return;
+            }
+#else
+            framePtr = std::static_pointer_cast<VideoFrame>(m);
 #endif
-                framePtr = std::static_pointer_cast<VideoFrame>(m);
             int angle = framePtr->getOrientation();
             if (angle != rotation_) {
                 videoRotationFilter_ = sip_core::video::getTransposeFilter(angle,
@@ -358,14 +356,17 @@ MediaRecorder::onFrame(const std::string& name, const std::shared_ptr<MediaFrame
         auto desc = av_pix_fmt_desc_get(
             (AVPixelFormat) (std::static_pointer_cast<VideoFrame>(frame))->format());
         if (desc && (desc->flags & AV_PIX_FMT_FLAG_HWACCEL)) {
-            try {
-                clone = video::HardwareAccel::transferToMainMemory(
-                    *std::static_pointer_cast<VideoFrame>(frame),
-                    static_cast<AVPixelFormat>(ms.format));
-            } catch (const std::runtime_error& e) {
-                SIP_CORE_ERR("Accel failure: %s", e.what());
+            auto sw = video::HardwareAccel::ensureSoftwareFrame(
+                std::static_pointer_cast<VideoFrame>(frame),
+                static_cast<AVPixelFormat>(ms.format));
+            if (!sw) {
+                SIP_CORE_ERR("Accel failure: dropping frame, GPU download failed");
                 return;
             }
+            // The download is shared between consumers and the pts is
+            // rewritten below: clone a private ref.
+            clone = std::make_unique<MediaFrame>();
+            clone->copyFrom(*sw);
         } else {
             clone = std::make_unique<MediaFrame>();
             clone->copyFrom(*frame);

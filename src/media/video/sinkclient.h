@@ -115,7 +115,7 @@ private:
      * - Rotate the frame as needed.
      * - Apply cropping as needed
      */
-    std::shared_ptr<VideoFrame> applyTransform(VideoFrame& frame);
+    std::shared_ptr<VideoFrame> applyTransform(const std::shared_ptr<VideoFrame>& frame);
 
 #ifdef DEBUG_FPS
     unsigned frameCount_;

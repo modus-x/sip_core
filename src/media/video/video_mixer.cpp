@@ -1781,27 +1781,52 @@ VideoMixer::getHWFrame(const std::shared_ptr<VideoFrame>& input, std::shared_ptr
     try {
         auto desc = av_pix_fmt_desc_get(static_cast<AVPixelFormat>(input->format()));
         bool isHardware = desc && (desc->flags & AV_PIX_FMT_FLAG_HWACCEL);
+        std::shared_ptr<VideoFrame> in = input;
+        if (isHardware && input->format() != AV_PIX_FMT_OPENCL) {
+            // Decoders pass D3D11/VAAPI frames through GPU-resident, but the
+            // OpenCL composite filter only accepts OPENCL frames and the
+            // software mixer only software ones. Download once (shared with
+            // sibling consumers of the same published frame), then continue
+            // with the software handling below, incl. the sw->OpenCL upload.
+            in = HardwareAccel::ensureSoftwareFrame(input, AV_PIX_FMT_NV12);
+            if (!in) {
+                SIP_CORE_ERR("[mixer:%s] dropping hardware frame: GPU download failed",
+                             id_.c_str());
+                return -1;
+            }
+            isHardware = false;
+        }
         if (accel_ && accel_->isLinked() && isHardware) {
             // Fully accelerated pipeline, skip main memory
-            output = input;
+            output = in;
         } else if (isHardware) {
             // Hardware decoded frame, transfer back to main memory
             // Transfer to GPU if we have a hardware encoder
             // Hardware decoders decode to NV12, but sip_core's supported software encoders want YUV420P
-            output = getUnlinkedHWFrame(*input.get());
+            output = getUnlinkedHWFrame(*in.get());
         } else if (accel_) {
             // Software decoded frame with a hardware encoder, convert to accepted format first
-            output = getHWFrameFromSWFrame(*input.get());
+            output = getHWFrameFromSWFrame(*in.get());
         } else {
-            output = input;
+            output = in;
         }
     } catch (const std::runtime_error& e) {
         SIP_CORE_ERR("Accel failure: %s", e.what());
         return -1;
     }
 #else
-        // macOS
+    // macOS: VideoToolbox frames now reach the mixer GPU-resident; the
+    // software mixer cannot scale them. Download (shared, memoized).
+    auto desc = av_pix_fmt_desc_get(static_cast<AVPixelFormat>(input->format()));
+    if (desc && (desc->flags & AV_PIX_FMT_FLAG_HWACCEL)) {
+        output = HardwareAccel::ensureSoftwareFrame(input, AV_PIX_FMT_NV12);
+        if (!output) {
+            SIP_CORE_ERR("[mixer:%s] dropping hardware frame: GPU download failed", id_.c_str());
+            return -1;
+        }
+    } else {
         output = input;
+    }
 #endif
 
         return 0;

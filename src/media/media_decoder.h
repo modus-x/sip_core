@@ -227,7 +227,6 @@ private:
 
 #ifdef RING_ACCEL
     int getHWFrame(const std::shared_ptr<VideoFrame>& input, std::shared_ptr<VideoFrame>& output);
-    std::shared_ptr<VideoFrame> getUnlinkedHWFrame(const VideoFrame& input);
     std::shared_ptr<VideoFrame> getHWFrameFromSWFrame(const VideoFrame& input);
 
     bool enableAccel_ = true;
