@@ -488,16 +488,18 @@ SinkClient::setFrameSize(int width, int height)
     width_ = width;
     height_ = height;
     if (width > 0 and height > 0) {
-        SIP_CORE_DBG("[Sink:%p] Started - size=%dx%d, mixer=%s",
-                 this,
+        // INFO (not DBG) so this lifecycle event is always in sip_core.log,
+        // correlatable by renderer id with the glue/plugin video logs.
+        SIP_CORE_INFO("[Sink:%s] DecodingStarted - size=%dx%d, mixer=%s",
+                 getId().c_str(),
                  width,
                  height,
                  mixer_ ? "Yes" : "No");
         emitSignal<libsip_core::VideoSignal::DecodingStarted>(getId(), openedName(), width, height, mixer_);
         started_ = true;
     } else if (started_) {
-        SIP_CORE_DBG("[Sink:%p] Stopped - size=%dx%d, mixer=%s",
-                 this,
+        SIP_CORE_INFO("[Sink:%s] DecodingStopped - size=%dx%d, mixer=%s",
+                 getId().c_str(),
                  width,
                  height,
                  mixer_ ? "Yes" : "No");

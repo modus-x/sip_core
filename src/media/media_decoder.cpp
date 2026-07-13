@@ -706,6 +706,13 @@ MediaDecoder::setupStream()
         SIP_CORE_WARN("Not using hardware decoding for %s", avcodec_get_name(decoderCtx_->codec_id));
         ret = avcodec_open2(decoderCtx_, inputDecoder_, nullptr);
     }
+
+    SIP_CORE_INFO("HW-accel decision for %s %dx%d: mode=%s -> %s",
+                  avcodec_get_name(decoderCtx_->codec_id),
+                  width_,
+                  height_,
+                  Manager::instance().videoPreferences.getHWAccelMode().c_str(),
+                  accel_ ? accel_->getName().c_str() : "software (CPU)");
 #else
     // Set threading options for software decoder (must be done before avcodec_open2)
     decoderCtx_->thread_count = std::max(1u, std::min(8u, std::thread::hardware_concurrency() / 2));

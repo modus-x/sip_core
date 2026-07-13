@@ -714,7 +714,8 @@ HardwareAccel::transferToMainMemory(const VideoFrame& frame, AVPixelFormat desir
 
     int ret = av_hwframe_transfer_data(output, input, 0);
     if (ret < 0) {
-        throw std::runtime_error("Cannot transfer the frame from GPU");
+        throw std::runtime_error("Cannot transfer the frame from GPU: "
+                                 + libav_utils::getError(ret) + " (" + std::to_string(ret) + ")");
     }
 
     output->pts = input->pts;
