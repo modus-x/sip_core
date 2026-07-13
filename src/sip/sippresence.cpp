@@ -181,10 +181,11 @@ SIPPresence::reportPresSubClientNotification(std::string_view uri, pjsip_pres_st
     const std::string& acc_ID = acc_->getAccountID();
     const std::string note(status->info[0].rpid.note.ptr, status->info[0].rpid.note.slen);
     SIP_CORE_DBG(" Received status of PresSubClient %.*s(acc:%s): status=%s note=%s",
-             (int)uri.size(), uri.data(),
-             acc_ID.c_str(),
-             status->info[0].basic_open ? "open" : "closed",
-             note.c_str());
+                 (int) uri.size(),
+                 uri.data(),
+                 acc_ID.c_str(),
+                 status->info[0].basic_open ? "open" : "closed",
+                 note.c_str());
 
     if (uri == acc_->getFromUri()) {
         // save the status of our own account
@@ -193,9 +194,9 @@ SIPPresence::reportPresSubClientNotification(std::string_view uri, pjsip_pres_st
     }
     // report status to client signal
     emitSignal<libsip_core::PresenceSignal::NewBuddyNotification>(acc_ID,
-                                                            std::string(uri),
-                                                            status->info[0].basic_open,
-                                                            note);
+                                                                  std::string(uri),
+                                                                  status->info[0].basic_open,
+                                                                  note);
 }
 
 void
@@ -289,6 +290,10 @@ SIPPresence::recoverSubscriptionsAndPublish(const std::string& contactHeader, bo
             SIP_CORE_WARN("Failed to recover presence subscription for %.*s",
                           (int) sub->getURI().size(),
                           sub->getURI().data());
+            // Re-arm: recovery is otherwise one-shot (runPostRegisterRecoverySync
+            // already consumed the flag). Retry on the next register-2xx instead
+            // of leaving the subscription permanently stale.
+            acc_->needsResubscribe_.store(true);
         }
     }
 
@@ -313,6 +318,12 @@ SIPPresence::recoverSubscriptionsAndPublish(const std::string& contactHeader, bo
         SIP_CORE_WARN("Failed to recover presence publish session for account %s: %d",
                       acc_->getAccountID().c_str(),
                       status);
+        // Re-arm: the republish is otherwise one-shot — the flag was already
+        // consumed by runPostRegisterRecoverySync(), so a failure here (e.g. the
+        // transport is still settling right after a connectivity change) would
+        // leave presence dead until an app restart. Retry on the next
+        // register-2xx. (Vologda 112 incident, 2026-07-12)
+        acc_->needsRepublish_.store(true);
     }
 }
 
@@ -476,8 +487,8 @@ SIPPresence::publish_cb(struct pjsip_publishc_cbparam* param)
             pj_strerror(param->status, errmsg, sizeof(errmsg));
             SIP_CORE_ERR("Client (PUBLISH) failed, status=%d, msg=%s", param->status, errmsg);
             emitSignal<libsip_core::PresenceSignal::ServerError>(pres->getAccount()->getAccountID(),
-                                                           error,
-                                                           errmsg);
+                                                                 error,
+                                                                 errmsg);
 
         } else if (param->code == 412) {
             /* 412 (Conditional Request Failed)
@@ -490,8 +501,8 @@ SIPPresence::publish_cb(struct pjsip_publishc_cbparam* param)
             SIP_CORE_WARN("Client (PUBLISH) failed (%s)", error.c_str());
 
             emitSignal<libsip_core::PresenceSignal::ServerError>(pres->getAccount()->getAccountID(),
-                                                           error,
-                                                           "Publish not supported.");
+                                                                 error,
+                                                                 "Publish not supported.");
 
             pres->getAccount()->supportPresence(PRESENCE_FUNCTION_PUBLISH, false);
         }
@@ -583,6 +594,26 @@ SIPPresence::send_publish(SIPPresence* pres)
     pj_list_init(&msg_data.multipart_parts);
 
     pres->fillDoc(tdata, &msg_data);
+
+    // Pin the PUBLISH to the account's live transport, exactly like REGISTER
+    // (pjsip_regc_set_transport) and the raw keep-alive do. publishc has no
+    // set_transport API, so we seed the UAC transaction's selector via the
+    // tx_data — pjsip_endpt_send_request() forwards tdata->tp_sel to
+    // pjsip_tsx_set_transport(). Without this, after a connectivity change
+    // rebinds the account onto a fresh transport, the PUBLISH resolves through
+    // the transport manager to the old (destroyed) transport and fails with
+    // PJSIP_EUNSUPTRANSPORT forever — presence never recovers until restart
+    // (Vologda 112 incident, 2026-07-12). Set it here, right before the send and
+    // past every goto on_error, so a failed early step can't leak the transport
+    // ref; use pjsip_tx_data_set_transport (not a raw tp_sel assignment) so the
+    // ref-count is held for the life of the transaction.
+    // Own scope so the earlier `goto on_error` statements route around this
+    // declaration instead of jumping across its initialization.
+    {
+        const pjsip_tpselector tpSel = acc->getTransportSelector();
+        if (tpSel.type != PJSIP_TPSELECTOR_NONE)
+            pjsip_tx_data_set_transport(tdata, &tpSel);
+    }
 
     /* Send the PUBLISH request */
     status = pjsip_publishc_send(pres->publish_sess_, tdata);
