@@ -337,12 +337,12 @@ AudioRtpSession::startSender()
         send_.enabled = false;
     }
 
+    // Canonical host stream id (see Call::localVoice): camera-independent, and
+    // must match SIPCall's router defaultId or the host's own mic activity would
+    // be misrouted to peerVoice.
     std::string localId = "";
 #ifdef ENABLE_VIDEO
-    if (not sip_core::getVideoDeviceMonitor().getDeviceList().empty()) {
-        // if we have a video device
-        localId = sip_utils::streamId("", sip_utils::DEFAULT_VIDEO_STREAMID);
-    }
+    localId = sip_utils::streamId("", sip_utils::DEFAULT_VIDEO_STREAMID);
 #endif
 
     if (voiceCallback_) {
@@ -501,12 +501,12 @@ AudioRtpSession::setVoiceCallback(std::function<void(const std::string&, bool)> 
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     voiceCallback_ = std::move(cb);
 
+    // Canonical host stream id (see Call::localVoice): camera-independent, and
+    // must match SIPCall's router defaultId or the host's own mic activity would
+    // be misrouted to peerVoice.
     std::string localId = "";
 #ifdef ENABLE_VIDEO
-    if (not sip_core::getVideoDeviceMonitor().getDeviceList().empty()) {
-        // if we have a video device
-        localId = sip_utils::streamId("", sip_utils::DEFAULT_VIDEO_STREAMID);
-    }
+    localId = sip_utils::streamId("", sip_utils::DEFAULT_VIDEO_STREAMID);
 #endif
 
     if (sender_) {

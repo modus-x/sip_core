@@ -316,12 +316,13 @@ SIPCall::setupVoiceCallback(const std::shared_ptr<RtpSession>& rtpSession)
 
         runOnMainThread([w, streamId, voice] {
             if (auto thisPtr = w.lock()) {
+                // Camera-independent host stream id — must equal the sender's
+                // localId (AudioRtpSession) so the host's own mic activity routes
+                // to localVoice; remote streamIds are call-id-prefixed and never
+                // collide with it.
                 std::string defaultId = "";
 #ifdef ENABLE_VIDEO
-                if (not sip_core::getVideoDeviceMonitor().getDeviceList().empty()) {
-                    // if we have a video device
-                    defaultId = sip_utils::streamId("", sip_utils::DEFAULT_VIDEO_STREAMID);
-                }
+                defaultId = sip_utils::streamId("", sip_utils::DEFAULT_VIDEO_STREAMID);
 #endif
                 if (defaultId != streamId) {
                     // remote participant audio
