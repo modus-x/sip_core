@@ -340,9 +340,28 @@ SinkClient::sendFrameDirect(const std::shared_ptr<sip_core::MediaFrame>& frame_p
 {
     notify(frame_p);
 
+    auto videoFrame = std::static_pointer_cast<VideoFrame>(frame_p);
+    bool isHardware = false;
+#ifdef RING_ACCEL
+    auto desc = av_pix_fmt_desc_get(static_cast<AVPixelFormat>(videoFrame->format()));
+    isHardware = desc && (desc->flags & AV_PIX_FMT_FLAG_HWACCEL);
+    if (isHardware && !(target_.acceptsHardwareFrames && !(crop_.w || crop_.h))) {
+        // Target cannot take GPU frames (or needs a crop, which is invalid on
+        // hardware frames): hand it the shared software copy instead.
+        videoFrame = HardwareAccel::ensureSoftwareFrame(videoFrame, AV_PIX_FMT_NV12);
+        if (!videoFrame) {
+            SIP_CORE_ERR("[Sink:%p] Dropping hardware frame: GPU download failed", this);
+            return;
+        }
+        isHardware = false;
+    }
+#endif
+
     libsip_core::FrameBuffer outFrame(av_frame_alloc());
-    av_frame_ref(outFrame.get(), std::static_pointer_cast<VideoFrame>(frame_p)->pointer());
-    if (crop_.w || crop_.h) {
+    av_frame_ref(outFrame.get(), videoFrame->pointer());
+    // av_frame_apply_cropping is not valid on hardware frames; the hardware
+    // branch above only survives to this point when no crop is configured.
+    if (!isHardware && (crop_.w || crop_.h)) {
         outFrame->crop_top = crop_.y;
         outFrame->crop_bottom = (size_t) outFrame->height - crop_.y - crop_.h;
         outFrame->crop_left = crop_.x;
@@ -368,23 +387,23 @@ SinkClient::sendFrameTransformed(AVFrame* frame)
 }
 
 std::shared_ptr<VideoFrame>
-SinkClient::applyTransform(VideoFrame& frame_p)
+SinkClient::applyTransform(const std::shared_ptr<VideoFrame>& frame_p)
 {
     std::shared_ptr<VideoFrame> frame = std::make_shared<VideoFrame>();
 #ifdef RING_ACCEL
-    auto desc = av_pix_fmt_desc_get((AVPixelFormat) frame_p.format());
+    auto desc = av_pix_fmt_desc_get((AVPixelFormat) frame_p->format());
     if (desc && (desc->flags & AV_PIX_FMT_FLAG_HWACCEL)) {
-        try {
-            frame = HardwareAccel::transferToMainMemory(frame_p, AV_PIX_FMT_NV12);
-        } catch (const std::runtime_error& e) {
-            SIP_CORE_ERR("[Sink:%p] Transfert to hardware acceleration memory failed: %s",
-                     this,
-                     e.what());
+        auto sw = HardwareAccel::ensureSoftwareFrame(frame_p, AV_PIX_FMT_NV12);
+        if (not sw) {
+            SIP_CORE_ERR("[Sink:%p] Transfert to hardware acceleration memory failed", this);
             return {};
         }
+        // The download is shared between consumers; crop fields below are
+        // per-ref state, so mutate a private ref.
+        frame->copyFrom(*sw);
     } else
 #endif
-        frame->copyFrom(frame_p);
+        frame->copyFrom(*frame_p);
 
     int angle = frame->getOrientation();
     if (angle != rotation_) {
@@ -443,7 +462,7 @@ SinkClient::update(Observable<std::shared_ptr<MediaFrame>>* /*obs*/,
 #endif
 
     if (doTransfer) {
-        auto frame = applyTransform(*std::static_pointer_cast<VideoFrame>(frame_p));
+        auto frame = applyTransform(std::static_pointer_cast<VideoFrame>(frame_p));
         if (not frame)
             return;
 
@@ -469,16 +488,18 @@ SinkClient::setFrameSize(int width, int height)
     width_ = width;
     height_ = height;
     if (width > 0 and height > 0) {
-        SIP_CORE_DBG("[Sink:%p] Started - size=%dx%d, mixer=%s",
-                 this,
+        // INFO (not DBG) so this lifecycle event is always in sip_core.log,
+        // correlatable by renderer id with the glue/plugin video logs.
+        SIP_CORE_INFO("[Sink:%s] DecodingStarted - size=%dx%d, mixer=%s",
+                 getId().c_str(),
                  width,
                  height,
                  mixer_ ? "Yes" : "No");
         emitSignal<libsip_core::VideoSignal::DecodingStarted>(getId(), openedName(), width, height, mixer_);
         started_ = true;
     } else if (started_) {
-        SIP_CORE_DBG("[Sink:%p] Stopped - size=%dx%d, mixer=%s",
-                 this,
+        SIP_CORE_INFO("[Sink:%s] DecodingStopped - size=%dx%d, mixer=%s",
+                 getId().c_str(),
                  width,
                  height,
                  mixer_ ? "Yes" : "No");

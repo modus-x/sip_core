@@ -75,6 +75,8 @@ endif()
 
 target_link_libraries(sip_cli PRIVATE sip_core SDL3::SDL3)
 
+target_include_directories(sip_cli PRIVATE third_party)
+
 # On Windows, copy SDL3.dll to the build directory
 if(WIN32)
   add_custom_command(

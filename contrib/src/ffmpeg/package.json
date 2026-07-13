@@ -10,10 +10,16 @@
         "fontconfig",
         "x264",
         "vpx",
-        "opus"
+        "opus",
+        "ffnvcodec",
+        "libvpl",
+        "opencl-icd"
     ],
     "patches": [
         "windows-configure.patch",
+        "windows-configure-ffnvcodec.patch",
+        "windows-configure-libmfx-libvpl.patch",
+        "ffmpeg-sv_participant_opencl.patch",
         "rtp_dtmf.patch",
         "opus-rtp-marker.patch"
     ],

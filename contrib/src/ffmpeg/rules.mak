@@ -6,6 +6,14 @@ PKGS+=ffmpeg
 
 DEPS_ffmpeg = iconv zlib freetype2 fontconfig x264 vpx opus harfbuzz
 
+# HW-accel contrib deps are desktop-Linux only: Windows builds them via
+# package.json, Darwin uses the system VideoToolbox/OpenCL frameworks.
+ifdef HAVE_LINUX
+ifndef HAVE_ANDROID
+DEPS_ffmpeg += ffnvcodec libva libvpl opencl-icd
+endif
+endif
+
 FFMPEGCONF = \
 	--cc="$(CC)" \
 	--pkg-config="$(PKG_CONFIG)"
@@ -181,6 +189,41 @@ FFMPEGCONF += \
 	--enable-libxcb-xfixes \
 	--enable-libxcb-shape
 # End Desktop Linux:
+
+FFMPEGCONF += \
+	--enable-opencl \
+	--enable-filter=sv_participant_opencl \
+	--extra-libs=-ldrm \
+	--enable-vaapi \
+	--enable-hwaccel=h264_vaapi \
+	--enable-hwaccel=vp8_vaapi \
+	--enable-hwaccel=vp9_vaapi \
+	--enable-encoder=h264_vaapi \
+	--enable-encoder=vp8_vaapi \
+	--enable-encoder=vp9_vaapi \
+	--enable-libvpl \
+	--enable-encoder=h264_qsv \
+	--enable-decoder=h264_qsv \
+	--enable-decoder=h264_cuvid \
+	--enable-decoder=vp9_qsv \
+	--enable-encoder=vp9_qsv \
+	--enable-decoder=vp8_cuvid \
+	--enable-decoder=vp9_cuvid \
+	--enable-cuvid \
+	--enable-cuda \
+	--enable-ffnvcodec \
+	--enable-nvdec \
+	--enable-nvenc \
+	--enable-hwaccel=h264_nvdec \
+	--enable-hwaccel=vp8_nvdec \
+	--enable-hwaccel=vp9_nvdec \
+	--enable-encoder=h264_nvenc
+
+# hwcontext_drm for av_hwframe_map(VAAPI -> DRM_PRIME) dmabuf export
+# (zero-copy GPU frames). The build host needs the libdrm dev headers
+# (pkg-config libdrm).
+FFMPEGCONF += --enable-libdrm
+
 endif
 
 # End HAVE_LINUX:
@@ -188,6 +231,8 @@ endif
 
 ifdef HAVE_MACOSX
 FFMPEGCONF += \
+	--enable-opencl \
+	--enable-filter=sv_participant_opencl \
 	--enable-avfoundation \
 	--enable-indev=avfoundation \
 	--enable-videotoolbox \
@@ -259,12 +304,15 @@ $(TARBALLS)/ffmpeg-$(FFMPEG_HASH).tar.gz:
 
 .sum-ffmpeg: ffmpeg-$(FFMPEG_HASH).tar.gz
 
-ffmpeg: ffmpeg-$(FFMPEG_HASH).tar.gz
+# Re-extract (and thus re-patch) whenever the recipe or any patch changes;
+# otherwise a stale source tree silently keeps building without new patches.
+ffmpeg: ffmpeg-$(FFMPEG_HASH).tar.gz $(SRC)/ffmpeg/rules.mak $(wildcard $(SRC)/ffmpeg/*.patch)
 	rm -Rf $@ $@-$(FFMPEG_HASH)
 	mkdir -p $@-$(FFMPEG_HASH)
 	(cd $@-$(FFMPEG_HASH) && tar x $(if ${BATCH_MODE},,-v) --strip-components=1 -f $<)
 	$(APPLY) $(SRC)/ffmpeg/ios-disable-b-frames.patch
 	$(APPLY) $(SRC)/ffmpeg/screen-sharing-x11-fix.patch
+	$(APPLY) $(SRC)/ffmpeg/ffmpeg-sv_participant_opencl.patch
 	$(APPLY) $(SRC)/ffmpeg/rtp_dtmf.patch
 	$(APPLY) $(SRC)/ffmpeg/opus-rtp-marker.patch
 	$(UPDATE_AUTOCONFIG)

@@ -226,9 +226,22 @@ private:
     bool fallback_ = false;
 
 #ifdef RING_ACCEL
+    int getHWFrame(const std::shared_ptr<VideoFrame>& input, std::shared_ptr<VideoFrame>& output);
+    std::shared_ptr<VideoFrame> getHWFrameFromSWFrame(const VideoFrame& input);
+
     bool enableAccel_ = true;
     std::unique_ptr<video::HardwareAccel> accel_;
     unsigned short accelFailures_ = 0;
+
+    // AUTO-mode performance watchdog (see MediaDecoder::decode()).
+    int64_t hwPerfAccumUs_ {0};
+    unsigned hwPerfSamples_ {0};
+    unsigned hwPerfSlowWindows_ {0};
+    bool hwPerfDemotePending_ {false};
+#endif
+
+#ifdef ENABLE_VIDEO
+    video::VideoScaler scaler_;
 #endif
 
     // report here x value of MediaFrame after demuxer

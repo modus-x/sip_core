@@ -23,11 +23,14 @@
 
 #include "libav_deps.h"
 #include "media_codec.h"
+#include "media_stream.h"
 
 #include <memory>
 #include <string>
 #include <vector>
 #include <list>
+#include <map>
+#include <utility>
 
 extern "C" {
 #include <libavutil/hwcontext.h>
@@ -63,6 +66,34 @@ public:
      */
     static std::unique_ptr<VideoFrame> transferToMainMemory(const VideoFrame& frame,
                                                             AVPixelFormat desiredFormat);
+
+    /**
+     * @brief Attaches a shared lazy-download cache to a published hardware frame.
+     *
+     * Must be called by the producer before the frame fans out to consumers
+     * (VideoGenerator::publishFrame does this). av_frame_ref propagates a new
+     * reference to the same cache buffer via AVFrame.opaque_ref, so every
+     * consumer of the published frame shares one cache. No-op for software
+     * frames or on allocation failure (consumers then download individually).
+     */
+    static void attachDownloadCache(AVFrame* frame);
+
+    /**
+     * @brief Returns a software copy of @frame, downloading at most once.
+     *
+     * If @frame is already software it is returned unchanged. If it is a
+     * hardware frame, the GPU->CPU transfer runs once per published frame and
+     * format; sibling consumers (cropped conference sinks, recorder, mixer,
+     * encoder relay) reuse the memoized download through the cache attached
+     * by attachDownloadCache. Returns nullptr on download failure (logged) —
+     * callers must drop the frame, never block or retry.
+     *
+     * The returned frame is shared between consumers: treat it as immutable.
+     * Take a private ref (e.g. MediaFrame::copyFrom) before touching mutable
+     * per-ref state such as pts or the crop fields.
+     */
+    static std::shared_ptr<VideoFrame> ensureSoftwareFrame(
+        const std::shared_ptr<VideoFrame>& frame, AVPixelFormat desired = AV_PIX_FMT_NV12);
 
     /**
      * @brief Constructs a HardwareAccel object
@@ -153,10 +184,33 @@ public:
      */
     bool linkHardware(AVBufferRef* framesCtx);
 
+    /**
+     * @brief Links this HardwareAccel's frames context and device context
+     *  with the passed in filter's MediaStream.
+     *
+     * This serves to skip transferring a decoded frame back to main memory before encoding.
+     */
+    void linkFilter(MediaStream& ms, int width, int height);
+
+    /**
+     * @brief Links given VideoFrame context with current HardwareAccel.
+     *  
+     *
+     * This serves to be able to allocate new VideoFrame with given hw format.
+     */
+    bool reserveFrame(AVFrame* frame);
+
     static std::list<HardwareAccel> getCompatibleAccel(AVCodecID id,
                                                        int width,
                                                        int height,
                                                        CodecType type);
+
+    /**
+     * @brief Whether any hardware acceleration device can actually be opened
+     * on this host. Probed once per process and cached.
+     */
+    static bool isGPUAvailable();
+
     int initAPI(bool linkable, AVBufferRef* framesCtx);
     bool dynBitrate() { return dynBitrate_; }
 
@@ -177,6 +231,14 @@ private:
 
     AVBufferRef* deviceCtx_ {nullptr};
     AVBufferRef* framesCtx_ {nullptr};
+    // Cached per-size hardware upload pools for CODEC_NONE transfers
+    // (conference mixer path); released in the destructor.
+    std::map<std::pair<int, int>, AVBufferRef*> uploadPools_;
+
+    struct HardwareAPI;
+    static std::vector<HardwareAPI> apiListDec_;
+    static std::vector<HardwareAPI> apiListEnc_;
+    static std::vector<HardwareAPI> apiListOpencl_;
 
     int init_device(const char* name, const char* device, int flags);
     int init_device_type(std::string& dev);

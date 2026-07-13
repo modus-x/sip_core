@@ -116,6 +116,12 @@ struct VideoMixer::VideoMixerSource
     int rotation {0};
     std::unique_ptr<MediaFilter> transposeFilter {nullptr};
     std::unique_ptr<MediaFilter> bordersFilter {nullptr};
+#ifdef RING_ACCEL
+    // OpenCL composite filter (sv_participant_opencl): scales, pads, borders and
+    // labels the participant directly on the GPU mixer canvas. When set (accel
+    // active), it replaces transposeFilter/bordersFilter entirely.
+    std::unique_ptr<MediaFilter> mainFilter {nullptr};
+#endif
     std::shared_ptr<VideoFrame> render_frame;
     void atomic_copy(const VideoFrame& other)
     {
@@ -127,14 +133,22 @@ struct VideoMixer::VideoMixerSource
             render_frame = black_frame;
         } else {
             auto newFrame = std::make_shared<VideoFrame>();
-            // Deep copy: allocate an independent buffer and copy pixel data.
-            // copyFrom() only does av_frame_ref() which keeps data pointers
-            // aimed at the original buffer (e.g. V4L2 mmap'd memory).  If
-            // the device is torn down on another thread those pages get
-            // unmapped while the mixer is still reading them -> SIGSEGV.
-            newFrame->reserve(other.format(), other.width(), other.height());
-            av_frame_copy(newFrame->pointer(), other.pointer());
-            av_frame_copy_props(newFrame->pointer(), other.pointer());
+            auto desc = av_pix_fmt_desc_get(static_cast<AVPixelFormat>(other.format()));
+            if (desc && (desc->flags & AV_PIX_FMT_FLAG_HWACCEL)) {
+                // Hardware frames wrap refcounted GPU surfaces: reserve()
+                // cannot allocate them (throws bad_alloc) and the V4L2
+                // unmap hazard below does not apply. Reference instead.
+                newFrame->copyFrom(other);
+            } else {
+                // Deep copy: allocate an independent buffer and copy pixel data.
+                // copyFrom() only does av_frame_ref() which keeps data pointers
+                // aimed at the original buffer (e.g. V4L2 mmap'd memory).  If
+                // the device is torn down on another thread those pages get
+                // unmapped while the mixer is still reading them -> SIGSEGV.
+                newFrame->reserve(other.format(), other.width(), other.height());
+                av_frame_copy(newFrame->pointer(), other.pointer());
+                av_frame_copy_props(newFrame->pointer(), other.pointer());
+            }
             render_frame = newFrame;
         }
     }
@@ -394,28 +408,28 @@ VideoMixer::setVoiceInactiveHoldMs(int holdMs)
 }
 
 bool
-VideoMixer::moveSource(size_t from_index, size_t to_index)
+VideoMixer::moveSource(size_t source_index, size_t dest_index)
 {
     std::unique_lock lock(rwMutex_);
 
     size_t size = sources_.size();
-    if (from_index == to_index || from_index >= size || to_index >= size)
+    if (source_index == dest_index || source_index >= size || dest_index >= size)
         return false;
 
     auto it_from = sources_.begin();
-    std::advance(it_from, from_index);
+    std::advance(it_from, source_index);
 
-    if (from_index < to_index) {
-        if (to_index == sources_.size()) {
+    if (source_index < dest_index) {
+        if (dest_index == sources_.size()) {
             sources_.splice(sources_.end(), sources_, it_from);
         } else {
             auto it_to = sources_.begin();
-            std::advance(it_to, to_index);
+            std::advance(it_to, dest_index);
             sources_.splice(std::next(it_to), sources_, it_from);
         }
-    } else { // from > to
+    } else { // source > dest
         auto it_to = sources_.begin();
-        std::advance(it_to, to_index);
+        std::advance(it_to, dest_index);
         sources_.splice(it_to, sources_, it_from);
     }
     updateLayout("moveSource");
@@ -782,15 +796,12 @@ VideoMixer::update(Observable<std::shared_ptr<MediaFrame>>* ob,
         if (x->source == ob) {
 #ifdef RING_ACCEL
             std::shared_ptr<VideoFrame> frame;
-            try {
-                frame = HardwareAccel::transferToMainMemory(*std::static_pointer_cast<VideoFrame>(
-                                                                frame_p),
-                                                            AV_PIX_FMT_NV12);
-                x->atomic_copy(*std::static_pointer_cast<VideoFrame>(frame));
-            } catch (const std::runtime_error& e) {
-                SIP_CORE_ERR("[mixer:%s] Accel failure: %s", id_.c_str(), e.what());
+            if (getHWFrame(std::static_pointer_cast<VideoFrame>(frame_p), frame) < 0) {
+                SIP_CORE_ERR("[mixer:%s] VideoFrame::failed to transfer hardware frame", id_.c_str());
                 return;
             }
+            if(frame)
+                x->atomic_copy(*std::static_pointer_cast<VideoFrame>(frame));
 #else
             x->atomic_copy(*std::static_pointer_cast<VideoFrame>(frame_p));
 #endif
@@ -941,6 +952,18 @@ VideoMixer::process()
     {
         std::shared_lock lock(rwMutex_);
 
+#ifdef RING_ACCEL
+        if (accel_) {
+            if (auto hw_frame = getHWFrameFromSWFrame(output)) {
+                output.copyFrom(*hw_frame);
+            } else {
+                SIP_CORE_ERR("[mixer:%s] VideoFrame::main hardware buffer allocation failed",
+                             id_.c_str());
+                return;
+            }
+        }
+#endif
+
         // collection of patricipants, both audio & video
         std::vector<SourceInfo> sourcesInfo;
         sourcesInfo.reserve(sources_.size() + audioOnlySources_.size());
@@ -979,6 +1002,19 @@ VideoMixer::process()
             audioOnlyFrame = std::make_shared<VideoFrame>();
             audioOnlyFrame->reserve(frameFormat, aoW, aoH);
             libav_utils::fillWithBlack(audioOnlyFrame->pointer());
+
+#ifdef RING_ACCEL
+            // The OpenCL composite filter expects hardware input frames.
+            if (accel_) {
+                if (auto hw_frame = getHWFrameFromSWFrame(*audioOnlyFrame)) {
+                    audioOnlyFrame->copyFrom(*hw_frame);
+                } else {
+                    SIP_CORE_ERR("[mixer:%s] audio-only placeholder hardware upload failed",
+                                 id_.c_str());
+                    return;
+                }
+            }
+#endif
         }
 
         int i = 0;
@@ -1186,6 +1222,25 @@ VideoMixer::process()
                                              static_cast<AVRounding>(AV_ROUND_NEAR_INF
                                                                      | AV_ROUND_PASS_MINMAX));
     lastTimestamp_ = output.pointer()->pts;
+
+#ifdef RING_ACCEL
+    {
+        auto odesc = av_pix_fmt_desc_get(static_cast<AVPixelFormat>(output.format()));
+        if (odesc && (odesc->flags & AV_PIX_FMT_FLAG_HWACCEL)) {
+            std::lock_guard lock(accelMtx_);
+            if (!accel_) {
+                // accel died mid-frame; drop this canvas, next frame is software
+                return;
+            }
+            auto frame = getUnlinkedHWFrame(output);
+            if (!frame) {
+                SIP_CORE_ERR("[mixer:%s] failed to download mixed frame from GPU", id_.c_str());
+                return;
+            }
+            output.copyFrom(*frame.get());
+        }
+    }
+#endif
     publishFrame();
 }
 
@@ -1235,6 +1290,40 @@ VideoMixer::render_frame(VideoFrame& output,
     if (!width_ or !height_ or !input->pointer() or input->pointer()->format == -1)
         return false;
 
+#ifdef RING_ACCEL
+    {
+        std::lock_guard lock(accelMtx_);
+        if (accel_) {
+            // GPU path: the sv_participant_opencl composite filter scales, pads,
+            // borders and labels the participant directly on the mixer canvas.
+            auto idesc = av_pix_fmt_desc_get(static_cast<AVPixelFormat>(input->format()));
+            if (!idesc || !(idesc->flags & AV_PIX_FMT_FLAG_HWACCEL)) {
+                // Muted/software placeholder frame: the OpenCL filter only
+                // accepts hardware input — leave the tile black.
+                return true;
+            }
+            if (source->mainFilter) {
+                source->mainFilter->feedInput(input->pointer(), "overlay");
+                output.pointer()->pts = input->pointer()->pts; // for correct framesync
+                source->mainFilter->feedInput(output.pointer(), "main");
+                std::unique_ptr<MediaFrame> clone = source->mainFilter->readOutput();
+                if (clone.get())
+                    output.copyFrom(*std::static_pointer_cast<VideoFrame>(
+                        std::shared_ptr<MediaFrame>(clone.release())));
+            }
+            return true;
+        }
+    }
+
+    // If the accel died mid-frame the canvas is still a hardware frame this
+    // tick; software scaling cannot touch it. Skip — next frame is software.
+    {
+        auto odesc = av_pix_fmt_desc_get(static_cast<AVPixelFormat>(output.format()));
+        if (odesc && (odesc->flags & AV_PIX_FMT_FLAG_HWACCEL))
+            return false;
+    }
+#endif
+
     int cell_width = source->w;
     int cell_height = source->h;
     int xoff = source->x.load();
@@ -1274,8 +1363,8 @@ VideoMixer::render_frame(VideoFrame& output,
     } else {
         frame = input;
     }
-
-    scaler_.scale_and_pad(*frame, output, xoff, yoff, cell_width, cell_height, true);
+    if (frame)
+        scaler_.scale_and_pad(*frame, output, xoff, yoff, cell_width, cell_height, true);
 
     if (source->bordersFilter) {
         source->bordersFilter->feedInput(output.pointer(), borderFilterName_);
@@ -1323,7 +1412,7 @@ VideoMixer::calc_position(std::unique_ptr<VideoMixerSource>& source,
     source->x.store(frameW_off + padding_ + border_size_);
     source->y.store(frameH_off + padding_ + border_size_);
 
-    // Update border filter
+
 #if CONFERENCE_METADATA
     // Text overlays are disabled when CONFERENCE_METADATA is on, so the display
     // name is unused.  Skip the Manager call that would otherwise be made under
@@ -1332,6 +1421,35 @@ VideoMixer::calc_position(std::unique_ptr<VideoMixerSource>& source,
 #else
     std::string display = getCallDisplayName(source, callId);
 #endif
+
+#ifdef RING_ACCEL
+    {
+        std::lock_guard lock(accelMtx_);
+        if (accel_) {
+            if (!source->w || !source->h)
+                return;
+
+            source->mainFilter = std::make_unique<MediaFilter>();
+            if (!initMainFilterHardware(*source->mainFilter,
+                                        display,
+                                        input->format(),
+                                        source->x.load(),
+                                        source->y.load(),
+                                        source->w,
+                                        source->h,
+                                        input->getOrientation(),
+                                        remove_black_borders_ && not source->isBig,
+                                        isActive)) {
+                enableAccel_ = false;
+                accel_.reset();
+                source->mainFilter.reset();
+            }
+            return;
+        }
+    }
+#endif
+
+    // Update border filter
     auto tryInitBorderFilter = [&](bool withText) {
         auto filter = std::make_unique<MediaFilter>();
         if (!initBorderFilter(*filter,
@@ -1583,6 +1701,166 @@ VideoMixer::initBorderFilter(MediaFilter& filter,
     return true;
 }
 
+#ifdef RING_ACCEL
+bool
+VideoMixer::initMainFilterHardware(MediaFilter& filter,
+                                   std::string inputName,
+                                   int format,
+                                   int x,
+                                   int y,
+                                   int w,
+                                   int h,
+                                   int dir,
+                                   bool remove_borders,
+                                   bool active)
+{
+    std::stringstream ss;
+    ss << " [main][overlay]";
+    ss << "sv_participant_opencl=x=" << x << ":y=" << y 
+                                     << ":width=" << w << ":height=" << h
+                                     << ":b_width=" << border_size_ 
+                                     << ":b_color=" << (active ? active_border_color_ : inactive_border_color_);
+
+    if(!inputName.empty()) {
+        const int text_height = h / 15;
+        constexpr int text_padding = 10;
+        ss << ":text='" << escapeDrawtext(inputName) << "'"
+           << ":fontcolor=white:fontsize=" << text_height
+           << ":text_x=(" << w << "-text_w)/2"
+           << ":text_y=" << h - text_padding << "-text_h";
+    }
+
+    switch (dir) {
+    case 0: break;
+    case 90:
+    case -270:
+        ss << ":dir=2";
+        break;
+    case 180:
+    case -180:
+        ss << ":dir=6";
+        break;
+    case 270:
+    case -90:
+        ss << ":dir=1";
+        break;
+    default:
+        SIP_CORE_WARN("Unsupported rotation value");
+    }
+    
+    if (remove_borders)
+        ss << ":no_black_fields=1";
+
+    constexpr auto one = rational<int>(1);
+    std::vector<MediaStream> msv;
+    msv.emplace_back("main", AV_PIX_FMT_OPENCL, one, width_, height_, 0, one);
+    accel_->linkFilter(msv.back(), width_, height_);
+    msv.emplace_back("overlay", AV_PIX_FMT_OPENCL, one, w, h, 0, one);
+    accel_->linkFilter(msv.back(), w, h);
+    auto ret = filter.initialize(ss.str(), msv);
+    // The filter graph holds its own refs on the device/frames contexts;
+    // release ours in every path (success used to leak a full GPU surface
+    // pool per participant per layout rebuild).
+    for (auto& m : msv) {
+        av_buffer_unref(&m.deviceRef);
+        av_buffer_unref(&m.frameRef);
+    }
+    if (ret < 0) {
+        SIP_CORE_ERR() << "filter init fail";
+        return false;
+    }
+
+    return true;
+}
+
+int
+VideoMixer::getHWFrame(const std::shared_ptr<VideoFrame>& input, std::shared_ptr<VideoFrame>& output)
+{
+    std::lock_guard lock(accelMtx_);
+#if !defined(__APPLE__) && defined(RING_ACCEL)
+    try {
+        auto desc = av_pix_fmt_desc_get(static_cast<AVPixelFormat>(input->format()));
+        bool isHardware = desc && (desc->flags & AV_PIX_FMT_FLAG_HWACCEL);
+        std::shared_ptr<VideoFrame> in = input;
+        if (isHardware && input->format() != AV_PIX_FMT_OPENCL) {
+            // Decoders pass D3D11/VAAPI frames through GPU-resident, but the
+            // OpenCL composite filter only accepts OPENCL frames and the
+            // software mixer only software ones. Download once (shared with
+            // sibling consumers of the same published frame), then continue
+            // with the software handling below, incl. the sw->OpenCL upload.
+            in = HardwareAccel::ensureSoftwareFrame(input, AV_PIX_FMT_NV12);
+            if (!in) {
+                SIP_CORE_ERR("[mixer:%s] dropping hardware frame: GPU download failed",
+                             id_.c_str());
+                return -1;
+            }
+            isHardware = false;
+        }
+        if (accel_ && accel_->isLinked() && isHardware) {
+            // Fully accelerated pipeline, skip main memory
+            output = in;
+        } else if (isHardware) {
+            // Hardware decoded frame, transfer back to main memory
+            // Transfer to GPU if we have a hardware encoder
+            // Hardware decoders decode to NV12, but sip_core's supported software encoders want YUV420P
+            output = getUnlinkedHWFrame(*in.get());
+        } else if (accel_) {
+            // Software decoded frame with a hardware encoder, convert to accepted format first
+            output = getHWFrameFromSWFrame(*in.get());
+        } else {
+            output = in;
+        }
+    } catch (const std::runtime_error& e) {
+        SIP_CORE_ERR("Accel failure: %s", e.what());
+        return -1;
+    }
+#else
+    // macOS: VideoToolbox frames now reach the mixer GPU-resident; the
+    // software mixer cannot scale them. Download (shared, memoized).
+    auto desc = av_pix_fmt_desc_get(static_cast<AVPixelFormat>(input->format()));
+    if (desc && (desc->flags & AV_PIX_FMT_FLAG_HWACCEL)) {
+        output = HardwareAccel::ensureSoftwareFrame(input, AV_PIX_FMT_NV12);
+        if (!output) {
+            SIP_CORE_ERR("[mixer:%s] dropping hardware frame: GPU download failed", id_.c_str());
+            return -1;
+        }
+    } else {
+        output = input;
+    }
+#endif
+
+        return 0;
+}
+
+std::shared_ptr<VideoFrame>
+VideoMixer::getUnlinkedHWFrame(const VideoFrame& input)
+{
+    std::shared_ptr<VideoFrame> framePtr;
+    if (!accel_) {
+        std::lock_guard<std::mutex> lock(scaler_mutex_);
+        framePtr = scaler_.convertFormat(input, format_);
+    } else {
+        framePtr = accel_->transfer(input);
+    }
+    return framePtr;
+}
+
+std::shared_ptr<VideoFrame>
+VideoMixer::getHWFrameFromSWFrame(const VideoFrame& input)
+{
+    std::shared_ptr<VideoFrame> framePtr;
+    auto pix = accel_->getSoftwareFormat();
+    if (input.format() != pix) {
+        std::lock_guard<std::mutex> lock(scaler_mutex_);
+        framePtr = scaler_.convertFormat(input, pix);
+        framePtr = accel_->transfer(*framePtr);
+    } else {
+        framePtr = accel_->transfer(input);
+    }
+    return framePtr;
+}
+#endif
+
 void
 VideoMixer::setParameters(const Parameters& params)
 {
@@ -1598,11 +1876,38 @@ VideoMixer::setParameters(const Parameters& params)
     inactive_border_color_ = params.inactive_border_color;
     remove_black_borders_ = params.remove_black_borders;
     voiceInactiveHoldMs_ = clampVoiceInactiveHoldMs(params.voice_inactive_hold_ms);
+#ifdef RING_ACCEL
+    enableAccel_ = params.useHardware;
+#endif
 
     // cleanup the previous frame to have a nice copy in rendering method
     std::shared_ptr<VideoFrame> previous_p(obtainLastFrame());
     if (previous_p)
         libav_utils::fillWithBlack(previous_p->pointer());
+
+#if defined(RING_ACCEL) && !defined(__APPLE__)
+    // macOS mixes in software: the decoder-side HW upload helpers are compiled
+    // out there (VideoToolbox frames have no OpenCL interop), so enabling the
+    // OpenCL composite path would feed a broken graph and publish black frames.
+    std::lock_guard lock_accel(accelMtx_);
+    bool enabled = enableAccel_.load();
+    enabled &= Manager::instance().videoPreferences.getDecodingAccelerated();
+    enableAccel_.store(enabled);
+    if(enableAccel_) {
+        auto apiList = HardwareAccel::getCompatibleAccel(AV_CODEC_ID_NONE, width_, height_, CODEC_NONE);
+        for (const auto& api : apiList) {
+            accel_ = std::make_unique<video::HardwareAccel>(api);
+            if (accel_->initAPI(false, nullptr) < 0) {
+                accel_.reset();
+                continue;
+            }
+            SIP_CORE_INFO("[mixer:%s] GPU conference mixing enabled via %s",
+                          id_.c_str(),
+                          accel_->getName().c_str());
+            break;
+        }
+    }
+#endif
 
     startSink();
     updateLayout("setParameters");

@@ -1,0 +1,25 @@
+{
+    "name": "libvpl",
+    "version": "2.16.0",
+    "url": "https://nexus.svetlocal.ru/repository/github-artifacts/libvpl-__VERSION__.tar.gz",
+    "deps": [],
+    "use_cmake" : true,
+    "defines": [
+        "INSTALL_LIB=ON",
+        "BUILD_SHARED_LIBS=OFF"
+    ],
+    "patches": [],
+    "project_paths": [],
+    "win_patches": [],
+    "with_env" : "",
+    "custom_scripts":
+    {
+        "pre_build": [],
+        "build": [],
+        "post_build": [
+            "cmake --install build --prefix \"%INSTALL_PREFIX%\" --config %BUILD_TYPE%",
+            "cd \"%INSTALL_PREFIX%\\lib\" && move /Y vpl*.lib \".\\x64\"",
+            "if /I %BUILD_TYPE%==debug cd \"%INSTALL_PREFIX%\\lib\\x64\" && if not exist vpl.lib mklink vpl.lib vpld.lib"
+        ]
+    }
+}

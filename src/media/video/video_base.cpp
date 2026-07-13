@@ -25,6 +25,9 @@
 #include "string_utils.h"
 #include "logger.h"
 #include "connectivity/utf8_utils.h"
+#ifdef RING_ACCEL
+#include "accel.h"
+#endif
 
 #include <cassert>
 
@@ -46,6 +49,12 @@ VideoGenerator::publishFrame()
 {
     std::lock_guard<std::mutex> lk(mutex_);
     lastFrame_ = std::move(writableFrame_);
+#ifdef RING_ACCEL
+    // Hardware frames fan out to multiple consumers; the shared cache makes
+    // their GPU->CPU downloads happen at most once (no-op for software frames).
+    if (lastFrame_)
+        HardwareAccel::attachDownloadCache(lastFrame_->pointer());
+#endif
     notify(std::static_pointer_cast<MediaFrame>(lastFrame_));
 }
 
@@ -54,6 +63,10 @@ VideoGenerator::publishFrame(std::shared_ptr<VideoFrame> frame)
 {
     std::lock_guard<std::mutex> lk(mutex_);
     lastFrame_ = std::move(frame);
+#ifdef RING_ACCEL
+    if (lastFrame_)
+        HardwareAccel::attachDownloadCache(lastFrame_->pointer());
+#endif
     notify(std::static_pointer_cast<MediaFrame>(lastFrame_));
 }
 

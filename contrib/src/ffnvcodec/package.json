@@ -1,0 +1,17 @@
+{
+    "name": "ffnvcodec",
+    "version": "n12.2.72.0",
+    "url": "https://nexus.svetlocal.ru/repository/github-artifacts/nv-codec-headers-__VERSION__.tar.gz",
+    "deps": [],
+    "patches": [],
+    "win_patches": [],
+    "project_paths": [],
+    "with_env" : "",
+    "custom_scripts": {
+        "pre_build": [],
+        "build": [
+            "mkdir \"%INSTALL_PREFIX%\\include\\ffnvcodec\" & cd include/ffnvcodec & xcopy /S /Y *.h \"%INSTALL_PREFIX%\\include\\ffnvcodec\""
+        ],
+        "post_build": []
+    }
+}

@@ -11,10 +11,10 @@
 #define PATH_MAX MAX_PATH
 #endif
 
-CallController::CallController(const std::string& accountId)
+CallController::CallController(const std::string& accountId, bool enableVideo /* = true */)
     : m_mtxEvents()
 #ifdef ENABLE_VIDEO
-    , m_isVideoEnabled(true)
+    , m_isVideoEnabled(enableVideo)
     , m_mediaVideo {{"MEDIA_TYPE", "MEDIA_TYPE_VIDEO"},
                     {"ENABLED", "true"},
                     {"MUTED", "false"},
@@ -190,12 +190,27 @@ CallController::publishPresence(bool available, const std::string& note)
 bool
 CallController::sendRegister(const std::string& user,
                              const std::string& pass,
-                             const std::string& domain)
+                             const std::string& domain,
+                             const std::string& binding)
 {
     std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
 
     if (!libsip_core::initialized())
         return false;
+
+    std::string actualUser = user;
+    std::string actualPass = pass;
+    std::string actualDomain = domain;
+    if(pass.empty()) {
+        std::cout << "Warn: some of the requeired fields are not set.\n" <<
+                     "Using defautl account:" <<
+                     "\n\tusername - " << m_defualt_username <<
+                     "\n\tdomain - " << m_default_domain << std::endl << std::endl;
+        
+        actualUser = m_defualt_username;
+        actualPass = m_default_password;
+        actualDomain = m_default_domain;
+    }
 
     bool needToCreateNew = true;
     auto accounts = libsip_core::getAccountList();
@@ -206,20 +221,14 @@ CallController::sendRegister(const std::string& user,
         }
     }
 
-    std::string actualDomain;
-    std::string actualUser;
-
     if (needToCreateNew) {
         std::map<std::string, std::string> account;
         account["Account.type"] = "SIP";
         account["Account.upnpEnabled"] = "false";
-
-        actualUser = user;
-        actualDomain = domain;
-
         account["Account.username"] = actualUser;
         account["Account.hostname"] = actualDomain;
-        account["Account.password"] = pass;
+        account["Account.password"] = actualPass;
+        account["Account.bindAddress"] = binding;
         account["Account.localPort"] = "0";
         account["Account.localModeratorsEnabled"] = "true";
         account["Account.allModeratorsEnabled"] = "false";
@@ -233,24 +242,32 @@ CallController::sendRegister(const std::string& user,
         libsip_core::addAccount(account, m_accountId);
     } else {
         auto details = libsip_core::getAccountDetails(m_accountId);
-        actualUser = details["Account.username"];
-        actualDomain = details["Account.hostname"];
-
-        if (details["Account.password"].empty()) {
-            std::cout << "No password set, inferring it..." << std::endl;
-            details["Account.password"] = pass;
-            libsip_core::setAccountDetails(m_accountId, details);
-        }
+        if(not actualUser.empty())
+            details["Account.username"] = actualUser;
+        if(not actualDomain.empty())
+            details["Account.hostname"] = actualDomain;
+        if (not actualPass.empty())
+            details["Account.password"] = actualPass;
+        if(not binding.empty())
+            details["Account.bindAddress"] = binding;
+        libsip_core::setAccountDetails(m_accountId, details);
     }
-
-    libsip_core::registerEventPackage("x-lostcalls", 600);
-
-    std::cout << "Registering user - " << user << "..." << std::endl;
-
-    libsip_core::sendRegister(m_accountId, true);
 
     m_user = actualUser;
     m_domain = actualDomain;
+
+    libsip_core::registerEventPackage("x-lostcalls", 600);
+
+    if(not m_user.empty() && not m_domain.empty()) {
+        std::cout << "Registering user - " << actualUser << "..." << std::endl;
+        libsip_core::sendRegister(m_accountId, true);
+    }
+    else {
+        std::cerr << "Error: no valid username or domain address given.\n" 
+                     "Use --user, --domain, --pass options or edit test.yaml directly...\n\n";
+        return false;
+    }
+
     return true;
 }
 
@@ -528,20 +545,17 @@ CallController::resume()
 }
 
 void
-CallController::toggleVideo()
+CallController::enableVideo(bool enabled)
 {
 #ifdef ENABLE_VIDEO
-    m_isVideoEnabled = !m_isVideoEnabled;
-    if (m_isVideoEnabled) {
-        m_mediaVideo["ENABLED"] = "true";
-        m_mediaVideo["MUTED"] = "false";
-    }
-    else {
-        m_mediaVideo["ENABLED"] = "true";
-        m_mediaVideo["MUTED"] = "true";
-    }
-
     std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
+    if(m_isVideoEnabled == enabled)
+        return;
+
+    m_isVideoEnabled = enabled;
+    m_mediaVideo["ENABLED"] = "true";
+    m_mediaVideo["MUTED"] = enabled ? "false" : "true";
+
     if (hasActiveCall()) {
         // build media list settings according to settings
         std::vector<std::map<std::string, std::string>> mediaList;
@@ -553,7 +567,7 @@ CallController::toggleVideo()
         libsip_core::requestMediaChange(m_accountId, getActiveCall(), mediaList);
     }
 
-#elif
+#else
     std::cerr << "Video is unsupported by a kernel build." << std::endl;
 #endif
 }
@@ -564,7 +578,61 @@ CallController::isVideoEnabled() const
 #ifdef ENABLE_VIDEO
     std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
     return m_isVideoEnabled;
-#elif
+#else
+    return false;
+#endif
+}
+
+void
+CallController::enableHWAccel(bool enabled)
+{
+#ifdef RING_ACCEL
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
+    if(isHWAccelEnabled() == enabled) 
+        return;
+
+    if(enabled) {
+        sip_core::Manager::instance().videoPreferences.setDecodingAccelerated(true);
+        sip_core::Manager::instance().videoPreferences.setEncodingAccelerated(true);
+    } else {
+        sip_core::Manager::instance().videoPreferences.setDecodingAccelerated(false);
+        sip_core::Manager::instance().videoPreferences.setEncodingAccelerated(false);
+    }
+
+    sip_core::Manager::instance().saveConfig();
+#else
+    std::cerr << "Video hardware acceleration is unsupported by a kernel build." << std::endl;
+#endif
+}
+
+bool
+CallController::setHWAccelMode(const std::string& mode)
+{
+#ifdef RING_ACCEL
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
+    return libsip_core::setHardwareAccelerationMode(mode);
+#else
+    return mode == "cpu";
+#endif
+}
+
+std::string
+CallController::getHWAccelMode() const
+{
+#ifdef RING_ACCEL
+    return libsip_core::getHardwareAccelerationMode();
+#else
+    return "cpu";
+#endif
+}
+
+bool
+CallController::isHWAccelEnabled() const
+{
+#ifdef RING_ACCEL
+    std::lock_guard<std::recursive_mutex> lock(m_mtxEvents);
+    return sip_core::Manager::instance().videoPreferences.getDecodingAccelerated() && sip_core::Manager::instance().videoPreferences.getEncodingAccelerated();
+#else
     return false;
 #endif
 }

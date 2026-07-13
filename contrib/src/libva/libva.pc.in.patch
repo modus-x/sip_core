@@ -1,0 +1,11 @@
+diff --git a/pkgconfig/libva.pc.in b/pkgconfig/libva.pc.in
+index 4ede38c..337b9e2 100644
+--- a/pkgconfig/libva.pc.in
++++ b/pkgconfig/libva.pc.in
+@@ -8,5 +8,5 @@ libva_version=@LIBVA_VERSION@
+ Name: libva
+ Description: Userspace Video Acceleration (VA) core interface
+ Version: @VA_API_VERSION@
+-Libs: -L${libdir} -lva
++Libs: -L${libdir} -lva -ldl
+ Cflags: -I${includedir}

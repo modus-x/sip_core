@@ -437,7 +437,7 @@ MediaEncoder::writeContainerToRtp(const uint8_t* buf, int buf_size)
         // Get compatible list of Hardware API
     if (enableAccel_ && mediaType == AVMEDIA_TYPE_VIDEO) {
         auto APIs = video::HardwareAccel::getCompatibleAccel(static_cast<AVCodecID>(
-                                                                 systemCodecInfo.avcodecId),
+                                                             systemCodecInfo.avcodecId),
                                                              videoOpts_.width,
                                                              videoOpts_.height,
                                                              CODEC_ENCODER);
@@ -459,6 +459,7 @@ MediaEncoder::writeContainerToRtp(const uint8_t* buf, int buf_size)
             auto ret = accel_->initAPI(linkableHW_, framesCtx);
             if (ret < 0) {
                 accel_.reset();
+                avcodec_free_context(&encoderCtx);
                 encoderCtx = nullptr;
                 continue;
             }
@@ -1410,14 +1411,14 @@ MediaEncoder::enableAccel(bool enableAccel)
         outputCodec_ = nullptr;
 #ifdef RING_ACCEL
         if (mediaType == AVMEDIA_TYPE_VIDEO) {
-        if (enableAccel_) {
-            if (accel_) {
-                outputCodec_ = avcodec_find_encoder_by_name(accel_->getCodecName().c_str());
+            if (enableAccel_) {
+                if (accel_) {
+                    outputCodec_ = avcodec_find_encoder_by_name(accel_->getCodecName().c_str());
+                }
+            } else {
+                SIP_CORE_WARN() << "Hardware encoding disabled";
             }
-        } else {
-            SIP_CORE_WARN() << "Hardware encoding disabled";
         }
-    }
 #endif
 
         if (!outputCodec_) {
@@ -1635,7 +1636,12 @@ MediaEncoder::enableAccel(bool enableAccel)
         av_opt_set_int(encoderCtx, "maxrate", maxrate, AV_OPT_SEARCH_CHILDREN);
         av_opt_set_int(encoderCtx, "bufsize", bufsize, AV_OPT_SEARCH_CHILDREN);
         av_opt_set(encoderCtx, "preset", preset, AV_OPT_SEARCH_CHILDREN);
-
+        
+        // Also send PPS/SPS data with key frames in case reciever restarts its stream 
+        // GPU decoding falure for example
+        av_opt_set(encoderCtx, "repeat_headers", "1", AV_OPT_SEARCH_CHILDREN);
+        av_opt_set(encoderCtx, "forced-idr", "1", AV_OPT_SEARCH_CHILDREN);
+        
         // Optionally disable scene cut to reduce spikes
         av_opt_set_int(encoderCtx, "no-scenecut", 1, AV_OPT_SEARCH_CHILDREN);
         // Intra refresh may help error resilience / refresh gradually
@@ -1675,6 +1681,11 @@ MediaEncoder::enableAccel(bool enableAccel)
             av_opt_set_int(encoderCtx, "crf", -1, AV_OPT_SEARCH_CHILDREN);
             SIP_CORE_DEBUG("H265 encoder setup cbr: bitrate={:d} kbit/s", br);
         }
+
+        // Also send PPS/SPS data with key frames in case reciever restarts its stream 
+        // GPU decoding falure for example
+        av_opt_set(encoderCtx, "repeat_headers", "1", AV_OPT_SEARCH_CHILDREN); // forced-idr=1
+        av_opt_set(encoderCtx, "forced-idr", "1", AV_OPT_SEARCH_CHILDREN); // forced-idr=1
     }
 
     void
@@ -2063,7 +2074,7 @@ MediaEncoder::sendDummyPacket()
             // Hardware decoded frame, transfer back to main memory
             // Transfer to GPU if we have a hardware encoder
             // Hardware decoders decode to NV12, but sip_core's supported software encoders want YUV420P
-            output = getUnlinkedHWFrame(*input.get());
+            output = getUnlinkedHWFrame(input);
         } else if (accel_) {
             // Software decoded frame with a hardware encoder, convert to accepted format first
             output = getHWFrameFromSWFrame(*input.get());
@@ -2083,11 +2094,14 @@ MediaEncoder::sendDummyPacket()
     }
 
 #ifdef RING_ACCEL
-    std::shared_ptr<VideoFrame>
-MediaEncoder::getUnlinkedHWFrame(const VideoFrame& input)
+std::shared_ptr<VideoFrame>
+MediaEncoder::getUnlinkedHWFrame(const std::shared_ptr<VideoFrame>& input)
 {
     AVPixelFormat pix = (accel_ ? accel_->getSoftwareFormat() : AV_PIX_FMT_NV12);
-    std::shared_ptr<VideoFrame> framePtr = video::HardwareAccel::transferToMainMemory(input, pix);
+    // Shared, memoized download; used read-only below (convert or upload).
+    std::shared_ptr<VideoFrame> framePtr = video::HardwareAccel::ensureSoftwareFrame(input, pix);
+    if (!framePtr)
+        return nullptr;
     if (!accel_) {
         framePtr = scaler_.convertFormat(*framePtr, AV_PIX_FMT_YUV420P);
     } else {

@@ -83,6 +83,10 @@ Conference::Conference(const std::shared_ptr<Account>& account, const std::strin
         auto params = video::VideoMixer::Parameters {(int) conf_res[0], (int) conf_res[1]};
 #endif
         params.voice_inactive_hold_ms = voiceInactiveHoldMs;
+#ifdef RING_ACCEL
+        params.useHardware = sip_core::Manager::instance().videoPreferences.getHWAccelMode()
+                             != "cpu";
+#endif
         videoMixer_->setParameters(params);
     } else {
         SIP_CORE_ERR("Conference resolution is invalid");

@@ -476,6 +476,17 @@ CoreLayer::startAudioUnit()
                                std::memory_order_release);
 
     restartingAudio_ = false;
+
+    // Wire the capture/playback lifecycle into AudioLayer so the shared
+    // audioProcessor is created and fed on macOS too (every other backend does
+    // this in its run/start path). Without it, AudioLayer::putRecorded's
+    // `audioProcessor && playbackStarted_ && recordStarted_` gate is permanently
+    // false: the host's mic frames bypass voice-activity detection and reach the
+    // ring buffer with has_voice=false forever, so the conference "speaking"
+    // indicator never lights for the local host (remote indicators are computed
+    // by the independent AudioReceiveThread and are unaffected).
+    playbackChanged(true);
+    recordChanged(true);
     return true;
 }
 
@@ -543,6 +554,12 @@ CoreLayer::destroyAudioLayer()
     playbackDeviceID_ = 0;
     configuredStreamMask_ = 0;
     deviceSignatureHash_.store(kNoDeviceSignature, std::memory_order_release);
+
+    // Paired teardown for the recordChanged/playbackChanged wiring added in
+    // startAudioUnit(): destroy the audioProcessor in lockstep with the
+    // VoiceProcessingIO unit so it is recreated cleanly on the next rebuild.
+    playbackChanged(false);
+    recordChanged(false);
 }
 
 void

@@ -20,6 +20,7 @@
  */
 
 #include <algorithm>
+#include <mutex>
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
@@ -34,7 +35,7 @@
 namespace sip_core {
 namespace video {
 
-struct HardwareAPI
+struct HardwareAccel::HardwareAPI
 {
     std::string name;
     AVHWDeviceType hwType;
@@ -46,13 +47,20 @@ struct HardwareAPI
 };
 
 
-static std::list<HardwareAPI> apiListDec = {
-    {"nvdec",
-     AV_HWDEVICE_TYPE_CUDA,
-     AV_PIX_FMT_CUDA,
+std::vector<HardwareAccel::HardwareAPI> HardwareAccel::apiListDec_ = {
+    {"dxva2",
+     AV_HWDEVICE_TYPE_DXVA2,
+     AV_PIX_FMT_DXVA2_VLD,
      AV_PIX_FMT_NV12,
-     {AV_CODEC_ID_H264, AV_CODEC_ID_HEVC, AV_CODEC_ID_VP8, AV_CODEC_ID_MJPEG},
-     {{"default", DeviceState::NOT_TESTED}, {"1", DeviceState::NOT_TESTED}, {"2", DeviceState::NOT_TESTED}},
+     {AV_CODEC_ID_H264, AV_CODEC_ID_HEVC, AV_CODEC_ID_MJPEG, AV_CODEC_ID_VP8, AV_CODEC_ID_VP9},
+     {{"default", DeviceState::NOT_TESTED}},
+     false},
+    {"d3d11va",
+     AV_HWDEVICE_TYPE_D3D11VA,
+     AV_PIX_FMT_D3D11,
+     AV_PIX_FMT_NV12,
+     {AV_CODEC_ID_H264, AV_CODEC_ID_HEVC, AV_CODEC_ID_MJPEG, AV_CODEC_ID_VP9},
+     {{"default", DeviceState::NOT_TESTED}},
      false},
     {"vaapi",
      AV_HWDEVICE_TYPE_VAAPI,
@@ -62,12 +70,26 @@ static std::list<HardwareAPI> apiListDec = {
      {{"default", DeviceState::NOT_TESTED}, {"/dev/dri/renderD128", DeviceState::NOT_TESTED},
       {"/dev/dri/renderD129", DeviceState::NOT_TESTED}, {":0", DeviceState::NOT_TESTED}},
      false},
-    {"vdpau",
-     AV_HWDEVICE_TYPE_VDPAU,
-     AV_PIX_FMT_VDPAU,
+    {"qsv",
+     AV_HWDEVICE_TYPE_QSV,
+     AV_PIX_FMT_QSV,
      AV_PIX_FMT_NV12,
-     {AV_CODEC_ID_H264, AV_CODEC_ID_MPEG4},
+     {AV_CODEC_ID_H264, AV_CODEC_ID_HEVC, AV_CODEC_ID_MJPEG, AV_CODEC_ID_VP8, AV_CODEC_ID_VP9},
      {{"default", DeviceState::NOT_TESTED}},
+     false},
+    {"nvdec",
+     AV_HWDEVICE_TYPE_CUDA,
+     AV_PIX_FMT_CUDA,
+     AV_PIX_FMT_NV12,
+     {AV_CODEC_ID_H264, AV_CODEC_ID_HEVC, AV_CODEC_ID_VP8, AV_CODEC_ID_VP9, AV_CODEC_ID_MJPEG},
+     {{"default", DeviceState::NOT_TESTED}, {"1", DeviceState::NOT_TESTED}, {"2", DeviceState::NOT_TESTED}},
+     false},
+    {"cuvid",
+     AV_HWDEVICE_TYPE_CUDA,
+     AV_PIX_FMT_CUDA,
+     AV_PIX_FMT_NV12,
+     {AV_CODEC_ID_H264, AV_CODEC_ID_VP8, AV_CODEC_ID_VP9},
+     {{"default", DeviceState::NOT_TESTED}, {"1", DeviceState::NOT_TESTED}, {"2", DeviceState::NOT_TESTED}},
      false},
     {"videotoolbox",
      AV_HWDEVICE_TYPE_VIDEOTOOLBOX,
@@ -76,16 +98,16 @@ static std::list<HardwareAPI> apiListDec = {
      {AV_CODEC_ID_H264, AV_CODEC_ID_HEVC, AV_CODEC_ID_MPEG4},
      {{"default", DeviceState::NOT_TESTED}},
      false},
-    {"qsv",
-     AV_HWDEVICE_TYPE_QSV,
-     AV_PIX_FMT_QSV,
+    {"d3d12va",
+     AV_HWDEVICE_TYPE_D3D12VA,
+     AV_PIX_FMT_D3D12,
      AV_PIX_FMT_NV12,
-     {AV_CODEC_ID_H264, AV_CODEC_ID_HEVC, AV_CODEC_ID_MJPEG, AV_CODEC_ID_VP8, AV_CODEC_ID_VP9},
+     {AV_CODEC_ID_H264, AV_CODEC_ID_HEVC, AV_CODEC_ID_MJPEG, AV_CODEC_ID_VP9},
      {{"default", DeviceState::NOT_TESTED}},
      false},
 };
 
-static std::list<HardwareAPI> apiListEnc = {
+std::vector<HardwareAccel::HardwareAPI> HardwareAccel::apiListEnc_ = {
     {"nvenc",
      AV_HWDEVICE_TYPE_CUDA,
      AV_PIX_FMT_CUDA,
@@ -93,6 +115,13 @@ static std::list<HardwareAPI> apiListEnc = {
      {AV_CODEC_ID_H264, AV_CODEC_ID_HEVC},
      {{"default", DeviceState::NOT_TESTED}, {"1", DeviceState::NOT_TESTED}, {"2", DeviceState::NOT_TESTED}},
      true},
+    {"qsv",
+     AV_HWDEVICE_TYPE_QSV,
+     AV_PIX_FMT_QSV,
+     AV_PIX_FMT_NV12,
+     {AV_CODEC_ID_H264, AV_CODEC_ID_HEVC, AV_CODEC_ID_MJPEG, AV_CODEC_ID_VP8},
+    {{"default", DeviceState::NOT_TESTED}},
+    false},
     {"vaapi",
      AV_HWDEVICE_TYPE_VAAPI,
      AV_PIX_FMT_VAAPI,
@@ -109,14 +138,16 @@ static std::list<HardwareAPI> apiListEnc = {
      {AV_CODEC_ID_H264, AV_CODEC_ID_HEVC},
      {{"default", DeviceState::NOT_TESTED}},
      false},
-    // Disable temporarily QSVENC
-    // {"qsv",
-    // AV_HWDEVICE_TYPE_QSV,
-    //  AV_PIX_FMT_QSV,
-    //  AV_PIX_FMT_NV12,
-    // {AV_CODEC_ID_H264, AV_CODEC_ID_HEVC, AV_CODEC_ID_MJPEG, AV_CODEC_ID_VP8},
-    // {{"default", DeviceState::NOT_TESTED}},
-    // false},
+};
+
+std::vector<HardwareAccel::HardwareAPI> HardwareAccel::apiListOpencl_ = {
+    {"opencl",
+     AV_HWDEVICE_TYPE_OPENCL,
+     AV_PIX_FMT_OPENCL,
+     AV_PIX_FMT_NV12,
+     { AV_CODEC_ID_NONE },
+     {{"default", DeviceState::NOT_TESTED},{"0.0", DeviceState::NOT_TESTED}},
+     false}
 };
 
 HardwareAccel::HardwareAccel(AVCodecID id,
@@ -141,11 +172,14 @@ HardwareAccel::~HardwareAccel()
         av_buffer_unref(&deviceCtx_);
     if (framesCtx_)
         av_buffer_unref(&framesCtx_);
+    for (auto& pool : uploadPools_)
+        av_buffer_unref(&pool.second);
 }
 
 static AVPixelFormat
 getFormatCb(AVCodecContext* codecCtx, const AVPixelFormat* formats)
 {
+    // this cb is called only for decoders
     auto accel = static_cast<HardwareAccel*>(codecCtx->opaque);
 
     for (int i = 0; formats[i] != AV_PIX_FMT_NONE; ++i) {
@@ -154,8 +188,58 @@ getFormatCb(AVCodecContext* codecCtx, const AVPixelFormat* formats)
             SIP_CORE_DBG() << "Found compatible hardware format for "
                        << avcodec_get_name(static_cast<AVCodecID>(accel->getCodecId()))
                        << " decoder with " << accel->getName();
+
+            if (!codecCtx->hw_device_ctx) {
+                SIP_CORE_ERR() << "Cannot initialize hardware frames without a valid hardware device";
+                return AV_PIX_FMT_NONE;
+            }
+
+            // Let the decoder size the frames context (dimensions, alignment,
+            // pool size incl. reference frames); fall back to a manual setup
+            // for decoders that do not implement it.
+            AVBufferRef* frame_ctx = nullptr;
+            int ret = avcodec_get_hw_frames_parameters(codecCtx,
+                                                       codecCtx->hw_device_ctx,
+                                                       formats[i],
+                                                       &frame_ctx);
+            if (ret < 0) {
+                frame_ctx = av_hwframe_ctx_alloc(codecCtx->hw_device_ctx);
+                if (!frame_ctx)
+                    return AV_PIX_FMT_NONE;
+
+                auto ctx = reinterpret_cast<AVHWFramesContext*>(frame_ctx->data);
+                ctx->format = formats[i];
+                ctx->sw_format = accel->getSoftwareFormat();
+                ctx->width = codecCtx->coded_width ? codecCtx->coded_width : codecCtx->width;
+                ctx->height = codecCtx->coded_height ? codecCtx->coded_height : codecCtx->height;
+                ctx->initial_pool_size = 20;
+            } else {
+                // Decoded frames now stay GPU-resident past the decode loop:
+                // downstream consumers hold surfaces (engine last-frame +
+                // in-flight present + glue latest-wins slot). Enlarge fixed
+                // pools so held surfaces cannot starve the decoder; 0 means a
+                // dynamic pool, which cannot starve.
+                auto ctx = reinterpret_cast<AVHWFramesContext*>(frame_ctx->data);
+                if (ctx->initial_pool_size > 0)
+                    ctx->initial_pool_size += 4;
+            }
+
+            if ((ret = av_hwframe_ctx_init(frame_ctx)) < 0) {
+                SIP_CORE_ERR("Failed to initialize hardware frame context: %s (%d)",
+                        libav_utils::getError(ret).c_str(),
+                        ret);
+                av_buffer_unref(&frame_ctx);
+                return AV_PIX_FMT_NONE;
+            }
+
             // hardware tends to under-report supported levels
             codecCtx->hwaccel_flags |= AV_HWACCEL_FLAG_IGNORE_LEVEL;
+
+            if (codecCtx->hw_frames_ctx)
+                av_buffer_unref(&codecCtx->hw_frames_ctx);
+
+            // transfer ownership of our only ref — no extra ref, no leak
+            codecCtx->hw_frames_ctx = frame_ctx;
             return formats[i];
         }
     }
@@ -190,6 +274,11 @@ HardwareAccel::init_device(const char* name, const char* device, int flags)
 int
 HardwareAccel::init_device_type(std::string& dev)
 {
+    // The DeviceState lists are shared static state mutated from every
+    // decoder/encoder/mixer thread that probes devices.
+    static std::mutex deviceProbeMtx;
+    std::lock_guard<std::mutex> probeLock(deviceProbeMtx);
+
     AVHWDeviceType check;
     const char* name;
     int err;
@@ -249,12 +338,7 @@ HardwareAccel::init_device_type(std::string& dev)
 std::string
 HardwareAccel::getCodecName() const
 {
-    if (type_ == CODEC_DECODER) {
-        return avcodec_get_name(id_);
-    } else if (type_ == CODEC_ENCODER) {
-        return fmt::format("{}_{}", avcodec_get_name(id_), name_);
-    }
-    return {};
+    return fmt::format("{}_{}", avcodec_get_name(id_), name_);
 }
 
 std::unique_ptr<VideoFrame>
@@ -301,18 +385,97 @@ HardwareAccel::transfer(const VideoFrame& frame)
 
         hwFrame->pts = input->pts; // transfer does not copy timestamp
         return framePtr;
-    } else {
-        SIP_CORE_ERR() << "Invalid hardware accelerator";
-        return nullptr;
+    } else { // CODEC_NONE for example for OpenCL filters
+        auto input = frame.pointer();
+        if (not input)
+            throw std::runtime_error("Cannot transfer null frame");
+
+        auto desc = av_pix_fmt_desc_get(static_cast<AVPixelFormat>(input->format));
+        if (!desc) {
+            throw std::runtime_error("Cannot transfer frame with invalid format");
+        }
+
+        if (desc->flags & AV_PIX_FMT_FLAG_HWACCEL) {
+            if (input->format != format_) {
+                SIP_CORE_ERR() << "Frame format mismatch: expected " << av_get_pix_fmt_name(format_)
+                        << ", got "
+                        << av_get_pix_fmt_name(static_cast<AVPixelFormat>(input->format));
+                return nullptr;
+            }
+
+            return transferToMainMemory(frame, swFormat_);
+        }
+        else {
+            if (input->format != swFormat_) {
+                SIP_CORE_ERR() << "Frame format mismatch: expected " << av_get_pix_fmt_name(swFormat_)
+                        << ", got "
+                        << av_get_pix_fmt_name(static_cast<AVPixelFormat>(input->format));
+                return nullptr;
+            }
+
+            auto framePtr = std::make_unique<VideoFrame>();
+            auto hwFrame = framePtr->pointer();
+
+            if (!deviceCtx_) {
+                SIP_CORE_ERR() << "Cannot initialize hardware frames without a valid hardware device";
+                return nullptr;
+            }
+
+            // Reuse a cached per-size frames context: allocating and
+            // initializing a fresh GPU surface pool for every uploaded frame
+            // costs far more than the upload itself.
+            auto& pool = uploadPools_[{input->width, input->height}];
+            if (!pool) {
+                AVBufferRef* framesCtx = av_hwframe_ctx_alloc(deviceCtx_);
+                if (!framesCtx)
+                    return nullptr;
+
+                auto ctx = reinterpret_cast<AVHWFramesContext*>(framesCtx->data);
+                ctx->format = format_;
+                ctx->sw_format = swFormat_;
+                ctx->width = input->width;
+                ctx->height = input->height;
+                ctx->initial_pool_size = 0; // dynamic: sizes vary with layout
+
+                if ((ret = av_hwframe_ctx_init(framesCtx)) < 0) {
+                    SIP_CORE_ERR("Failed to initialize hardware frame context: %s (%d)",
+                            libav_utils::getError(ret).c_str(),
+                            ret);
+                    av_buffer_unref(&framesCtx);
+                    uploadPools_.erase({input->width, input->height});
+                    return nullptr;
+                }
+                pool = framesCtx;
+            }
+
+            if ((ret = av_hwframe_get_buffer(pool, hwFrame, 0)) < 0) {
+                SIP_CORE_ERR() << "Failed to allocate hardware buffer: "
+                        << libav_utils::getError(ret).c_str();
+                return nullptr;
+            }
+
+            if (!hwFrame->hw_frames_ctx) {
+                SIP_CORE_ERR() << "Failed to allocate hardware buffer: Cannot allocate memory";
+                return nullptr;
+            }
+
+            if ((ret = av_hwframe_transfer_data(hwFrame, input, 0)) < 0) {
+                SIP_CORE_ERR() << "Failed to push frame to GPU: " << libav_utils::getError(ret).c_str();
+                return nullptr;
+            }
+
+            hwFrame->pts = input->pts; // transfer does not copy timestamp
+            return framePtr;
+        }
     }
 }
 
 void
 HardwareAccel::setDetails(AVCodecContext* codecCtx)
 {
+    codecCtx->hw_device_ctx = av_buffer_ref(deviceCtx_);
     if (type_ == CODEC_DECODER) {
-        codecCtx->hw_device_ctx = av_buffer_ref(deviceCtx_);
-        codecCtx->get_format = getFormatCb;
+        codecCtx->get_format = &getFormatCb;
         // codecCtx->thread_safe_callbacks = 1;
     } else if (type_ == CODEC_ENCODER) {
         if (framesCtx_)
@@ -373,6 +536,161 @@ HardwareAccel::linkHardware(AVBufferRef* framesCtx)
     }
 }
 
+void
+HardwareAccel::linkFilter(MediaStream& ms, int width, int height)
+{
+    if (!deviceCtx_) {
+        SIP_CORE_ERR() << "Cannot link filter without a valid hardware device";
+        return;
+    }
+
+    AVBufferRef* framesCtx;
+    if (width == width_ && height == height_ && framesCtx_) {
+        ms.deviceRef = av_buffer_ref(deviceCtx_);
+        ms.frameRef = av_buffer_ref(framesCtx_);
+        return;
+    }
+
+    framesCtx = av_hwframe_ctx_alloc(deviceCtx_);
+    if (!framesCtx)
+        return;
+
+    auto ctx = reinterpret_cast<AVHWFramesContext*>(framesCtx->data);
+    ctx->format = format_;
+    ctx->sw_format = swFormat_;
+    ctx->width = width;
+    ctx->height = height;
+    ctx->initial_pool_size = 20; // TODO try other values
+
+    int ret;
+    if ((ret = av_hwframe_ctx_init(framesCtx)) < 0) {
+        SIP_CORE_ERR("Failed to initialize hardware frame context: %s (%d)",
+                 libav_utils::getError(ret).c_str(),
+                 ret);
+        av_buffer_unref(&framesCtx);
+        // ms.frameRef stays null; the filter graph init fails cleanly and the
+        // mixer falls back to software mixing.
+        return;
+    }
+
+    ms.deviceRef = av_buffer_ref(deviceCtx_);
+    // transfer ownership of the alloc ref — the caller releases ms.frameRef
+    ms.frameRef = framesCtx;
+}
+
+bool
+HardwareAccel::reserveFrame(AVFrame* frame)
+{
+    if(!framesCtx_ && !initFrame())
+        return false;
+
+    int ret;
+    if ((ret = av_hwframe_get_buffer(framesCtx_, frame, 0)) < 0) {
+        SIP_CORE_ERR() << "Failed to allocate hardware buffer: "
+                    << libav_utils::getError(ret).c_str();
+        return false;
+    }
+
+    return true;
+}
+
+namespace {
+
+// Shared lazy-download cache attached to published hardware frames through
+// AVFrame.opaque_ref. av_frame_ref()/av_frame_copy_props() propagate a new
+// reference to the same underlying buffer and av_frame_unref() drops it, so
+// every consumer of a published frame (sink clients, recorder, mixer, encoder
+// relay) sees the same cache and the GPU->CPU transfer runs at most once per
+// published frame and requested format. Destroyed with the last frame ref.
+struct SharedDownloadCache
+{
+    static constexpr uint32_t MAGIC = 0x53444331; // 'SDC1'
+    uint32_t magic {MAGIC};
+    std::mutex mtx;
+    // One entry per requested software format (NV12 for sinks/mixer, the
+    // stream format for the recorder); bounded, frames are transient.
+    std::vector<std::pair<AVPixelFormat, std::shared_ptr<VideoFrame>>> entries;
+};
+
+constexpr size_t DOWNLOAD_CACHE_MAX_FORMATS = 4;
+
+void
+freeDownloadCache(void* /*opaque*/, uint8_t* data)
+{
+    delete reinterpret_cast<SharedDownloadCache*>(data);
+}
+
+SharedDownloadCache*
+getDownloadCache(const AVFrame* frame)
+{
+    if (!frame->opaque_ref)
+        return nullptr;
+    auto* cache = reinterpret_cast<SharedDownloadCache*>(frame->opaque_ref->data);
+    return (cache && cache->magic == SharedDownloadCache::MAGIC) ? cache : nullptr;
+}
+
+} // namespace
+
+void
+HardwareAccel::attachDownloadCache(AVFrame* frame)
+{
+    if (!frame)
+        return;
+    auto desc = av_pix_fmt_desc_get(static_cast<AVPixelFormat>(frame->format));
+    if (!desc || !(desc->flags & AV_PIX_FMT_FLAG_HWACCEL))
+        return;
+    auto cache = std::make_unique<SharedDownloadCache>();
+    AVBufferRef* ref = av_buffer_create(reinterpret_cast<uint8_t*>(cache.get()),
+                                        sizeof(SharedDownloadCache),
+                                        freeDownloadCache,
+                                        nullptr,
+                                        AV_BUFFER_FLAG_READONLY);
+    if (!ref)
+        return; // consumers fall back to per-consumer downloads
+    cache.release();
+    av_buffer_unref(&frame->opaque_ref); // every publish gets a fresh cache
+    frame->opaque_ref = ref;
+}
+
+std::shared_ptr<VideoFrame>
+HardwareAccel::ensureSoftwareFrame(const std::shared_ptr<VideoFrame>& frame,
+                                   AVPixelFormat desired)
+{
+    if (!frame || !frame->pointer())
+        return {};
+    auto input = frame->pointer();
+    auto desc = av_pix_fmt_desc_get(static_cast<AVPixelFormat>(input->format));
+    if (!desc)
+        return {};
+    if (!(desc->flags & AV_PIX_FMT_FLAG_HWACCEL))
+        return frame;
+
+    auto download = [&]() -> std::shared_ptr<VideoFrame> {
+        try {
+            return transferToMainMemory(*frame, desired);
+        } catch (const std::runtime_error& e) {
+            SIP_CORE_ERR("ensureSoftwareFrame: GPU download failed: %s", e.what());
+            return {};
+        }
+    };
+
+    auto* cache = getDownloadCache(input);
+    if (!cache)
+        return download(); // unpublished frame: plain one-off download
+
+    // The transfer runs under the cache mutex so racing siblings wait for the
+    // first download instead of duplicating it — bounded by the single
+    // transfer each of them used to pay individually.
+    std::lock_guard<std::mutex> lk(cache->mtx);
+    for (const auto& entry : cache->entries)
+        if (entry.first == desired)
+            return entry.second;
+    auto sw = download();
+    if (sw && cache->entries.size() < DOWNLOAD_CACHE_MAX_FORMATS)
+        cache->entries.emplace_back(desired, sw);
+    return sw;
+}
+
 std::unique_ptr<VideoFrame>
 HardwareAccel::transferToMainMemory(const VideoFrame& frame, AVPixelFormat desiredFormat)
 {
@@ -396,7 +714,8 @@ HardwareAccel::transferToMainMemory(const VideoFrame& frame, AVPixelFormat desir
 
     int ret = av_hwframe_transfer_data(output, input, 0);
     if (ret < 0) {
-        throw std::runtime_error("Cannot transfer the frame from GPU");
+        throw std::runtime_error("Cannot transfer the frame from GPU: "
+                                 + libav_utils::getError(ret) + " (" + std::to_string(ret) + ")");
     }
 
     output->pts = input->pts;
@@ -410,15 +729,20 @@ HardwareAccel::transferToMainMemory(const VideoFrame& frame, AVPixelFormat desir
 int
 HardwareAccel::initAPI(bool linkable, AVBufferRef* framesCtx)
 {
-    const auto& codecName = getCodecName();
     std::string device;
     auto ret = init_device_type(device);
     if (ret == 0) {
         bool link = false;
         if (linkable && framesCtx)
             link = linkHardware(framesCtx);
-        // we don't need frame context for videotoolbox
-        if (hwType_ == AV_HWDEVICE_TYPE_VIDEOTOOLBOX || link || initFrame()) {
+        if (type_ == CODEC_NONE) {
+            // Filter-only accel (OpenCL mixing) is useless without a frames
+            // context; report failure so the caller can try the next API.
+            return initFrame() ? 0 : -1;
+        }
+        // we don't need frame context for videotoolbox and decoders
+        if (hwType_ == AV_HWDEVICE_TYPE_VIDEOTOOLBOX ||
+                type_ == CODEC_DECODER || link || initFrame()) {
             return 0;
         }
     }
@@ -429,7 +753,10 @@ std::list<HardwareAccel>
 HardwareAccel::getCompatibleAccel(AVCodecID id, int width, int height, CodecType type)
 {
     std::list<HardwareAccel> l;
-    const auto& list = (type == CODEC_ENCODER) ? &apiListEnc : &apiListDec;
+
+    const auto& list = (type == CODEC_ENCODER) ? &apiListEnc_ :
+                       (type == CODEC_DECODER) ? &apiListDec_ :
+                       &apiListOpencl_;
     for (auto& api : *list) {
         const auto& it = std::find(api.supportedCodecs.begin(), api.supportedCodecs.end(), id);
         if (it != api.supportedCodecs.end()) {
@@ -452,6 +779,23 @@ HardwareAccel::getCompatibleAccel(AVCodecID id, int width, int height, CodecType
         }
     }
     return l;
+}
+
+bool
+HardwareAccel::isGPUAvailable()
+{
+    static const bool available = [] {
+        auto apis = getCompatibleAccel(AV_CODEC_ID_H264, 1280, 720, CODEC_DECODER);
+        for (auto& api : apis) {
+            if (api.initAPI(false, nullptr) >= 0) {
+                SIP_CORE_INFO("GPU probe: %s is usable", api.getName().c_str());
+                return true;
+            }
+        }
+        SIP_CORE_WARN("GPU probe: no usable hardware acceleration device found");
+        return false;
+    }();
+    return available;
 }
 
 } // namespace video

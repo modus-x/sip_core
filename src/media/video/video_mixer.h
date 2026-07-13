@@ -28,6 +28,9 @@
 #include "threadloop.h"
 #include "media_stream.h"
 #include "media_filter.h"
+#ifdef RING_ACCEL
+#include "accel.h"
+#endif
 
 #include <list>
 #include <chrono>
@@ -96,6 +99,9 @@ public:
         std::string inactive_border_color {"Blue@0"};         // invisible: only the active speaker is framed
         bool remove_black_borders {true};
         int voice_inactive_hold_ms {500};
+#ifdef RING_ACCEL
+        bool useHardware {true};
+#endif
     };
 
     VideoMixer(const std::string& id, const std::string& localInput = {}, bool attachHost = true);
@@ -247,6 +253,22 @@ private:
                           int height,
                           bool active,
                           bool withText);
+#ifdef RING_ACCEL
+    bool initMainFilterHardware(MediaFilter& filter,
+                               std::string inputName,
+                               int format,
+                               int x,
+                               int y,
+                               int w,
+                               int h,
+                               int dir,
+                               bool remove_borders,
+                               bool active);
+
+    int getHWFrame(const std::shared_ptr<VideoFrame>& input, std::shared_ptr<VideoFrame>& output);
+    std::shared_ptr<VideoFrame> getUnlinkedHWFrame(const VideoFrame& input);
+    std::shared_ptr<VideoFrame> getHWFrameFromSWFrame(const VideoFrame& input);
+#endif
 
     int addLayoutUpdate(const char* reason);
     void consumeLayoutUpdates(int count, const char* reason);
@@ -302,6 +324,7 @@ private:
     std::atomic<bool> nextLocalSourceMuted_ {false};
     void stopInput(const std::shared_ptr<VideoFrameActiveWriter>& input);
 
+    std::mutex scaler_mutex_;
     VideoScaler scaler_;
 
     ThreadLoop loop_; // as to be last member
@@ -348,6 +371,14 @@ private:
     // to avoid calling Manager::getCallFromCallID() under the shared lock.
     // Keyed by callId. Only accessed from the mixer thread.
     std::unordered_map<std::string, std::string> displayNameCache_;
+
+#ifdef RING_ACCEL
+    std::atomic_bool enableAccel_ = true;
+    bool fallback_ = false;
+    const std::string hardwareScaleAndPadFilterName_ = "SnP";
+    std::unique_ptr<video::HardwareAccel> accel_ = nullptr;
+    std::mutex accelMtx_;
+#endif
 };
 
 } // namespace video

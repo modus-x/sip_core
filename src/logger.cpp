@@ -976,7 +976,12 @@ Logger::debugEnabled()
 void
 Logger::vlog(int level, const char* file, int line, bool linefeed, const char* fmt, va_list ap)
 {
-    if (level < LOG_WARNING and not debugEnabled_.load(std::memory_order_relaxed)) {
+    // Only the most verbose level (LOG_DEBUG) is suppressed when debug mode is
+    // off; errors, warnings and info are ALWAYS emitted regardless of the debug
+    // flag. (The previous `level < LOG_WARNING` dropped LOG_ERR/CRIT when debug
+    // was off — syslog orders errors *below* LOG_WARNING — which could hide
+    // failures from the log files.)
+    if (level >= LOG_DEBUG and not debugEnabled_.load(std::memory_order_relaxed)) {
         return;
     }
 

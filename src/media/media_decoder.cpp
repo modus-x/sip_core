@@ -54,6 +54,9 @@ const unsigned jitterBufferMaxSize_ {1500};
 const constexpr auto jitterBufferMaxDelay_ = std::chrono::milliseconds(50);
 // maximum number of times accelerated decoding can fail in a row before falling back to software
 const constexpr unsigned MAX_ACCEL_FAILURES {5};
+// AUTO-mode HW performance window: frames per measurement window (~4 s at 30
+// fps); demotion needs two consecutive windows slower than the frame budget.
+const constexpr unsigned HW_PERF_WINDOW {120};
 
 MediaDemuxer::MediaDemuxer()
     : inputCtx_(avformat_alloc_context())
@@ -634,7 +637,14 @@ MediaDecoder::setupStream()
     // it has been disabled already by the video_receive_thread/video_input
     enableAccel_ &= Manager::instance().videoPreferences.getDecodingAccelerated();
 
-    if (enableAccel_ and not fallback_) {
+    hwPerfAccumUs_ = 0;
+    hwPerfSamples_ = 0;
+    hwPerfSlowWindows_ = 0;
+    hwPerfDemotePending_ = false;
+
+    // "hardware" mode never demotes to software: ignore previous fallbacks.
+    const bool strictHW = Manager::instance().videoPreferences.getHWAccelMode() == "hardware";
+    if (enableAccel_ and (strictHW or not fallback_)) {
         auto APIs = video::HardwareAccel::getCompatibleAccel(decoderCtx_->codec_id,
                                                              decoderCtx_->width,
                                                              decoderCtx_->height,
@@ -696,6 +706,13 @@ MediaDecoder::setupStream()
         SIP_CORE_WARN("Not using hardware decoding for %s", avcodec_get_name(decoderCtx_->codec_id));
         ret = avcodec_open2(decoderCtx_, inputDecoder_, nullptr);
     }
+
+    SIP_CORE_INFO("HW-accel decision for %s %dx%d: mode=%s -> %s",
+                  avcodec_get_name(decoderCtx_->codec_id),
+                  width_,
+                  height_,
+                  Manager::instance().videoPreferences.getHWAccelMode().c_str(),
+                  accel_ ? accel_->getName().c_str() : "software (CPU)");
 #else
     // Set threading options for software decoder (must be done before avcodec_open2)
     decoderCtx_->thread_count = std::max(1u, std::min(8u, std::thread::hardware_concurrency() / 2));
@@ -710,10 +727,65 @@ MediaDecoder::setupStream()
     return 0;
 }
 
+#ifdef RING_ACCEL
+int MediaDecoder::getHWFrame(const std::shared_ptr<VideoFrame>& input, std::shared_ptr<VideoFrame>& output)
+{
+#if !defined(__APPLE__) && defined(RING_ACCEL)
+    try {
+        auto desc = av_pix_fmt_desc_get(static_cast<AVPixelFormat>(input->format()));
+        bool isHardware = desc && (desc->flags & AV_PIX_FMT_FLAG_HWACCEL);
+        if (isHardware) {
+            // Keep hardware frames GPU-resident on every platform (linked or
+            // not): consumers that need system memory (software sinks, mixer,
+            // recorder, encoder relay) download lazily and share one transfer
+            // per published frame via HardwareAccel::ensureSoftwareFrame.
+            output = input;
+        } else if (accel_) {
+            // Software decoded frame with a hardware encoder, convert to accepted format first
+            output = getHWFrameFromSWFrame(*input.get());
+        } else {
+            output = input;
+        }
+    } catch (const std::runtime_error& e) {
+        SIP_CORE_ERR("Accel failure: %s", e.what());
+        return -1;
+    }
+#else
+        // macOS: VideoToolbox frames pass through GPU-resident as well
+        output = input;
+#endif
+
+        return 0;
+}
+
+std::shared_ptr<VideoFrame>
+MediaDecoder::getHWFrameFromSWFrame(const VideoFrame& input)
+{
+    std::shared_ptr<VideoFrame> framePtr;
+    auto pix = accel_->getSoftwareFormat();
+    if (input.format() != pix) {
+        framePtr = scaler_.convertFormat(input, pix);
+        framePtr = accel_->transfer(*framePtr);
+    } else {
+        framePtr = accel_->transfer(input);
+    }
+    return framePtr;
+}
+#endif
+
 int
 MediaDecoder::prepareDecoderContext()
 {
-    inputDecoder_ = findDecoder(avStream_->codecpar->codec_id);
+    inputDecoder_ = nullptr;
+#ifdef RING_ACCEL
+    if (enableAccel_ && accel_) {
+        inputDecoder_ = avcodec_find_decoder_by_name(accel_->getCodecName().c_str());
+    }
+#endif
+
+    if(inputDecoder_ == nullptr)
+        inputDecoder_ = findDecoder(avStream_->codecpar->codec_id);
+
     if (!inputDecoder_) {
         SIP_CORE_ERR() << "Unsupported codec";
         return -1;
@@ -769,13 +841,31 @@ MediaDecoder::enableLateFrameDrop(std::chrono::microseconds threshold)
 DecodeStatus
 MediaDecoder::decode(AVPacket& packet)
 {
+#ifdef RING_ACCEL
+    if (accel_ && hwPerfDemotePending_) {
+        hwPerfDemotePending_ = false;
+        SIP_CORE_WARN("HW decoding slower than realtime for %s; falling back to software",
+                      avcodec_get_name(decoderCtx_->codec_id));
+        fallback_ = true;
+        accel_.reset();
+        avcodec_flush_buffers(decoderCtx_);
+        setupStream();
+        return DecodeStatus::FallBack;
+    }
+    const int64_t hwDecodeStart = (accel_ && inputDecoder_->type == AVMEDIA_TYPE_VIDEO)
+                                      ? av_gettime()
+                                      : 0;
+#endif
     int frameFinished = 0;
     auto ret = avcodec_send_packet(decoderCtx_, &packet);
     if (ret < 0 && ret != AVERROR(EAGAIN)) {
 #ifdef RING_ACCEL
         if (accel_) {
             SIP_CORE_WARN("Decoding error falling back to software");
-            fallback_ = true;
+            // "hardware" mode retries HW on the next setupStream instead of
+            // demoting to software.
+            if (Manager::instance().videoPreferences.getHWAccelMode() != "hardware")
+                fallback_ = true;
             accel_.reset();
             avcodec_flush_buffers(decoderCtx_);
             setupStream();
@@ -799,15 +889,15 @@ MediaDecoder::decode(AVPacket& packet)
     // fix for sdp time_base
     decoderCtx_->time_base = av_inv_q(decoderCtx_->framerate);
     frame->time_base = decoderCtx_->time_base;
-    if (resolutionChangedCallback_) {
-        if (decoderCtx_->width != width_ or decoderCtx_->height != height_) {
+    if (decoderCtx_->width != width_ or decoderCtx_->height != height_) {
+        width_ = decoderCtx_->width;
+        height_ = decoderCtx_->height;
+        if (resolutionChangedCallback_) {
             SIP_CORE_DBG("Resolution changed from %dx%d to %dx%d",
                          width_,
                          height_,
                          decoderCtx_->width,
                          decoderCtx_->height);
-            width_ = decoderCtx_->width;
-            height_ = decoderCtx_->height;
             resolutionChangedCallback_(width_, height_);
         }
     }
@@ -890,6 +980,46 @@ MediaDecoder::decode(AVPacket& packet)
                 std::this_thread::sleep_for(std::chrono::microseconds(target_absolute - now));
             }
         }
+
+#ifdef RING_ACCEL
+        auto videoFrame = std::dynamic_pointer_cast<VideoFrame>(f);
+        auto output = std::make_shared<VideoFrame>();
+        if (videoFrame.get() && getHWFrame(videoFrame, output) < 0) {
+            SIP_CORE_ERR("Fail to get hardware frame");
+            return DecodeStatus::DecodeError;
+        }
+        if(output && videoFrame)
+            f = std::static_pointer_cast<MediaFrame>(output);
+
+        // AUTO mode watchdog: demote to software when HW decode cannot keep
+        // up with the stream framerate — integrated GPUs are sometimes slower
+        // than the CPU here. Measures decode only: since frames pass through
+        // GPU-resident, the GPU->CPU transfer happens lazily at consumers
+        // (ensureSoftwareFrame) and is no longer part of this budget. Two
+        // consecutive slow windows are required so device warm-up does not
+        // trigger a false demotion.
+        if (hwDecodeStart && accel_
+            && Manager::instance().videoPreferences.getHWAccelMode() == "auto") {
+            hwPerfAccumUs_ += av_gettime() - hwDecodeStart;
+            if (++hwPerfSamples_ >= HW_PERF_WINDOW) {
+                const double fps = std::max(1.0, av_q2d(decoderCtx_->framerate));
+                const int64_t budgetUs = static_cast<int64_t>(1e6 / fps);
+                const int64_t avgUs = hwPerfAccumUs_ / hwPerfSamples_;
+                hwPerfAccumUs_ = 0;
+                hwPerfSamples_ = 0;
+                if (avgUs > budgetUs) {
+                    if (++hwPerfSlowWindows_ >= 2) {
+                        SIP_CORE_WARN("HW decode averaging %lld us/frame (budget %lld us)",
+                                      static_cast<long long>(avgUs),
+                                      static_cast<long long>(budgetUs));
+                        hwPerfDemotePending_ = true;
+                    }
+                } else {
+                    hwPerfSlowWindows_ = 0;
+                }
+            }
+        }
+#endif
 
         if (callback_)
             callback_(std::move(f));

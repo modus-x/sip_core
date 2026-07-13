@@ -47,6 +47,8 @@ struct MediaStream
     int downScaleFactor{0};
     int quality{0};
     int flags {0};
+    AVBufferRef* deviceRef { nullptr };
+    AVBufferRef* frameRef { nullptr };
 
     MediaStream() {}
 

@@ -52,6 +52,12 @@ cmake --build . --config Release/Debug --target install
 - **_yasm_**
 - **_nasm_**
 - **_pkg-config_**
+- **_autoconf_**
+- **_libtool_**
+- **_python3-dev_**
+- **_gperf_**
+- **_gettext_**
+- **_autopoint_**
 - **_curl + wget + tar + git_**
 
 На darwin + linux установки библиотек, содержащих данные инструменты,  любым способом - должно быть достаточно. Главное, чтобы они были доступны в PATH.
@@ -108,6 +114,14 @@ pacman -S nasm yasm gcc make pkg-config patch
 Windows SDK + MSVC комиляторы очень просто устанавливаются через установщик [Visual Studio Community Edition](https://visualstudio.microsoft.com/vs/community/).
 
 Visual Studio 2010 (VC++ 10.0) SP1 требуется для сборки некоторых зависимостей, которые используют "легаси" код. При установке Visual Studio данный пакет **не устанавливается**.
+
+В Linux системах, которые используют аппаратное видео ускорение, для корректной работы vaapi должны быть выставлены следующие переменные окружения:
+```sh
+export LIBVA_DRIVER_NAME=iHD/nvidia/vdpau
+export LIBVA_DRIVERS_PATH=/path/to/media/driver
+```
+а так же установлены соответсвующие runtime библиотеки.
+
 
 ## Examples.
 

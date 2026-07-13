@@ -550,12 +550,15 @@ void Call::localVoice(bool state)
     if (auto conference = conf_.lock()) {
     // we are in a conference
 
+    // The host is always registered in the conference under this canonical
+    // stream id (its real video source, or the audio-only placeholder added by
+    // attachLocalParticipant), so key the host's own voice activity on it
+    // regardless of camera presence. Gating on getDeviceList() left an
+    // audio-only / camera-denied host dark: streamId "" never matched the host
+    // row, so setVoiceActivity() dropped it as "participant not found".
     std::string streamId = "";
 #ifdef ENABLE_VIDEO
-    if (not sip_core::getVideoDeviceMonitor().getDeviceList().empty()) {
-        // if we have a video device
-        streamId = sip_utils::streamId("", sip_utils::DEFAULT_VIDEO_STREAMID);
-    }
+    streamId = sip_utils::streamId("", sip_utils::DEFAULT_VIDEO_STREAMID);
 #endif
 
     // updates conference info and sends it to others via ConfInfo

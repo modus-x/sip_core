@@ -441,37 +441,35 @@ public:
         pull_ = std::move(pull);
         push_ = std::move(push);
 
-        if (FAILED(device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, &client_))) {
-            SIP_CORE_ERR() << "WASAPI: IAudioClient Activate failed";
+        // (Re)activate a Communications-category IAudioClient on `device`. A
+        // failed Initialize can wedge a client (MS docs: a later Initialize may
+        // spuriously return E_ALREADY_INITIALIZED), so the format retries below
+        // each start from a freshly activated client.
+        auto activateClient = [&]() -> bool {
+            client_.Reset();
+            if (FAILED(device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, &client_))) {
+                SIP_CORE_ERR() << "WASAPI: IAudioClient Activate failed";
+                return false;
+            }
+            // Win8+: hint the engine (and the RDP stack) that this is a VoIP stream.
+            ComPtr<IAudioClient2> client2;
+            if (SUCCEEDED(client_.As(&client2)) && client2) {
+                AudioClientProperties props {};
+                props.cbSize = sizeof(props);
+                props.bIsOffload = FALSE;
+                props.eCategory = AudioCategory_Communications;
+                client2->SetClientProperties(&props); // best-effort
+            }
+            return true;
+        };
+
+        if (!activateClient())
             return false;
-        }
 
         WAVEFORMATEX* mix = nullptr;
         if (FAILED(client_->GetMixFormat(&mix)) || !mix) {
             SIP_CORE_ERR() << "WASAPI: GetMixFormat failed";
             return false;
-        }
-        waveType_ = classifyFormat(mix);
-        channels_ = mix->nChannels;
-        sampleRate_ = mix->nSamplesPerSec;
-        if (waveType_ == wasapi::WaveSampleType::Unsupported) {
-            // Shared-mode GetMixFormat is effectively always 32-bit float, so
-            // this is near-unreachable; surface it rather than fail silently.
-            SIP_CORE_WARN() << "WASAPI: unsupported mix format (bits="
-                            << mix->wBitsPerSample << ", tag=" << mix->wFormatTag
-                            << "), audio will be silent";
-            emitSignal<libsip_core::ConfigurationSignal::DeviceOpenError>(
-                "Unsupported WASAPI shared-mode format", render_);
-        }
-
-        // Win8+: hint the engine (and the RDP stack) that this is a VoIP stream.
-        ComPtr<IAudioClient2> client2;
-        if (SUCCEEDED(client_.As(&client2)) && client2) {
-            AudioClientProperties props {};
-            props.cbSize = sizeof(props);
-            props.bIsOffload = FALSE;
-            props.eCategory = AudioCategory_Communications;
-            client2->SetClientProperties(&props); // best-effort
         }
 
         REFERENCE_TIME defPeriod = 0, minPeriod = 0;
@@ -480,16 +478,77 @@ public:
                                          : std::max<REFERENCE_TIME>(3 * defPeriod,
                                                                     LOCAL_MIN_BUFFER_DURATION);
 
-        HRESULT hr = client_->Initialize(AUDCLNT_SHAREMODE_SHARED,
-                                         AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
-                                         bufDuration,
-                                         0, // hnsPeriodicity must be 0 in shared mode
-                                         mix,
-                                         nullptr);
+        auto tryInit = [&](const WAVEFORMATEX* wf) {
+            return client_->Initialize(AUDCLNT_SHAREMODE_SHARED,
+                                       AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+                                       bufDuration,
+                                       0, // hnsPeriodicity must be 0 in shared mode
+                                       wf,
+                                       nullptr);
+        };
+
+        // Pick a format Initialize will actually accept. The mix format is
+        // correct for render and well-behaved capture, but Realtek and similar
+        // capture drivers hand back a GetMixFormat that Initialize then rejects
+        // with AUDCLNT_E_UNSUPPORTED_FORMAT (0x88890008) — the exact failure this
+        // backend hit in the field (mic dead for a conference participant). Ask
+        // the engine for its closest shared-mode match; ppClosestMatch is set
+        // (and owned by us) only on S_FALSE.
+        WAVEFORMATEX* closest = nullptr;
+        if (client_->IsFormatSupported(AUDCLNT_SHAREMODE_SHARED, mix, &closest) != S_FALSE) {
+            CoTaskMemFree(closest); // S_OK / failure -> null; nothing to adopt
+            closest = nullptr;
+        }
+        const WAVEFORMATEX* chosen = closest ? closest : mix;
+        HRESULT hr = tryInit(chosen);
+
+        // Some Realtek drivers accept a format in IsFormatSupported that
+        // Initialize still rejects (PortAudio/portaudio#875). Last resort: plain
+        // interleaved PCM16 at the negotiated rate/channels — the shared-mode
+        // engine is guaranteed to convert it, and wasapi_convert.h already
+        // handles it. A bare WAVE_FORMAT_PCM is well-defined for mono/stereo,
+        // which is what capture mics (the endpoints that hit this path) report;
+        // >2-channel would want WAVEFORMATEXTENSIBLE, but render (the only >2ch
+        // case) is accepted verbatim and never reaches here. The rejected client
+        // is wedged, so re-Activate a fresh one first.
+        WAVEFORMATEX pcm16 {};
+        if (hr == AUDCLNT_E_UNSUPPORTED_FORMAT) {
+            pcm16.wFormatTag = WAVE_FORMAT_PCM;
+            pcm16.nChannels = chosen->nChannels;
+            pcm16.nSamplesPerSec = chosen->nSamplesPerSec;
+            pcm16.wBitsPerSample = 16;
+            pcm16.nBlockAlign = static_cast<WORD>(pcm16.nChannels * pcm16.wBitsPerSample / 8);
+            pcm16.nAvgBytesPerSec = pcm16.nSamplesPerSec * pcm16.nBlockAlign;
+            if (activateClient()) {
+                hr = tryInit(&pcm16);
+                if (SUCCEEDED(hr))
+                    chosen = &pcm16;
+            }
+        }
+
+        // Derive the working format from whatever actually initialized, BEFORE
+        // freeing the CoTaskMem allocations `chosen` may point into.
+        waveType_ = classifyFormat(chosen);
+        channels_ = chosen->nChannels;
+        sampleRate_ = chosen->nSamplesPerSec;
+        const WORD chosenBits = chosen->wBitsPerSample;
+        const bool adopted = (chosen != mix);
         CoTaskMemFree(mix);
+        CoTaskMemFree(closest);
+
         if (FAILED(hr)) {
             SIP_CORE_ERR() << "WASAPI: IAudioClient Initialize failed (0x" << std::hex << hr << ")";
             return false;
+        }
+        if (adopted)
+            SIP_CORE_INFO() << "WASAPI: mix format rejected; using negotiated format {bits="
+                            << chosenBits << ", ch=" << channels_ << ", rate=" << sampleRate_
+                            << "}";
+        if (waveType_ == wasapi::WaveSampleType::Unsupported) {
+            SIP_CORE_WARN() << "WASAPI: unsupported shared-mode format (bits=" << chosenBits
+                            << "), audio will be silent";
+            emitSignal<libsip_core::ConfigurationSignal::DeviceOpenError>(
+                "Unsupported WASAPI shared-mode format", render_);
         }
 
         if (FAILED(client_->GetBufferSize(&bufferFrameCount_))) {

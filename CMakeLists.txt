@@ -50,6 +50,7 @@ endif()
 # ##############################################################################
 option(ENABLE_CLI_EXAMPLE "Build with CLI example" OFF)
 option(ENABLE_VIDEO "Build with video support" ON)
+option(HW_ACCEL "Build with video hardware acceleration support" ON)
 option(BUILD_DEPS "Build deps" ON)
 option(CONFERENCE_METADATA
        "Send conference metadata over SIP and disable conference border text overlays"
@@ -615,6 +616,10 @@ if(MSVC)
             optimized
             ${DEPS_RELEASE}/lib/x64/libzlib.lib
             optimized
+            ${DEPS_RELEASE}/lib/x64/vpl.lib
+            optimized
+            ${DEPS_RELEASE}/lib/x64/OpenCL.lib
+            optimized
             ${DEPS_RELEASE}/yaml-cpp.lib
             optimized
             ${DEPS_RELEASE}/fmt.lib
@@ -652,6 +657,10 @@ if(MSVC)
             ${DEPS_DEBUG}/lib/x64/lib_json.lib
             debug
             ${DEPS_DEBUG}/lib/x64/libzlib.lib
+            debug
+            ${DEPS_DEBUG}/lib/x64/vpl.lib
+            debug
+            ${DEPS_DEBUG}/lib/x64/OpenCL.lib
             debug
             ${DEPS_DEBUG}/yaml-cppd.lib
             debug
@@ -738,6 +747,13 @@ else()
                         webrtc-audio-processing)
     endif()
 
+    if(LINUX)
+      pkg_search_module(vpl_${TARGET} REQUIRED IMPORTED_TARGET vpl)
+      pkg_search_module(libva_${TARGET} REQUIRED IMPORTED_TARGET libva)
+      pkg_search_module(libva-drm_${TARGET} REQUIRED IMPORTED_TARGET libva-drm)
+      pkg_search_module(drm_${TARGET} REQUIRED IMPORTED_TARGET libdrm)
+    endif()
+
     pkg_search_module(pjproject_${TARGET} REQUIRED IMPORTED_TARGET libpjproject)
     pkg_search_module(avformat_${TARGET} REQUIRED IMPORTED_TARGET libavformat)
     pkg_search_module(vpx_${TARGET} REQUIRED IMPORTED_TARGET vpx)
@@ -802,7 +818,12 @@ else()
       target_link_libraries(${PROJECT_NAME}
                             PRIVATE PkgConfig::webrtcap_${TARGET})
       target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::udev
-                                                    PkgConfig::pulseaudio)
+                                                    PkgConfig::pulseaudio
+	                                                  PkgConfig::vpl_${TARGET}
+                                                    PkgConfig::libva_${TARGET}
+                                                    PkgConfig::libva-drm_${TARGET}
+                                                    PkgConfig::drm_${TARGET}
+                                                    )
       # X11, XCB, XCB_SHM, XCB_SHAPE, XCB_XFIXES for desktop share
       pkg_search_module(X11 REQUIRED IMPORTED_TARGET x11)
       pkg_search_module(XCB REQUIRED IMPORTED_TARGET xcb)
@@ -835,6 +856,33 @@ else()
       ${PROJECT_NAME} PRIVATE resolv "-framework AudioToolbox"
                               "-framework CoreAudio" "-framework Accelerate"
                               "-framework CoreGraphics")
+
+    if(NOT IOS)
+      # FFmpeg's hwcontext_opencl (GPU conference mixing) uses the system
+      # OpenCL framework on macOS; iOS has no OpenCL and builds FFmpeg
+      # without it.
+      target_link_libraries(${PROJECT_NAME} PRIVATE "-framework OpenCL")
+    endif()
+  endif()
+
+  if(LINUX AND NOT ANDROID)
+    # FFmpeg's hwcontext_opencl / sv_participant_opencl filter (GPU conference
+    # mixing) references the OpenCL ICD loader. contrib builds a static
+    # libOpenCL.a (-fPIC) for exactly this; link it explicitly so
+    # libsip_core_bindings.so resolves the cl* symbols (macOS uses
+    # -framework OpenCL, Windows OpenCL.lib). Prefer the contrib archive; fall
+    # back to a system libOpenCL only if the contrib one is absent.
+    find_library(SIP_CORE_OPENCL_LIB NAMES OpenCL
+                 PATHS ${CONTRIB_PATHS} PATH_SUFFIXES lib NO_DEFAULT_PATH)
+    if(NOT SIP_CORE_OPENCL_LIB)
+      find_library(SIP_CORE_OPENCL_LIB NAMES OpenCL)
+    endif()
+    if(SIP_CORE_OPENCL_LIB)
+      target_link_libraries(${PROJECT_NAME} PRIVATE ${SIP_CORE_OPENCL_LIB})
+    else()
+      message(WARNING "libOpenCL not found on Linux; FFmpeg OpenCL mixer "
+                      "symbols will be undefined in libsip_core_bindings.so")
+    endif()
   endif()
 
   if(ANDROID)

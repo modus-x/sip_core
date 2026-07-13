@@ -1,0 +1,31 @@
+diff --git a/configure b/configure
+index 9052f18..93402f3 100644
+--- a/configure
++++ b/configure
+@@ -7162,22 +7162,14 @@ if enabled libmfx && enabled libvpl; then
+ # pkg-config support.  Instead, users should make sure that the build
+ # can find the libraries and headers through other means.
+ elif enabled libmfx; then
+-    { check_pkg_config libmfx "libmfx >= 1.28 libmfx < 2.0" "mfxvideo.h" MFXInit ||
+-# Some old versions of libmfx have the following settings in libmfx.pc:
+-#   includedir=/usr/include
+-#   Cflags: -I${includedir}
+-# So add -I${includedir}/mfx to CFLAGS
+-      { check_pkg_config libmfx "libmfx >= 1.28 libmfx < 2.0" "mfx/mfxvideo.h" MFXInit && add_cppflags -I${libmfx_incdir}/mfx; } ||
++      { add_cppflags -I${libmfx_incdir}/mfx; } ||
+       { require libmfx "mfxvideo.h mfxdefs.h" MFXInit "-llibmfx $advapi32_extralibs" &&
+         { test_cpp_condition mfxdefs.h "MFX_VERSION >= 1028 && MFX_VERSION < 2000" || die "ERROR: libmfx version must be >= 1.28 and < 2.0"; }  &&
+-        warn "using libmfx without pkg-config"; } } &&
++        warn "using libmfx without pkg-config"; } &&
+     warn "libmfx is deprecated. Please run configure with --enable-libvpl to use libvpl instead."
+ elif enabled libvpl; then
+-# Consider pkg-config only. The name of libmfx is still passed to check_pkg_config function for --enable-libvpl option
+-# because QSV has dependency on libmfx, we can use the same dependency if using libmfx in this check. The package name
+-# is extracted from "vpl >= 2.6"
+-    check_pkg_config libmfx "vpl >= 2.6" "mfxvideo.h mfxdispatcher.h" MFXLoad || \
+-            die "ERROR: libvpl >= 2.6 not found"
++    check_func_headers "vpl/mfxvideo.h vpl/mfxdispatcher.h" MFXLoad "-lvpl $advapi32_extralibs" &&
++        enable libmfx
+     add_cppflags -DMFX_DEPRECATED_OFF
+     check_type "vpl/mfxdefs.h vpl/mfxvideo.h" "struct mfxConfigInterface"
+ fi

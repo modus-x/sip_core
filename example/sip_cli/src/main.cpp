@@ -9,6 +9,7 @@
 #include <atomic>
 #include <thread>
 
+#include "argparse.hpp"
 #include "CallController.h"
 
 #ifdef _WIN32
@@ -20,13 +21,10 @@
 
 #define ACCOUNT_ID "test_acc"
 
-// getInput("Enter username: ");
-// getInput("Enter domain: ");
-// getPassword();
-
 std::string username = "dev_user";
 std::string password = "12345";
 std::string domain = "192.168.92.43";
+std::string binding = "";
 
 std::atomic_bool g_needFinish(false);
 
@@ -36,21 +34,72 @@ std::string getInput(const std::string& prompt);
 std::vector<std::string> split(const std::string& s);
 
 int
-main()
+main(int argc, char* argv[])
 {
-    std::cout << "SIP core Console App" << std::endl;
+    std::cout << "SIP core Console App started." << std::endl;
     std::cout << "Available commands:\n\tcall <callee>,\n\tadd <callee>,\n\tdel <callee>,\n\tmove <from> <to>,\n\t"
                  "conf <callee1> ... <calleeN>,\n\tswitch <device>,\n\thold,\n\tresume,\n\thangup,\n\tcapOn,\n\t"
-                 "capOff,\n\tvideo,\n\treregister,\n\tunregister,\n\tsubscribe,\n\tunsubscribe,\n\tpublish,\n\tdtmf\n\texit"
+                 "capOff,\n\tvideo,\n\tgpu,\n\treregister,\n\tunregister,\n\tsubscribe,\n\tunsubscribe,\n\tpublish,\n\tdtmf\n\texit"
               << std::endl;
 
-    CallController controller(ACCOUNT_ID);
-    std::thread input_thread(consoleInputLoop, std::ref(controller));
-
+    CallController controller(ACCOUNT_ID, true);
     if (!controller.init()) {
         std::cerr << "Error: can't initialize sip." << std::endl;
         return 1;
     }
+
+    argparse::ArgumentParser parser("sip_cli");
+    parser.add_argument("-u", "--user")
+          .help("username");
+          // .required();
+    parser.add_argument("-p", "--pass")
+          .help("password");
+          // .required();
+    parser.add_argument("-d", "--domain")
+          .help("domain URL")
+          .metavar("URL");
+          // .required();
+    parser.add_argument("-b", "--binding-address")
+          .help("binding address for this account, if is different from default (e.g. VPN)")
+          .metavar("URL");
+    parser.add_argument("-v", "--video")
+          .help("enable video (optional: device URL e.g., camera:// display://...)")
+          .nargs(0, 1)
+          .metavar("device URL")
+          .default_value("");
+
+    try {
+        parser.parse_args(argc, argv);
+
+        if (parser.is_used("--user"))
+            username = parser.get<std::string>("--user");
+
+        if (parser.is_used("--pass"))
+            password = parser.get<std::string>("--pass");
+
+        if (parser.is_used("--domain"))
+            domain = parser.get<std::string>("--domain");
+        
+        if (parser.is_used("--binding-address"))
+            binding = parser.get<std::string>("--binding-address");
+        
+        bool enableVideo = parser.is_used("--video");
+        std::string videoUrl = parser.get<std::string>("--video");
+
+        if (enableVideo && videoUrl.empty())
+            std::cout << "Video is enabled, but input device is not specified. "
+                      << "Using default video device...";
+
+        controller.enableVideo(enableVideo);
+        if(enableVideo && not videoUrl.empty())
+            controller.setVideoDevice(videoUrl);
+        
+    } catch (const std::exception &err) {
+        std::cerr << err.what() << std::endl;
+        std::cerr << parser;
+    }
+    
+    std::thread input_thread(consoleInputLoop, std::ref(controller));
 
     // controller.setAudioCaptureDevice(1);
     // print audio captures
@@ -89,8 +138,11 @@ main()
         std::cout << std::endl;
     }
 
-    if (!controller.sendRegister(username, password, domain)) {
+    if (!controller.sendRegister(username, password, domain, binding)) {
         std::cerr << "Error: unable to send register for current account." << std::endl;
+        g_needFinish.store(true);
+        if (input_thread.joinable())
+            input_thread.join();
         return 1;
     }
 
@@ -266,12 +318,31 @@ consoleInputLoop(CallController& controller)
                 continue;
             }
         } else if (command == "video") {
-            if (controller.isVideoEnabled())
+            if (controller.isVideoEnabled()) {
                 std::cout << "Disabling video..." << std::endl;
-            else
+                controller.enableVideo(false);
+            }
+            else {
                 std::cout << "Enabling video..." << std::endl;
-
-            controller.toggleVideo();
+                controller.enableVideo(true);
+            }
+        } else if (command == "gpu") {
+            if (tokens.size() >= 2) {
+                // gpu <auto|hardware|cpu>
+                if (controller.setHWAccelMode(tokens[1]))
+                    std::cout << "Hardware acceleration mode: " << tokens[1] << std::endl;
+                else
+                    std::cerr << "Error: cannot switch to mode '" << tokens[1]
+                              << "' (unknown mode, or no usable GPU for 'hardware')."
+                              << std::endl;
+            } else if (controller.isHWAccelEnabled()) {
+                std::cout << "Disabling hardware acceleration..." << std::endl;
+                controller.enableHWAccel(false);
+            }
+            else {
+                std::cout << "Enabling hardware acceleration..." << std::endl;
+                controller.enableHWAccel(true);
+            }
         } else if (command == "info") {
             if (!controller.hasActiveCall()) {
                 std::cerr << "No active call..." << std::endl;
@@ -338,7 +409,7 @@ consoleInputLoop(CallController& controller)
             controller.unsubscribe(uris);
             std::cout << "Unsubscribe successfully sent" << std::endl;
         } else if (command == "reregister") {
-            if (!controller.sendRegister(username, password, domain)) {
+            if (!controller.sendRegister(username, password, domain, binding)) {
                 std::cerr << "Error: unable to send reregister for current account." << std::endl;
             } else {
                 std::cout << "Reregister successfully sent" << std::endl;
@@ -365,9 +436,10 @@ consoleInputLoop(CallController& controller)
                          "hold - put current call on hold.\n resume - resume current call.\n "
                          "hangup - hangup current call.\n capOn - start capture of active call in "
                          "a local file.\n capOff - stops capture of video.\n video - enables video "
-                         "transfer.\n info - get current call infos.\n reregister - force "
-                         "reregistration.\n unregister - unregister user.\n subscribe <uri1>... - "
-                         "subscribe to events.\n unsubscribe <uri1>... - unsubscribe from events.\n"
+                         "transfer.\n gpu - toggles hardware acceleration.\n info - get current "
+                         "call infos.\n reregister - force reregistration.\n unregister - "
+                         "unregister user.\n subscribe <uri1>... - subscribe to events.\n "
+                         "unsubscribe <uri1>... - unsubscribe from events.\n"
                          "dtmf <dtmf code> - send dtmf code for active call.\n"
                          "exit - exit program." << std::endl;
         }

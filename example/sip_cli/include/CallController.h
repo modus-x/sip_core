@@ -18,11 +18,14 @@ private:
     };
 
 public:
-    CallController(const std::string& accountId);
+    CallController(const std::string& accountId, bool enableVideo = true);
     ~CallController();
 
     bool init();
-    bool sendRegister(const std::string& user, const std::string& pass, const std::string& domain);
+    bool sendRegister(const std::string& user,
+                      const std::string& pass,
+                      const std::string& domain,
+                      const std::string& binding);
     bool unregister();
 
     void subscribe(const std::vector<std::string>& uris);
@@ -45,8 +48,14 @@ public:
     bool startCallCapture();
     bool stopCallCapture();
 
-    void toggleVideo();
+    void enableVideo(bool enable);
     bool isVideoEnabled() const;
+
+    void enableHWAccel(bool enable);
+    bool isHWAccelEnabled() const;
+    bool setHWAccelMode(const std::string& mode);
+    std::string getHWAccelMode() const;
+
     bool setVideoDevice(const std::string& videoDevice);
     std::vector<std::string> getVideoDeviceList() const;
     const std::string getVideoDevice() const;
@@ -136,6 +145,10 @@ private:
     Uint32 EVENT_CREATE_PREVIEW;
     Uint32 EVENT_DESTROY_PREVIEW;
     Uint32 EVENT_FRAME_READY;
+
+    const std::string m_defualt_username = "dev_user";
+    const std::string m_default_password = "12345";
+    const std::string m_default_domain = "192.168.92.43";
 
     std::map<std::string, std::shared_ptr<SDLVideoRenderer>> m_previewWindows;
 };

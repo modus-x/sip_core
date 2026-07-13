@@ -20,7 +20,6 @@ FFMPEGCONF='
 FFMPEGCONF+='
             --disable-everything
             --disable-programs
-            --disable-dxva2
             --disable-filters'
 
 FFMPEGCONF+='
@@ -30,7 +29,12 @@ FFMPEGCONF+='
             --enable-swscale
             --enable-protocols
             --enable-bsfs
+            --enable-dxva2
             --enable-d3d11va
+            --enable-d3d12va
+            --enable-cuda
+            --enable-cuvid
+            --enable-opencl
             --enable-libfreetype
             --enable-libfontconfig
             --enable-iconv
@@ -134,17 +138,41 @@ FFMPEGCONF+='
             --enable-filter=hwdownload
             --enable-filter=drawbox
             --enable-filter=crop
-            --enable-filter=drawtext'
+            --enable-filter=drawtext
+            --enable-filter=sv_participant_opencl'
 
 FFMPEGCONF+='
             --enable-indev=dshow
             --enable-indev=gdigrab
             --enable-indev=lavfi'
+FFMPEGCONF+='
+            --enable-ffnvcodec
+            --enable-nvenc
+            --enable-nvdec
+            --enable-hwaccel=h264_nvdec
+            --enable-hwaccel=vp8_nvdec
+            --enable-hwaccel=vp9_nvdec
+            --enable-encoder=h264_nvenc
+            --enable-hwaccel=h264_d3d12va
+            --enable-hwaccel=h264_d3d11va
+            --enable-hwaccel=h264_dxva2
+            --enable-hwaccel=vp9_d3d12va
+            --enable-hwaccel=vp9_d3d11va
+            --enable-hwaccel=vp9_dxva2
+            --enable-decoder=vp8_cuvid
+            --enable-decoder=vp9_cuvid
+            --enable-decoder=h264_cuvid'
+FFMPEGCONF+='
+            --enable-libvpl
+            --enable-encoder=h264_qsv
+            --enable-decoder=h264_qsv
+            --enable-decoder=vp9_qsv
+            --enable-encoder=vp9_qsv'
 
 echo "configure and make ffmpeg for win32-x64... in $(pwd)"
 
 # extra libs
-EXTRALDFLAGS="libopus.lib libx264.lib libvpx.lib libfreetype.lib libfontconfig.lib harfbuzz.lib"
+EXTRALDFLAGS="libopus.lib libx264.lib libvpx.lib libfreetype.lib libfontconfig.lib harfbuzz.lib vpl.lib OpenCL.lib"
 
 # configure debug / release libs
 if [ "$1" == "Debug" ]; then
@@ -158,7 +186,7 @@ else
   EXTRACXXFLAGS="${EXTRACFLAGS}"
 fi
 
-EXTRACFLAGS="${EXTRACFLAGS} -D_WINDLL -D_WIN32_WINNT=0x0A00 -DWINDOWS_FOUNDATION_UNIVERSALAPICONTRACT_VERSION=0x130000 -I${INCLUDE_DIR} -I${INCLUDE_DIR}/opus -I${INCLUDE_DIR}/freetype2 -I${INCLUDE_DIR}/harfbuzz"
+EXTRACFLAGS="${EXTRACFLAGS} -D_WINDLL -D_WIN32_WINNT=0x0A00 -DWINDOWS_FOUNDATION_UNIVERSALAPICONTRACT_VERSION=0x130000 -I${INCLUDE_DIR} -I${INCLUDE_DIR}/opus -I${INCLUDE_DIR}/freetype2 -I${INCLUDE_DIR}/harfbuzz -I${INCLUDE_DIR}/ffnvcodec -I${INCLUDE_DIR}/vpl"
 
 EXTRALDFLAGS="${EXTRALDFLAGS} -APPCONTAINER:NO -MACHINE:x64 /VERBOSE:LIB Ole32.lib Kernel32.lib Gdi32.lib User32.lib Strmiids.lib Advapi32.lib OleAut32.lib Shlwapi.lib Vfw32.lib Secur32.lib Crypt32.lib ncrypt.lib Advapi32.lib -LIBPATH:${LIB_DIR}"
 
@@ -174,6 +202,6 @@ FFMPEGCONF=$(echo $FFMPEGCONF | sed -e "s/[[:space:]]\+/ /g")
 
 set -x
 set -e
-../../../../configure $FFMPEGCONF --extra-cflags="${EXTRACFLAGS}" --extra-ldflags="${EXTRALDFLAGS}" --prefix="${INSTALL_DIR}" --extra-cxxflags="${EXTRACXXFLAGS} -std:c++20"
+../../../../configure $FFMPEGCONF --extra-cflags="${EXTRACFLAGS}" --extra-ldflags="${EXTRALDFLAGS}" --prefix="${INSTALL_DIR}" --extra-cxxflags="${EXTRACXXFLAGS}"
 make -j8 install
 cd ../../../..
