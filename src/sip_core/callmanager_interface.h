@@ -347,6 +347,15 @@ struct LIBSIP_CORE_PUBLIC CallSignal
         constexpr static const char* name = "PeerMuted";
         using cb_type = void(const std::string&, bool);
     };
+    // Voice activity (VAD) for a one-to-one (non-conference) call. isLocal
+    // distinguishes our own mic (localVoice) from the decoded peer stream
+    // (peerVoice); active is the current talking state. Conferences carry this
+    // in confInfo instead — this signal is emitted ONLY for plain 1:1 calls.
+    struct LIBSIP_CORE_PUBLIC VoiceActivity
+    {
+        constexpr static const char* name = "VoiceActivity";
+        using cb_type = void(const std::string&, bool, bool);
+    };
     struct LIBSIP_CORE_PUBLIC SmartInfo
     {
         constexpr static const char* name = "SmartInfo";

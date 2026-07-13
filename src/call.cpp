@@ -567,8 +567,10 @@ void Call::localVoice(bool state)
     conference->setVoiceActivity(streamId, state);
 
     } else {
-        // we are in a one-to-one call
-        // TODO: maybe emit signal here for local voice activity
+        // we are in a one-to-one call: no conference/confInfo to carry the
+        // talking state, so surface it directly to the client as a per-call
+        // signal (isLocal=true -> our own mic).
+        emitSignal<libsip_core::CallSignal::VoiceActivity>(getCallId(), true, state);
     }
 }
 

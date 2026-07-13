@@ -4343,23 +4343,10 @@ SIPCall::peerVoice(bool voice)
     if (auto conference = conf_.lock()) {
         conference->setVoiceActivityForCall(getCallId(), voice);
     } else {
-        // one-to-one call
-
-        {
-            std::lock_guard<std::mutex> lk(confInfoMutex_);
-            // confID_ empty -> participant set confInfo with the received one
-            auto participant = std::find_if(confInfo_.begin(),
-                                            confInfo_.end(),
-                                            [&](const ParticipantInfo& p) {
-                                                return p.uri == this->getCallId();
-                                            });
-
-            if (participant != confInfo_.end()) {
-                participant->voiceActivity = voice;
-            }
-        }
-
-        // maybe emit signal with partner voice activity
+        // one-to-one call: no conference/confInfo, so surface the peer's talking
+        // state directly to the client as a per-call signal (isLocal=false ->
+        // the decoded remote stream).
+        emitSignal<libsip_core::CallSignal::VoiceActivity>(getCallId(), false, voice);
     }
 }
 
