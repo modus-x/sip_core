@@ -3396,24 +3396,33 @@ int
 Manager::loadAccountMap(const YAML::Node& node)
 {
     int errorCount = 0;
-    try {
-        // build preferences
-        preferences.unserialize(node);
-        voipPreferences.unserialize(node);
-        audioPreference.unserialize(node);
+    // Each preferences section unserializes under its OWN try/catch. A single
+    // shared try (the previous form) meant a throw in the FIRST section
+    // (Preferences) silently skipped voip/audio/video for the whole process life,
+    // reverting persisted audio/camera device selections to compiled defaults —
+    // exactly the failure seen in the field ("invalid node; first invalid key:
+    // preferences"). Isolating them lets a malformed section fail alone while the
+    // others still load their saved values.
+    auto tryUnserialize = [&](const char* label, auto&& fn) {
+        try {
+            fn();
+        } catch (const YAML::Exception& e) {
+            SIP_CORE_ERR("%s node unserialize YAML exception: %s", label, e.what());
+            ++errorCount;
+        } catch (const std::exception& e) {
+            SIP_CORE_ERR("%s node unserialize standard exception: %s", label, e.what());
+            ++errorCount;
+        } catch (...) {
+            SIP_CORE_ERR("%s node unserialize unknown exception", label);
+            ++errorCount;
+        }
+    };
+    tryUnserialize("Preferences", [&] { preferences.unserialize(node); });
+    tryUnserialize("VoipPreferences", [&] { voipPreferences.unserialize(node); });
+    tryUnserialize("AudioPreference", [&] { audioPreference.unserialize(node); });
 #ifdef ENABLE_VIDEO
-        videoPreferences.unserialize(node);
+    tryUnserialize("VideoPreferences", [&] { videoPreferences.unserialize(node); });
 #endif
-    } catch (const YAML::Exception& e) {
-        SIP_CORE_ERR("Preferences node unserialize YAML exception: %s", e.what());
-        ++errorCount;
-    } catch (const std::exception& e) {
-        SIP_CORE_ERR("Preferences node unserialize standard exception: %s", e.what());
-        ++errorCount;
-    } catch (...) {
-        SIP_CORE_ERR("Preferences node unserialize unknown exception");
-        ++errorCount;
-    }
 
     const std::string accountOrder = preferences.getAccountOrder();
 
