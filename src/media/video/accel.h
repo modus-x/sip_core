@@ -207,9 +207,19 @@ public:
 
     /**
      * @brief Whether any hardware acceleration device can actually be opened
-     * on this host. Probed once per process and cached.
+     * on this host. Probed once per process and cached. Reports false inside a
+     * Windows Remote Desktop session (no usable GPU — see isRemoteSession).
      */
     static bool isGPUAvailable();
+
+    /**
+     * @brief Whether the process is running inside a Windows Remote Desktop
+     * (Terminal Services) session. Always false on non-Windows. Under RDP the
+     * physical GPU is not exposed (Microsoft Basic Render Driver), so hardware
+     * decode/encode/OpenCL-mixing silently produce black or fall back to
+     * software — callers use this to prefer the software path.
+     */
+    static bool isRemoteSession();
 
     int initAPI(bool linkable, AVBufferRef* framesCtx);
     bool dynBitrate() { return dynBitrate_; }

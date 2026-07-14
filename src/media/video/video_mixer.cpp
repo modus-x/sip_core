@@ -39,6 +39,7 @@
 #include <cmath>
 #include <algorithm>
 #include <atomic>
+#include <cstdlib> // getenv
 #include <unistd.h>
 #include <mutex>
 #include <unordered_map>
@@ -1892,6 +1893,29 @@ VideoMixer::setParameters(const Parameters& params)
     std::lock_guard lock_accel(accelMtx_);
     bool enabled = enableAccel_.load();
     enabled &= Manager::instance().videoPreferences.getDecodingAccelerated();
+
+    // The OpenCL (sv_participant_opencl) composite path publishes an all-black
+    // canvas under a Windows Remote Desktop session (see HardwareAccel::isGPUAvailable
+    // / isRemoteSession) — that canvas is both shown locally and encoded to every
+    // remote, so the whole conference goes black. Fall back to software mixing there,
+    // mirroring the macOS carve-out below. Presence-based env kill switches, per the
+    // getenv("SIP_CORE_DISABLE_SHM") convention:
+    //   SIP_CORE_FORCE_SW_CONF_MIX  -> always software-mix (belt-and-suspenders; also
+    //                                  covers RemoteFX/vGPU RDP that SM_REMOTESESSION
+    //                                  mis-reports as a local session).
+    //   SIP_CORE_FORCE_GPU_CONF_MIX -> keep OpenCL accel even under a detected RDP
+    //                                  session (escape hatch for a working remote GPU).
+    // SIP_CORE_FORCE_SW_CONF_MIX wins (checked first, unconditionally).
+    if (getenv("SIP_CORE_FORCE_SW_CONF_MIX")) {
+        enabled = false;
+    } else if (enabled && HardwareAccel::isRemoteSession()
+               && !getenv("SIP_CORE_FORCE_GPU_CONF_MIX")) {
+        SIP_CORE_WARN("[mixer:%s] Remote (RDP) session detected; forcing software "
+                      "conference mixing (OpenCL GPU interop is unreliable over RDP)",
+                      id_.c_str());
+        enabled = false;
+    }
+
     enableAccel_.store(enabled);
     if(enableAccel_) {
         auto apiList = HardwareAccel::getCompatibleAccel(AV_CODEC_ID_NONE, width_, height_, CODEC_NONE);

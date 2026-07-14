@@ -21,6 +21,7 @@
 
 #include <algorithm>
 #include <mutex>
+#include <cstdlib> // getenv
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
@@ -31,6 +32,18 @@
 #include "fileutils.h"
 #include "logger.h"
 #include "accel.h"
+
+// windows.h last (after the sip_core/FFmpeg headers), matching the convention in
+// fileutils.cpp / video_input.cpp / wasapilayer.cpp; NOMINMAX guards std::min/max.
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h> // GetSystemMetrics(SM_REMOTESESSION)
+#endif
 
 namespace sip_core {
 namespace video {
@@ -782,9 +795,30 @@ HardwareAccel::getCompatibleAccel(AVCodecID id, int width, int height, CodecType
 }
 
 bool
+HardwareAccel::isRemoteSession()
+{
+#ifdef _WIN32
+    return GetSystemMetrics(SM_REMOTESESSION) != 0;
+#else
+    return false;
+#endif
+}
+
+bool
 HardwareAccel::isGPUAvailable()
 {
     static const bool available = [] {
+        // A Windows Remote Desktop session advertises the GPU/OpenCL device but
+        // runs on the Microsoft Basic Render Driver: initAPI() (device-create
+        // only) still succeeds, yet the D3D11/DXVA2<->OpenCL interop the pipeline
+        // relies on produces black/invalid output. Report no usable GPU so the UI
+        // render-mode badge and the "hardware-only" preference guard tell the
+        // truth. SIP_CORE_FORCE_GPU_CONF_MIX is the escape hatch for a working
+        // remote GPU (e.g. RemoteFX vGPU).
+        if (isRemoteSession() && !getenv("SIP_CORE_FORCE_GPU_CONF_MIX")) {
+            SIP_CORE_WARN("GPU probe: remote (RDP) session - reporting no usable GPU");
+            return false;
+        }
         auto apis = getCompatibleAccel(AV_CODEC_ID_H264, 1280, 720, CODEC_DECODER);
         for (auto& api : apis) {
             if (api.initAPI(false, nullptr) >= 0) {
