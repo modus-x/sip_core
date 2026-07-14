@@ -23,7 +23,7 @@
 
 #include "sip_core/def.h"
 
-//#define __STDC_FORMAT_MACROS 1
+// #define __STDC_FORMAT_MACROS 1
 #include <fmt/core.h>
 #include <fmt/format.h>
 #include <fmt/chrono.h>
@@ -44,6 +44,7 @@
 #define LOG_WARNING ANDROID_LOG_WARN
 #define LOG_INFO    ANDROID_LOG_INFO
 #define LOG_DEBUG   ANDROID_LOG_DEBUG
+#define LOG_CRIT    ANDROID_LOG_FATAL
 
 #elif defined(_WIN32)
 
@@ -52,10 +53,14 @@
 #define LOG_WARNING EVENTLOG_WARNING_TYPE
 #define LOG_INFO    EVENTLOG_INFORMATION_TYPE
 #define LOG_DEBUG   EVENTLOG_SUCCESS
+// Windows has no distinct "fatal" event type; use a synthetic value that never
+// reaches the (no-op) Windows syslog sink so FATAL stays distinct from ERROR
+// for our own severity ranking / colouring.
+#define LOG_CRIT    (EVENTLOG_ERROR_TYPE + 0x1000)
 
 #else
 
-#include <syslog.h> // Defines LOG_XXXX
+#include <syslog.h> // Defines LOG_XXXX (LOG_CRIT included)
 
 #endif /* __ANDROID__ / _WIN32 */
 
@@ -80,7 +85,6 @@ void strErr();
 class Logger
 {
 public:
-
     class Handler;
     struct Msg;
 
@@ -135,10 +139,21 @@ public:
     static void setDebugMode(bool enable);
     static bool debugEnabled();
 
+    ///
+    /// Unified verbosity control (mirrors the 6-level ladder of the GUI):
+    ///   0 = off, 1 = fatal, 2 = error, 3 = warning, 4 = info (+ full SIP
+    ///   messages), 5 = debug (+ transaction/dialog detail & third-party trace).
+    /// A message is emitted iff its severity rank is <= the current level.
+    ///
+    static void setLogLevel(int level);
+    static int logLevel();
+
     static void fini();
 
-
     static std::string logLevelToString(int level);
+
+    /// Map a syslog LOG_XXXX level to its 1..5 severity rank (see setLogLevel).
+    static int severityRank(int level);
 
     ///
     /// Stream fashion logging.
@@ -151,8 +166,6 @@ public:
     }
 
 private:
-
-
     int level_;              ///< LOG_XXXX values
     const char* const file_; ///< contextual filename (printed as header)
     const int line_;         ///< contextual line number (printed as header)
@@ -164,35 +177,78 @@ private:
 namespace log {
 
 template<typename S, typename... Args>
-void dbg(const char* file, int line, S&& format, Args&&... args) {
-    Logger::write(LOG_DEBUG, file, line, fmt::format(fmt::runtime(std::forward<S>(format)), std::forward<Args>(args)...));
+void
+dbg(const char* file, int line, S&& format, Args&&... args)
+{
+    Logger::write(LOG_DEBUG,
+                  file,
+                  line,
+                  fmt::format(fmt::runtime(std::forward<S>(format)), std::forward<Args>(args)...));
 }
 
 template<typename S, typename... Args>
-void warn(const char* file, int line, S&& format, Args&&... args) {
-    Logger::write(LOG_WARNING, file, line, fmt::format(fmt::runtime(std::forward<S>(format)), std::forward<Args>(args)...));
+void
+warn(const char* file, int line, S&& format, Args&&... args)
+{
+    Logger::write(LOG_WARNING,
+                  file,
+                  line,
+                  fmt::format(fmt::runtime(std::forward<S>(format)), std::forward<Args>(args)...));
 }
 
 template<typename S, typename... Args>
-void error(const char* file, int line, S&& format, Args&&... args) {
-    Logger::write(LOG_ERR, file, line, fmt::format(fmt::runtime(std::forward<S>(format)), std::forward<Args>(args)...));
+void
+error(const char* file, int line, S&& format, Args&&... args)
+{
+    Logger::write(LOG_ERR,
+                  file,
+                  line,
+                  fmt::format(fmt::runtime(std::forward<S>(format)), std::forward<Args>(args)...));
 }
 
+template<typename S, typename... Args>
+void
+fatal(const char* file, int line, S&& format, Args&&... args)
+{
+    Logger::write(LOG_CRIT,
+                  file,
+                  line,
+                  fmt::format(fmt::runtime(std::forward<S>(format)), std::forward<Args>(args)...));
 }
+
+} // namespace log
 
 // We need to use macros for contextual information
-#define SIP_CORE_INFO(...) ::sip_core::Logger::log(LOG_INFO, __FILE__, __LINE__, true, ##__VA_ARGS__)
-#define SIP_CORE_DBG(...)  ::sip_core::Logger::log(LOG_DEBUG, __FILE__, __LINE__, true, ##__VA_ARGS__)
-#define SIP_CORE_WARN(...) ::sip_core::Logger::log(LOG_WARNING, __FILE__, __LINE__, true, ##__VA_ARGS__)
-#define SIP_CORE_ERR(...)  ::sip_core::Logger::log(LOG_ERR, __FILE__, __LINE__, true, ##__VA_ARGS__)
+#define SIP_CORE_INFO(...) \
+    ::sip_core::Logger::log(LOG_INFO, __FILE__, __LINE__, true, ##__VA_ARGS__)
+#define SIP_CORE_DBG(...) \
+    ::sip_core::Logger::log(LOG_DEBUG, __FILE__, __LINE__, true, ##__VA_ARGS__)
+#define SIP_CORE_WARN(...) \
+    ::sip_core::Logger::log(LOG_WARNING, __FILE__, __LINE__, true, ##__VA_ARGS__)
+#define SIP_CORE_ERR(...) ::sip_core::Logger::log(LOG_ERR, __FILE__, __LINE__, true, ##__VA_ARGS__)
+#define SIP_CORE_FATAL(...) \
+    ::sip_core::Logger::log(LOG_CRIT, __FILE__, __LINE__, true, ##__VA_ARGS__)
 
-#define SIP_CORE_XINFO(...) ::sip_core::Logger::log(LOG_INFO, __FILE__, __LINE__, false, ##__VA_ARGS__)
-#define SIP_CORE_XDBG(...)  ::sip_core::Logger::log(LOG_DEBUG, __FILE__, __LINE__, false, ##__VA_ARGS__)
-#define SIP_CORE_XWARN(...) ::sip_core::Logger::log(LOG_WARNING, __FILE__, __LINE__, false, ##__VA_ARGS__)
-#define SIP_CORE_XERR(...)  ::sip_core::Logger::log(LOG_ERR, __FILE__, __LINE__, false, ##__VA_ARGS__)
+#define SIP_CORE_XINFO(...) \
+    ::sip_core::Logger::log(LOG_INFO, __FILE__, __LINE__, false, ##__VA_ARGS__)
+#define SIP_CORE_XDBG(...) \
+    ::sip_core::Logger::log(LOG_DEBUG, __FILE__, __LINE__, false, ##__VA_ARGS__)
+#define SIP_CORE_XWARN(...) \
+    ::sip_core::Logger::log(LOG_WARNING, __FILE__, __LINE__, false, ##__VA_ARGS__)
+#define SIP_CORE_XERR(...) \
+    ::sip_core::Logger::log(LOG_ERR, __FILE__, __LINE__, false, ##__VA_ARGS__)
+#define SIP_CORE_XFATAL(...) \
+    ::sip_core::Logger::log(LOG_CRIT, __FILE__, __LINE__, false, ##__VA_ARGS__)
 
-#define SIP_CORE_DEBUG(formatstr, ...) if(::sip_core::Logger::debugEnabled()) { ::sip_core::log::dbg(__FILE__, __LINE__, FMT_STRING(formatstr), ##__VA_ARGS__); }
-#define SIP_CORE_WARNING(formatstr, ...) ::sip_core::log::warn(__FILE__, __LINE__, FMT_STRING(formatstr), ##__VA_ARGS__)
-#define SIP_CORE_ERROR(formatstr, ...) ::sip_core::log::error(__FILE__, __LINE__, FMT_STRING(formatstr), ##__VA_ARGS__)
+#define SIP_CORE_DEBUG(formatstr, ...) \
+    if (::sip_core::Logger::debugEnabled()) { \
+        ::sip_core::log::dbg(__FILE__, __LINE__, FMT_STRING(formatstr), ##__VA_ARGS__); \
+    }
+#define SIP_CORE_WARNING(formatstr, ...) \
+    ::sip_core::log::warn(__FILE__, __LINE__, FMT_STRING(formatstr), ##__VA_ARGS__)
+#define SIP_CORE_ERROR(formatstr, ...) \
+    ::sip_core::log::error(__FILE__, __LINE__, FMT_STRING(formatstr), ##__VA_ARGS__)
+#define SIP_CORE_FATALF(formatstr, ...) \
+    ::sip_core::log::fatal(__FILE__, __LINE__, FMT_STRING(formatstr), ##__VA_ARGS__)
 
 } // namespace sip_core

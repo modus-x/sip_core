@@ -149,9 +149,16 @@ check_rename(const std::string& old_dir, const std::string& new_dir)
 }
 
 /**
- * Set pjsip's log level based on the SIPLOGLEVEL environment variable.
- * SIPLOGLEVEL = 0 minimum logging
- * SIPLOGLEVEL = 6 maximum logging
+ * Wire pjsip's logger into our unified logger.
+ *
+ * The SIPLOGLEVEL env var (0..5, matching our verbosity ladder) overrides the
+ * current Logger level when set; otherwise pjsip tracks whatever level the app
+ * configured. pjsip's own decoration is reduced to just the sender (module)
+ * name — our logger already prepends the wall-clock timestamp and thread id, so
+ * keeping pjsip's timestamp/newline would duplicate metadata and inject blank
+ * lines. pjsip level 4 is where full SIP messages are dumped; we route that to
+ * INFO so complete SIP traffic appears from verbosity 4 upward (as the GUI's
+ * "info (including full SIP messages)" level promises).
  */
 
 /** Environment variable used to set pjsip's logging level */
@@ -160,16 +167,35 @@ static constexpr const char* SIPLOGLEVEL = "SIPLOGLEVEL";
 static void
 setSipLogLevel()
 {
-    int level = PJ_LOG_MAX_LEVEL;
+    if (const char* env = getenv(SIPLOGLEVEL)) {
+        char* end = nullptr;
+        long v = std::strtol(env, &end, 10);
+        if (end != env) {
+            Logger::setLogLevel(static_cast<int>(v));
+        }
+    }
 
-    pj_log_set_level(level);
+    const int appLevel = Logger::logLevel();
+    // At full verbosity, let pjsip emit its most detailed trace (transaction &
+    // dialog internals live at pjsip levels 5-6).
+    pj_log_set_level(appLevel >= 5 ? 6 : appLevel);
+
+    // Keep only the module name; our logger owns timestamp/thread/newline.
+    pj_log_set_decor(PJ_LOG_HAS_SENDER);
+
     pj_log_set_log_func([](int level, const char* data, int /*len*/) {
-        if (level < 2)
-            SIP_CORE_ERR() << data;
-        else if (level < 4)
-            SIP_CORE_WARN() << data;
+        // pjsip levels: 0 fatal, 1 error, 2 warning, 3 info, 4 full SIP message
+        // dump, 5-6 transaction/dialog trace.
+        if (level <= 0)
+            SIP_CORE_FATAL() << "[SIP] " << data;
+        else if (level == 1)
+            SIP_CORE_ERR() << "[SIP] " << data;
+        else if (level == 2)
+            SIP_CORE_WARN() << "[SIP] " << data;
+        else if (level <= 4)
+            SIP_CORE_INFO() << "[SIP] " << data;
         else
-            SIP_CORE_DBG() << data;
+            SIP_CORE_DBG() << "[SIP] " << data;
     });
 }
 
@@ -259,9 +285,8 @@ struct Manager::ManagerPimpl
     /// Lookup an incoming-call header by name in a case-insensitive manner.
     /// PJSIP preserves the original casing of received headers, so the
     /// remote PBX may emit "Alert-Info" in any case.
-    static std::string findHeaderCaseInsensitive(
-        const std::map<std::string, std::string>& headers,
-        std::string_view name);
+    static std::string findHeaderCaseInsensitive(const std::map<std::string, std::string>& headers,
+                                                 std::string_view name);
 
     /// Called from the scheduler when the Alert-Info wait window expired
     /// without the client pushing a custom ringtone. Plays the default
@@ -716,9 +741,9 @@ Manager::setKeepAliveInterval(const std::string& accountId, int interval)
                                                    && sipAccount->isMainRouteFastProbeEnabled()
                                                    && interval > 0;
             const bool restoreActiveNoRouteFastProbe
-                = SIPAccount::shouldUseOptionsForKeepAlive(
-                      sipAccount->config().keepAliveType,
-                      sipAccount->getTransportType() == PJSIP_TRANSPORT_UDP)
+                = SIPAccount::shouldUseOptionsForKeepAlive(sipAccount->config().keepAliveType,
+                                                           sipAccount->getTransportType()
+                                                               == PJSIP_TRANSPORT_UDP)
                   && sipAccount->isActiveNoRouteFastProbeEnabled() && interval > 0;
             sipAccount->editConfig(
                 [&](SipAccountConfig& config) { config.keepAliveInterval = interval; });
@@ -2530,7 +2555,8 @@ AudioDeviceGuard::~AudioDeviceGuard()
                 layer->stopStream(streamType);
         },
         std::chrono::milliseconds(750),
-        __FILE__, __LINE__);
+        __FILE__,
+        __LINE__);
 }
 
 bool
@@ -2962,8 +2988,8 @@ Manager::ManagerPimpl::stripSipPrefix(Call& incomCall)
 }
 
 std::string
-Manager::ManagerPimpl::findHeaderCaseInsensitive(
-    const std::map<std::string, std::string>& headers, std::string_view name)
+Manager::ManagerPimpl::findHeaderCaseInsensitive(const std::map<std::string, std::string>& headers,
+                                                 std::string_view name)
 {
     auto equalIgnoreCase = [](std::string_view a, std::string_view b) {
         if (a.size() != b.size())
@@ -2983,8 +3009,7 @@ Manager::ManagerPimpl::findHeaderCaseInsensitive(
 }
 
 void
-Manager::ManagerPimpl::onAlertInfoTimeout(const std::string& accountId,
-                                          const std::string& callId)
+Manager::ManagerPimpl::onAlertInfoTimeout(const std::string& accountId, const std::string& callId)
 {
     bool needFallback = false;
     {
@@ -3001,9 +3026,8 @@ Manager::ManagerPimpl::onAlertInfoTimeout(const std::string& accountId,
     }
 
     if (needFallback) {
-        SIP_CORE_ERR(
-            "[call:%s] Alert-Info wait timed out, falling back to default ringtone",
-            callId.c_str());
+        SIP_CORE_ERR("[call:%s] Alert-Info wait timed out, falling back to default ringtone",
+                     callId.c_str());
         base_.playRingtone(accountId);
     }
 }
@@ -3036,16 +3060,14 @@ Manager::setRingtoneForIncomingCall(const std::string& accountId,
         std::lock_guard<std::mutex> lock(pimpl_->pendingAlertInfoMutex_);
         auto it = pimpl_->pendingAlertInfoCalls_.find(callId);
         if (it == pimpl_->pendingAlertInfoCalls_.end()) {
-            SIP_CORE_WARN(
-                "setRingtoneForIncomingCall: no pending Alert-Info call %s on account %s",
-                callId.c_str(),
-                accountId.c_str());
+            SIP_CORE_WARN("setRingtoneForIncomingCall: no pending Alert-Info call %s on account %s",
+                          callId.c_str(),
+                          accountId.c_str());
             return false;
         }
         if (it->second.delivered) {
-            SIP_CORE_WARN(
-                "setRingtoneForIncomingCall: ringtone already delivered for call %s",
-                callId.c_str());
+            SIP_CORE_WARN("setRingtoneForIncomingCall: ringtone already delivered for call %s",
+                          callId.c_str());
             return false;
         }
         // Mark delivered + remove the entry (we own everything we need locally now).
@@ -3074,8 +3096,7 @@ Manager::setRingtoneForIncomingCall(const std::string& accountId,
     {
         std::lock_guard<std::mutex> lock(pimpl_->audioLayerMutex_);
         if (not pimpl_->audiodriver_) {
-            SIP_CORE_ERR("setRingtoneForIncomingCall: no audio layer for call %s",
-                         callId.c_str());
+            SIP_CORE_ERR("setRingtoneForIncomingCall: no audio layer for call %s", callId.c_str());
             return false;
         }
         auto oldGuard = std::move(pimpl_->toneDeviceGuard_);
@@ -3093,9 +3114,7 @@ Manager::setRingtoneForIncomingCall(const std::string& accountId,
         return false;
     }
 
-    SIP_CORE_INFO("[call:%s] Playing custom ringtone '%s'",
-                  callId.c_str(),
-                  ringtonePath.c_str());
+    SIP_CORE_INFO("[call:%s] Playing custom ringtone '%s'", callId.c_str(), ringtonePath.c_str());
     return true;
 }
 

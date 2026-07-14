@@ -46,6 +46,15 @@ init(enum InitFlag flags) noexcept
     try {
         sip_core::Logger::setDebugMode(LIBSIP_CORE_FLAG_DEBUG == (flags & LIBSIP_CORE_FLAG_DEBUG));
 
+        // SIPLOGLEVEL (0..5) is the fine-grained override of the debug flag and
+        // is the single knob shared by core, pjsip and ffmpeg verbosity.
+        if (const char* lvl = getenv("SIPLOGLEVEL")) {
+            char* end = nullptr;
+            long v = std::strtol(lvl, &end, 10);
+            if (end != lvl)
+                sip_core::Logger::setLogLevel(static_cast<int>(v));
+        }
+
         sip_core::Logger::setSysLog(true);
         sip_core::Logger::setConsoleLog(LIBSIP_CORE_FLAG_CONSOLE_LOG
                                         == (flags & LIBSIP_CORE_FLAG_CONSOLE_LOG));

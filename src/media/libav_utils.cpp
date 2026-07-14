@@ -92,15 +92,29 @@ avcodecManageMutex(void** data, enum AVLockOp op)
 }
 #endif
 
-
 static void
 setAvLogLevel()
 {
-
-    auto avloglevel = AV_LOG_WARNING;
-
-    if (sip_core::Logger::debugEnabled()) {
-        avloglevel = AV_LOG_VERBOSE;
+    // Map our 0..5 verbosity ladder onto FFmpeg's levels so codec/muxer logs
+    // (x264, vpx, opus, … all route through av_log) follow the same knob.
+    int avloglevel;
+    switch (sip_core::Logger::logLevel()) {
+    case 0:
+    case 1:
+        avloglevel = AV_LOG_FATAL;
+        break;
+    case 2:
+        avloglevel = AV_LOG_ERROR;
+        break;
+    case 3:
+        avloglevel = AV_LOG_WARNING;
+        break;
+    case 4:
+        avloglevel = AV_LOG_INFO;
+        break;
+    default:
+        avloglevel = AV_LOG_DEBUG;
+        break;
     }
 
     av_log_set_level(avloglevel);
@@ -128,8 +142,8 @@ avLogCb(void* ptr, int level, const char* fmt, va_list vl)
         ++idx;
     }
 
-    // this is for android system log
-    #ifdef __ANDROID__
+// this is for android system log
+#ifdef __ANDROID__
     switch (level) {
     case AV_LOG_QUIET:
         android_level = ANDROID_LOG_SILENT;
@@ -163,23 +177,27 @@ avLogCb(void* ptr, int level, const char* fmt, va_list vl)
         break;
     }
     __android_log_print(android_level, "FFmpeg", "%s", line);
-    #endif
+#endif
 
-    // AV_LOG_ERROR + AV_LOG_FATAL == ERROR
-    if (level <= 16)
-        SIP_CORE_ERR() << line;
+    // AV_LOG_PANIC (0) + AV_LOG_FATAL (8) == FATAL
+    if (level <= AV_LOG_FATAL)
+        SIP_CORE_FATAL() << "[FFMPEG] " << line;
 
-    // AV_LOG_WARNING == WARNING
-    else if (level <= 24)
-        SIP_CORE_WARN() << line;
+    // AV_LOG_ERROR (16) == ERROR
+    else if (level <= AV_LOG_ERROR)
+        SIP_CORE_ERR() << "[FFMPEG] " << line;
 
-    // AV_LOG_INFO == INFO
-    else if (level <= 32)
-        SIP_CORE_INFO() << line;
+    // AV_LOG_WARNING (24) == WARNING
+    else if (level <= AV_LOG_WARNING)
+        SIP_CORE_WARN() << "[FFMPEG] " << line;
 
-    // AV_LOG_DEBUG == DEBUG
+    // AV_LOG_INFO (32) == INFO
+    else if (level <= AV_LOG_INFO)
+        SIP_CORE_INFO() << "[FFMPEG] " << line;
+
+    // AV_LOG_VERBOSE/DEBUG/TRACE == DEBUG
     else
-        SIP_CORE_DBG() << line;
+        SIP_CORE_DBG() << "[FFMPEG] " << line;
 }
 
 static void

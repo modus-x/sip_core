@@ -101,13 +101,11 @@
 #define LIGHT_GREEN      FOREGROUND_GREEN + 0x0008
 #endif // _WIN32
 
-
 #ifdef UNICODE
 #define LOGFILE L"sip_core"
 #else
 #define LOGFILE "sip_core"
 #endif
-
 
 namespace sip_core {
 
@@ -156,8 +154,36 @@ stripDirName(const char* path)
     return occur ? occur + 1 : path;
 }
 
+// Short, fixed-width severity tag. Kept ASCII + 3 chars so columns stay
+// aligned and every line is trivially greppable (e.g. `grep ' FTL '`).
+static const char*
+levelTag(int level)
+{
+    if (level == LOG_CRIT)
+        return "FTL";
+    if (level == LOG_ERR)
+        return "ERR";
+    if (level == LOG_WARNING)
+        return "WRN";
+    if (level == LOG_INFO)
+        return "INF";
+    return "DBG";
+}
+
+// Right-trim trailing CR/LF so third-party payloads (pjsip, ffmpeg) that ship
+// their own newline don't produce blank "duplicate" lines once we re-add one.
+static void
+rtrimNewlines(std::string& s)
+{
+    while (not s.empty() and (s.back() == '\n' or s.back() == '\r'))
+        s.pop_back();
+}
+
+// Every log line is prefixed with a wall-clock timestamp so any captured log is
+// self-dating. Layout (aligned, single-space separated for readability):
+//   HH:MM:SS.mmm  TAG  t<tid>  file:line
 static std::string
-contextHeader(const char* const file, int line)
+contextHeader(int level, const char* const file, int line)
 {
 #ifdef __linux__
     auto tid = syscall(__NR_gettid) & 0xffff;
@@ -165,26 +191,39 @@ contextHeader(const char* const file, int line)
     auto tid = std::this_thread::get_id();
 #endif // __linux__
 
-    unsigned int secs, milli;
     struct timeval tv;
-    if (!gettimeofday(&tv, NULL)) {
-        secs = tv.tv_sec;
-        milli = tv.tv_usec / 1000; // suppose that milli < 1000
-    } else {
-        secs = time(NULL);
-        milli = 0;
+    if (gettimeofday(&tv, NULL) != 0) {
+        tv.tv_sec = time(NULL);
+        tv.tv_usec = 0;
     }
+    std::time_t t = tv.tv_sec;
+    std::tm tm {};
+#ifdef _WIN32
+    localtime_s(&tm, &t);
+#else
+    localtime_r(&t, &tm);
+#endif
+    const unsigned milli = static_cast<unsigned>(tv.tv_usec / 1000);
 
     if (file) {
-        return fmt::format(FMT_COMPILE("[{: >3d}.{:0<3d}|{: >4}|{: <24s}:{: <4d}]"),
-                           secs,
+        auto fileLine = fmt::format("{}:{}", stripDirName(file), line);
+        return fmt::format("{:02d}:{:02d}:{:02d}.{:03d}  {}  t{:<6}  {:<28} │ ",
+                           tm.tm_hour,
+                           tm.tm_min,
+                           tm.tm_sec,
                            milli,
+                           levelTag(level),
                            tid,
-                           stripDirName(file),
-                           line);
-    } else {
-        return fmt::format(FMT_COMPILE("[{: >3d}.{:0<3d}|{: >4}] "), secs, milli, tid);
+                           fileLine);
     }
+    return fmt::format("{:02d}:{:02d}:{:02d}.{:03d}  {}  t{:<6}  {:<28} │ ",
+                       tm.tm_hour,
+                       tm.tm_min,
+                       tm.tm_sec,
+                       milli,
+                       levelTag(level),
+                       tid,
+                       "");
 }
 
 std::string
@@ -221,17 +260,21 @@ struct Logger::Msg
 
     Msg(int level, const char* file, int line, bool linefeed, std::string&& message)
         : payload_(std::move(message))
-        , header_(contextHeader(file, line))
+        , header_(contextHeader(level, file, line))
         , level_(level)
         , linefeed_(linefeed)
-    {}
+    {
+        rtrimNewlines(payload_);
+    }
 
     Msg(int level, const char* file, int line, bool linefeed, const char* fmt, va_list ap)
         : payload_(formatPrintfArgs(fmt, ap))
-        , header_(contextHeader(file, line))
+        , header_(contextHeader(level, file, line))
         , level_(level)
         , linefeed_(linefeed)
-    {}
+    {
+        rtrimNewlines(payload_);
+    }
 
     Msg(Msg&& other)
     {
@@ -283,6 +326,10 @@ public:
             CONSOLE_SCREEN_BUFFER_INFO consoleInfo;
 
             switch (msg.level_) {
+            case LOG_CRIT:
+                color_prefix = RED;
+                break;
+
             case LOG_ERR:
                 color_prefix = RED;
                 break;
@@ -322,6 +369,11 @@ public:
             const char* color_prefix = "";
 
             switch (msg.level_) {
+            case LOG_CRIT:
+                color_header = LIGHT_RED;
+                color_prefix = LIGHT_RED;
+                break;
+
             case LOG_ERR:
                 color_prefix = RED;
                 break;
@@ -512,10 +564,7 @@ public:
         compression_level_.store(level, std::memory_order_relaxed);
     }
 
-    ~FileLog()
-    {
-        stop();
-    }
+    ~FileLog() { stop(); }
 
     virtual void consume(Logger::Msg& msg) override
     {
@@ -591,11 +640,7 @@ private:
         std::strftime(buf, sizeof(buf), "%Y%m%d-%H%M%S", &tm);
 
         char suffix[48] = {0};
-        std::snprintf(suffix,
-                      sizeof(suffix),
-                      "%s.%03ld",
-                      buf,
-                      static_cast<long>(tv.tv_usec / 1000));
+        std::snprintf(suffix, sizeof(suffix), "%s.%03ld", buf, static_cast<long>(tv.tv_usec / 1000));
         return suffix;
     }
 
@@ -815,7 +860,9 @@ private:
             return;
         }
 
-        fileutils::openStream(file_, path_, std::ios_base::out | std::ios_base::trunc | std::ios_base::binary);
+        fileutils::openStream(file_,
+                              path_,
+                              std::ios_base::out | std::ios_base::trunc | std::ios_base::binary);
         if (not file_.is_open()) {
             // Fallback to append mode if we can't recreate the log file.
             fileutils::openStream(file_,
@@ -833,10 +880,10 @@ private:
         pruneRotatedFiles();
     }
 
-    static uint64_t estimateWriteSize(const Logger::Msg& msg, const std::string& level)
+    static uint64_t estimateWriteSize(const Logger::Msg& msg)
     {
-        // header + "{" + level + "} " + payload + optional '\n'
-        uint64_t size = msg.header_.size() + 1 + level.size() + 2 + msg.payload_.size();
+        // header (already carries the severity tag) + payload + optional '\n'
+        uint64_t size = msg.header_.size() + msg.payload_.size();
         if (msg.linefeed_) {
             size += 1;
         }
@@ -845,14 +892,10 @@ private:
 
     void writeMsg(const Logger::Msg& msg)
     {
-        const auto level = Logger::logLevelToString(msg.level_);
-        const auto writeSize = estimateWriteSize(msg, level);
+        const auto writeSize = estimateWriteSize(msg);
         rotateIfNeeded(writeSize);
 
         file_.write(msg.header_.data(), static_cast<std::streamsize>(msg.header_.size()));
-        file_.put('{');
-        file_.write(level.data(), static_cast<std::streamsize>(level.size()));
-        file_.write("} ", 2);
         file_.write(msg.payload_.data(), static_cast<std::streamsize>(msg.payload_.size()));
         if (msg.linefeed_) {
             file_.put(ENDL);
@@ -959,29 +1002,69 @@ log_to_if_enabled(T& handler, Logger::Msg& msg)
     }
 }
 
-static std::atomic_bool debugEnabled_ {false};
+// Current verbosity on the 0..5 ladder (see Logger::setLogLevel). Default 4 =
+// info (+ full SIP messages): errors, warnings and info are emitted, debug is
+// suppressed — matching the historical "debug off" behaviour.
+static std::atomic_int logLevel_ {4};
+
+int
+Logger::severityRank(int level)
+{
+    if (level == LOG_CRIT)
+        return 1; // fatal
+    if (level == LOG_ERR)
+        return 2; // error
+    if (level == LOG_WARNING)
+        return 3; // warning
+    if (level == LOG_INFO)
+        return 4; // info (+ full SIP messages)
+    return 5;     // debug (LOG_DEBUG and anything more verbose)
+}
+
+// A message is emitted iff logging is on (>0) and its severity is within the
+// configured verbosity. Single choke-point for every sink.
+static inline bool
+levelEnabled(int level)
+{
+    const int lvl = logLevel_.load(std::memory_order_relaxed);
+    return lvl > 0 and Logger::severityRank(level) <= lvl;
+}
+
+void
+Logger::setLogLevel(int level)
+{
+    if (level < 0)
+        level = 0;
+    if (level > 5)
+        level = 5;
+    logLevel_.store(level, std::memory_order_relaxed);
+}
+
+int
+Logger::logLevel()
+{
+    return logLevel_.load(std::memory_order_relaxed);
+}
 
 void
 Logger::setDebugMode(bool enable)
 {
-    debugEnabled_.store(enable, std::memory_order_relaxed);
+    // Preserve the legacy two-state API: debug on => full detail (5),
+    // debug off => info + full SIP messages (4).
+    setLogLevel(enable ? 5 : 4);
 }
 
 bool
 Logger::debugEnabled()
 {
-    return debugEnabled_.load(std::memory_order_relaxed);
+    return logLevel_.load(std::memory_order_relaxed) >= 5;
 }
 
 void
 Logger::vlog(int level, const char* file, int line, bool linefeed, const char* fmt, va_list ap)
 {
-    // Only the most verbose level (LOG_DEBUG) is suppressed when debug mode is
-    // off; errors, warnings and info are ALWAYS emitted regardless of the debug
-    // flag. (The previous `level < LOG_WARNING` dropped LOG_ERR/CRIT when debug
-    // was off — syslog orders errors *below* LOG_WARNING — which could hide
-    // failures from the log files.)
-    if (level >= LOG_DEBUG and not debugEnabled_.load(std::memory_order_relaxed)) {
+    // Gate on the 0..5 verbosity ladder (fatal<error<warning<info<debug).
+    if (not levelEnabled(level)) {
         return;
     }
 
@@ -1002,6 +1085,16 @@ Logger::vlog(int level, const char* file, int line, bool linefeed, const char* f
 void
 Logger::write(int level, const char* file, int line, std::string&& message)
 {
+    // Gate on the 0..5 verbosity ladder (this path skipped the debug check).
+    if (not levelEnabled(level)) {
+        return;
+    }
+
+    if (not(ConsoleLog::instance().isEnable() or SysLog::instance().isEnable()
+            or MonitorLog::instance().isEnable() or FileLog::instance().isEnable())) {
+        return;
+    }
+
     /* Timestamp is generated here. */
     Msg msg(level, file, line, true, std::move(message));
 
@@ -1025,16 +1118,15 @@ Logger::fini()
 std::string
 Logger::logLevelToString(int level)
 {
-    if (level == LOG_ERR) {
+    if (level == LOG_CRIT) {
+        return "FATAL";
+    } else if (level == LOG_ERR) {
         return "ERROR";
     } else if (level == LOG_WARNING) {
         return "WARNING";
-    }
-    else if (level == LOG_INFO)
-    {
+    } else if (level == LOG_INFO) {
         return "INFO";
-    }
-    else if (level == LOG_DEBUG) {
+    } else if (level == LOG_DEBUG) {
         return "DEBUG";
     }
     return "UNKNOWN";
