@@ -713,6 +713,14 @@ MediaDecoder::setupStream()
                   height_,
                   Manager::instance().videoPreferences.getHWAccelMode().c_str(),
                   accel_ ? accel_->getName().c_str() : "software (CPU)");
+
+    // Record the ACTUAL decode path (video only) so the render-mode badge can
+    // tell the truth even when a HW device probed as available but this codec
+    // fell back to software. Audio never uses accel_, so gate on video.
+    if (decoderCtx_ && decoderCtx_->codec_type == AVMEDIA_TYPE_VIDEO)
+        video::HardwareAccel::setActiveDecodeState(
+            accel_ ? video::HardwareAccel::AccelState::HARDWARE
+                   : video::HardwareAccel::AccelState::SOFTWARE);
 #else
     // Set threading options for software decoder (must be done before avcodec_open2)
     decoderCtx_->thread_count = std::max(1u, std::min(8u, std::thread::hardware_concurrency() / 2));

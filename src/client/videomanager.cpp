@@ -704,6 +704,9 @@ setHardwareAccelerationMode(const std::string& mode)
 {
 #ifdef RING_ACCEL
     SIP_CORE_DBG("Setting hardware acceleration mode to '%s'", mode.c_str());
+    // Diagnostic: log which video card(s) this host has (once per process),
+    // regardless of whether hardware acceleration then succeeds on them.
+    sip_core::video::HardwareAccel::logSystemVideoAdapters();
     if (!sip_core::Manager::instance().videoPreferences.setHWAccelMode(mode))
         return false;
     sip_core::Manager::instance().saveConfig();
@@ -720,6 +723,40 @@ isHardwareAccelerationAvailable()
     return sip_core::video::HardwareAccel::isGPUAvailable();
 #else
     return false;
+#endif
+}
+
+std::string
+getActiveVideoDecodeAccel()
+{
+#ifdef RING_ACCEL
+    switch (sip_core::video::HardwareAccel::activeDecodeState()) {
+    case sip_core::video::HardwareAccel::AccelState::HARDWARE:
+        return "hardware";
+    case sip_core::video::HardwareAccel::AccelState::SOFTWARE:
+        return "software";
+    default:
+        return "unknown";
+    }
+#else
+    return "software";
+#endif
+}
+
+std::string
+getActiveVideoEncodeAccel()
+{
+#ifdef RING_ACCEL
+    switch (sip_core::video::HardwareAccel::activeEncodeState()) {
+    case sip_core::video::HardwareAccel::AccelState::HARDWARE:
+        return "hardware";
+    case sip_core::video::HardwareAccel::AccelState::SOFTWARE:
+        return "software";
+    default:
+        return "unknown";
+    }
+#else
+    return "software";
 #endif
 }
 

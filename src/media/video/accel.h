@@ -221,6 +221,36 @@ public:
      */
     static bool isRemoteSession();
 
+    /**
+     * @brief The ACTUAL hardware-vs-software path of the live video pipeline.
+     *
+     * Unlike isGPUAvailable() (a one-shot *capability* probe), these report what
+     * the most recently opened VIDEO decoder/encoder actually did:
+     *  - HARDWARE when a HardwareAccel was successfully attached (accel_ != null),
+     *  - SOFTWARE when it fell back to a CPU codec — e.g. NVENC/NVDEC failed to
+     *    open, or the card has no encoder silicon at all (NVIDIA GM108 / 840M),
+     *  - UNKNOWN before any video codec has opened this process.
+     * The conference render-mode badge polls these (static, so they work from
+     * the separate videoMixer-window engine on Windows/Linux) so it can never
+     * claim "GPU" while frames are really going through libx264 / software
+     * decode. Process-global, last-writer-wins, lock-free.
+     */
+    enum class AccelState { UNKNOWN, SOFTWARE, HARDWARE };
+    static void setActiveDecodeState(AccelState s);
+    static void setActiveEncodeState(AccelState s);
+    static AccelState activeDecodeState();
+    static AccelState activeEncodeState();
+
+    /**
+     * @brief Logs the host's video adapter(s) — names + vendor/device IDs — to
+     * sip_core.log, once per process. Best-effort and never fatal: Linux reads
+     * DRM sysfs nodes + /proc/driver/nvidia; Windows enumerates DXGI adapters;
+     * macOS reads IOKit IOAccelerator names. Purely diagnostic — it explains
+     * WHICH card a host has even when hardware acceleration then fails to open
+     * on it (the "GPU but really CPU" case).
+     */
+    static void logSystemVideoAdapters();
+
     int initAPI(bool linkable, AVBufferRef* framesCtx);
     bool dynBitrate() { return dynBitrate_; }
 

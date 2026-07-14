@@ -276,6 +276,17 @@ LIBSIP_CORE_PUBLIC bool setHardwareAccelerationMode(const std::string& mode);
  */
 LIBSIP_CORE_PUBLIC bool isHardwareAccelerationAvailable();
 
+/**
+ * The ACTUAL runtime video decode/encode acceleration path:
+ * "hardware" | "software" | "unknown" (no video codec has opened yet).
+ * Unlike isHardwareAccelerationAvailable() (a one-shot capability probe), these
+ * reflect what the live pipeline actually did — so the UI render-mode badge can
+ * tell the truth (show CPU) when a card advertised a GPU but the codec fell back
+ * to software (e.g. NVENC/NVDEC failed to open, or the card has no encoder).
+ */
+LIBSIP_CORE_PUBLIC std::string getActiveVideoDecodeAccel();
+LIBSIP_CORE_PUBLIC std::string getActiveVideoEncodeAccel();
+
 // player signal type definitions
 struct LIBSIP_CORE_PUBLIC MediaPlayerSignal
 {

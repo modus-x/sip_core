@@ -585,6 +585,8 @@ if(MSVC)
             Avrt.lib
             Ksuser.lib
             uuid.lib
+            Dxgi.lib
+            # ^ DXGI adapter enumeration for the video-adapter diagnostic log.
             optimized
             ${DEPS_RELEASE}/lib/avcodec.lib
             optimized
@@ -855,7 +857,10 @@ else()
     target_link_libraries(
       ${PROJECT_NAME} PRIVATE resolv "-framework AudioToolbox"
                               "-framework CoreAudio" "-framework Accelerate"
-                              "-framework CoreGraphics")
+                              "-framework CoreGraphics"
+                              # IOKit + CoreFoundation: enumerate IOAccelerator
+                              # GPU names for the video-adapter diagnostic log.
+                              "-framework IOKit" "-framework CoreFoundation")
 
     if(NOT IOS)
       # FFmpeg's hwcontext_opencl (GPU conference mixing) uses the system

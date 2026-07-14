@@ -20,6 +20,9 @@
  */
 
 #include <algorithm>
+#include <atomic>   // lock-free active-accel state for the render-mode badge
+#include <fstream>  // read DRM/nvidia sysfs+proc nodes for adapter logging
+#include <iterator> // std::istreambuf_iterator (sysfs slurp)
 #include <mutex>
 #include <map>
 #include <cstring> // strncmp
@@ -28,6 +31,11 @@
 #ifndef _WIN32
 #include <unistd.h> // access(), F_OK — fast device-node reachability pre-check
 #include <dirent.h> // scan /dev/dri for a render node
+#endif
+
+#ifdef __APPLE__
+#include <IOKit/IOKitLib.h>              // IOAccelerator adapter names
+#include <CoreFoundation/CoreFoundation.h>
 #endif
 
 #ifdef HAVE_CONFIG_H
@@ -50,6 +58,7 @@
 #define NOMINMAX
 #endif
 #include <windows.h> // GetSystemMetrics(SM_REMOTESESSION)
+#include <dxgi.h>    // DXGI adapter enumeration for adapter logging
 #endif
 
 namespace sip_core {
@@ -955,6 +964,185 @@ HardwareAccel::isGPUAvailable()
         return false;
     }();
     return available;
+}
+
+// ---------------------------------------------------------------------------
+// Actual (runtime) hardware-vs-software path of the live video pipeline.
+// Set by MediaDecoder/MediaEncoder at codec-open time (video only); polled by
+// the Dart render-mode badge. Process-global, last-writer-wins, lock-free.
+// ---------------------------------------------------------------------------
+namespace {
+
+std::atomic<int> gActiveDecodeState_ {static_cast<int>(HardwareAccel::AccelState::UNKNOWN)};
+std::atomic<int> gActiveEncodeState_ {static_cast<int>(HardwareAccel::AccelState::UNKNOWN)};
+
+#ifdef __linux__
+// Read a small sysfs/proc text node and trim trailing whitespace/newlines.
+std::string
+readSmallFile(const std::string& path)
+{
+    std::ifstream f(path);
+    if (!f)
+        return {};
+    std::string s((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    while (!s.empty() && (s.back() == '\n' || s.back() == '\r' || s.back() == ' '))
+        s.pop_back();
+    return s;
+}
+
+const char*
+pciVendorName(const std::string& id)
+{
+    // sysfs stores lowercase hex, e.g. "0x10de".
+    if (id == "0x10de") return "NVIDIA";
+    if (id == "0x8086") return "Intel";
+    if (id == "0x1002") return "AMD/ATI";
+    if (id == "0x1414") return "Microsoft (Basic Render/WARP)";
+    return "unknown vendor";
+}
+#endif
+
+void
+logSystemVideoAdaptersImpl()
+{
+#if defined(__linux__)
+    // (1) DRM nodes: PCI vendor/device IDs for every card/render node present.
+    if (DIR* d = ::opendir("/sys/class/drm")) {
+        for (struct dirent* e; (e = ::readdir(d));) {
+            const std::string n = e->d_name;
+            const bool isCard = n.rfind("card", 0) == 0;
+            const bool isRender = n.rfind("renderD", 0) == 0;
+            if (!isCard && !isRender)
+                continue;
+            if (n.find('-') != std::string::npos)
+                continue; // skip connector nodes like card0-HDMI-A-1
+            const std::string base = "/sys/class/drm/" + n + "/device/";
+            const std::string vendor = readSmallFile(base + "vendor");
+            const std::string device = readSmallFile(base + "device");
+            if (vendor.empty() && device.empty())
+                continue;
+            SIP_CORE_INFO("Video adapter [DRM %s]: vendor=%s (%s) device=%s",
+                          n.c_str(),
+                          vendor.empty() ? "?" : vendor.c_str(),
+                          pciVendorName(vendor),
+                          device.empty() ? "?" : device.c_str());
+        }
+        ::closedir(d);
+    }
+    // (2) NVIDIA proprietary driver: the human-readable card model. Present even
+    // when CUDA/NVENC then fail to initialise, which is exactly the case we want
+    // to explain in the log.
+    if (DIR* d = ::opendir("/proc/driver/nvidia/gpus")) {
+        for (struct dirent* e; (e = ::readdir(d));) {
+            const std::string n = e->d_name;
+            if (n == "." || n == "..")
+                continue;
+            std::ifstream f("/proc/driver/nvidia/gpus/" + n + "/information");
+            std::string line;
+            while (std::getline(f, line)) {
+                if (line.rfind("Model:", 0) == 0)
+                    SIP_CORE_INFO("Video adapter [NVIDIA %s]: %s", n.c_str(), line.c_str());
+            }
+        }
+        ::closedir(d);
+    }
+#elif defined(_WIN32)
+    IDXGIFactory1* factory = nullptr;
+    if (SUCCEEDED(CreateDXGIFactory1(__uuidof(IDXGIFactory1), reinterpret_cast<void**>(&factory)))
+        && factory) {
+        IDXGIAdapter1* adapter = nullptr;
+        for (UINT i = 0; factory->EnumAdapters1(i, &adapter) == S_OK; ++i) {
+            DXGI_ADAPTER_DESC1 desc {};
+            if (SUCCEEDED(adapter->GetDesc1(&desc))) {
+                char name[256] = {0};
+                ::WideCharToMultiByte(CP_UTF8, 0, desc.Description, -1, name,
+                                      static_cast<int>(sizeof(name) - 1), nullptr, nullptr);
+                // 0x1414 + the SOFTWARE flag both mark the Microsoft Basic Render
+                // Driver (WARP) — the no-real-GPU/RDP fallback adapter.
+                const bool software = (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0
+                                      || desc.VendorId == 0x1414;
+                SIP_CORE_INFO("Video adapter [DXGI %u]: %s vendor=0x%04x device=0x%04x vram=%lluMB%s",
+                              i,
+                              name,
+                              desc.VendorId,
+                              desc.DeviceId,
+                              static_cast<unsigned long long>(desc.DedicatedVideoMemory >> 20),
+                              software ? " (software/basic-render)" : "");
+            }
+            adapter->Release();
+            adapter = nullptr;
+        }
+        factory->Release();
+    }
+#elif defined(__APPLE__)
+    // IOKit (C API, no Obj-C): IOAccelerator services carry the GPU identity on
+    // both Intel (a "model" blob up the parent PCI chain) and Apple Silicon (the
+    // accelerator's own registry name, e.g. AGXAcceleratorG13X).
+    io_iterator_t it = 0;
+    if (IOServiceGetMatchingServices(kIOMasterPortDefault,
+                                     IOServiceMatching("IOAccelerator"),
+                                     &it)
+        == KERN_SUCCESS) {
+        io_registry_entry_t e;
+        while ((e = IOIteratorNext(it))) {
+            CFTypeRef model = IORegistryEntrySearchCFProperty(
+                e, kIOServicePlane, CFSTR("model"), kCFAllocatorDefault,
+                kIORegistryIterateRecursively | kIORegistryIterateParents);
+            if (model && CFGetTypeID(model) == CFDataGetTypeID()) {
+                const CFDataRef data = static_cast<CFDataRef>(model);
+                SIP_CORE_INFO("Video adapter [IOKit]: %.*s",
+                              static_cast<int>(CFDataGetLength(data)),
+                              reinterpret_cast<const char*>(CFDataGetBytePtr(data)));
+            } else {
+                io_name_t nm = {0};
+                if (IORegistryEntryGetName(e, nm) == KERN_SUCCESS)
+                    SIP_CORE_INFO("Video adapter [IOKit]: %s", nm);
+            }
+            if (model)
+                CFRelease(model);
+            IOObjectRelease(e);
+        }
+        IOObjectRelease(it);
+    }
+#else
+    SIP_CORE_DBG("logSystemVideoAdapters: no enumeration implemented for this platform");
+#endif
+}
+
+} // namespace
+
+void
+HardwareAccel::setActiveDecodeState(AccelState s)
+{
+    gActiveDecodeState_.store(static_cast<int>(s), std::memory_order_relaxed);
+}
+
+void
+HardwareAccel::setActiveEncodeState(AccelState s)
+{
+    gActiveEncodeState_.store(static_cast<int>(s), std::memory_order_relaxed);
+}
+
+HardwareAccel::AccelState
+HardwareAccel::activeDecodeState()
+{
+    return static_cast<AccelState>(gActiveDecodeState_.load(std::memory_order_relaxed));
+}
+
+HardwareAccel::AccelState
+HardwareAccel::activeEncodeState()
+{
+    return static_cast<AccelState>(gActiveEncodeState_.load(std::memory_order_relaxed));
+}
+
+void
+HardwareAccel::logSystemVideoAdapters()
+{
+    static std::once_flag once;
+    std::call_once(once, [] {
+        SIP_CORE_INFO("Enumerating system video adapters...");
+        logSystemVideoAdaptersImpl();
+    });
 }
 
 } // namespace video

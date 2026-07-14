@@ -501,6 +501,17 @@ MediaEncoder::writeContainerToRtp(const uint8_t* buf, int buf_size)
                 throw MediaEncoderException("Could not open encoder");
         }
 
+#ifdef RING_ACCEL
+        // Record the ACTUAL encode path (video only) for the render-mode badge:
+        // accel_ is non-null iff a hardware encoder opened; the software
+        // fallback above leaves it null. NVIDIA GM108/840M has no NVENC silicon,
+        // so H.264 encode is always software there even with a healthy driver.
+        if (mediaType == AVMEDIA_TYPE_VIDEO)
+            video::HardwareAccel::setActiveEncodeState(
+                accel_ ? video::HardwareAccel::AccelState::HARDWARE
+                       : video::HardwareAccel::AccelState::SOFTWARE);
+#endif
+
         avcodec_parameters_from_context(stream->codecpar, encoderCtx);
 
         // framerate is not copied from encoderCtx to stream
