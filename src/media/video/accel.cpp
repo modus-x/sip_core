@@ -21,7 +21,14 @@
 
 #include <algorithm>
 #include <mutex>
+#include <map>
+#include <cstring> // strncmp
 #include <cstdlib> // getenv
+
+#ifndef _WIN32
+#include <unistd.h> // access(), F_OK — fast device-node reachability pre-check
+#include <dirent.h> // scan /dev/dri for a render node
+#endif
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
@@ -284,13 +291,125 @@ HardwareAccel::init_device(const char* name, const char* device, int flags)
     return 0;
 }
 
+namespace {
+
+// Fast, NON-BLOCKING reachability pre-check + process-global negative cache for a
+// hardware device TYPE.
+//
+// The real probe (av_hwdevice_ctx_create -> cuInit()/vaInitialize()) BLOCKS for
+// ~2.5s per attempt against a driver whose userspace is installed but whose device
+// is dead (e.g. an NVIDIA host where libcuda is present but cuInit returns
+// CUDA_ERROR_NO_DEVICE). Because CUDA is listed as three separate API entries
+// (nvdec, cuvid, nvenc), each with a {default,1,2} device list, a host with no
+// usable GPU otherwise pays ~9 blocking cuInit() calls on the first video call —
+// the "one-to-two-minute freeze" reported on driverless Linux.
+//
+// Two cheap defences:
+//   1) skip the probe outright when the type's kernel device node is absent
+//      (checks are conservative — they only declare a type unreachable when NO
+//      plausible node exists, so they don't false-negative a common working
+//      config; known blind spots: card0-only VAAPI, and OpenCL CPU ICDs which
+//      have no node and are intentionally not gated here);
+//   2) latch a type UNREACHABLE after its first full probe failure, so the
+//      remaining same-type API entries skip the blocking retry.
+enum class HwReach { UNKNOWN, REACHABLE, UNREACHABLE };
+std::mutex hwReachMtx_;
+std::map<AVHWDeviceType, HwReach> hwReachCache_;
+
+#ifndef _WIN32
+inline bool nodeExists(const char* p) { return ::access(p, F_OK) == 0; }
+
+// Any /dev/dri/renderD* render node present? (VAAPI/QSV need a DRM render node;
+// glob rather than hardcode 128/129 so multi-GPU / shifted enumeration isn't
+// wrongly declared unreachable.)
+inline bool anyRenderNode()
+{
+    if (DIR* d = ::opendir("/dev/dri")) {
+        for (struct dirent* e; (e = ::readdir(d));) {
+            if (std::strncmp(e->d_name, "renderD", 7) == 0) { ::closedir(d); return true; }
+        }
+        ::closedir(d);
+    }
+    return false;
+}
+#endif
+
+// Returns false ONLY when we can cheaply prove the type cannot work (so the caller
+// must skip the expensive/blocking probe). "true" means present-or-unknown → probe
+// as usual.
+bool hwTypeMayBeUsable(AVHWDeviceType t)
+{
+#ifdef _WIN32
+    (void) t;
+    return true; // node checks are POSIX-only; Windows keeps its existing behaviour
+#else
+    std::lock_guard<std::mutex> lk(hwReachMtx_);
+    auto it = hwReachCache_.find(t);
+    if (it != hwReachCache_.end() && it->second != HwReach::UNKNOWN)
+        return it->second == HwReach::REACHABLE;
+
+    bool present = true; // default: types without a cheap check probe normally
+    switch (t) {
+    case AV_HWDEVICE_TYPE_CUDA:
+        // cuInit() needs the NVIDIA control node (/dev/nvidiactl) or, under WSL2,
+        // the DirectX paravirt node (/dev/dxg). Neither present => no device.
+        present = nodeExists("/dev/nvidiactl") || nodeExists("/dev/dxg");
+        break;
+    case AV_HWDEVICE_TYPE_VAAPI:
+    case AV_HWDEVICE_TYPE_QSV:
+        present = anyRenderNode();
+        break;
+    default:
+        break;
+    }
+    if (!present) {
+        hwReachCache_[t] = HwReach::UNREACHABLE;
+        return false;
+    }
+    return true; // leave UNKNOWN: the real probe decides & latches the outcome
+#endif
+}
+
+// Record a real probe outcome so same-type API entries can skip a repeat blocking
+// attempt. A success clears the type to REACHABLE.
+void hwTypeSetProbed(AVHWDeviceType t, bool usable)
+{
+#ifndef _WIN32
+    std::lock_guard<std::mutex> lk(hwReachMtx_);
+    hwReachCache_[t] = usable ? HwReach::REACHABLE : HwReach::UNREACHABLE;
+#else
+    (void) t; (void) usable;
+#endif
+}
+
+} // namespace
+
 int
 HardwareAccel::init_device_type(std::string& dev)
 {
+    // Fast pre-check BEFORE any blocking probe: if this device type's kernel node
+    // is absent, or a prior probe already proved the type unusable, bail out now
+    // and let the caller fall back to software. This is what keeps a driverless
+    // host from freezing on ~9 serial ~2.5s cuInit() timeouts. (Own mutex; taken
+    // before deviceProbeMtx to keep a consistent lock order.)
+    if (!hwTypeMayBeUsable(hwType_)) {
+        SIP_CORE_DBG("-- Skipping %s probe: device type unreachable (no kernel node / cached).",
+                     av_hwdevice_get_type_name(hwType_));
+        return -1;
+    }
+
     // The DeviceState lists are shared static state mutated from every
     // decoder/encoder/mixer thread that probes devices.
     static std::mutex deviceProbeMtx;
     std::lock_guard<std::mutex> probeLock(deviceProbeMtx);
+
+    // Re-check under the probe lock: a concurrent same-type probe may have
+    // latched the type UNREACHABLE while we were blocked here (e.g. nvenc waking
+    // after nvdec already proved CUDA dead). Without this second look, a thread
+    // that passed the pre-check while the cache was still UNKNOWN would go on to
+    // pay a full ~2.5s-per-device blocking probe of its own separate device list.
+    if (!hwTypeMayBeUsable(hwType_))
+        return -1;
 
     AVHWDeviceType check;
     const char* name;
@@ -319,6 +438,7 @@ HardwareAccel::init_device_type(std::string& dev)
         if (err == 0) {
             SIP_CORE_DBG("-- Init passed for %s with default device.", name);
             possible_devices_->front().second = DeviceState::USABLE;
+            hwTypeSetProbed(hwType_, true);
             dev = "default";
             return 0;
         } else {
@@ -338,6 +458,7 @@ HardwareAccel::init_device_type(std::string& dev)
         if (err == 0) {
             SIP_CORE_DBG("-- Init passed for %s with device %s.", name, device.first.c_str());
             device.second = DeviceState::USABLE;
+            hwTypeSetProbed(hwType_, true);
             dev = device.first;
             return 0;
         } else {
@@ -345,6 +466,10 @@ HardwareAccel::init_device_type(std::string& dev)
             SIP_CORE_DBG("-- Init failed for %s with device %s.", name, device.first.c_str());
         }
     }
+    // Every device for this type failed the real probe: latch the TYPE unreachable
+    // so the remaining same-type API entries (e.g. cuvid/nvenc after nvdec) skip
+    // the repeat blocking attempt this session.
+    hwTypeSetProbed(hwType_, false);
     return -1;
 }
 
