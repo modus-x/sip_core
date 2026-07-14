@@ -445,25 +445,31 @@ public:
         // failed Initialize can wedge a client (MS docs: a later Initialize may
         // spuriously return E_ALREADY_INITIALIZED), so the format retries below
         // each start from a freshly activated client.
-        auto activateClient = [&]() -> bool {
+        auto activateClient = [&](bool setCategory) -> bool {
             client_.Reset();
             if (FAILED(device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, &client_))) {
                 SIP_CORE_ERR() << "WASAPI: IAudioClient Activate failed";
                 return false;
             }
             // Win8+: hint the engine (and the RDP stack) that this is a VoIP stream.
-            ComPtr<IAudioClient2> client2;
-            if (SUCCEEDED(client_.As(&client2)) && client2) {
-                AudioClientProperties props {};
-                props.cbSize = sizeof(props);
-                props.bIsOffload = FALSE;
-                props.eCategory = AudioCategory_Communications;
-                client2->SetClientProperties(&props); // best-effort
+            // Skipped on a retry rung: MS docs name "a prior SetClientProperties
+            // with an invalid category" as a documented cause of E_INVALIDARG from
+            // Initialize, and some capture drivers reject the Communications
+            // category outright — so the recovery ladder retries without it.
+            if (setCategory) {
+                ComPtr<IAudioClient2> client2;
+                if (SUCCEEDED(client_.As(&client2)) && client2) {
+                    AudioClientProperties props {};
+                    props.cbSize = sizeof(props);
+                    props.bIsOffload = FALSE;
+                    props.eCategory = AudioCategory_Communications;
+                    client2->SetClientProperties(&props); // best-effort
+                }
             }
             return true;
         };
 
-        if (!activateClient())
+        if (!activateClient(true))
             return false;
 
         WAVEFORMATEX* mix = nullptr;
@@ -478,10 +484,10 @@ public:
                                          : std::max<REFERENCE_TIME>(3 * defPeriod,
                                                                     LOCAL_MIN_BUFFER_DURATION);
 
-        auto tryInit = [&](const WAVEFORMATEX* wf) {
+        auto tryInit = [&](const WAVEFORMATEX* wf, REFERENCE_TIME duration) {
             return client_->Initialize(AUDCLNT_SHAREMODE_SHARED,
                                        AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
-                                       bufDuration,
+                                       duration,
                                        0, // hnsPeriodicity must be 0 in shared mode
                                        wf,
                                        nullptr);
@@ -489,10 +495,8 @@ public:
 
         // Pick a format Initialize will actually accept. The mix format is
         // correct for render and well-behaved capture, but Realtek and similar
-        // capture drivers hand back a GetMixFormat that Initialize then rejects
-        // with AUDCLNT_E_UNSUPPORTED_FORMAT (0x88890008) — the exact failure this
-        // backend hit in the field (mic dead for a conference participant). Ask
-        // the engine for its closest shared-mode match; ppClosestMatch is set
+        // capture drivers hand back a GetMixFormat that Initialize then rejects.
+        // Ask the engine for its closest shared-mode match; ppClosestMatch is set
         // (and owned by us) only on S_FALSE.
         WAVEFORMATEX* closest = nullptr;
         if (client_->IsFormatSupported(AUDCLNT_SHAREMODE_SHARED, mix, &closest) != S_FALSE) {
@@ -500,29 +504,57 @@ public:
             closest = nullptr;
         }
         const WAVEFORMATEX* chosen = closest ? closest : mix;
-        HRESULT hr = tryInit(chosen);
 
-        // Some Realtek drivers accept a format in IsFormatSupported that
-        // Initialize still rejects (PortAudio/portaudio#875). Last resort: plain
-        // interleaved PCM16 at the negotiated rate/channels — the shared-mode
-        // engine is guaranteed to convert it, and wasapi_convert.h already
-        // handles it. A bare WAVE_FORMAT_PCM is well-defined for mono/stereo,
-        // which is what capture mics (the endpoints that hit this path) report;
-        // >2-channel would want WAVEFORMATEXTENSIBLE, but render (the only >2ch
-        // case) is accepted verbatim and never reaches here. The rejected client
-        // is wedged, so re-Activate a fresh one first.
+        // First attempt is byte-identical to the legacy single-shot init, so any
+        // endpoint that already succeeds today (render, and every working capture
+        // mic) takes this path and never enters the recovery ladder below.
+        HRESULT hr = tryInit(chosen, bufDuration);
+
+        // Recovery ladder — only reached once Initialize has already been
+        // REJECTED (today an unconditional hard failure -> dead mic, e.g. the
+        // field Realtek capture returning AUDCLNT_E_UNSUPPORTED_FORMAT (0x88890008)
+        // or another capture endpoint returning E_INVALIDARG (0x80070057)). MS docs
+        // name two shared+event-mode triggers Initialize rejects with E_INVALIDARG:
+        // a non-zero hnsBufferDuration (docs say it MUST be 0 for shared
+        // event-driven) and a prior SetClientProperties() with a category the
+        // driver dislikes. So retry across {duration 0, no category hint, plain
+        // PCM16} combinations. A rejected Initialize wedges the client (a later
+        // Initialize may spuriously return E_ALREADY_INITIALIZED), so every rung
+        // re-Activates first. The PCM16 downgrade is defined only for mono/stereo
+        // (what capture mics report); clamp channels so a >2ch endpoint never
+        // builds a bogus format.
         WAVEFORMATEX pcm16 {};
-        if (hr == AUDCLNT_E_UNSUPPORTED_FORMAT) {
+        if (FAILED(hr)) {
             pcm16.wFormatTag = WAVE_FORMAT_PCM;
-            pcm16.nChannels = chosen->nChannels;
+            pcm16.nChannels = std::min<WORD>(chosen->nChannels, 2);
             pcm16.nSamplesPerSec = chosen->nSamplesPerSec;
             pcm16.wBitsPerSample = 16;
             pcm16.nBlockAlign = static_cast<WORD>(pcm16.nChannels * pcm16.wBitsPerSample / 8);
             pcm16.nAvgBytesPerSec = pcm16.nSamplesPerSec * pcm16.nBlockAlign;
-            if (activateClient()) {
-                hr = tryInit(&pcm16);
-                if (SUCCEEDED(hr))
-                    chosen = &pcm16;
+
+            struct Rung
+            {
+                const WAVEFORMATEX* wf;
+                REFERENCE_TIME dur;
+                bool category;
+            };
+            const Rung ladder[] = {
+                {chosen, 0, true},            // MS-mandated duration for shared+event
+                {chosen, bufDuration, false}, // drop the Communications category hint
+                {chosen, 0, false},
+                {&pcm16, bufDuration, true}, // plain PCM16 downgrade (Realtek case)
+                {&pcm16, 0, true},
+                {&pcm16, 0, false},
+            };
+            for (const auto& rung : ladder) {
+                if (!activateClient(rung.category))
+                    continue;
+                hr = tryInit(rung.wf, rung.dur);
+                if (SUCCEEDED(hr)) {
+                    chosen = rung.wf;
+                    bufDuration = rung.dur; // reflect what actually initialized
+                    break;
+                }
             }
         }
 
@@ -532,12 +564,24 @@ public:
         channels_ = chosen->nChannels;
         sampleRate_ = chosen->nSamplesPerSec;
         const WORD chosenBits = chosen->wBitsPerSample;
+        const bool chosenExtensible = (chosen->wFormatTag == WAVE_FORMAT_EXTENSIBLE);
         const bool adopted = (chosen != mix);
         CoTaskMemFree(mix);
         CoTaskMemFree(closest);
 
         if (FAILED(hr)) {
-            SIP_CORE_ERR() << "WASAPI: IAudioClient Initialize failed (0x" << std::hex << hr << ")";
+            // Log the rejected format's shape (a bare HRESULT can't distinguish a
+            // bit-depth problem from a channel-count/array-mic one) and surface a
+            // DeviceOpenError so the failure is visible to the UI instead of a
+            // silent dead mic — the sibling branches below already emit it; this
+            // terminal path was the one gap.
+            SIP_CORE_ERR() << "WASAPI: IAudioClient Initialize failed (0x" << std::hex << hr
+                           << std::dec << ") for " << (render_ ? "render" : "capture")
+                           << " format {bits=" << chosenBits << ", ch=" << channels_
+                           << ", rate=" << sampleRate_ << ", extensible=" << chosenExtensible << "}";
+            emitSignal<libsip_core::ConfigurationSignal::DeviceOpenError>(
+                render_ ? "WASAPI render Initialize failed" : "WASAPI capture Initialize failed",
+                render_);
             return false;
         }
         if (adopted)
