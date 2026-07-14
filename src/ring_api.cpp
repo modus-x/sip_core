@@ -111,6 +111,15 @@ logging(const std::string& whom, const std::string& action) noexcept
         sip_core::Logger::setMonitorLog(not action.empty());
     } else if ("file" == whom) {
         sip_core::Logger::setFileLog(action);
+    } else if ("level" == whom) {
+        // Verbosity on the 0..5 ladder (see Logger::setLogLevel). Lets a client
+        // (e.g. the GUI log-level slider) drive core/pjsip/ffmpeg verbosity live
+        // through the existing binding, no dedicated symbol required.
+        try {
+            sip_core::Logger::setLogLevel(std::stoi(action));
+        } catch (const std::exception&) {
+            SIP_CORE_ERR("Bad log level '%s'", action.c_str());
+        }
     } else {
         SIP_CORE_ERR("Bad log handler %s", whom.c_str());
     }
