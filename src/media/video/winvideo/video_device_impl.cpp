@@ -244,6 +244,27 @@ VideoDeviceImpl::setup()
         // use 1e7 / MinFrameInterval to get maximum fps
         auto rate = sip_core::video::FrameRate(1e7, pSCC.MinFrameInterval);
         auto bitrate = videoInfo->dwBitRate;
+        // Diagnostic: log each capability's media subtype (FourCC) so a camera
+        // that only offers a resolution as MJPEG (and therefore streams no raw
+        // samples when opened without an explicit vcodec — the suspected trigger
+        // for a dshow findStreamInfo() that opens but never delivers a frame) is
+        // visible in the log. DEBUG-level, enumeration-time only.
+        {
+            const DWORD fcc = pmt->subtype.Data1;
+            char fourcc[5] = {0};
+            for (int b = 0; b < 4; ++b) {
+                char c = static_cast<char>((fcc >> (8 * b)) & 0xff);
+                fourcc[b] = (c >= 0x20 && c < 0x7f) ? c : '?';
+            }
+            SIP_CORE_DBG("dshow cap[%d]: %ldx%ld fps=%.3f subtype='%s' (0x%08lx) bitrate=%lu",
+                         i,
+                         static_cast<long>(videoInfo->bmiHeader.biWidth),
+                         static_cast<long>(videoInfo->bmiHeader.biHeight),
+                         rate.real(),
+                         fourcc,
+                         static_cast<unsigned long>(fcc),
+                         static_cast<unsigned long>(bitrate));
+        }
         // Avoid adding multiple rates with different bitrates.
         auto ratesIt = rateList_.find(size);
         if (ratesIt != rateList_.end()
