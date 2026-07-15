@@ -1,9 +1,9 @@
 /*
  *  Copyright (C) 2004-2024 Savoir-faire Linux Inc.
  *
- *  Native Windows (WASAPI) audio backend. Shared-mode, event-driven capture and
- *  render, RDP-safe. Minimum target OS: Windows 8 (IAudioClient / IAudioClient2;
- *  no IAudioClient3 dependency).
+ *  Native Windows (WASAPI) audio backend. Shared-mode, event-driven locally with
+ *  a timer fallback, and timer-driven over RDP. Minimum target OS: Windows 8
+ *  (IAudioClient / IAudioClient2; no IAudioClient3 dependency).
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -398,10 +398,10 @@ private:
 };
 
 //==================================================================================================
-// One shared-mode, event-driven WASAPI stream (capture OR render), on its own
-// MMCSS-boosted thread. Decoupled from AudioLayer internals through the two
-// std::function seams (pull/push), which the layer fills in with getPlayback /
-// putRecorded access.
+// One shared-mode WASAPI stream (capture OR render), event-driven locally with a
+// timer fallback, and timer-driven over RDP, on its own MMCSS-boosted thread.
+// Decoupled from AudioLayer internals through the two std::function seams
+// (pull/push), which the layer fills in with getPlayback / putRecorded access.
 //==================================================================================================
 
 class WasapiStream
@@ -484,13 +484,24 @@ public:
                                          : std::max<REFERENCE_TIME>(3 * defPeriod,
                                                                     LOCAL_MIN_BUFFER_DURATION);
 
-        auto tryInit = [&](const WAVEFORMATEX* wf, REFERENCE_TIME duration) {
-            return client_->Initialize(AUDCLNT_SHAREMODE_SHARED,
-                                       AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
-                                       duration,
-                                       0, // hnsPeriodicity must be 0 in shared mode
-                                       wf,
-                                       nullptr);
+        auto tryInit = [&](const char* rung,
+                           const WAVEFORMATEX* wf,
+                           REFERENCE_TIME duration,
+                           DWORD flags) {
+            const HRESULT result = client_->Initialize(AUDCLNT_SHAREMODE_SHARED,
+                                                       flags,
+                                                       duration,
+                                                       0, // hnsPeriodicity must be 0 in shared mode
+                                                       wf,
+                                                       nullptr);
+            if (SUCCEEDED(result))
+                SIP_CORE_INFO() << "WASAPI: " << (render_ ? "render" : "capture")
+                                << " Initialize rung " << rung << " succeeded";
+            else
+                SIP_CORE_WARN() << "WASAPI: " << (render_ ? "render" : "capture")
+                                << " Initialize rung " << rung << " failed (0x" << std::hex
+                                << result << std::dec << ")";
+            return result;
         };
 
         // Pick a format Initialize will actually accept. The mix format is
@@ -505,55 +516,62 @@ public:
         }
         const WAVEFORMATEX* chosen = closest ? closest : mix;
 
-        // First attempt is byte-identical to the legacy single-shot init, so any
-        // endpoint that already succeeds today (render, and every working capture
-        // mic) takes this path and never enters the recovery ladder below.
-        HRESULT hr = tryInit(chosen, bufDuration);
+        // Local streams use event mode with its required zero duration. RDP uses
+        // polling so Initialize can honor the explicit 200 ms jitter buffer.
+        eventDriven_ = !rdp;
+        if (rdp)
+            chosen = mix;
+        HRESULT hr = tryInit(rdp ? "polling/mix/category" : "event/negotiated/category",
+                             chosen,
+                             rdp ? bufDuration : 0,
+                             rdp ? 0 : AUDCLNT_STREAMFLAGS_EVENTCALLBACK);
 
-        // Recovery ladder — only reached once Initialize has already been
-        // REJECTED (today an unconditional hard failure -> dead mic, e.g. the
-        // field Realtek capture returning AUDCLNT_E_UNSUPPORTED_FORMAT (0x88890008)
-        // or another capture endpoint returning E_INVALIDARG (0x80070057)). MS docs
-        // name two shared+event-mode triggers Initialize rejects with E_INVALIDARG:
-        // a non-zero hnsBufferDuration (docs say it MUST be 0 for shared
-        // event-driven) and a prior SetClientProperties() with a category the
-        // driver dislikes. So retry across {duration 0, no category hint, plain
-        // PCM16} combinations. A rejected Initialize wedges the client (a later
-        // Initialize may spuriously return E_ALREADY_INITIALIZED), so every rung
-        // re-Activates first. The PCM16 downgrade is defined only for mono/stereo
-        // (what capture mics report); clamp channels so a >2ch endpoint never
-        // builds a bogus format.
+        // A rejected Initialize can wedge its client, so every retry re-Activates.
+        // RDP only drops the category hint; local streams retain their format
+        // retries before the exact-mix polling fallback.
         WAVEFORMATEX pcm16 {};
         if (FAILED(hr)) {
-            pcm16.wFormatTag = WAVE_FORMAT_PCM;
-            pcm16.nChannels = std::min<WORD>(chosen->nChannels, 2);
-            pcm16.nSamplesPerSec = chosen->nSamplesPerSec;
-            pcm16.wBitsPerSample = 16;
-            pcm16.nBlockAlign = static_cast<WORD>(pcm16.nChannels * pcm16.wBitsPerSample / 8);
-            pcm16.nAvgBytesPerSec = pcm16.nSamplesPerSec * pcm16.nBlockAlign;
+            if (rdp) {
+                if (activateClient(false))
+                    hr = tryInit("polling/mix", mix, bufDuration, 0);
+                else
+                    SIP_CORE_WARN() << "WASAPI: " << (render_ ? "render" : "capture")
+                                    << " Initialize rung polling/mix could not activate";
+            } else {
+                pcm16.wFormatTag = WAVE_FORMAT_PCM;
+                pcm16.nChannels = std::min<WORD>(chosen->nChannels, 2);
+                pcm16.nSamplesPerSec = chosen->nSamplesPerSec;
+                pcm16.wBitsPerSample = 16;
+                pcm16.nBlockAlign = static_cast<WORD>(pcm16.nChannels * pcm16.wBitsPerSample / 8);
+                pcm16.nAvgBytesPerSec = pcm16.nSamplesPerSec * pcm16.nBlockAlign;
 
-            struct Rung
-            {
-                const WAVEFORMATEX* wf;
-                REFERENCE_TIME dur;
-                bool category;
-            };
-            const Rung ladder[] = {
-                {chosen, 0, true},            // MS-mandated duration for shared+event
-                {chosen, bufDuration, false}, // drop the Communications category hint
-                {chosen, 0, false},
-                {&pcm16, bufDuration, true}, // plain PCM16 downgrade (Realtek case)
-                {&pcm16, 0, true},
-                {&pcm16, 0, false},
-            };
-            for (const auto& rung : ladder) {
-                if (!activateClient(rung.category))
-                    continue;
-                hr = tryInit(rung.wf, rung.dur);
-                if (SUCCEEDED(hr)) {
-                    chosen = rung.wf;
-                    bufDuration = rung.dur; // reflect what actually initialized
-                    break;
+                struct Rung
+                {
+                    const char* name;
+                    const WAVEFORMATEX* wf;
+                    REFERENCE_TIME dur;
+                    DWORD flags;
+                    bool category;
+                };
+                const Rung ladder[] = {
+                    {"event/negotiated", chosen, 0, AUDCLNT_STREAMFLAGS_EVENTCALLBACK, false},
+                    {"event/pcm16/category", &pcm16, 0, AUDCLNT_STREAMFLAGS_EVENTCALLBACK, true},
+                    {"event/pcm16", &pcm16, 0, AUDCLNT_STREAMFLAGS_EVENTCALLBACK, false},
+                    {"polling/mix", mix, bufDuration, 0, false},
+                };
+                for (const auto& rung : ladder) {
+                    if (!activateClient(rung.category)) {
+                        SIP_CORE_WARN()
+                            << "WASAPI: " << (render_ ? "render" : "capture") << " Initialize rung "
+                            << rung.name << " could not activate";
+                        continue;
+                    }
+                    hr = tryInit(rung.name, rung.wf, rung.dur, rung.flags);
+                    if (SUCCEEDED(hr)) {
+                        chosen = rung.wf;
+                        eventDriven_ = (rung.flags & AUDCLNT_STREAMFLAGS_EVENTCALLBACK) != 0;
+                        break;
+                    }
                 }
             }
         }
@@ -601,7 +619,11 @@ public:
         }
 
         hEvent_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-        if (!hEvent_ || FAILED(client_->SetEventHandle(hEvent_))) {
+        if (!hEvent_) {
+            SIP_CORE_ERR() << "WASAPI: CreateEvent failed";
+            return false;
+        }
+        if (eventDriven_ && FAILED(client_->SetEventHandle(hEvent_))) {
             SIP_CORE_ERR() << "WASAPI: SetEventHandle failed";
             return false;
         }
@@ -609,8 +631,7 @@ public:
         if (render_) {
             if (FAILED(client_->GetService(IID_PPV_ARGS(&renderClient_))))
                 return false;
-            // Pre-roll one buffer of silence so the first WaitForSingleObject
-            // fires and the stream never starts starved.
+            // Pre-roll one buffer of silence so the stream never starts starved.
             BYTE* data = nullptr;
             if (SUCCEEDED(renderClient_->GetBuffer(bufferFrameCount_, &data)))
                 renderClient_->ReleaseBuffer(bufferFrameCount_, AUDCLNT_BUFFERFLAGS_SILENT);
@@ -619,10 +640,8 @@ public:
                 return false;
         }
 
-        // The watchdog MUST be shorter than the buffer duration: on a lost event
-        // stream (RDP stall) the loop falls through to poll-and-refill before the
-        // buffer drains, so there is no underrun. Scale it to ~half the actual
-        // buffer (e.g. ~100 ms for the 200 ms RDP buffer, ~15 ms locally).
+        // Service at half the actual buffer duration: this is the event watchdog
+        // locally and the polling cadence over RDP (about 100 ms for its 200 ms buffer).
         const DWORD bufMs = static_cast<DWORD>(static_cast<unsigned long long>(bufferFrameCount_)
                                                * 1000ULL / (sampleRate_ ? sampleRate_ : 48000));
         watchdogMs_ = std::max<DWORD>(5, bufMs / 2);
@@ -633,8 +652,8 @@ public:
         stop_ = false;
         thread_ = std::thread(&WasapiStream::run, this);
         SIP_CORE_INFO() << "WASAPI: started " << (render_ ? "render" : "capture") << " stream {"
-                        << sampleRate_ << " Hz, " << channels_ << " ch, buf "
-                        << (bufDuration / REFTIMES_PER_MS) << " ms}";
+                        << sampleRate_ << " Hz, " << channels_ << " ch, buf " << bufMs << " ms, "
+                        << (eventDriven_ ? "event" : "polling") << "}";
         return true;
     }
 
@@ -769,6 +788,7 @@ private:
     unsigned channels_ {2};
     unsigned sampleRate_ {48000};
     wasapi::WaveSampleType waveType_ {wasapi::WaveSampleType::Float32};
+    bool eventDriven_ {true};
     DWORD watchdogMs_ {100};
 
     std::thread thread_;

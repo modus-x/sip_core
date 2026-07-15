@@ -2,8 +2,8 @@
  *  Copyright (C) 2004-2024 Savoir-faire Linux Inc.
  *
  *  Native Windows (WASAPI) audio backend. Replaces the PortAudio backend with a
- *  direct Core Audio (WASAPI) implementation: shared-mode, event-driven capture
- *  and render, RDP-safe. Minimum target OS: Windows 8.
+ *  direct Core Audio (WASAPI) implementation: shared-mode, event-driven locally
+ *  with a timer fallback, and timer-driven over RDP. Minimum target OS: Windows 8.
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
