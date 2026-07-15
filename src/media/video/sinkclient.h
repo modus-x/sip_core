@@ -80,6 +80,9 @@ public:
     {
         std::lock_guard<std::mutex> lock(mtx_);
         target_ = std::move(target);
+        directFrameContractLogged_ = false;
+        lastDirectSourceFormat_ = AV_PIX_FMT_NONE;
+        lastDirectDeliveredFormat_ = AV_PIX_FMT_NONE;
     }
 
 #ifdef ENABLE_SHM
@@ -102,6 +105,9 @@ private:
     bool started_ {false}; // used to arbitrate client's stop signal.
     int rotation_ {0};
     libsip_core::SinkTarget target_;
+    bool directFrameContractLogged_ {false};
+    AVPixelFormat lastDirectSourceFormat_ {AV_PIX_FMT_NONE};
+    AVPixelFormat lastDirectDeliveredFormat_ {AV_PIX_FMT_NONE};
     std::unique_ptr<VideoScaler> scaler_;
     std::unique_ptr<MediaFilter> filter_;
     std::mutex mtx_;

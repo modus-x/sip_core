@@ -62,6 +62,13 @@ namespace video {
 
 const constexpr char FILTER_INPUT_NAME[] = "in";
 
+static const char*
+pixelFormatName(AVPixelFormat format) noexcept
+{
+    const auto* name = av_get_pix_fmt_name(format);
+    return name ? name : "unknown";
+}
+
 #ifdef ENABLE_SHM
 // RAII class helper on sem_wait/sem_post sempahore operations
 class SemGuardLock
@@ -341,6 +348,7 @@ SinkClient::sendFrameDirect(const std::shared_ptr<sip_core::MediaFrame>& frame_p
     notify(frame_p);
 
     auto videoFrame = std::static_pointer_cast<VideoFrame>(frame_p);
+    const auto sourceFormat = static_cast<AVPixelFormat>(videoFrame->format());
     bool isHardware = false;
 #ifdef RING_ACCEL
     auto desc = av_pix_fmt_desc_get(static_cast<AVPixelFormat>(videoFrame->format()));
@@ -371,6 +379,28 @@ SinkClient::sendFrameDirect(const std::shared_ptr<sip_core::MediaFrame>& frame_p
     if (outFrame->height != height_ || outFrame->width != width_) {
         setFrameSize(outFrame->width, outFrame->height);
         return;
+    }
+    const auto deliveredFormat = static_cast<AVPixelFormat>(outFrame->format);
+    if (!directFrameContractLogged_ || sourceFormat != lastDirectSourceFormat_
+        || deliveredFormat != lastDirectDeliveredFormat_) {
+        SIP_CORE_DBG("[Sink:%s] FrameContract path=direct source_pix_fmt=%s "
+                     "delivered_pix_fmt=%s dimensions=%dx%d delivered_hardware=%s "
+                     "target_preferred_pix_fmt=%s accepts_hardware_frames=%s crop=%d,%d,%d,%d",
+                     getId().c_str(),
+                     pixelFormatName(sourceFormat),
+                     pixelFormatName(deliveredFormat),
+                     outFrame->width,
+                     outFrame->height,
+                     isHardware ? "yes" : "no",
+                     pixelFormatName(static_cast<AVPixelFormat>(target_.preferredFormat)),
+                     target_.acceptsHardwareFrames ? "yes" : "no",
+                     crop_.x,
+                     crop_.y,
+                     crop_.w,
+                     crop_.h);
+        directFrameContractLogged_ = true;
+        lastDirectSourceFormat_ = sourceFormat;
+        lastDirectDeliveredFormat_ = deliveredFormat;
     }
     target_.push(std::move(outFrame));
 }
