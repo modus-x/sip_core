@@ -290,7 +290,11 @@ else
 ZCAT ?= $(error Gunzip client (zcat) not found!)
 endif
 
-ifeq ($(shell sha512sum --version >/dev/null 2>&1 || echo FAIL),)
+# Darwin ships its own sha512sum ("sha512sum (Darwin) 1.0") which exits 0 for
+# --version but does not understand --check, so probing --version alone picks a
+# tool that then fails every checksum. Require GNU coreutils here and let macOS
+# fall through to shasum, which does support --check.
+ifeq ($(shell sha512sum --version 2>/dev/null | grep -qi coreutils && echo OK),OK)
 SHA512SUM = sha512sum --check
 else ifeq ($(shell shasum --version >/dev/null 2>&1 || echo FAIL),)
 SHA512SUM = shasum -a 512 --check
