@@ -136,6 +136,12 @@ public:
 
     void interrupt();
 
+    // Clear the interrupt latch so the pair can serve a new sender/receiver
+    // without rebinding the local UDP port. interrupt() is a one-way latch:
+    // every read path bails out on it forever once it is set, so a SocketPair
+    // that survives a media restart must be re-armed here before reuse.
+    void resumeAfterInterrupt();
+
     // Set the read blocking mode.
     // By default, the read operation will block until data is available
     // on the socket. This method allows to switch to unblocking mode

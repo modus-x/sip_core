@@ -200,17 +200,33 @@ AudioRtpSession::start()
         return;
     }
 
-    try {
-        socketPair_.reset(new SocketPair(getRemoteRtpUri().c_str(), receive_.addr.getPort()));
+    const auto uri = getRemoteRtpUri();
+    const auto endpoint = uri + '|' + std::to_string(receive_.addr.getPort());
+    const bool needsCrypto = send_.crypto and receive_.crypto;
 
-        if (send_.crypto and receive_.crypto) {
-            socketPair_->createSRTP(receive_.crypto.getCryptoSuite().c_str(),
-                                    receive_.crypto.getSrtpKeyInfo().c_str(),
-                                    send_.crypto.getCryptoSuite().c_str(),
-                                    send_.crypto.getSrtpKeyInfo().c_str());
+    try {
+        // Reuse the pair across a media restart whenever it still points at the
+        // same peer. A renegotiation (183 early media -> 200 OK) calls stop()
+        // then start(); rebinding here would leave the local RTP port closed for
+        // the width of that gap, and a peer that gets an ICMP port-unreachable in
+        // the window can drop the leg to silence for the rest of the call.
+        // SRTP keys are per offer/answer, so a crypto session always rebuilds.
+        if (socketPair_ and not needsCrypto and socketPairEndpoint_ == endpoint) {
+            socketPair_->resumeAfterInterrupt();
+        } else {
+            socketPair_.reset(new SocketPair(uri.c_str(), receive_.addr.getPort()));
+            socketPairEndpoint_ = endpoint;
+
+            if (needsCrypto) {
+                socketPair_->createSRTP(receive_.crypto.getCryptoSuite().c_str(),
+                                        receive_.crypto.getSrtpKeyInfo().c_str(),
+                                        send_.crypto.getCryptoSuite().c_str(),
+                                        send_.crypto.getSrtpKeyInfo().c_str());
+            }
         }
     } catch (const std::runtime_error& e) {
         SIP_CORE_ERR("Socket creation failed: %s", e.what());
+        socketPairEndpoint_.clear();
         return;
     }
 
@@ -242,8 +258,17 @@ AudioRtpSession::stop()
     rtcpCheckerThread_.join();
 
     receiveThread_.reset();
+    // Save the wire sequence BEFORE the sender goes away. startSender() only
+    // carries it over while sender_ is still alive, but a renegotiation runs
+    // stop() first, so without this the next sender restarts from a stale
+    // initSeqVal_ and the sequence jumps backwards mid-call — which some
+    // gateways read as a foreign stream and stop forwarding.
+    if (sender_)
+        initSeqVal_ = sender_->getLastSeqValue() + 1;
     sender_.reset();
-    socketPair_.reset();
+    // socketPair_ is deliberately kept: start() re-arms and reuses it while the
+    // peer is unchanged, so the local RTP port stays bound across the restart.
+    // It is released when the session itself is destroyed.
     audioInput_.reset();
 }
 
@@ -394,7 +419,7 @@ AudioRtpSession::attachLocalRecorder(const MediaStream& ms)
 void
 AudioRtpSession::initRecorder()
 {
-    std::lock_guard<std::recursive_mutex> lock(mutex_);    
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
 
     if (!recorder_)
         return;

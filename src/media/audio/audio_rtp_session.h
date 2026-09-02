@@ -84,6 +84,10 @@ private:
     std::shared_ptr<AudioInput> audioInput_;
     std::shared_ptr<RingBuffer> ringbuffer_;
     uint16_t initSeqVal_ {0};
+    // Endpoint the current socketPair_ was bound for, as "<remote uri>|<local port>".
+    // start() reuses the pair only while this is unchanged, so a renegotiation that
+    // actually moves the media still gets a fresh socket.
+    std::string socketPairEndpoint_;
     bool muteState_ {false};
     bool receiverActive_ {true};
     unsigned packetLoss_ {10};
