@@ -2210,6 +2210,15 @@ AudioDeviceGuard::AudioDeviceGuard(Manager& manager, AudioDeviceType type)
         if (auto& pending = manager_.pimpl_->audioStreamStopTask_[streamId]) {
             pending->cancel();
             pending.reset();
+            // The reused stream is only really alive when the layer is running;
+            // a failed start, or a fini()/start() cycle that left a pending task
+            // behind, leaves it stopped, and skipping startStream here would
+            // silence this call too. Starting is still skipped when the device
+            // stream survived — the case this reuse path exists for.
+            if (auto layer = manager_.getAudioDriver()) {
+                if (!layer->isStarted())
+                    layer->startStream(type);
+            }
         } else if (auto layer = manager_.getAudioDriver()) {
             layer->startStream(type);
         }
