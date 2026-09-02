@@ -105,7 +105,6 @@ private:
     void merge(Call& call) override; // not public - only called by Call
 
 public:
-
     void setExtraSipHeaders(std::map<std::string, std::string> extraHeaders);
     void answer() override;
     void answer(const std::vector<libsip_core::MediaMap>& mediaList) override;
@@ -122,7 +121,9 @@ public:
     bool offhold(OnReadyCb&& cb) override;
     void switchInput(const std::string& resource = {}) override;
     void peerHungup() override;
-    void carryingDTMFdigits(const std::string& dtmfEvents, double duration, unsigned int volume) override;
+    void carryingDTMFdigits(const std::string& dtmfEvents,
+                            double duration,
+                            unsigned int volume) override;
     bool requestMediaChange(const std::vector<libsip_core::MediaMap>& mediaList) override;
     std::vector<libsip_core::MediaMap> currentMediaList() const override;
     void sendTextMessage(const std::map<std::string, std::string>& messages,
@@ -198,6 +199,12 @@ public:
      * Peer answered the call
      */
     void onAnswered();
+    /**
+     * Peer sent 183 Session Progress with SDP (early media). Brings the media
+     * path up so early-media RTP can play, but leaves the call state alone:
+     * the client must not see the call as CURRENT until the real 200 OK.
+     */
+    void onEarlyAnswered();
     /**
      * Called to report server/internal errors
      * @param cause Optional error code

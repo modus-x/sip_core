@@ -962,9 +962,11 @@ invite_session_state_changed_cb(pjsip_inv_session* inv, pjsip_event* ev)
             call->onPeerRinging();
         }
 
-        // svetets call manager gives us this when we should start receiving the media
-        if (status_code == PJSIP_SC_PROGRESS) {
-            call->onAnswered();
+        // svetets call manager gives us this when we should start receiving the media.
+        // Only for our own outgoing leg, and without moving the call to CONNECTED:
+        // see SIPCall::onEarlyAnswered().
+        if (status_code == PJSIP_SC_PROGRESS && inv->role == PJSIP_ROLE_UAC) {
+            call->onEarlyAnswered();
         }
         break;
 

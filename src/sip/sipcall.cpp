@@ -1516,6 +1516,27 @@ SIPCall::onClosed()
 }
 
 void
+SIPCall::onEarlyAnswered()
+{
+    SIP_CORE_WARN("[call:%s] onEarlyAnswered() - 183 with SDP", getCallId().c_str());
+    runOnMainThread([w = weak()] {
+        if (auto shared = w.lock()) {
+            if (shared->getConnectionState() != ConnectionState::CONNECTED) {
+                // Do NOT mutate the call state on 183 Session Progress. Marking the
+                // call CONNECTED here makes onAnswered() skip its own body when the
+                // real 200 OK arrives, so peerAnsweredCall() - and with it stopTone()
+                // and addAudio() - never runs for the answered leg, even though
+                // onMediaNegotiationComplete() has meanwhile torn the media down and
+                // rebuilt it. Only bring the media path up so early media can play.
+                if (not shared->isSubcall()) {
+                    Manager::instance().peerAnsweredCall(*shared);
+                }
+            }
+        }
+    });
+}
+
+void
 SIPCall::onAnswered()
 {
     SIP_CORE_WARN("[call:%s] onAnswered()", getCallId().c_str());
