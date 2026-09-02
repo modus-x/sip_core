@@ -279,13 +279,6 @@ SocketPair::interrupt()
 }
 
 void
-SocketPair::resumeAfterInterrupt()
-{
-    SIP_CORE_DBG("[%p] Re-arming RTP sockets after interrupt", this);
-    interrupted_ = false;
-}
-
-void
 SocketPair::setReadBlockingMode(bool block)
 {
     SIP_CORE_DBG("[%p] Read operations in blocking mode [%s]", this, block ? "YES" : "NO");
