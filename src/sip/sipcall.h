@@ -309,13 +309,25 @@ private:
 
     mutable std::mutex transportMtx_ {};
 
-    void setupNegotiatedMedia();
+    /**
+     * Apply the media the active SDP negotiated to the RTP sessions.
+     * Returns a fingerprint of that media — everything in it that would force
+     * the sessions to be torn down and rebuilt — or an empty string when there
+     * is nothing usable. See onMediaNegotiationComplete().
+     */
+    std::string setupNegotiatedMedia();
 
     void setCallMediaLocal();
 
     void startIceMedia();
     void onIceNegoSucceed();
-    void startAllMedia();
+    /**
+     * Start every RTP stream. `negotiatedFingerprint` is the value
+     * setupNegotiatedMedia() returned for the media being started; it is
+     * remembered so a later identical negotiation can skip the restart. Leave it
+     * empty when starting media that did not come from a fresh negotiation.
+     */
+    void startAllMedia(const std::string& negotiatedFingerprint = {});
     void stopAllMedia();
     void updateRemoteMedia();
 
@@ -403,6 +415,12 @@ private:
     unsigned int localVideoPort_ {0};
 
     bool mediaRestartRequired_ {true};
+    /**
+     * Fingerprint of the negotiated media the currently running RTP sessions
+     * were started with, or empty when no media is running. Lets a second SDP
+     * negotiation that changes nothing keep the stream it already has.
+     */
+    std::string startedMediaFingerprint_ {};
     bool srtpEnabled_ {false};
     bool rtcpMuxEnabled_ {false};
 

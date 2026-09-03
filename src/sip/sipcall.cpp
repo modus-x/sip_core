@@ -1759,17 +1759,71 @@ SIPCall::isCaptureDeviceMuted(const MediaType& mediaType) const
     return iter == rtpStreams_.end();
 }
 
+namespace {
+// Everything in a negotiated MediaDescription the RTP session is built from.
+// Only fields that come out of the SDP are digested: the media layer writes
+// back into MediaDescription after negotiation (AudioRtpSession::startSender
+// sets send_.fecEnabled, VideoRtpSession::startSender sets send_.bitrate and
+// send_.linkableHW), so a digest must never be compared against live session
+// state — both sides of the comparison here come from Sdp::getMediaSlots().
 void
+appendMediaDigest(std::string& out, const MediaDescription& md)
+{
+    out += std::to_string(static_cast<int>(md.type));
+    out += md.enabled ? "|e1" : "|e0";
+    out += md.onHold ? "|h1" : "|h0";
+    out += "|d" + std::to_string(static_cast<int>(md.direction_));
+    out += "|a" + (md.addr ? md.addr.toString(true) : std::string {"-"});
+    out += "|c" + (md.rtcp_addr ? md.rtcp_addr.toString(true) : std::string {"-"});
+    out += "|p" + std::to_string(md.payload_type);
+    out += "|r" + std::to_string(md.rtp_clockrate);
+    out += "|P" + md.parameters;
+    out += "|k"
+           + (md.codec ? md.codec->systemCodecInfo.name + ":"
+                             + std::to_string(md.codec->systemCodecInfo.avcodecId)
+                       : std::string {"-"});
+    out += "|y" + md.crypto.getCryptoSuite();
+    out += "|i" + md.crypto.getSrtpKeyInfo();
+    // receiving_sdp is a re-print of the whole local session, session-level
+    // lines included. pjsip hands out a fresh active local session for every
+    // negotiation and is free to re-version its o= line, so keep only the media
+    // block: that is what the decoder is opened with, and it carries no counter.
+    if (auto m = md.receiving_sdp.find("m="); m != std::string::npos)
+        out += "|s" + md.receiving_sdp.substr(m);
+    out += ';';
+}
+
+std::string
+mediaSlotsDigest(const std::vector<Sdp::MediaSlot>& slots)
+{
+    if (slots.empty())
+        return {};
+
+    std::string digest;
+    digest.reserve(slots.size() * 256);
+    for (const auto& slot : slots) {
+        appendMediaDigest(digest, slot.first);  // local
+        appendMediaDigest(digest, slot.second); // remote
+    }
+    return digest;
+}
+} // namespace
+
+std::string
 SIPCall::setupNegotiatedMedia()
 {
     SIP_CORE_DBG("[call:%s] updating negotiated media", getCallId().c_str());
 
     if (not sipTransport_ or not sdp_) {
         SIP_CORE_ERR("[call:%s] the call is in invalid state", getCallId().c_str());
-        return;
+        return {};
     }
 
+    // One read of the active SDP sessions per negotiation. They are raw pointers
+    // owned by the PJSIP thread, so reading them twice would let the decision and
+    // the thing it is applied to come from different sessions.
     auto slots = sdp_->getMediaSlots();
+    auto digest = mediaSlotsDigest(slots);
     bool peer_holding {true};
     int streamIdx = -1;
 
@@ -1847,10 +1901,12 @@ SIPCall::setupNegotiatedMedia()
         peerHolding_ = peer_holding;
         emitSignal<libsip_core::CallSignal::PeerHold>(getCallId(), peerHolding_);
     }
+
+    return digest;
 }
 
 void
-SIPCall::startAllMedia()
+SIPCall::startAllMedia(const std::string& negotiatedFingerprint)
 {
     SIP_CORE_DBG("[call:%s] Starting all media", getCallId().c_str());
 
@@ -1867,6 +1923,7 @@ SIPCall::startAllMedia()
     // reset
     readyToRecord_ = false;
 
+    bool anyStarted = false;
     for (auto iter = rtpStreams_.begin(); iter != rtpStreams_.end(); iter++) {
         if (not iter->mediaAttribute_) {
             throw std::runtime_error("Missing media attribute");
@@ -1876,8 +1933,15 @@ SIPCall::startAllMedia()
         // because of the audio loop
         if (getState() != CallState::HOLD) {
             iter->rtpSession_->start();
+            anyStarted = true;
         }
     }
+
+    // Remember the media the running sessions were built from, so a later
+    // negotiation that yields exactly the same media can keep them. Empty unless
+    // the caller had a digest and we actually started something, which keeps the
+    // gate closed for every path that starts media without one.
+    startedMediaFingerprint_ = anyStarted ? negotiatedFingerprint : std::string {};
 
     // Media is restarted, we can process the last holding request.
     if (remainingRequest_ != Request::NoRequest) {
@@ -1919,6 +1983,8 @@ void
 SIPCall::stopAllMedia()
 {
     SIP_CORE_DBG("[call:%s] Stopping all media", getCallId().c_str());
+
+    startedMediaFingerprint_.clear();
 
 #ifdef ENABLE_VIDEO
     {
@@ -2277,13 +2343,42 @@ SIPCall::onMediaNegotiationComplete()
 
             // Update the negotiated media.
             if (this_->mediaRestartRequired_) {
-                this_->setupNegotiatedMedia();
-                // No ICE, start media now.
-                SIP_CORE_WARN("[call:%s] ICE media disabled, using default media ports",
-                              this_->getCallId().c_str());
-                // RESTART the media.
-                this_->stopAllMedia();
-                this_->startAllMedia();
+                auto running = this_->startedMediaFingerprint_;
+                auto negotiated = this_->setupNegotiatedMedia();
+
+                // A 183 Session Progress carrying SDP and the 200 OK that follows
+                // it are two complete offer/answer exchanges, so pjsip calls this
+                // twice for one call. When the second one negotiates exactly the
+                // media that is already running, a stop/start cycle is pure loss:
+                // the RTP session is rebuilt on the same 5-tuple with a new SSRC,
+                // a new random sequence base and a new random timestamp base
+                // (ffmpeg's rtp muxer draws all three from av_get_random_seed),
+                // and the local port is unbound for the length of the rebuild.
+                // PSTN media gateways stop relaying the stream after that and the
+                // far side hears nothing, while we keep hearing them because their
+                // own SSRC never changed. Nothing to change means nothing to
+                // restart.
+                if (not negotiated.empty() and negotiated == running) {
+                    SIP_CORE_WARN("[call:%s] Negotiated media is unchanged, keeping the "
+                                  "running RTP session",
+                                  this_->getCallId().c_str());
+                } else {
+                    if (not running.empty()) {
+                        // Say what moved. Without this a gate that never fires is
+                        // indistinguishable from a gate that is not there.
+                        SIP_CORE_DBG("[call:%s] Negotiated media changed, restarting"
+                                     "\n  was: %s\n  now: %s",
+                                     this_->getCallId().c_str(),
+                                     running.c_str(),
+                                     negotiated.c_str());
+                    }
+                    // No ICE, start media now.
+                    SIP_CORE_WARN("[call:%s] ICE media disabled, using default media ports",
+                                  this_->getCallId().c_str());
+                    // RESTART the media.
+                    this_->stopAllMedia();
+                    this_->startAllMedia(negotiated);
+                }
             }
 
             this_->updateRemoteMedia();

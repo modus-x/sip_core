@@ -30,6 +30,7 @@
 
 #include <string>
 #include <memory>
+#include <optional>
 
 namespace sip_core {
 
@@ -84,6 +85,10 @@ private:
     std::shared_ptr<AudioInput> audioInput_;
     std::shared_ptr<RingBuffer> ringbuffer_;
     uint16_t initSeqVal_ {0};
+    // Last sequence number the previous sender put on the wire. stop() destroys
+    // sender_, so startSender() cannot ask it any more; keeping it here lets the
+    // next sender continue the wire sequence instead of drawing a random base.
+    std::optional<uint16_t> lastSenderSeqVal_ {};
     bool muteState_ {false};
     bool receiverActive_ {true};
     unsigned packetLoss_ {10};

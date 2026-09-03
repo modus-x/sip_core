@@ -127,6 +127,12 @@ AudioRtpSession::startSender()
     socketPair_->stopSendOp();
     if (sender_)
         initSeqVal_ = sender_->getLastSeqValue() + 1;
+    else if (lastSenderSeqVal_) {
+        // setInitSeqVal() treats 0 as "unset", so skip it on wrap-around and
+        // lose one number rather than fall back to a random base.
+        auto next = static_cast<uint16_t>(*lastSenderSeqVal_ + 1);
+        initSeqVal_ = next != 0 ? next : uint16_t {1};
+    }
     try {
         sender_.reset();
         socketPair_->stopSendOp(false);
@@ -242,6 +248,10 @@ AudioRtpSession::stop()
     rtcpCheckerThread_.join();
 
     receiveThread_.reset();
+    // Carry the wire sequence across the teardown: a rebuilt sender that starts
+    // from a fresh random base makes the stream look reordered to the peer.
+    if (sender_)
+        lastSenderSeqVal_ = sender_->getLastSeqValue();
     sender_.reset();
     socketPair_.reset();
     audioInput_.reset();
@@ -394,7 +404,7 @@ AudioRtpSession::attachLocalRecorder(const MediaStream& ms)
 void
 AudioRtpSession::initRecorder()
 {
-    std::lock_guard<std::recursive_mutex> lock(mutex_);    
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
 
     if (!recorder_)
         return;
