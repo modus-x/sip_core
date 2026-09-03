@@ -1,7 +1,9 @@
-# No sound on calls — Android v0.13.8 (revision 4)
+# No sound on calls — Android v0.13.8 (revision 5)
 
-> **Revision 4 is at the bottom of this file (§9–§13).** It proves the mechanism on the wire and
-> supersedes §8's ranking. Read it first; §0–§8 below are revision 3, kept for the case 1–3 analysis.
+> **Read revision 5 first (§15–§17, end of file).** It carries the field verdict: the cause was an
+> RTP header extension the PSTN gateway mishandles, not the media rebuild revision 4 blamed.
+> §9–§14 (revision 4) remain accurate as measurements and describe a real, separate defect that was
+> also fixed. §0–§8 are revision 3, kept for the case 1–3 analysis.
 
 **Revision 3.** Scope narrowed to Android. iOS is closed: the latest TestFlight builds are reported
 100 % good and the iOS logs have been removed from `logs/`. Revision 2's iOS sections are dropped
@@ -1055,3 +1057,61 @@ Session Progress carrying SDP. Then:
 
 Case 6's shape (incoming, one negotiation) is unaffected by construction: pjsip's multiple-answer
 branch requires `tsx->role == PJSIP_ROLE_UAC` (`sip_inv.c:2245`).
+
+---
+
+# Revision 5 — the field verdict, and a correction
+
+**Revision 4's §13 named the double media rebuild as *the* confirmed root cause. That is now
+downgraded.** The build that was tested against production and reported working carries two changes,
+and the one that fixed the calls is the other one.
+
+## 15. The RTP header extension was the cause
+
+The library's bundled ffmpeg is patched to add an RFC 8285 one-byte header extension carrying
+abs-send-time to every outgoing RTP packet (`contrib/src/ffmpeg/rtp_ext_abs_send_time.patch`,
+`#define EXT_ABS_SEND_TIME` in `libavformat/rtpenc.c`). The `RTC CallManager` media gateway in front
+of the PSTN mishandles it. The patch now compiles the extension out:
+
+```c
+#undef EXT_ABS_SEND_TIME /* off: the RT trunk mishandles the 0xBEDE ext; feat/17 sends none */
+```
+
+The capture from the failing build confirms the library was sending it on every packet — all 1193
+of our RTP packets in `logs/android_no_sound_incoming/5/` carry `rtp.ext == True` with
+`rtp.ext.profile == 0xbede`. With the extension gone, calls through the trunk work; verified on
+production on arm64.
+
+That also settles a question revision 4 left open. `feat/17` was never affected because it sends no
+header extension at all — which is exactly what `feat/17:src/media/socket_pair.h` documents and what
+the `#undef`'s own comment records.
+
+## 16. What this means for §9–§14
+
+- **§9's mechanism is real but was not what broke the calls.** The SSRC/sequence/timestamp reset at
+  the 200 OK is measured, reproducible and still in the captures. It simply was not the thing the
+  gateway choked on.
+- **§10's control experiment is weakened.** The five good calls in folder 4 went through a different
+  gateway (`95.167.42.116`), so they differ from case 5 in *two* variables — no 183-with-SDP **and**
+  a different media plane. The correlation with 183 stands, but it is no longer a clean single
+  variable.
+- **§14's fix stays.** Not restarting media when the negotiation changed nothing is correct on its
+  own terms: it removes a needless SSRC/sequence/timestamp discontinuity and an unbind window on
+  every early-media call. It ships alongside the extension change, and the production build that was
+  verified contains both. It is not, on this evidence, load-bearing.
+- **§13 is superseded.** Candidate #1 from §8 is a real defect that has been fixed; it is not the
+  root cause of the no-sound reports.
+
+## 17. Shipped
+
+`sip_core 0.13.8.3` / `ru.svetets.sip:android-sip-core-wrapper:1.8.8-fix.2`, containing:
+
+1. `#undef EXT_ABS_SEND_TIME` — the fix that production verified.
+2. §14.1 — no media rebuild when a second negotiation changes nothing.
+3. §14.2 — RTP sequence carried across a genuine restart.
+4. `411e45909` — do not mark a call CONNECTED on 183 (from the previous round; correct, not the
+   audio fix).
+
+All four Android ABIs are built against ffmpeg trees rebuilt from the patched source; verified by
+extracting `rtpenc.o` from each `libavformat.a` and confirming zero occurrences of the `0xBEDE`
+constant.

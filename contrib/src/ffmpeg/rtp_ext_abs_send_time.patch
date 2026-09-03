@@ -6,7 +6,7 @@ index 63047beccc..d59ec3dc8c 100644
  
  #include "rtpenc.h"
  
-+#define EXT_ABS_SEND_TIME
++#undef EXT_ABS_SEND_TIME /* off: the RT trunk mishandles the 0xBEDE ext; feat/17 sends none */
 +
  static const AVOption options[] = {
      FF_RTP_FLAG_OPTS(RTPMuxContext, flags),
